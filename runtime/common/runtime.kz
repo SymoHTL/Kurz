@@ -8,7 +8,8 @@
 use std
 use sys
 
-// The buffer of each thread in which `Print` puts a line together before its write, and its size.
+// The buffer of each thread in which `Print` puts a line together before its write, and its size, in the
+// thread's own heap (`AllocateOwn`).
 thread static mut byte* buffer = null
 thread static mut long room = 0
 
@@ -20,8 +21,9 @@ pub void Start(int count, byte* values) {
 
 // Called by the emitted `main` after the program's last statement: the end of the process with the
 // exit code 0 through the runtime's one exit (design record, section 6). A message still in an actor's
-// inbox does not run (U13).
+// inbox does not run, and every actor's heap is freed whole (U13).
 pub void Finish() {
+    EndActors()
     sys.Exit(0)
 }
 
@@ -31,6 +33,29 @@ pub void Finish() {
 // it for the null its allocator gives.
 pub byte* Allocate(long size) {
     byte* p = std.Allocate(size)
+    if p == null {
+        AllocationFailed(size)
+    }
+
+    return p
+}
+
+// `size` bytes of the thread's own heap, outside every actor's (design record, section 3), as `Allocate`
+// gives them, for what lives as long as the process whichever actor's code makes it first: the runtime's
+// buffers, the copy's work list and its memo. A `static` value holds no block, as its initializer is a
+// constant (R13), and the hash keys of the thread's maps are two words of the thread, not a block.
+pub byte* AllocateOwn(long size) {
+    byte* p = std.AllocateIn(null, size)
+    if p == null {
+        AllocationFailed(size)
+    }
+
+    return p
+}
+
+// `size` bytes of the heap `heap`, as `Allocate` gives them: a message in the heap of the actor it goes to.
+pub byte* AllocateIn(byte* heap, long size) {
+    byte* p = std.AllocateIn(heap, size)
     if p == null {
         AllocationFailed(size)
     }
@@ -137,7 +162,7 @@ pub void Print(int fd, string text, string file, int line) {
                 room = 4096
             }
 
-            buffer = Allocate(room)
+            buffer = AllocateOwn(room)
         }
 
         byte* from = text.Pointer
@@ -2702,7 +2727,8 @@ static mut long logDropped = 0
 // the line feed, or one may clear the flag while the other's line stands cut, and a count may lose a line.
 static mut bool logCut = false
 
-// The buffer of each thread in which `LogLine` puts a line together before its write, and its size.
+// The buffer of each thread in which `LogLine` puts a line together before its write, and its size, in the
+// thread's own heap (`AllocateOwn`).
 thread static mut byte* logBuffer = null
 thread static mut long logRoom = 0
 
@@ -2993,7 +3019,7 @@ pub void LogLine(int level, string category, string message, string fields, long
                 logRoom = 4096
             }
 
-            logBuffer = Allocate(logRoom)
+            logBuffer = AllocateOwn(logRoom)
         }
 
         if logCut {
@@ -3291,11 +3317,15 @@ pub string ExitErrorText(ExitError e) {
 // The actors of a program run on the one thread the runtime runs, while the top-level code waits for a
 // call's result (U4), as tokio's `current_thread` runtime runs its tasks inside `block_on`
 // (compiler/README.md, "What the emitter emits"). An actor's reference is the address of its state, which
-// the emitted code constructs, with the actor's record in the 48 bytes in front of it, as a string's block
+// the emitted code constructs, with the actor's record in the 64 bytes in front of it, as a string's block
 // stands in front of its bytes, a multiple of 16 so that the state keeps the alignment of the allocator's
-// block, as Rust's `ArcInner` pads its counts to what it holds: the size of the actor's stack its clause
-// asked for (U1), the actor's number (U2), the first message of its inbox, the last, the actor after it in
-// the run queue, and its top activation, null while it is idle. An actor stands in the run queue where an
+// block, as Rust's `ArcInner` pads its counts to what it holds: the actor's heap (design record, section
+// 3), the actor spawned before it, the size of the actor's stack its clause asked for (U1), the actor's
+// number (U2), the first message of its inbox, the last, the actor after it in the run queue, and its top
+// activation, null while it is idle. The record and the state are the first block of the actor's heap, and
+// every block the actor's code allocates is a block of that heap, which `Run` has the allocation entry
+// serve while the actor's activation runs; a message is a block of the heap of the actor it goes to, and
+// what crosses into it a copy there (U12). An actor stands in the run queue where an
 // actor stands after it or it is the last, as an intrusive list tells its members by their links. A
 // message is a block the emitted code makes: the message after it in its list, the function that runs it,
 // its reply, null after `send`, its chain ID, 16 bytes, and its arguments; that function frees it.
@@ -3315,23 +3345,49 @@ pub string ExitErrorText(ExitError e) {
 static mut byte* runFirst = null
 static mut byte* runLast = null
 
-// The count of the actors spawned, which is the number of the last one (U2).
+// The count of the actors spawned, which is the number of the last one (U2), and the last one, whose
+// record names the one spawned before it, so that the end of the program reaches every actor (U13).
 static mut long actorCount = 0
+static mut byte* actors = null
 
 // The header of the activation whose message runs on the thread, null while the top-level code runs,
 // the scheduler's loop in its wait among it.
 thread static mut byte* running = null
 
-// The record of a new actor, numbered after the last one spawned, its inbox empty, outside the run queue
-// and idle, with room for a state of `size` bytes behind it, and the bytes of its stack, `stack`, the size
-// its clause wrote or 2 MiB (U1): the address of that room, which is the actor's reference (U2). No
-// message reaches the actor while `spawn` constructs it, as section 6 has it (assumed there): its
-// reference is the spawner's once `spawn` returns, and a default of its body reads neither `this` nor
-// its methods (K7).
-pub byte* ActorNew(long size, long stack) {
-    mut byte* state = Allocate(48 + size)
+// The heap of an actor `spawn` makes, whose first block holds the actor's record and a state of `size`
+// bytes behind it (design record, section 3), made before the arguments of `spawn`, which cross into it
+// (U12). A heap the system refuses ends the process as a refused allocation does.
+pub byte* ActorHeapNew(long size) {
+    byte* heap = std.HeapNew(64 + size)
+    if heap == null {
+        AllocationFailed(64 + size)
+    }
+
+    return heap
+}
+
+// The heap of a `spawn` whose arguments did not all cross, by a case propagated out of a later one,
+// freed whole once the region let go of the copies made into it; nothing where the actor took it
+// (`ActorNew`), which gives null.
+pub void HeapLeft(byte* heap) {
+    if heap != null {
+        std.HeapFree(heap)
+    }
+}
+
+// The record of a new actor in the first block of its heap `heap`, numbered after the last one spawned,
+// its inbox empty, outside the run queue and idle, with room for a state of `size` bytes behind it, and
+// the bytes of its stack, `stack`, the size its clause wrote or 2 MiB (U1): the address of that room,
+// which is the actor's reference (U2). No message reaches the actor while `spawn` constructs it, as
+// section 6 has it (assumed there): its reference is the spawner's once `spawn` returns, and a default of
+// its body reads neither `this` nor its methods (K7).
+pub byte* ActorNew(byte* heap, long size, long stack) {
+    mut byte* state = std.HeapFirst(heap)
     raw {
-        state = state + 48
+        state = state + 64
+        *Ptr<byte*>(state - 64) = heap
+        *Ptr<byte*>(state - 56) = actors
+        actors = state
         *Ptr<long>(state - 48) = stack
         actorCount = actorCount + 1
         *Ptr<long>(state - 40) = actorCount
@@ -3342,6 +3398,34 @@ pub byte* ActorNew(long size, long stack) {
     }
 
     return state
+}
+
+// The heap of the actor whose reference is `state`, which a message to it is made in (U12).
+pub byte* ActorHeap(byte* state) {
+    mut byte* heap = null
+    raw {
+        heap = *Ptr<byte*>(state - 64)
+    }
+
+    return heap
+}
+
+// The end of every actor at the end of the program (U13): its heap freed whole, as section 3 frees the
+// heap of an actor that ends, the messages queued in it with it, as tokio drops its tasks when its runtime
+// shuts down; no message runs after it.
+void EndActors() {
+    raw {
+        mut byte* at = actors
+        while at != null {
+            byte* before = *Ptr<byte*>(at - 56)
+            std.HeapFree(*Ptr<byte*>(at - 64))
+            at = before
+        }
+
+        actors = null
+        runFirst = null
+        runLast = null
+    }
 }
 
 // The text of the actor whose reference is `state`, of the type named `name` (U2): the name, `#` and the
@@ -3478,7 +3562,8 @@ pub void Replied(byte* reply) {
 // 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level wait"). Inside a message the
 // activation parks: the thread switches from its stack to the scheduler's, as corosensei's
 // `Yielder::suspend` switches back to the stack that resumed it, and comes back here once the scheduler
-// resumes it with the reply set.
+// resumes it with the reply set, to the heap it allocated in before, which is another actor's where it
+// waits inside the constructor of an actor it spawns (`Run` serves the heap of the actor it resumes).
 pub void Wait(byte* reply, string file, int line) {
     raw {
         *Ptr<byte*>(reply + 8) = running
@@ -3496,10 +3581,12 @@ pub void Wait(byte* reply, string file, int line) {
 
         byte* header = running
         *Ptr<byte*>(header + 360) = reply
+        byte* heap = std.HeapUse(null)
         while *reply == 0 {
             sys.Switch(header, threadSide)
         }
 
+        std.HeapUse(heap)
         *Ptr<byte*>(header + 360) = null
     }
 }
@@ -3561,17 +3648,20 @@ void Start(byte* state, byte* message, byte* below) {
 }
 
 // The activation `header` of the actor whose reference is `state` run on its stack until it waits or
-// ends: the bounds of that stack's guard set for the target's handler of a fault (section 2), the switch
-// to it and back. An activation that ended gives the actor's top to the one below it, with its side list,
+// ends: the actor's heap the one the allocation entry serves (section 3), the bounds of that stack's guard
+// set for the target's handler of a fault (section 2), the switch to it and back, and the heap served
+// before it served again. An activation that ended gives the actor's top to the one below it, with its side list,
 // and its stack back to the pool; the actor then stands at the end of the run queue where it can go on
 // (`Ready`) and does not stand there.
 void Run(byte* state, byte* header) {
     raw {
+        byte* before = std.HeapUse(*Ptr<byte*>(state - 64))
         sys.StackGuard(header + 512, *Ptr<long>(header + 400))
         running = header
         sys.Switch(threadSide, header)
         running = null
         sys.StackGuard(null, 0)
+        std.HeapUse(before)
         if *Ptr<byte*>(header + 360) == null {
             byte* below = *Ptr<byte*>(header + 368)
             *Ptr<byte*>(state - 8) = below
@@ -3601,7 +3691,7 @@ thread static mut byte* chains = null
 void NewChain(byte* at) {
     raw {
         if chains == null {
-            chains = Allocate(32)
+            chains = AllocateOwn(32)
             if !sys.Random(chains, 32) {
                 RandomFailed()
             }
@@ -3654,8 +3744,8 @@ ulong NextChainWord(byte* s) {
 // run yet, at 344 the chain ID, at 360 the reply the activation waits on, null while it runs, at 368 the
 // activation below it, at 376 the first and at 384 the last call of its side list; at 392 the next stack
 // of the pool, at 400 the stack's size, and from 408 the target's words of the trim. The thread's own
-// side of the switch, its save area, is in the thread's record, `threadSide`, 320 bytes from the
-// allocator, made at the thread's first message.
+// side of the switch, its save area, is in the thread's record, `threadSide`, 320 bytes of the thread's
+// own heap, made at the thread's first message.
 thread static mut byte* threadSide = null
 thread static mut byte* pooled = null
 thread static mut long pooledCount = 0
@@ -3665,7 +3755,7 @@ thread static mut long pooledCount = 0
 byte* Held(long asked) {
     raw {
         if threadSide == null {
-            threadSide = Allocate(320)
+            threadSide = AllocateOwn(320)
         }
 
         long size = StackSize(asked)
@@ -3762,11 +3852,16 @@ extern "C" void ActorStart() {
 // A value that reaches a class instance crosses into an actor, or back to the caller as a result, as a
 // copy of its own, and a value after `copy` is one at any call (U12; the owner, 2026-11-15, #519, comment
 // 6896192351, Q6, "Rust: deep copy anywhere"). The emitted copy of each type calls these, and they run no
-// program code. The copies one call makes of its arguments share one memo, so that a block two paths of
-// the call reach arrives as one block (Q2, "Sharing kept"), and a result has a memo of its own: the
-// session of the call, eight words in the caller's frame, the memo, its slots and its count, the `weak`
-// references the copies hold, their room and their count, the copies the call has left to make, and
-// whether every block goes into the memo. The memo maps each block the copies reached that a later path
+// program code. A crossing copies every counted block the value reaches into the heap of the actor it
+// crosses into, or of the caller its result goes to (design record, section 6; the owner, 2026-11-15,
+// #519, comment 6902210646, Q5, "Copy all, share big unbuilt"); a value after `copy` at a call that is
+// no crossing has every class instance it reaches copied into the heap the allocation entry serves, and
+// shares every other block by its count. The copies one call makes of its arguments share one memo, so
+// that a block two paths of the call reach arrives as one block (Q2, "Sharing kept"), and a result has a
+// memo of its own: the session of the call, nine words in the caller's frame, the memo, its slots and its
+// count, the `weak` references the copies hold, their room and their count, the copies the call has left
+// to make, whether every block goes into the memo, and the heap the copies go into, null for a `copy` at
+// a call that is no crossing. The memo maps each block the copies reached that a later path
 // may reach again to its copy and to the function that lets go of it, open addressing on the block's
 // address, three words a slot, and holds a count of the block until the session's end, so that no block
 // made before then takes its address; a `weak` reference is kept with its place, its target, whether it is
@@ -3776,17 +3871,58 @@ extern "C" void ActorStart() {
 // runs of a call, a later argument's call that waits among them. The work list of the blocks whose items
 // or fields wait to be copied is the thread's, three words each, the block, its copy and the function that
 // fills the copy, emptied by every run, so that the copy never recurses, as a release works its lists off
-// (the owner, 2026-11-01, "Iterative, never crashes").
+// (the owner, 2026-11-01, "Iterative, never crashes"). The memo, the work list and the room of the `weak`
+// references are blocks of the thread's own heap (`AllocateOwn`), and a run of a crossing has the
+// allocation entry serve the session's heap until its end, the heap it served before then served again.
 thread static mut byte* copySession = null
 thread static mut byte* copyWork = null
 thread static mut long copyWorkRoom = 0
 thread static mut long copyWorkCount = 0
+thread static mut byte* copyBefore = null
 
-// The session the copy of the run under way works in.
+// The session the copy of the run under way works in, and its heap, where it has one, the one the
+// allocation entry serves until the run's end (`CopyLeft`).
 pub void CopyUse(byte* session) {
     raw {
         copySession = session
+        byte* heap = *Ptr<byte*>(session + 64)
+        if heap != null {
+            copyBefore = std.HeapUse(heap)
+        }
     }
+}
+
+// Whether the copy under way is a crossing's, which copies every counted block it reaches, where a `copy`
+// at a call that is no crossing shares every block but a class instance by its count (Q5).
+pub bool CopyWhole() {
+    mut bool whole = false
+    raw {
+        whole = *Ptr<byte*>(copySession + 64) != null
+    }
+
+    return whole
+}
+
+// The copy of the `count` bytes of a string at `bytes`, which hold a block, in a block of its own of the
+// heap the allocation entry serves, held by one value: the address of its bytes. A crossing copies a
+// string's block as it copies every other counted block (Q5); no program can tell the copy from a block
+// shared by its count, as a string never changes.
+pub byte* CopyBytes(byte* bytes, long count) {
+    byte* copy = std.StringBlock(count)
+    if copy == null {
+        AllocationFailed(16 + count)
+    }
+
+    raw {
+        mut long i = 0
+        while i < count {
+            copy[i] = bytes[i]
+            i = i + 1
+        }
+    }
+
+    std.StringTakeOver(copy, count)
+    return copy
 }
 
 // Whether every block the copy reaches goes into the memo: in a call with more than one copied argument,
@@ -3848,7 +3984,7 @@ pub void CopyKeep(byte* source, byte* copy, byte* release) {
                 more = slots * 2
             }
 
-            byte* bigger = Allocate(more * 24)
+            byte* bigger = AllocateOwn(more * 24)
             mut long i = 0
             while i < more * 3 {
                 *Ptr<long>(bigger + i * 8) = 0
@@ -3900,7 +4036,7 @@ byte* CopyRoom(byte* table, long held, long count, long size, mut long grown) {
     }
 
     grown = more
-    byte* bigger = Allocate(more * size)
+    byte* bigger = AllocateOwn(more * size)
     raw {
         mut long i = 0
         while i < count * size / 8 {
@@ -3971,9 +4107,14 @@ pub void CopyWeak(byte* slot, byte* target, bool wide, byte* release) {
     }
 }
 
-// One copy of the session made; its last ends the session.
+// One copy of the session made, at the end of its run, which has the allocation entry serve the heap it
+// served before the run; its last ends the session.
 pub void CopyLeft(byte* session) {
     raw {
+        if *Ptr<byte*>(session + 64) != null {
+            std.HeapUse(copyBefore)
+        }
+
         long remaining = *Ptr<long>(session + 48) - 1
         *Ptr<long>(session + 48) = remaining
         if remaining == 0 {
@@ -4051,7 +4192,7 @@ void CopyEnd(byte* session) {
         }
 
         i = 0
-        while i < 8 {
+        while i < 9 {
             *Ptr<long>(session + i * 8) = 0
             i = i + 1
         }

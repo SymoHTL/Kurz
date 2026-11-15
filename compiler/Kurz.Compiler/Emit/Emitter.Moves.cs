@@ -7,7 +7,9 @@ namespace Kurz.Compiler.Emit;
 /// <summary>
 /// U12, section 6: <c>move</c> on one thread copies nothing and changes no count (the owner, 2026-11-15, #519, comment 6895076937): the
 /// value of a variable written <c>move</c> leaves its place, which is emptied, and the count it held goes with it to the place the
-/// argument goes to, a message's or a parameter written <c>move</c>, which the function owns and lets go of at its end. A place a
+/// argument goes to, a message's or a parameter written <c>move</c>, which the function owns and lets go of at its end. Into an actor,
+/// whose heap is its own, the moved value is copied into that heap and let go of, which frees it (section 13, the point of comment
+/// 6895076937 that the answers left standing; <see cref="Arguments"/>). A place a
 /// <c>move</c> may have emptied is let go of through a test for the empty value, as rustc keeps a drop flag (comment 6897444564), and a
 /// loop that takes its list empties the item's place in the list (comment 6897778812, Q1 (b)), so that the list lets go of every item
 /// it still holds and of no moved one.

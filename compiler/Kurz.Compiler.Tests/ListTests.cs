@@ -4051,12 +4051,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         """));
 
     /// <summary>
-    /// The runtime of this machine's target whose system gives the pieces of a mebibyte the allocator carves its blocks of up to 262144
-    /// bytes from, and refuses every other request: a block of its own, which a larger request takes, is refused.
+    /// The runtime of this machine's target whose system gives the mappings of 2 mebibytes the allocator takes its aligned pieces of a
+    /// mebibyte from, which it carves the pages of its blocks of up to 262144 bytes from, and refuses every other request: a block of its
+    /// own, which a larger request takes, is refused.
     /// </summary>
     private static CheckedRuntime PiecesOnly() => Edited((TargetFile, "pub byte* Memory(long bytes) {", """
         pub byte* Memory(long bytes) {
-            if bytes != 1048576 {
+            if bytes != 2097152 {
                 return null
             }
 
@@ -4134,6 +4135,39 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     /// <summary>The edit that has the thread keep no freed block of more than 262144 bytes, so that each one's `Free` gives it back to the system.</summary>
     private static readonly (string Path, string Old, string New) KeptNone = ("std/std.kz", "keptBytes + bytes <= 33554432", "keptBytes + bytes <= 0");
+
+    /// <summary>
+    /// The edit of the runtime that has <c>eprint("end actors")</c> end every actor of the program, its heap freed whole as at the end of the
+    /// program (U13; design record, section 3), and write nothing, so that the top-level code reads after it what it holds of the actors.
+    /// </summary>
+    internal static readonly (string Path, string Old, string New) EndingActors = ("runtime/common/runtime.kz", "pub void Print(int fd, string text, string file, int line) {\n", """
+        bool Ending(string text) {
+            ending = "end actors"
+            if text.Bytes.Count != ending.Bytes.Count {
+                return false
+            }
+
+            raw {
+                mut long i = 0
+                while i < 10 {
+                    if text.Pointer[i] != ending.Pointer[i] {
+                        return false
+                    }
+
+                    i = i + 1
+                }
+            }
+
+            return true
+        }
+
+        pub void Print(int fd, string text, string file, int line) {
+            if fd == 2 && Ending(text) {
+                EndActors()
+                return
+            }
+
+        """);
 
     /// <summary>
     /// The runtime of this machine's target whose `Memory` and `Resize` count the bytes the system gives, by a `Memory` and by the
@@ -4262,7 +4296,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// every block back to the system; and the target's `Resize` grows none, since a block grown in place would reach past the page
     /// after its end.
     /// </summary>
-    private static (string Path, string Old, string New)[] Fence => FenceOf(Builder.HostTarget!.Value);
+    internal static (string Path, string Old, string New)[] Fence => FenceOf(Builder.HostTarget!.Value);
 
     /// <summary>The edits of <see cref="Fence"/> for the runtime of <paramref name="target"/>.</summary>
     private static (string Path, string Old, string New)[] FenceOf(Target target)
@@ -4272,12 +4306,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         [
             ("std/std.kz", "if size > 262144 {", "if size >= 0 {"),
             ("std/std.kz", "keptBytes + bytes <= 33554432", "keptBytes + bytes <= 0"),
-            // the size the allocation asked for, in the header's second word, which only a kept block uses
-            ("std/std.kz", "            if p != null {\n                p = p + 16\n", "            if p != null {\n                *Ptr<long>(p + 8) = size\n                p = p + 16\n"),
-            ("std/std.kz", "                moved = p\n", "                *Ptr<long>(block + 8) = grown\n                moved = p\n"),
+            // the size the allocation asked for, in the header's fifth word, which no field takes
+            ("std/std.kz", "            if p != null {\n                Enlist(heap, p)\n", "            if p != null {\n                *Ptr<long>(p + 32) = size\n                Enlist(heap, p)\n"),
+            ("std/std.kz", "                moved = p\n", "                *Ptr<long>(block + 32) = grown\n                moved = p\n"),
             ("std/std.kz", "            long bytes = *Ptr<long>(block)\n",
                 "            long bytes = *Ptr<long>(block)\n" +
-                "            if *Ptr<long>(block + 8) != size {\n" +
+                "            if *Ptr<long>(block + 32) != size {\n" +
                 $"                string line = \"{FreeSizeLine.Replace("\n", "\\n", StringComparison.Ordinal)}\"\n" +
                 $"                sys.Write(2, line.Pointer, {Encoding.UTF8.GetByteCount(FreeSizeLine)})\n" +
                 "                block[bytes] = 1\n" + // the first byte of the page after the block's end
@@ -4834,6 +4868,53 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(actorMove, fenced, "actor-move-fenced"), 0, ["5", "2", "1346"], "");
+        // section 3, U12 (the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big unbuilt"): the results of an actor's
+        // methods, a string, a list of strings, a map, a data value and an instance, each a copy in the caller's heap, read after every
+        // actor's heap was freed whole (EndingActors), so that no block of a freed heap is reachable from the top-level code
+        const string actorHeaps = """
+            class Box(string Label, List<int> Xs)
+            data Pair(string A, List<string> B)
+
+            actor Maker {
+                pub string Text(int n) => "text {n}"
+
+                pub List<string> Words(int n) {
+                    mut made = List<string>()
+                    for i in 0..<n {
+                        made.Add("w{i}")
+                    }
+
+                    return made
+                }
+
+                pub Map<string, int> Table(int n) {
+                    mut m = Map<string, int>()
+                    m["k{n}"] = n
+                    return m
+                }
+
+                pub Pair Both(int n) => Pair("a{n}", ["b{n}"])
+
+                pub Box Made(int n) => Box("box {n}", [n])
+            }
+
+            maker = spawn Maker()
+            t = maker.Text(1)
+            ws = maker.Words(3)
+            table = maker.Table(2)
+            p = maker.Both(4)
+            b = maker.Made(5)
+            eprint("end actors")
+            print(t)
+            print(ws)
+            print(table["k2"] ?? 0)
+            print(p.A)
+            print(p.B)
+            print(b.Label)
+            print(b.Xs)
+
+            """;
+        Ran(BuildAndRun(actorHeaps, Edited([.. Fence, EndingActors]), "actor-heaps-fenced"), 0, ["text 1", "[w0, w1, w2]", "2", "a4", "[b4]", "box 5", "[5]"], "");
         Ran(BuildAndRun(Weak, fenced, "weak-fenced"), 0, WeakPrint, "");
         Ran(BuildAndRun(Equality, fenced, "class-equality-fenced"), 0, EqualityPrint, "");
         Ran(BuildAndRun(Inheritance, fenced, "class-inheritance-fenced"), 0, InheritancePrint, "");
@@ -5160,8 +5241,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_freed_block_of_more_than_262144_bytes_is_given_out_again()
     {
-        // the lists of 70000 items within the system's 16 pieces of memory: the first round asks the system for a block of 262176
-        // bytes with its header, which grows to 524320, and each round after it takes that block back from the thread; blocks given
+        // the lists of 70000 items within the system's 16 pieces of memory: the first round asks the system for a block of 262208
+        // bytes with its header, which grows to 524352, and each round after it takes that block back from the thread; blocks given
         // back at their `Free` would ask the system for one in each of the 200 rounds
         Ran(BuildAndRun(LargeRounds, Budget(), "list-large-reused"), 0, ["14000000"], "");
         var run = BuildAndRun(LargeHeld, Budget(), "list-large-reused-held"); // the positive control: the same lists, all of them held
@@ -5172,7 +5253,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_thread_keeps_the_freed_blocks_of_more_than_262144_bytes_that_fit_within_33554432_bytes()
     {
-        // five blocks of 8388544 bytes, 8388560 with their headers, freed in turn: the first four take 33554240 bytes and stay the
+        // five blocks of 8388544 bytes, 8388592 with their headers, freed in turn: the first four take 33554368 bytes and stay the
         // thread's, so a write into the fourth after its `Free` ends nothing; the fifth would take the kept bytes past 33554432 and goes
         // back to the system, where a write into it ends the process with the system's signal
         const string start = "pub void Start(int count, byte* values) {\n    sys.Start(count, values)\n";
@@ -5184,16 +5265,16 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_kept_block_is_given_out_only_to_a_request_of_at_least_half_its_bytes()
     {
-        // the owner, 2026-10-30, "Only if at least half used": a block of 33554416 bytes, 33554432 with its header, freed and kept,
-        // which fills the 33554432 the thread keeps. A request of 16777184 bytes, 16777200 with its header, less than half of the kept
+        // the owner, 2026-10-30, "Only if at least half used": a block of 33554384 bytes, 33554432 with its header, freed and kept,
+        // which fills the 33554432 the thread keeps. A request of 16777152 bytes, 16777200 with its header, less than half of the kept
         // block's, takes memory of its own from the system, which its `Free` gives back, as the kept block leaves no room for it, so a
         // write into it after its `Free` ends the process with the system's signal
         const string start = "pub void Start(int count, byte* values) {\n    sys.Start(count, values)\n";
-        static string Request(long size) => $"    byte* a = Allocate(33554416)\n    raw {{\n        std.Free(a, 33554416)\n    }}\n    byte* q = Allocate({size})\n    raw {{\n        std.Free(q, {size})\n        q[0] = 1\n    }}\n";
-        Crashed(BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + Request(16777184))), "list-kept-below-half"));
-        // the positive control: a request of 16777200 bytes, 16777216 with its header, half of them, takes the kept block, which its
+        static string Request(long size) => $"    byte* a = Allocate(33554384)\n    raw {{\n        std.Free(a, 33554384)\n    }}\n    byte* q = Allocate({size})\n    raw {{\n        std.Free(q, {size})\n        q[0] = 1\n    }}\n";
+        Crashed(BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + Request(16777152))), "list-kept-below-half"));
+        // the positive control: a request of 16777168 bytes, 16777216 with its header, half of them, takes the kept block, which its
         // `Free` keeps again, so a write into it after its `Free` ends nothing
-        Ran(BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + Request(16777200))), "list-kept-half"), 0, ["1"], "");
+        Ran(BuildAndRun("print(1)\n", Edited(("runtime/common/runtime.kz", start, start + Request(16777168))), "list-kept-half"), 0, ["1"], "");
     }
 
     [Fact]
@@ -5201,7 +5282,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // two lists of `long`s within 64 mebibytes, the first of 2^21 items in a block of 16 mebibytes; the second grows from 16
         // mebibytes to 32. Grown in place, as Linux's `mremap` grows it, the two take 48 mebibytes; copied into a new block, as on
-        // Windows, the old and the new block of the second are held together beside the first, 64 mebibytes and 96 bytes with their
+        // Windows, the old and the new block of the second are held together beside the first, 64 mebibytes and 192 bytes with their
         // headers before the pieces the small blocks are carved from and the blocks the thread keeps
         const string fill = "mut a = List<long>()\nfor i in 0..<2097152 {\n    a.Add(long(i))\n}\nmut b = List<long>()\nfor i in 0..<2097153 {\n    b.Add(long(i))\n}\nmut long total = 0\nfor i in 0..<b.Count {\n    total = total + b[i]\n}\nprint(a.Count)\nprint(b.Count)\nprint(total)\n";
         var run = BuildAndRun(fill, Bytes(), "list-grown-in-place");
@@ -5225,16 +5306,17 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_block_of_more_than_262144_bytes_that_outgrows_its_room_takes_a_kept_block_before_the_targets_Resize()
     {
         // the owner, 2026-11-01, "Kept block first": a list of 2^21 `long`s made and dropped for 20 rounds, its block growing from
-        // 262176 bytes with its header to 16777248, the bytes the system gives counted with none given back. On Linux the first round
-        // takes 17825824 bytes, the mebibyte the small blocks are carved from among them; in the second the block of 8388640 takes
-        // the kept one of 16777248, which it uses at least half of, and the growths below it, too small for it, take 4194336 by
-        // `Resize`; the third takes 1048608 and the fourth 262176 so, and each round after them none, its growths all served by kept
-        // blocks, 23330944 bytes in all. Grown by `Resize` before the kept blocks, each round takes 16777248 bytes again, past the
-        // 24 mebibytes in its second, and the first `Memory` of the third is refused. On Windows, whose `Resize` gives none, each growth
-        // of the first round takes a block of its own, 34341088 bytes with the first mebibyte by the sizes above, and each round after it
-        // the kept blocks of its sizes, within 40 mebibytes
+        // 262208 bytes with its header to 16777280, the bytes the system gives counted with none given back. On Linux the first round
+        // takes 20971584 bytes, two mappings of 2 mebibytes whose aligned mebibytes the pages of the small blocks are carved from among
+        // them, as the page of 524288 bytes of the list's last small block does not fit beside the smaller pages in one; in the second
+        // the block of 8388672 takes the kept one of 16777280, which it uses at least half of, and the growths below it, too small for
+        // it, take 4194368 by `Resize`; the third takes 1048640 and the fourth 262208 so, and each round after them none, its growths
+        // all served by kept blocks, 26476800 bytes in all. Grown by `Resize` before the kept blocks, each round takes 16777280 bytes
+        // again, past the 28 mebibytes in its second, and the first `Memory` of the third is refused. On Windows, whose `Resize` gives
+        // none, each growth of the first round takes a block of its own, 37487040 bytes with the two mappings by the sizes above, and
+        // each round after it the kept blocks of its sizes, within 40 mebibytes
         const string fill = "long Fill(int n) {\n    mut xs = List<long>()\n    mut i = 0\n    while i < n {\n        xs.Add(long(i))\n        i = i + 1\n    }\n    return long(xs.Count)\n}\n\nmut round = 0\nmut long total = 0\nwhile round < 20 {\n    round = round + 1\n    total = total + Fill(2097152)\n}\nprint(total)\n";
-        long limit = Builder.HostTarget == Target.Windows ? 41943040 : 25165824;
+        long limit = Builder.HostTarget == Target.Windows ? 41943040 : 29360128;
         Ran(BuildAndRun(fill, Taking(limit), "list-grown-kept"), 0, ["41943040"], "");
 
         // the positive control: the same lists, all of them held, take memory of their own in the second round, past the limit, and a

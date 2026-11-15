@@ -21,7 +21,7 @@ public sealed partial class Emitter
         var info = Model.CallOf(c);
         var result = Sub(info.Result);
         var copied = c.Arguments.Where(a => Model.IsCopied(a.Value) && ReachesInstance(Sub(Model.TypeOf(a.Value).Type))).ToList();
-        if (CallSession(copied.Count) is { } session)
+        if (CallSession(copied.Count, null) is { } session)
         {
             foreach (var a in copied)
             {
@@ -324,14 +324,15 @@ public sealed partial class Emitter
     /// outside of. With <paramref name="owned"/> the slots hold the values, as a data value's fields do; else the callee borrows
     /// them for the call, which no <c>mut</c> slot of the call or of a call inside its arguments changes, since the checker refuses
     /// a read of what a call takes as <c>mut</c> while the expression still holds its value (M7), and the read of a copied type it
-    /// takes is a value of its own (<see cref="HeldCopy"/>). With <paramref name="crossing"/> the arguments cross into an actor (U12):
-    /// a value that reaches a class instance is its copy (<see cref="Crossed"/>), which the slot owns, or which is a temporary where the
-    /// callee borrows it.
+    /// takes is a value of its own (<see cref="HeldCopy"/>). With <paramref name="into"/>, the heap of an actor, the arguments cross into
+    /// it (U12): a value that holds a block is its copy there, every block it reaches copied (<see cref="Crossed"/>; the owner, 2026-11-15,
+    /// #519, comment 6902210646, Q5, "Copy all, share big unbuilt"), which the slot owns, or which is a temporary where the callee borrows
+    /// it.
     /// </summary>
-    private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, (Expression Value, Unit File)?> slotDefault, bool cConvention, bool owned, bool crossing = false)
+    private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, (Expression Value, Unit File)?> slotDefault, bool cConvention, bool owned, string? into = null)
     {
         var values = new string?[c.Arguments.Count];
-        var session = crossing ? CallSession(Enumerable.Range(0, c.Arguments.Count).Count(i => info.Binding[i] >= 0 && !slotMut(info.Binding[i]) && !Model.IsMove(c.Arguments[i].Value) && ReachesInstance(Sub(slotType(info.Binding[i]))))) : null;
+        var session = into is null ? null : CallSession(Enumerable.Range(0, c.Arguments.Count).Count(i => info.Binding[i] >= 0 && !slotMut(info.Binding[i]) && Counted(Sub(slotType(info.Binding[i])))), into);
         for (var i = 0; i < c.Arguments.Count; i++)
         {
             var slot = info.Binding[i];
@@ -342,16 +343,28 @@ public sealed partial class Emitter
                 var takes = owned || TakesSlot(c, info, slot); // U12: a parameter written `move` owns its argument
                 if (Model.IsMove(a))
                 {
-                    // U12: the value goes to the place with no copy and no count changed (comment 6895076937)
+                    // U12: the value goes to the place with no copy and no count changed (comment 6895076937); across into an actor's
+                    // heap, a copy there, and the moved value let go of, which frees it (section 13)
                     var moved = Convert(MovedValue(a), TypeOf(a), type, a.Line);
+                    if (into is not null && Counted(type))
+                    {
+                        var across = Crossed(moved, type, session, into);
+                        Release(moved, type);
+                        moved = across;
+                    }
+
                     values[i] = takes ? moved : Temp(moved, type);
                     continue;
                 }
 
-                if (crossing && ReachesInstance(type))
+                if (into is not null && Counted(type))
                 {
-                    // U12: each argument copied where it is evaluated, left to right, in the call's session
-                    var copy = Crossed(Convert(EmitExpression(a), TypeOf(a), type, a.Line, owned: false), type, session);
+                    // U12: each argument copied where it is evaluated, left to right, in the call's session; a function value with the
+                    // environment of the lambda the checker saw for it
+                    var crossing = Convert(EmitExpression(a), TypeOf(a), type, a.Line, owned: false);
+                    var copy = (Types.NonNull(type) ?? type) is FunctionType
+                        ? Crossed(crossing, type, session, into, CopyEnvironmentInto(Model.LambdaOf(Model.CrossingLambda(a) ?? throw new InvalidOperationException($"a function value crosses at line {a.Line} with no lambda the checker saw")).Captures.Select(v => Sub(v.Type)).ToList()))
+                        : Crossed(crossing, type, session, into);
                     values[i] = owned ? copy : Temp(copy, type);
                     continue;
                 }

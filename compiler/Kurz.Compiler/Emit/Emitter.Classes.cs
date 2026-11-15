@@ -82,21 +82,21 @@ public sealed partial class Emitter
     /// of the chain has a call of its base, the fields of each class from its constructor's arguments (<see cref="FillFields"/>);
     /// then each field of the body with an <c>=</c> its default, in their order, read in the class's file through the instance being
     /// built, as C# runs a field's initializer before the constructor's body; a class in a chain declares none (K6, K7, K18). With
-    /// <paramref name="crossing"/>, the state of an actor <c>spawn</c> makes, the arguments cross into the actor (U12).
+    /// <paramref name="into"/>, the heap of the actor whose state <c>spawn</c> makes, the arguments cross into it (U12).
     /// </summary>
-    private string Construct(ClassSymbol symbol, CallExpression c, CallInfo info, Func<string> block, bool crossing = false)
+    private string Construct(ClassSymbol symbol, CallExpression c, CallInfo info, Func<string> block, string? into = null)
     {
         string p;
         if (info.Constructor is { } made)
         {
-            var arguments = Arguments(c, info, j => made.Parameters[j].Type, _ => false, j => Default(made.Declaration.Parameters[j].Default, classOwners[symbol]), cConvention: false, owned: false, crossing);
+            var arguments = Arguments(c, info, j => made.Parameters[j].Type, _ => false, j => Default(made.Declaration.Parameters[j].Default, classOwners[symbol]), cConvention: false, owned: false, into);
             p = block();
             fn.Emit($"call void {Constructor(made)}({string.Join(", ", arguments.Prepend($"ptr {p}"))})");
         }
         else if (symbol.Chain.All(x => x.BaseCall is null))
         {
             // each parameter of the constructor is a field, which owns the argument bound to it
-            var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: true, crossing);
+            var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: true, into);
             p = block();
             for (var i = 0; i < arguments.Count; i++)
             {
@@ -112,7 +112,7 @@ public sealed partial class Emitter
         }
         else
         {
-            var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: false, crossing);
+            var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: false, into);
             p = block();
             FillFields(symbol, arguments, p);
         }

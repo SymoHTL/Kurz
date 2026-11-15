@@ -1187,8 +1187,9 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_whole_file_whose_room_the_system_refuses_raises_allocation_failed_with_the_bytes_of_that_one_request()
     {
-        // M9: the system of this runtime refuses every mapping of more than a mebibyte; a file of 1572864 bytes, which the shell writes
-        // before the run, asks the allocator for its size and the 16 bytes of the list's counts at once, 1572880 bytes, which it refuses
+        // M9: the system of this runtime refuses every mapping of more than 2 mebibytes, the mapping a piece of the allocator takes; a
+        // file of 3145728 bytes, which the shell writes before the run, asks the allocator for its size and the 16 bytes of the list's
+        // counts at once, 3145744 bytes, which it refuses
         const string whole = """
             void | IoError Whole() {
                 bytes = File.ReadAll("refused.bin")
@@ -1200,13 +1201,13 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             """;
-        var small = ListTests.Edited(("runtime/linux/linux.kz", "pub byte* Memory(long bytes) {\n", "pub byte* Memory(long bytes) {\n    if bytes > 1048576 {\n        return null\n    }\n\n"));
-        Ran(whole, "file-refused", [], setup: "head -c 1572864 /dev/zero > refused.bin", code: 1, error: "error: allocation-failed (1572880 bytes)\n", runtimes: [small]);
+        var small = ListTests.Edited(("runtime/linux/linux.kz", "pub byte* Memory(long bytes) {\n", "pub byte* Memory(long bytes) {\n    if bytes > 2097152 {\n        return null\n    }\n\n"));
+        Ran(whole, "file-refused", [], setup: "head -c 3145728 /dev/zero > refused.bin", code: 1, error: "error: allocation-failed (3145744 bytes)\n", runtimes: [small]);
 
-        // a file of more bytes than a list holds, with the largest `int` lowered to 1200000 in the library's text: the room the read asks
-        // for is the 1200000 bytes the list holds and the 16 bytes of its counts, 1200016 bytes, which the same system refuses
-        var smallLimited = ListTests.Edited(("std/std.kz", "2147483647", "1200000"), ("runtime/linux/linux.kz", "pub byte* Memory(long bytes) {\n", "pub byte* Memory(long bytes) {\n    if bytes > 1048576 {\n        return null\n    }\n\n"));
-        Ran(whole, "file-refused-past", [], setup: "head -c 2097152 /dev/zero > refused.bin", code: 1, error: "error: allocation-failed (1200016 bytes)\n", runtimes: [smallLimited]);
+        // a file of more bytes than a list holds, with the largest `int` lowered to 2200000 in the library's text: the room the read asks
+        // for is the 2200000 bytes the list holds and the 16 bytes of its counts, 2200016 bytes, which the same system refuses
+        var smallLimited = ListTests.Edited(("std/std.kz", "2147483647", "2200000"), ("runtime/linux/linux.kz", "pub byte* Memory(long bytes) {\n", "pub byte* Memory(long bytes) {\n    if bytes > 2097152 {\n        return null\n    }\n\n"));
+        Ran(whole, "file-refused-past", [], setup: "head -c 3145728 /dev/zero > refused.bin", code: 1, error: "error: allocation-failed (2200016 bytes)\n", runtimes: [smallLimited]);
 
         // the positive control: a file of 1048000 bytes, whose room the system gives
         Ran(whole, "file-granted", ["1048000"], setup: "head -c 1048000 /dev/zero > refused.bin", runtimes: [small]);

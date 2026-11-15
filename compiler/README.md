@@ -403,25 +403,42 @@ instead, and no path goes on after the call (S23, F17).
 text of a duration and of a timestamp (below), the
 joining and the comparison of two strings, the text of a list from the texts of its items,
 `Raise` for an exception of the run-time table and `Throw`, `AllocateString`, the room of a new string in
-a block of `std/` (R15, below), and `Allocate`, which takes its memory
-from the allocator's entry, `std/`'s `Allocate` (record, section 2), and ends the process where the
-entry gives null (the owner, 2026-10-24, "Null, runtime ends it"), as Rust's `GlobalAlloc::alloc`
+a block of `std/` (R15, below), and `Allocate`, `AllocateOwn` and `AllocateIn`, which take their
+memory from the allocator's entry, `std/`'s `Allocate` (record, section 2), the first in the heap the
+entry serves, the second in the thread's own heap and the third in the heap it is given, and end the
+process where the entry gives null (the owner, 2026-10-24, "Null, runtime ends it"), as Rust's `GlobalAlloc::alloc`
 returns null and leaves the end of the process to a caller, which its documentation encourages to
-call `handle_alloc_error`. The entry gives a block of one of fifteen size classes, the powers of two
-from 16 to 262144 bytes: the block of its class freed last, else one carved from the thread's
-memory, which it takes from the system's `Memory` a mebibyte at a time; an allocation of more than
-262144 bytes takes the smallest such block the thread keeps that holds it and takes no more than twice
-its bytes, the headers counted, given out whole, as glibc's `malloc` takes the smallest free chunk that
-holds a large request, else memory of its own from `Memory`, each with a header of 16 bytes in front
-that names the bytes the system gave it (record, section 2: the owner, 2026-10-30, "Keep them, as
-glibc" and "Only if at least half used"). It gives null where the system refuses. `std/`'s
-`Free` takes a block back with the size it was asked for, as Rust's `GlobalAlloc::dealloc` takes
-the layout a block was allocated with: a block of a size class to the front of its class's free
-blocks, where a request of the class takes it first, and a larger one to the front of the blocks the
-thread keeps where they take no more than 32 mebibytes with it, else to the system through the
-target's `Release`; the mebibytes a thread carved from and the blocks it keeps stay its own. `Reallocate` grows a block with
-its bytes, as Rust's `GlobalAlloc::realloc`: one of more than 262144 bytes stays where it is where its
-header names room enough, as a kept block given out whole can, else moves into the smallest kept
+call `handle_alloc_error`. The entry serves a heap (record, section 3): the one the runtime's `Run` sets before each
+switch to an actor's stack and puts back after it, the running actor's, else the thread's own, which
+holds what the top-level code allocates and what lives as long as the process ("The runtime"). A heap
+takes its memory in pages, its first page sized to what it holds first, from 256 bytes, each later page
+twice the size of the one before it, up to 65536 bytes, and larger, the smallest power of two that holds
+the block, only where one block needs more (record, section 3: the owner, 2026-11-15, #519, comment
+6902210646, Q6, "Small growing pages"); a page starts with 16 bytes, the page before it and its size,
+and the first page of a heap holds the heap's record, 48 bytes, and its first block behind them. The
+pages are carved from pieces of a mebibyte at an address that is a multiple of a mebibyte, the aligned
+mebibyte of a mapping of 2 mebibytes that the thread takes from the system's `Memory`, as mimalloc
+aligns its segments; a piece starts with its table, a word for each 256 bytes of it, 32768 bytes in
+all, which names the heap whose page holds those bytes, so that `Free` finds a block's heap by a mask,
+a shift and a load. The entry gives a block of one of fifteen size classes, the powers of two from 16
+to 262144 bytes, of the heap it serves: the block of its class the heap freed last, else one carved
+from the heap's newest page, else from a new page; an allocation of more than 262144 bytes takes the
+smallest such block the thread keeps that holds it and takes no more than twice its bytes, the headers
+counted, given out whole, as glibc's `malloc` takes the smallest free chunk that holds a large request,
+else memory of its own from `Memory`, each with a header of 48 bytes in front that names the bytes the
+system gave it, its heap and its neighbours in its heap's list of such blocks (record, section 2: the
+owner, 2026-10-30, "Keep them, as glibc" and "Only if at least half used"). It gives null where the
+system refuses. `std/`'s `Free` takes a block back with the size it was asked for, as Rust's
+`GlobalAlloc::dealloc` takes the layout a block was allocated with, to the heap it came from,
+whichever heap the entry serves: a block of a size class to the front of its heap's free blocks of its
+class, where a request of the class takes it first, and a larger one off its heap's list and to the
+front of the blocks the thread keeps where they take no more than 32 mebibytes with it, else to the
+system through the target's `Release`. `HeapFree` frees a heap whole, as the end of its actor does
+(record, section 3): its blocks of more than 262144 bytes join the blocks the thread keeps as `Free`
+gives them, and its pages go to the thread's pools, one for each size, from which a heap that needs a
+page of that size takes it first; the pieces a thread carved and the blocks it keeps stay its own.
+`Reallocate` grows a block with its bytes in the heap it came from, as Rust's `GlobalAlloc::realloc`:
+one of more than 262144 bytes stays where it is where its header names room enough, as a kept block given out whole can, else moves into the smallest kept
 block that holds the grown block and that the grown block takes at least half of, its bytes copied
 and the old block freed (record, section 2: the owner, 2026-11-01, "Kept block first"), else grows
 through the target's `Resize`, which can grow it without a copy, else, and where `Resize` gives null,
@@ -487,18 +504,21 @@ the top-level code runs on the thread's own stack, the main thread's, as section
 owner, 2026-11-14, #519, comment 6880404917, Q11). On Linux a fault on a stack's guard page is a
 `stack-overflow` as one on the main thread's is (below), and a stack the system refuses ends the
 process with `allocation-failed` and the size asked for. `common/`'s copy of a crossing (U12) works
-in the session of a call, eight words in the caller's frame, since the copies one call makes share
+in the session of a call, nine words in the caller's frame, the ninth the heap the copies go into, the
+receiver's, or none for a `copy` at a call that crosses nothing, which copies the class instances it
+reaches and shares every other block by its count (`CopyWhole`), since the copies one call makes share
 one memo and a result has one of its own (section 6): the memo, open addressing on a block's address
 and never more than half full, which `CopyFind` reads and `CopyKeep` fills with each block held more
 than once, or every block in a call of more than one copy, its copy and the function that lets go
 of the count the memo takes of the block; the `weak` references of the copies, which `CopyWeak`
 keeps with a weak count of their target; and the copies left, which `CopyLeft` counts down, the
 last pointing each `weak` reference at its target's copy, or at null, and letting go of the memo's
-counts. Each run of a copy names its session first (`CopyUse`), since an argument whose call waits
+counts. Each run of a copy names its session first (`CopyUse`), which has the allocation entry serve
+the session's heap until the run's end (`CopyLeft`), since an argument whose call waits
 lets other sessions run between two copies of one call, and `CopyAbort` ends a session whose call
 was left before its last copy. The work list, which `CopyPush` fills with a block, its copy and the
 function that fills the copy, and `CopyNext` empties, the last first, is the thread's own, from the
-allocator, grown by doubling and kept for the thread's next copy, since a run runs no program code
+thread's own heap (`AllocateOwn`), as the memo and the room of the `weak` references are, grown by doubling and kept for the thread's next copy, since a run runs no program code
 and leaves it empty. `ActorTests` pins the stacks, the guard page,
 the overflow, the refusal, the sizes, the pool, the trim and the registers a switch keeps, `RuntimeTests` the directories
 of the architectures, and `EmitterTests.The_switch_of_every_target_and_architecture_is_assembled_by_clang_for_its_machine`
@@ -948,10 +968,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - actors (chapter 19), on the one thread the runtime runs, as tokio's `current_thread` runtime runs
   its tasks ("What the emitter does not emit" names what of section 6 this does not build): `spawn`
   constructs the state as an instance of the actor's body is constructed, both its counts at one (K1,
-  K7), in a block of the runtime's `ActorNew` that holds the actor's record in the 48 bytes in front
-  of it, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps
+  K7), in the first block of the actor's own heap, which the runtime's `ActorHeapNew` makes and
+  `ActorNew` fills, the actor's record in the 64 bytes in front of it, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps
   the alignment of the allocator's block, as Rust's `ArcInner` pads its counts to what it holds, a
-  `Vector128` field's 16 among it: the size of the stack its messages run on, 2 MiB or what its
+  `Vector128` field's 16 among it: its heap, the actor spawned before it, by which the runtime's
+  `EndActors` reaches every actor, the size of the stack its messages run on, 2 MiB or what its
   `stack` clause sets (U1), the actor's number, the first and the last
   message of its inbox, the actor after it in the run queue, and the activation at the top of its
   stacks, the one that runs or waits, none while it is idle, which nothing marks while its
@@ -964,7 +985,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   actor's type, `#` and its number, `Counter#1` (U2). The constructor and the defaults of
   the body run inside `spawn`, so that what they print comes before what the spawner prints after it
   (U3). A call through a reference, a `send` and a `send` of the actor's own method (U11) make a
-  message, one block of the allocator, as actix packs a message and the sender of its reply into one
+  message, one block of the receiver's heap, as actix packs a message and the sender of its reply into one
   envelope: the message after it in its list, the function that runs it, the reply, none after
   `send`, the chain ID, 16 bytes, and the arguments, each with a count of its own; the runtime's
   `Enqueue` stamps the chain, a new one in the top-level code, drawn from the thread's generator, and
@@ -980,9 +1001,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   frees the message. An argument of a message or of `spawn` crosses as the type of its parameter says,
   where it is evaluated, before a later argument's call that waits can change what it reads, and a
   result crosses before it moves beside the reply, while the method's count of it still holds it
-  (U12): a value that reaches no class instance is shared by its count, which no program tells from
-  a copy, and one that reaches a class instance is copied deep by its type's copy function, every
-  class instance it reaches copied and every other block shared by its count, an instance of a
+  (U12): a value that holds a block is copied deep into the receiver's heap, the actor's or, for a
+  result, the caller's, which the reply names, by its type's copy function, every block it reaches
+  copied, a string's bytes among them, which no program tells from a block shared by its count
+  (section 6: the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big unbuilt"),
+  a function value with the values its lambda captures, and an instance of a
   derived class through the copy slot of its class's table, slot 5, so that an instance held as its base arrives as its own class; a block whose count
   says it is held more than once, or any block in a call of more than one copy, where a later
   argument may reach it by a path that holds no count of it, is looked up in the memo of the call's
@@ -1004,19 +1027,22 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the memo of a call, `copy-left-to-right.kz` the order, `copy-memo-keeps-block.kz` a block the memo
   holds living to the call's last copy and `copy-left-early.kz` a call left before it; and
   `corpus/actors/copy-derived.kz` an instance of a derived class held as its base.
-  A `move` before an argument copies nothing and changes no count (U12): a variable's value leaves its
-  place, which is stored null, or a string of no block, the count it held going to the message or to
-  the parameter written `move` the argument fills, which its function owns and lets go of where it
+  A `move` before an argument of a call that crosses nothing copies nothing and changes no count
+  (U12): a variable's value leaves its place, which is stored null, or a string of no block, the count
+  it held going to the parameter written `move` the argument fills, which its function owns and lets go of where it
   leaves; the item of a loop that takes its list leaves its place in the list the same way, and the
   release of a list of an item type such a loop takes, read from every unit's model before the first
   helper is built, tests each item for null, so that the list lets go of every item it still holds
   and of no moved one; a value of another type, inline or a function value, is counted once more. A
   place a `move` names is let go of through a test for null, at its scope's end and where an
   assignment replaces it, as rustc keeps a drop flag, and a message's function lets go of no
-  argument of a parameter written `move`, which the method owns. A function value whose parameter is
+  argument of a parameter written `move`, which the method owns. A `move` into a message or a `spawn`
+  copies the value into the receiver's heap, in the call's session, as an argument with no word
+  crosses, and lets go of the moved value, which frees it (section 6). A function value whose parameter is
   not written `move` where its type writes it, and a loop that takes a list of `weak` references,
   are the emitter's `not supported`. `ActorTests` pins a moved instance that the receiver changes and
-  keeps, a `move` that allocates nothing where `copy` allocates its copy, and the allocations equal
+  keeps, a `move` into an actor that copies into its heap and frees the original where `copy` frees
+  nothing, and the allocations equal
   to the frees on a branch, in a loop that takes its list, after a reassignment and through a
   parameter written `move`; the line `actor-move-fenced` of `ListTests` a branch, a loop that takes
   its list, a variable moved and assigned again in a loop, and a parameter written `move` left by a
@@ -1320,7 +1346,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   file the system names no size for; files of 1 to 1048579 bytes read without their list grown, under
   a library that ends the process where a read would grow one, and read whole where the size the
   system names is 3 bytes short, 3 bytes long or a failure; a file whose room a system that refuses
-  more than a mebibyte refuses, one of more bytes than a list holds whose room it refuses, and one
+  more than 2 mebibytes, the mapping of a piece, refuses, one of more bytes than a list holds whose room it refuses, and one
   whose room it gives; the room of the list a whole read gives,
   under a library that ends the process where an `Add` would grow one; a read and a write in
   the wrong direction; the modes under two masks; the close-on-exec flag the system shows; a directory
@@ -1972,9 +1998,23 @@ process with `allocation-failed`. An actor and its state live to the end of the 
 section 6's end of an actor in a program the build takes: an actor ends with its supervisor, the
 actor that spawned it (the owner, 2026-10-30), at the root the top-level code, which ends with the
 process, and no actor stops, nor crashes without ending the process. Every actor's blocks come from
-the one allocator of the thread, where section 3 gives each actor a heap of its own, so that a
-crossing keeps two actors apart by its copy alone (U12). `ActorTests` pins the crash,
-the turns, the end and the inbox's growth; no test pins the wait with no bound, which would not end.
+its own heap (section 3, "The runtime"), and the end of the top-level code frees every actor's heap
+whole before the process exits (`EndActors`), as the end of an actor frees its heap (U13); a crossing
+copies every counted block it reaches, so that no actor holds a block of another's heap (U12). Of
+the heaps two things are not built: the share of a big value by pointer outside every heap, which
+section 6 decides, every big value crossing as a copy, and the sweep of section 13, every block
+being freed at its last count (the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share
+big unbuilt", and Q7, "Rust: no sweep"). What lives as long as the process is made in the thread's
+own heap, outside every actor's (`AllocateOwn`): the buffers of `Print` and of the log, the list of
+chains that wait, the thread's side of the scheduler, and the memo, the work list and the room of the
+`weak` references of a copy; the filter of `KURZ_LOG` is read before the first statement, in that
+heap, the keys of the hash of a map are two words of the thread, and a `static` value of the build
+holds no block (R13). `ActorTests` pins the crash,
+the turns, the end and the inbox's growth, each heap giving back every block of its crossings, results
+and moves, 10,000 idle actors within 512 bytes each, on Linux alone, which reads the resident memory,
+a buffer of the runtime made inside an actor outliving it, and a block of more than 262144 bytes of an
+actor joining the kept blocks at the end; the line `actor-heaps-fenced` of `ListTests` the heaps of
+actors freed whole and every result of their messages read after it, from the caller's heap; no test pins the wait with no bound, which would not end.
 
 On Linux an exception that ends the process writes the trace of the calls below its error line
 (section 6), but `allocation-failed` and `random-failed`, which write no place and no trace (O11, M9): the runtime's `Trace` (`runtime/linux/linux.kz`) walks the stack it raised on with
@@ -2193,14 +2233,17 @@ ask about it.
   message holds, so that `null` given to a `Box?` of a class with a `mut` field needs `copy` as a
   `Box` would; the copies one call makes share one memo and a result has one of its own, each
   argument copied where it is evaluated, left to right, a block the memo holds living until the
-  call's last copy; a function value a crossing reaches is shared by its count, its captures with
-  it, as the deep copy stops at one *(all assumed in section 6, "How a value crosses and what `copy`
+  call's last copy; a function value a crossing reaches is copied into the receiver's heap with its
+  captures, as every counted block a crossing reaches is (decided there, 2026-11-15, Q5), and one a
+  `copy` at a call that crosses nothing reaches is shared by its count, its captures with it, as the
+  deep copy stops at one *(all assumed in section 6, "How a value crosses and what `copy`
   does")*; and an actor's reference as a key of a map hashes by the actor's number, which a crossing
   keeps, as section 6 has it ("An actor's reference compares by the actor it names"). Pinned by
   `ActorTests`, the cases `corpus/actors/copy-shared-graph.kz`, `corpus/actors/references-in-list.kz`
   and the six of the memo of a call (above), and the line `actor-crossing-fenced` of `ListTests`.
-- U12 with section 6: on one thread a `move` copies nothing and changes no count, the moved place's
-  count becoming the message's or the parameter's, and a place a `move` names is let go of through a
+- U12 with section 6: on one thread a `move` into a parameter copies nothing and changes no count,
+  the moved place's count becoming the parameter's, a `move` into a message or a `spawn` copying the
+  value into the receiver's heap and freeing the original, and a place a `move` names is let go of through a
   test for null, as rustc keeps a drop flag *(assumed in section 6, "What a `move` ends, and where it
   stands")*; a loop that takes its list empties the item's place in the list, one store per round, as
   answer 1 of comment 6897778812 costs it. Pinned by `ActorTests`, the cases

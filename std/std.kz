@@ -10,22 +10,50 @@
 // string's.
 use sys
 
-// The memory the allocator carves blocks from, and the bytes left behind it, of each thread (R13).
+// Each actor's own heap, and the thread's own heap, outside every actor's (design record, section 3; the
+// owner, 2026-11-15, #519, comment 6902210646, Q6, "Small growing pages"). A heap takes its memory in
+// pages: its first page sized to what the heap holds first, from 256 bytes, each later page twice the size
+// of the one before it, up to 65536 bytes, and larger only where one block needs more. A page starts
+// with 16 bytes, the page before it in its heap and its size; the first page of a heap holds the heap's
+// record behind them, 48 bytes: the next free byte of its newest page, the end of that page, its newest
+// page, the first of its blocks of more than 262144 bytes, its table of free blocks for each size class,
+// null until the heap's first block is freed, and a word no field takes, so that the heap's first block
+// starts at a multiple of 16. A heap is the address of its record.
+//
+// The pages are carved from pieces of a mebibyte at an address that is a multiple of a mebibyte, which
+// the thread takes from the system, as mimalloc aligns its segments so that a block's segment is its
+// address masked: a piece starts with its table, a word for each 256 bytes of the piece, 32768 bytes in
+// all, which names the heap whose page holds those bytes, so that `Free` finds a block's heap by a mask,
+// a shift and a load. The system gives a piece in a mapping of 2 mebibytes, of which it touches only the
+// aligned mebibyte. The thread keeps the pages of a heap freed whole, for each size, for the next heap
+// that takes a page of that size.
+//
+// The thread's own heap holds what lives as long as the process: the runtime's buffers, the work list
+// and the memo of a copy, and what the top-level code allocates, the root actor's heap. The allocation
+// entry serves the heap `HeapUse` set, the running actor's, else the thread's own.
+
+// The memory the allocator carves pages from, and the bytes left behind it, of each thread (R13).
 thread static mut byte* chunk = null
 thread static mut long left = 0
 
-// The first free block of each size class of each thread, as its address, 0 where the class has none:
-// fifteen classes, the powers of two from 16 to 262144 bytes, in a table carved at the thread's first
-// allocation of no more than 262144 bytes. A free block holds the address of the next free block of
-// its class in its first 8 bytes.
-thread static mut long* heads = null
+// The first free page of each size the thread keeps, as its address, 0 where it keeps none: twelve
+// sizes, the powers of two from 256 to 524288 bytes, in the first words of the table of the thread's
+// first piece, which name the heap of the bytes of the table itself, none, so that no lookup reads them.
+// A free page holds the address of the next free page of its size in its first 8 bytes.
+thread static mut long* pools = null
+
+// The thread's own heap, made at its first allocation, and the heap the allocation entry serves, null
+// for the thread's own.
+thread static mut byte* own = null
+thread static mut byte* current = null
 
 // The blocks of more than 262144 bytes that each thread freed and keeps (the owner, 2026-10-30, "Keep
 // them, as glibc"): the first of them, null where it keeps none, and the bytes they take, at most
 // 33554432, 32 mebibytes, as glibc's malloc serves from its heap, where it keeps what is freed, the
 // requests below a threshold that a freed block of up to that size raises. Such a block starts with a
-// header of 16 bytes, the bytes the system gave it and, while it is kept, the address of the kept block
-// after it; what the allocation entry gives out starts after the header.
+// header of 48 bytes: the bytes the system gave it; the next block of its list, the kept blocks while it
+// is kept, else its heap's; the block before it in its heap's list; its heap; and two words no field
+// takes, so that what the allocation entry gives out after the header starts at a multiple of 16.
 thread static mut byte* kept = null
 thread static mut long keptBytes = 0
 
@@ -42,43 +70,343 @@ long Class(long size) {
     return k
 }
 
-// `room` bytes carved from the thread's memory, which takes a new piece of a mebibyte from the system
-// where the rest of the piece is too small; null where the system refuses. The rest of a piece left
-// behind is not carved again.
-byte* Carve(long room) {
-    mut byte* p = null
+// The pool of the pages of `size` bytes, a power of two from 256 to 524288, counted from 0.
+long PoolOf(long size) {
+    mut long i = 0
+    mut long room = 256
+    while room < size {
+        room = room * 2
+        i = i + 1
+    }
+
+    return i
+}
+
+// A page of `size` bytes, a power of two from 256 to 524288, back in the thread's pool of its size.
+void Pooled(byte* page, long size) {
     raw {
-        if room > left {
-            chunk = sys.Memory(1048576)
-            left = 1048576
-            if chunk == null {
-                left = 0
+        long i = PoolOf(size)
+        *Ptr<long>(page) = pools[i]
+        pools[i] = long(page)
+    }
+}
+
+// A page of `size` bytes carved from the thread's piece, which takes a new piece from the system where
+// the rest of the piece is too small, the rest then kept in the pools as pages of the largest sizes it
+// holds; null where the system refuses.
+byte* Carved(long size) {
+    mut byte* page = null
+    raw {
+        if size > left {
+            byte* mapped = sys.Memory(2097152)
+            if mapped == null {
+                return null
             }
+
+            byte* piece = Ptr<byte>((long(mapped) + 1048575) & -1048576)
+            if pools == null {
+                pools = Ptr<long>(piece)
+            }
+
+            while left >= 256 {
+                mut long rest = 256
+                while rest * 2 <= left && rest < 524288 {
+                    rest = rest * 2
+                }
+
+                Pooled(chunk, rest)
+                chunk = chunk + rest
+                left = left - rest
+            }
+
+            chunk = piece + 32768
+            left = 1048576 - 32768
         }
 
-        if chunk != null {
-            p = chunk
-            chunk = chunk + room
-            left = left - room
+        page = chunk
+        chunk = chunk + size
+        left = left - size
+    }
+
+    return page
+}
+
+// A page of `size` bytes for `heap`, which the words of its piece's table for the page's bytes name: the
+// first page of that size the thread keeps, else one carved; null where the system refuses.
+byte* PageFor(byte* heap, long size) {
+    mut byte* page = null
+    raw {
+        if pools != null {
+            long i = PoolOf(size)
+            if pools[i] != 0 {
+                page = Ptr<byte>(pools[i])
+                pools[i] = *Ptr<long>(page)
+            }
         }
+    }
+
+    if page == null {
+        page = Carved(size)
+        if page == null {
+            return null
+        }
+    }
+
+    raw {
+        long* table = Ptr<long>(long(page) & -1048576)
+        long first = (long(page) & 1048575) >> 8
+        mut long i = 0
+        while i < size >> 8 {
+            table[first + i] = long(heap)
+            i = i + 1
+        }
+
+        *Ptr<long>(page + 8) = size
+    }
+
+    return page
+}
+
+// A new heap whose first page holds its record and a first block of `first` bytes behind it, which the
+// heap gives to nothing else and which is freed with the heap: the first page the smallest power of two
+// from 256 bytes that holds them (Q6). Null where the system refuses, and where the first page would be
+// larger than 524288 bytes, the largest page the thread carves.
+pub byte* HeapNew(long first) {
+    long need = 64 + (first + 15) / 16 * 16
+    mut long size = 256
+    while size < need {
+        size = size * 2
+    }
+
+    if size > 524288 {
+        return null
+    }
+
+    mut byte* page = null
+    raw {
+        if pools != null {
+            long i = PoolOf(size)
+            if pools[i] != 0 {
+                page = Ptr<byte>(pools[i])
+                pools[i] = *Ptr<long>(page)
+            }
+        }
+    }
+
+    if page == null {
+        page = Carved(size)
+        if page == null {
+            return null
+        }
+    }
+
+    mut byte* heap = null
+    raw {
+        heap = page + 16
+        long* table = Ptr<long>(long(page) & -1048576)
+        long at = (long(page) & 1048575) >> 8
+        mut long i = 0
+        while i < size >> 8 {
+            table[at + i] = long(heap)
+            i = i + 1
+        }
+
+        *Ptr<byte*>(page) = null
+        *Ptr<long>(page + 8) = size
+        *Ptr<byte*>(heap) = page + need
+        *Ptr<byte*>(heap + 8) = page + size
+        *Ptr<byte*>(heap + 16) = page
+        *Ptr<byte*>(heap + 24) = null
+        *Ptr<byte*>(heap + 32) = null
+        *Ptr<long>(heap + 40) = 0
+    }
+
+    return heap
+}
+
+// The first block of the heap, which `HeapNew` was given the size of.
+pub byte* HeapFirst(byte* heap) {
+    mut byte* p = null
+    raw {
+        p = heap + 48
     }
 
     return p
 }
 
-// The table of the thread's size classes, carved at its first use from memory the system gave
-// zeroed, so every class starts without a free block; null where the system refuses.
-long* Heads() {
-    mut long* table = null
+// The heap the allocation entry serves from now on, the thread's own for null: the heap it served until
+// then, null for the thread's own.
+pub byte* HeapUse(byte* heap) {
+    mut byte* before = null
     raw {
-        if heads == null {
-            heads = Ptr<long>(Carve(128))
+        before = current
+        current = heap
+    }
+
+    return before
+}
+
+// The heap the allocation entry serves: the one `HeapUse` set, else the thread's own, made at its first
+// use; null where the system refuses.
+pub byte* HeapCurrent() {
+    mut byte* heap = null
+    raw {
+        heap = current
+        if heap == null {
+            if own == null {
+                own = HeapNew(0)
+            }
+
+            heap = own
+        }
+    }
+
+    return heap
+}
+
+// The heap freed whole (section 3): its blocks of more than 262144 bytes to the front of the blocks the
+// thread keeps, as `Free` gives them, its pages to the thread's pools. Nothing may read a block of the
+// heap after it, its record and its first block among them.
+pub void HeapFree(byte* heap) {
+    raw {
+        mut byte* at = *Ptr<byte*>(heap + 24)
+        while at != null {
+            byte* after = *Ptr<byte*>(at + 8)
+            Kept(at, *Ptr<long>(at))
+            at = after
         }
 
-        table = heads
+        mut byte* page = *Ptr<byte*>(heap + 16)
+        while page != null {
+            byte* before = *Ptr<byte*>(page)
+            Pooled(page, *Ptr<long>(page + 8))
+            page = before
+        }
+    }
+}
+
+// `room` bytes from the newest page of `heap`, which takes a new page where that page is too small: twice
+// the size of the one before it, up to 65536 bytes, and the smallest power of two that holds the page's
+// header and `room` where that is larger. The rest of a page left behind is not carved again. Null where
+// the system refuses.
+byte* Bumped(byte* heap, long room) {
+    mut byte* p = null
+    raw {
+        p = *Ptr<byte*>(heap)
+        if long(p) + room > long(*Ptr<byte*>(heap + 8)) {
+            byte* newest = *Ptr<byte*>(heap + 16)
+            mut long size = *Ptr<long>(newest + 8) * 2
+            if size > 65536 {
+                size = 65536
+            }
+
+            while size < 16 + room {
+                size = size * 2
+            }
+
+            byte* page = PageFor(heap, size)
+            if page == null {
+                return null
+            }
+
+            *Ptr<byte*>(page) = newest
+            *Ptr<byte*>(heap + 16) = page
+            *Ptr<byte*>(heap + 8) = page + size
+            p = page + 16
+        }
+
+        *Ptr<byte*>(heap) = p + room
+    }
+
+    return p
+}
+
+// The table of the heap's size classes: fifteen classes, the powers of two from 16 to 262144 bytes, each
+// the address of the class's first free block, 0 where it has none, carved from the heap at its first
+// use and zeroed; null where the system refuses. A free block holds the address of the next free block of
+// its class in its first 8 bytes.
+long* Heads(byte* heap) {
+    mut long* table = null
+    raw {
+        table = *Ptr<long*>(heap + 32)
+        if table == null {
+            byte* room = Bumped(heap, 128)
+            if room != null {
+                table = Ptr<long>(room)
+                mut long i = 0
+                while i < 16 {
+                    table[i] = 0
+                    i = i + 1
+                }
+
+                *Ptr<long*>(heap + 32) = table
+            }
+        }
     }
 
     return table
+}
+
+// The heap of a block the allocation entry gave for `size` bytes: for a block of more than 262144 bytes
+// the heap its header names, else the heap the table at the head of its piece names for its bytes.
+byte* Owner(byte* p, long size) {
+    mut byte* heap = null
+    raw {
+        if size > 262144 {
+            heap = *Ptr<byte*>(p - 24)
+        } else {
+            heap = Ptr<byte>(Ptr<long>(long(p) & -1048576)[(long(p) & 1048575) >> 8])
+        }
+    }
+
+    return heap
+}
+
+// The block of more than 262144 bytes at `block` at the front of the list of such blocks of `heap`.
+void Enlist(byte* heap, byte* block) {
+    raw {
+        byte* first = *Ptr<byte*>(heap + 24)
+        *Ptr<byte*>(block + 8) = first
+        *Ptr<byte*>(block + 16) = null
+        *Ptr<byte*>(block + 24) = heap
+        if first != null {
+            *Ptr<byte*>(first + 16) = block
+        }
+
+        *Ptr<byte*>(heap + 24) = block
+    }
+}
+
+// The block of more than 262144 bytes at `block` taken off the list of its heap.
+void Delist(byte* block) {
+    raw {
+        byte* after = *Ptr<byte*>(block + 8)
+        byte* before = *Ptr<byte*>(block + 16)
+        if before == null {
+            *Ptr<byte*>(*Ptr<byte*>(block + 24) + 24) = after
+        } else {
+            *Ptr<byte*>(before + 8) = after
+        }
+
+        if after != null {
+            *Ptr<byte*>(after + 16) = before
+        }
+    }
+}
+
+// The block of more than 262144 bytes at `block`, `bytes` bytes as its header names them, to the front of
+// the blocks the thread keeps, where it fits within the 33554432 bytes the kept blocks may take, else to
+// the system.
+void Kept(byte* block, long bytes) {
+    raw {
+        if keptBytes + bytes <= 33554432 {
+            *Ptr<long>(block + 8) = long(kept)
+            kept = block
+            keptBytes = keptBytes + bytes
+        } else {
+            sys.Release(block, bytes)
+        }
+    }
 }
 
 // The smallest block the thread keeps that holds `bytes` bytes, its header among them, and takes no
@@ -119,18 +447,24 @@ byte* Reused(long bytes) {
     return best
 }
 
-// The allocation entry (design record, section 2): `size` bytes, at an address that is a multiple of
-// 16. A request of more than 262144 bytes takes the smallest block the thread keeps that holds it and
-// takes no more than twice its bytes, else memory of its own from the system, each with its header in
-// front. A smaller one takes a block of its size class: the one of that class freed last, or one carved
-// from the thread's memory, whose pieces the system gives a mebibyte at a time. A block used again holds
-// what was written into it before. Null where the system refuses, for which the runtime's `Allocate`
-// ends the process (the owner, 2026-10-24, "Null, runtime ends it"), as Rust's `GlobalAlloc::alloc`
-// returns null and its callers that cease execution are encouraged to call `handle_alloc_error`.
+// The allocation entry (design record, section 2): `size` bytes of the heap it serves (`HeapCurrent`), at
+// an address that is a multiple of 16. A request of more than 262144 bytes takes the smallest block the
+// thread keeps that holds it and takes no more than twice its bytes, else memory of its own from the
+// system, each with its header in front, in the heap's list of such blocks. A smaller one takes a block
+// of its size class: the one of that class the heap freed last, else one carved from the heap's newest
+// page. A block used again holds what was written into it before. Null where the system refuses, for
+// which the runtime's `Allocate` ends the process (the owner, 2026-10-24, "Null, runtime ends it"), as
+// Rust's `GlobalAlloc::alloc` returns null and its callers that cease execution are encouraged to call
+// `handle_alloc_error`.
 pub byte* Allocate(long size) {
     mut byte* p = null
+    byte* heap = HeapCurrent()
+    if heap == null {
+        return null
+    }
+
     if size > 262144 {
-        long bytes = (size + 15) / 16 * 16 + 16
+        long bytes = (size + 15) / 16 * 16 + 48
         p = Reused(bytes)
         raw {
             if p == null {
@@ -141,61 +475,64 @@ pub byte* Allocate(long size) {
             }
 
             if p != null {
-                p = p + 16
+                Enlist(heap, p)
+                p = p + 48
             }
         }
 
         return p
     }
 
-    long* table = Heads()
     raw {
-        if table != null {
-            long k = Class(size)
-            long head = table[k]
-            if head != 0 {
-                p = Ptr<byte>(head)
-                table[k] = *Ptr<long>(p)
-            } else {
-                mut long room = 16
-                mut long i = 0
-                while i < k {
-                    room = room * 2
-                    i = i + 1
-                }
-
-                p = Carve(room)
+        long k = Class(size)
+        long* table = *Ptr<long*>(heap + 32)
+        if table != null && table[k] != 0 {
+            p = Ptr<byte>(table[k])
+            table[k] = *Ptr<long>(p)
+        } else {
+            mut long room = 16
+            mut long i = 0
+            while i < k {
+                room = room * 2
+                i = i + 1
             }
+
+            p = Bumped(heap, room)
         }
     }
 
     return p
 }
 
+// `size` bytes of `heap`, the thread's own for null, as the allocation entry gives them, which then serves
+// the heap it served before.
+pub byte* AllocateIn(byte* heap, long size) {
+    byte* before = HeapUse(heap)
+    byte* p = Allocate(size)
+    HeapUse(before)
+    return p
+}
+
 // A block the allocation entry gave, given back with the `size` it was asked for, as Rust's
-// `GlobalAlloc::dealloc` takes the layout a block was allocated with: a block of more than 262144
-// bytes to the front of the blocks the thread keeps, where its bytes, as its header names them, fit
-// within the 33554432 the kept blocks may take, else to the system; a smaller one to the front of its
-// size class's free blocks, where a request of that class takes it first. Where the table of size
-// classes cannot be carved, the block is not used again.
+// `GlobalAlloc::dealloc` takes the layout a block was allocated with, to the heap it came from, whichever
+// heap the entry serves: a block of more than 262144 bytes off its heap's list and to the front of the
+// blocks the thread keeps, where its bytes, as its header names them, fit within the 33554432 the kept
+// blocks may take, else to the system; a smaller one to the front of its heap's free blocks of its size
+// class, where a request of that class takes it first. Where the table of size classes cannot be
+// carved, the block is not used again.
 pub void Free(byte* p, long size) {
     if size > 262144 {
         raw {
-            byte* block = p - 16
+            byte* block = p - 48
             long bytes = *Ptr<long>(block)
-            if keptBytes + bytes <= 33554432 {
-                *Ptr<long>(block + 8) = long(kept)
-                kept = block
-                keptBytes = keptBytes + bytes
-            } else {
-                sys.Release(block, bytes)
-            }
+            Delist(block)
+            Kept(block, bytes)
         }
 
         return
     }
 
-    long* table = Heads()
+    long* table = Heads(Owner(p, size))
     raw {
         if table != null {
             long k = Class(size)
@@ -205,40 +542,46 @@ pub void Free(byte* p, long size) {
     }
 }
 
-// A block the allocation entry gave for `size` bytes, grown to `grown` bytes with the bytes it holds, as
-// Rust's `GlobalAlloc::realloc`: a block of more than 262144 bytes is itself where its header names
-// room enough, as a kept block given out whole may, as glibc's `realloc` leaves a mapped chunk that
-// holds the size, else the kept block `Reused` gives for the grown size, the bytes copied into it and
-// the old block freed (the owner, 2026-11-01, "Kept block first"), else grown by the target's `Resize`,
-// which can grow it without a copy, as the C library's `realloc` grows a block it mapped; else, and
-// where `Resize` gives null, a new block with the bytes copied and the old one freed. Null where the
-// system refuses, the block then left as it was.
+// A block the allocation entry gave for `size` bytes, grown to `grown` bytes with the bytes it holds, in
+// the heap it came from, as Rust's `GlobalAlloc::realloc`: a block of more than 262144 bytes is itself
+// where its header names room enough, as a kept block given out whole may, as glibc's `realloc` leaves a
+// mapped chunk that holds the size, else the kept block `Reused` gives for the grown size, the bytes
+// copied into it and the old block freed (the owner, 2026-11-01, "Kept block first"), else grown by the
+// target's `Resize`, which can grow it without a copy, as the C library's `realloc` grows a block it
+// mapped; else, and where `Resize` gives null, a new block of the heap with the bytes copied and the old
+// one freed. Null where the system refuses, the block then left as it was.
 pub byte* Reallocate(byte* p, long size, long grown) {
+    byte* heap = Owner(p, size)
     if size > 262144 {
-        long bytes = (grown + 15) / 16 * 16 + 16
+        long bytes = (grown + 15) / 16 * 16 + 48
         mut byte* moved = null
         mut bool copied = false
         raw {
-            byte* block = p - 16
+            byte* block = p - 48
             long room = *Ptr<long>(block)
             if bytes <= room {
                 moved = p
             } else {
                 byte* reused = Reused(bytes)
                 if reused != null {
+                    Enlist(heap, reused)
                     mut long i = 0
                     while i < size {
-                        reused[16 + i] = p[i]
+                        reused[48 + i] = p[i]
                         i = i + 1
                     }
 
-                    moved = reused + 16
+                    moved = reused + 48
                     copied = true
                 } else {
+                    Delist(block)
                     byte* q = sys.Resize(block, room, bytes)
                     if q != null {
                         *Ptr<long>(q) = bytes
-                        moved = q + 16
+                        Enlist(heap, q)
+                        moved = q + 48
+                    } else {
+                        Enlist(heap, block)
                     }
                 }
             }
@@ -253,7 +596,7 @@ pub byte* Reallocate(byte* p, long size, long grown) {
         }
     }
 
-    byte* q = Allocate(grown)
+    byte* q = AllocateIn(heap, grown)
     if q == null {
         return null
     }
