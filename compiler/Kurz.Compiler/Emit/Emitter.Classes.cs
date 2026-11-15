@@ -44,10 +44,12 @@ public sealed partial class Emitter
     private readonly HashSet<InterfaceSymbol> comparedThroughInterface = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<InterfaceSymbol> hashedThroughInterface = new(ReferenceEqualityComparer.Instance);
 
-    // K6: the slots of a table before its methods: the release, the weak release, the equality, the hash and the link, which in a
-    // class's table is its base's table and in a class's table for an interface the class's own table, where it has one
-    private const int MethodSlots = 5;
+    // K6: the slots of a table before its methods: the release, the weak release, the equality, the hash, the link, which in a
+    // class's table is its base's table and in a class's table for an interface the class's own table, where it has one, and the copy
+    // of an instance (U12)
+    private const int MethodSlots = 6;
     private const int LinkSlot = 4;
+    private const int CopySlot = 5;
 
     // each class whose body's defaults are queued for their function, with its name (K7)
     private readonly Queue<(ClassSymbol Class, string Name)> defaultsPending = new();
@@ -79,21 +81,22 @@ public sealed partial class Emitter
     /// without one, store each field of the primary constructor, which owns the argument bound to it or its default; where a class
     /// of the chain has a call of its base, the fields of each class from its constructor's arguments (<see cref="FillFields"/>);
     /// then each field of the body with an <c>=</c> its default, in their order, read in the class's file through the instance being
-    /// built, as C# runs a field's initializer before the constructor's body; a class in a chain declares none (K6, K7, K18).
+    /// built, as C# runs a field's initializer before the constructor's body; a class in a chain declares none (K6, K7, K18). With
+    /// <paramref name="crossing"/>, the state of an actor <c>spawn</c> makes, the arguments cross into the actor (U12).
     /// </summary>
-    private string Construct(ClassSymbol symbol, CallExpression c, CallInfo info, Func<string> block)
+    private string Construct(ClassSymbol symbol, CallExpression c, CallInfo info, Func<string> block, bool crossing = false)
     {
         string p;
         if (info.Constructor is { } made)
         {
-            var arguments = Arguments(c, info, j => made.Parameters[j].Type, _ => false, j => Default(made.Declaration.Parameters[j].Default, classOwners[symbol]), cConvention: false, owned: false);
+            var arguments = Arguments(c, info, j => made.Parameters[j].Type, _ => false, j => Default(made.Declaration.Parameters[j].Default, classOwners[symbol]), cConvention: false, owned: false, crossing);
             p = block();
             fn.Emit($"call void {Constructor(made)}({string.Join(", ", arguments.Prepend($"ptr {p}"))})");
         }
         else if (symbol.Chain.All(x => x.BaseCall is null))
         {
             // each parameter of the constructor is a field, which owns the argument bound to it
-            var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: true);
+            var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: true, crossing);
             p = block();
             for (var i = 0; i < arguments.Count; i++)
             {
@@ -109,7 +112,7 @@ public sealed partial class Emitter
         }
         else
         {
-            var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: false);
+            var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: false, crossing);
             p = block();
             FillFields(symbol, arguments, p);
         }
@@ -961,7 +964,8 @@ public sealed partial class Emitter
 
     /// <summary>
     /// K13: the equality and the hash in the table of each class the program names, where <c>==</c> or a map's key reads a base of the
-    /// class through the table; returns whether it made one not made before, which can name more functions.
+    /// class through the table, and U12: its copy, where a copy does; returns whether it made one not made before, which can name more
+    /// functions.
     /// </summary>
     private bool TableFacets(HashSet<string> made)
     {
@@ -977,6 +981,12 @@ public sealed partial class Emitter
             if (symbol.Chain.Any(hashedThroughTable.Contains) && made.Add($"hash {symbol.Name}"))
             {
                 ClassHash(symbol);
+                more = true;
+            }
+
+            if (symbol.Chain.Any(copiedThroughTable.Contains) && made.Add($"copy {symbol.Name}"))
+            {
+                CopyClass(symbol);
                 more = true;
             }
         }
@@ -1002,9 +1012,10 @@ public sealed partial class Emitter
     /// <summary>
     /// K6, K13: the table of each class the program names, a constant array of addresses: the release of an instance, its weak
     /// release, its equality where `==` reads a base of the class through the table and its hash where a map's key does, else null,
-    /// the table of its base, null for a class with none, and the method each <c>virtual</c> slot runs, the base's slots first, so
-    /// that a base's slot has one place in every derived class's table; and of each class's table for an interface, the same four,
-    /// the class's own table where the class has a base or derived classes, else null, then its methods. Emitted after the last
+    /// the table of its base, null for a class with none, its copy where a copy reads a base of the class through the table, else null
+    /// (U12), and the method each <c>virtual</c> slot runs, the base's slots first, so that a base's slot has one place in every derived
+    /// class's table; and of each class's table for an interface, the same four, the class's own table where the class has a base or
+    /// derived classes, else null, then null, since no copy reads an interface's value (U12), then its methods. Emitted after the last
     /// function, when every use is known.
     /// </summary>
     private void EmitTables()
@@ -1020,6 +1031,7 @@ public sealed partial class Emitter
                 compared ? ClassEqual(symbol) : "null",
                 hashed ? ClassHash(symbol) : "null",
                 symbol.Base is { } b ? Table(b) : "null",
+                symbol.Chain.Any(copiedThroughTable.Contains) ? CopyClass(symbol) : "null",
             };
             entries.AddRange(Slots(symbol).Select(slot => slot is FunctionSymbol root ? Instance(Implementation(symbol, root), NoMap) : InterfaceTable(symbol, (InterfaceSymbol)slot)));
             module.Global($"{Table(symbol)} = internal constant [{Number(entries.Count)} x ptr] [{string.Join(", ", entries.Select(e => "ptr " + e))}]");
@@ -1034,6 +1046,7 @@ public sealed partial class Emitter
                 comparedThroughInterface.Contains(face) ? ClassEqual(symbol) : "null",
                 hashedThroughInterface.Contains(face) ? ClassHash(symbol) : "null",
                 Related(symbol) ? Table(symbol) : "null",
+                "null", // U12: no copy reads an interface's value, which no word makes cross
             };
             entries.AddRange(face.Methods.Select(method => InterfaceSlot(symbol, face, method)));
             module.Global($"{InterfaceTable(symbol, face)} = internal constant [{Number(entries.Count)} x ptr] [{string.Join(", ", entries.Select(e => "ptr " + e))}]");

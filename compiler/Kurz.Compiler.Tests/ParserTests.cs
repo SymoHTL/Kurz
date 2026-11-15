@@ -1108,6 +1108,28 @@ public sealed class ParserTests
     }
 
     [Theory]
+    [InlineData("Send(copy node)", "(call Send copy node)")]
+    [InlineData("Send(move node)", "(call Send move node)")]
+    [InlineData("Send(copy(node))", "(call Send copy (paren node))")]
+    [InlineData("Send(copy Box(1), move xs)", "(call Send copy (call Box (int 1)), move xs)")]
+    [InlineData("Send(to: copy node)", "(call Send to: copy node)")]
+    [InlineData("Send(copy)", "(call Send copy)")]
+    [InlineData("Send(copy, move)", "(call Send copy, move)")]
+    [InlineData("Send((copy)(x))", "(call Send (call (paren copy) x))")]
+    [InlineData("Send(copy[0])", "(call Send (index copy (int 0)))")]
+    [InlineData("Send(move - 1)", "(call Send (- move (int 1)))")]
+    [InlineData("Send(copy ([1]))", "(call Send copy (paren (list (int 1))))")]
+    [InlineData("copy = move", "(assign-or-declare copy move)")]
+    public void Copy_and_move_before_an_argument_are_its_words_and_names_elsewhere(string program, string tree)
+    {
+        // U12: `copy` and `move`, contextual words of section 6, read before an argument as `mut` is (L12): the word where an expression
+        // follows, `copy(x)` among them, and a name with nothing after it, before `[`, `-`, `*`, `&` or `with`, which go on from a name, and
+        // in parentheses, so that a variable named `copy` is called as `(copy)(x)` (comment 6895076937, "Taken as they follow from the
+        // record")
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
     [InlineData("b = a with { Name = \"Bea\" }", "(assign-or-declare b (with a Name = (string \"Bea\")))")]
     [InlineData("value = Find(id) else {\n    NotFound => 0\n}", "(assign-or-declare value (else (call Find id) [((type NotFound) => (int 0))]))")]
     [InlineData("value = Find(id) else {\n    NotFound => return Missing(id)\n}", "(assign-or-declare value (else (call Find id) [((type NotFound) => (return (call Missing id)))]))")]

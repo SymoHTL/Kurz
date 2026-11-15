@@ -27,7 +27,6 @@ public sealed partial class Checker
             ? CheckMadeArgument(expression, made, () => CheckExpressionCore(expression, expected, keepCases, given)) // T33: in its field's pass
             : CheckExpressionCore(expression, expected, keepCases, given);
         expressionDepth--;
-        typed = ActorInsideValue(expression, typed); // U12
         model.RecordType(expression, typed); // the last reading stands: a call's literal argument is read a second time, against the parameter of the function picked
         if (expressionDepth == 0)
         {

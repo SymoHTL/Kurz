@@ -2147,7 +2147,7 @@ public sealed partial class Checker
         // a `mut` parameter is the declaration's `native-type`, and a call that writes `mut` for it, as the declaration reads, carries no error
         // of its own (E1)
         var declared = f.CDeclaration.Parameters;
-        arguments = arguments.Select((a, i) => a.Mut && (a.Name is null ? i < declared.Count && declared[i].Mut : declared.Any(p => p.Name == a.Name && p.Mut)) ? a with { Mut = false } : a).ToList();
+        arguments = arguments.Select((a, i) => a.Mut && (a.Name is null ? i < declared.Count && declared[i].Mut : declared.Any(p => p.Name == a.Name && p.Mut)) ? a with { Word = ArgumentWord.None } : a).ToList();
         var slots = f.Parameters.Select(p => new Slot(p.Name, p.Type, false, p.HasDefault, false)).ToList();
         var result = Call([new Candidate { Function = f, Slots = slots, Result = f.ReturnType }], c with { Arguments = arguments }, expected, out var picked);
         foreach (var a in variadic)

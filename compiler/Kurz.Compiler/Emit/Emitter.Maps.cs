@@ -103,6 +103,15 @@ public sealed partial class Emitter
                     return fn.Value($"call i64 {StdFunction("MapHash")}(ptr {block}, ptr {slot}, i64 8)");
                 }
 
+            case ActorType:
+                {
+                    // U12: a reference hashes its actor's number, which its record holds 40 bytes before the state (section 6, Q10 of
+                    // comment 6880404917)
+                    var slot = fn.Alloca("i64", "key");
+                    fn.Emit($"store i64 {fn.Value($"load i64, ptr {fn.Value($"getelementptr i8, ptr {key}, i64 -40")}")}, ptr {slot}");
+                    return fn.Value($"call i64 {StdFunction("MapHash")}(ptr {block}, ptr {slot}, i64 8)");
+                }
+
             case ClassType c when Layout.Fat(c.Symbol):
                 return HashThroughTable(block, key, c.Symbol); // K13: by the hash of the instance's class
             case InterfaceType face:

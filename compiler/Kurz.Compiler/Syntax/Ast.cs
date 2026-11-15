@@ -88,8 +88,24 @@ public sealed record MemberAccess(int Line, Expression Target, string Member, bo
 /// <summary><c>List&lt;T&gt;.FromRaw</c>: a member of a type with type arguments, which R15 writes before a call. The line is the line of the dot.</summary>
 public sealed record TypeMemberAccess(int Line, TypeSyntax Type, string Member) : Expression(Line);
 
-/// <summary>An argument of a call: by position or by name (D11), with <c>mut</c> in front for a <c>mut</c> parameter (M7).</summary>
-public sealed record Argument(int Line, string? Name, bool Mut, Expression Value);
+/// <summary>
+/// An argument of a call: by position or by name (D11), with the word in front of it: <c>mut</c> for a <c>mut</c> parameter (M7), <c>copy</c>
+/// for a deep copy and <c>move</c> for a value whose sender's paths end (U12), or none.
+/// </summary>
+public sealed record Argument(int Line, string? Name, ArgumentWord Word, Expression Value)
+{
+    /// <summary>M7: whether <c>mut</c> stands in front of the argument.</summary>
+    public bool Mut => Word == ArgumentWord.Mut;
+}
+
+/// <summary>The word in front of an argument (<see cref="Argument"/>): none, <c>mut</c> (M7), <c>copy</c> or <c>move</c> (U12).</summary>
+public enum ArgumentWord
+{
+    None,
+    Mut,
+    Copy,
+    Move,
+}
 
 /// <summary>A call, a construction (D2) or a conversion (T10); type arguments where the call writes them (T19).</summary>
 public sealed record CallExpression(int Line, Expression Callee, IReadOnlyList<TypeSyntax> TypeArguments, IReadOnlyList<Argument> Arguments) : Expression(Line);

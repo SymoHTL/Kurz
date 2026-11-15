@@ -3756,3 +3756,219 @@ extern "C" void ActorStart() {
         sys.Switch(header, threadSide)
     }
 }
+
+// ---- the copy of a value that crosses (design record, section 6) -------------------------------------
+
+// A value that reaches a class instance crosses into an actor, or back to the caller as a result, as a
+// copy of its own, and a value after `copy` is one at any call (U12; the owner, 2026-11-15, #519, comment
+// 6896192351, Q6, "Rust: deep copy anywhere"). The emitted copy of each type calls these, and they run no
+// program code. Three tables of the thread hold a copy under way, each from the allocator and kept for the
+// thread's next copy: the memo, which maps each block held more than once that the copy reached to its
+// copy, so that a block two paths reach arrives as one block (Q2, "Sharing kept"), as Python's
+// `copy.deepcopy` keeps its `memo`, open addressing on the block's address, two words a slot; the work
+// list of the blocks copied whose items or fields wait to be copied, three words each, the block, its copy
+// and the function that fills the copy, so that the copy never recurses, as a release works its lists off
+// (the owner, 2026-11-01, "Iterative, never crashes"); and the `weak` references the copy holds, each
+// with its place, its target and whether it is the pair of a class with derived classes, pointed at the
+// target's copy at the end where the copy holds the target, else null (Q3, "Points at the copy").
+thread static mut byte* copyMemo = null
+thread static mut long copyMemoRoom = 0
+thread static mut long copyMemoCount = 0
+thread static mut byte* copyWork = null
+thread static mut long copyWorkRoom = 0
+thread static mut long copyWorkCount = 0
+thread static mut byte* copyWeak = null
+thread static mut long copyWeakRoom = 0
+thread static mut long copyWeakCount = 0
+
+// The slot of `source` in a memo of `slots` slots, a power of two: the one that holds it, or the first
+// empty one on its probe, which a memo at most half full always has.
+byte* CopySlot(byte* memo, long slots, byte* source) {
+    mut byte* slot = null
+    raw {
+        mut long i = (long(source) >> 4) & (slots - 1)
+        mut bool going = true
+        while going {
+            slot = memo + i * 16
+            byte* held = *Ptr<byte*>(slot)
+            if held == null || held == source {
+                going = false
+            } else {
+                i = (i + 1) & (slots - 1)
+            }
+        }
+    }
+
+    return slot
+}
+
+// The copy of the block at `source` that the copy under way made, or null where it made none.
+pub byte* CopyFind(byte* source) {
+    mut byte* copy = null
+    raw {
+        if copyMemoCount > 0 {
+            copy = *Ptr<byte*>(CopySlot(copyMemo, copyMemoRoom, source) + 8)
+        }
+    }
+
+    return copy
+}
+
+// `copy` kept in the memo as the copy of the block at `source`, which is held more than once; the memo
+// doubles its room before it would be more than half full.
+pub void CopyKeep(byte* source, byte* copy) {
+    raw {
+        if (copyMemoCount + 1) * 2 > copyMemoRoom {
+            mut long slots = 64
+            if copyMemoRoom > 0 {
+                slots = copyMemoRoom * 2
+            }
+
+            byte* memo = Allocate(slots * 16)
+            mut long i = 0
+            while i < slots * 2 {
+                *Ptr<long>(memo + i * 8) = 0
+                i = i + 1
+            }
+
+            i = 0
+            while i < copyMemoRoom {
+                byte* old = copyMemo + i * 16
+                byte* held = *Ptr<byte*>(old)
+                if held != null {
+                    byte* moved = CopySlot(memo, slots, held)
+                    *Ptr<byte*>(moved) = held
+                    *Ptr<byte*>(moved + 8) = *Ptr<byte*>(old + 8)
+                }
+
+                i = i + 1
+            }
+
+            if copyMemo != null {
+                std.Free(copyMemo, copyMemoRoom * 16)
+            }
+
+            copyMemo = memo
+            copyMemoRoom = slots
+        }
+
+        byte* slot = CopySlot(copyMemo, copyMemoRoom, source)
+        *Ptr<byte*>(slot) = source
+        *Ptr<byte*>(slot + 8) = copy
+        copyMemoCount = copyMemoCount + 1
+    }
+}
+
+// The table `table` of `held` entries of `size` bytes, `count` of them used, with room for one more: the
+// table itself, or a new one of twice the entries that holds its entries.
+byte* CopyRoom(byte* table, long held, long count, long size, mut long grown) {
+    grown = held
+    if count < held {
+        return table
+    }
+
+    mut long more = 64
+    if held > 0 {
+        more = held * 2
+    }
+
+    grown = more
+    byte* bigger = Allocate(more * size)
+    raw {
+        mut long i = 0
+        while i < count * size / 8 {
+            *Ptr<long>(bigger + i * 8) = *Ptr<long>(table + i * 8)
+            i = i + 1
+        }
+
+        if table != null {
+            std.Free(table, held * size)
+        }
+    }
+
+    return bigger
+}
+
+// The block at `source` and its copy at `copy` put on the work list, with `fill`, the function that fills
+// the copy from the block.
+pub void CopyPush(byte* source, byte* copy, byte* fill) {
+    raw {
+        mut long grown = 0
+        copyWork = CopyRoom(copyWork, copyWorkRoom, copyWorkCount, 24, mut grown)
+        copyWorkRoom = grown
+        byte* entry = copyWork + copyWorkCount * 24
+        *Ptr<byte*>(entry) = source
+        *Ptr<byte*>(entry + 8) = copy
+        *Ptr<byte*>(entry + 16) = fill
+        copyWorkCount = copyWorkCount + 1
+    }
+}
+
+// The entry taken off the end of the work list, its three words, which the caller reads before it fills
+// the copy, or null where the list is empty.
+pub byte* CopyNext() {
+    mut byte* entry = null
+    raw {
+        if copyWorkCount > 0 {
+            copyWorkCount = copyWorkCount - 1
+            entry = copyWork + copyWorkCount * 24
+        }
+    }
+
+    return entry
+}
+
+// The `weak` reference at `slot` of a copy, which still points at `target`, its target in the value
+// copied, kept for the end of the copy; `wide` where the slot is the pair of an address and a table.
+pub void CopyWeak(byte* slot, byte* target, bool wide) {
+    raw {
+        mut long grown = 0
+        copyWeak = CopyRoom(copyWeak, copyWeakRoom, copyWeakCount, 24, mut grown)
+        copyWeakRoom = grown
+        byte* entry = copyWeak + copyWeakCount * 24
+        *Ptr<byte*>(entry) = slot
+        *Ptr<byte*>(entry + 8) = target
+        mut long pair = 0
+        if wide {
+            pair = 1
+        }
+
+        *Ptr<long>(entry + 16) = pair
+        copyWeakCount = copyWeakCount + 1
+    }
+}
+
+// The end of a copy: each `weak` reference it holds pointed at the copy of its target, which then holds
+// one more weak count, where the copy holds that target, else null, as a reference whose target was
+// freed reads (R3); then the memo emptied for the thread's next copy.
+pub void CopyEnd() {
+    raw {
+        mut long i = 0
+        while i < copyWeakCount {
+            byte* entry = copyWeak + i * 24
+            byte* slot = *Ptr<byte*>(entry)
+            byte* copy = CopyFind(*Ptr<byte*>(entry + 8))
+            *Ptr<byte*>(slot) = copy
+            if copy != null {
+                *Ptr<long>(copy + 8) = *Ptr<long>(copy + 8) + 1
+            } else {
+                if *Ptr<long>(entry + 16) != 0 {
+                    *Ptr<byte*>(slot + 8) = null
+                }
+            }
+
+            i = i + 1
+        }
+
+        copyWeakCount = 0
+        if copyMemoCount > 0 {
+            i = 0
+            while i < copyMemoRoom * 2 {
+                *Ptr<long>(copyMemo + i * 8) = 0
+                i = i + 1
+            }
+
+            copyMemoCount = 0
+        }
+    }
+}

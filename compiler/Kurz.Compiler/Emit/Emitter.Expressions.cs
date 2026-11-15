@@ -20,6 +20,11 @@ public sealed partial class Emitter
         var around = f.Location;
         At(e.Line);
         var value = EmitExpressionAt(e);
+        if (Model.IsCopied(e))
+        {
+            value = Copied(value, Sub(Model.TypeOf(e).Type)); // U12: an argument after `copy`
+        }
+
         f.Location = around;
         return value;
     }

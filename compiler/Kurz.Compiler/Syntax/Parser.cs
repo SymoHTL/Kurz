@@ -2235,9 +2235,25 @@ public sealed class Parser
 
                 // M7: the caller writes `mut` in front of an argument for a `mut` parameter. A `mut` with nothing that can start an
                 // expression after it, `f(mut)` or `f(mut, 1)`, is a name (the reading on L12), so a variable of that name is used
-                // without a second error (E1)
-                var mut = AtKeyword("mut") && CanStartExpression(Peek().Kind) && MatchKeyword("mut");
-                arguments.Add(new Argument(start.Line, name, mut, ParseExpression()));
+                // without a second error (E1). U12: `copy` and `move`, the contextual words of section 6, are read as `mut` is, so
+                // that `copy(x)` is the word before `(x)` and a variable named `copy` is called as `(copy)(x)`; before a token that
+                // also goes on from a name, `[`, `-`, `*`, `&` and `with`, each is the name, so that `copy[i]` and `copy - 1` read a
+                // variable, and a list written after the word stands in parentheses, `copy ([a])`
+                var word = ArgumentWord.None;
+                if (CanStartExpression(Peek().Kind))
+                {
+                    if (MatchKeyword("mut"))
+                    {
+                        word = ArgumentWord.Mut;
+                    }
+                    else if (At(TokenKind.Name) && Current.Text is "copy" or "move"
+                        && Peek().Kind is not (TokenKind.LeftBracket or TokenKind.Minus or TokenKind.Star or TokenKind.Ampersand) && !Peek().IsKeyword("with"))
+                    {
+                        word = Advance().Text == "copy" ? ArgumentWord.Copy : ArgumentWord.Move;
+                    }
+                }
+
+                arguments.Add(new Argument(start.Line, name, word, ParseExpression()));
             }
             while (Match(TokenKind.Comma));
         }

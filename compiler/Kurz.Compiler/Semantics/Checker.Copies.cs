@@ -702,7 +702,7 @@ public sealed partial class Checker
             var pass = new FieldPass(parameter.Name, n.Name, made, field, SubstituteData(made, field.Type));
             var argument = SyntaxCopy.Copy(body, (e, copyOf) => FieldGet(e, copyOf, pass), KeepOrigin);
             madeArguments[argument] = (pass, parameter);
-            arguments.Add(new Argument(argument.Line, null, false, argument));
+            arguments.Add(new Argument(argument.Line, null, ArgumentWord.None, argument));
         }
 
         var construction = new CallExpression(c.Line, new NameExpression(n.Line, made.Symbol.Name), [], arguments);

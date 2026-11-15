@@ -315,9 +315,11 @@ public sealed partial class Emitter
     /// outside of. With <paramref name="owned"/> the slots hold the values, as a data value's fields do; else the callee borrows
     /// them for the call, which no <c>mut</c> slot of the call or of a call inside its arguments changes, since the checker refuses
     /// a read of what a call takes as <c>mut</c> while the expression still holds its value (M7), and the read of a copied type it
-    /// takes is a value of its own (<see cref="HeldCopy"/>).
+    /// takes is a value of its own (<see cref="HeldCopy"/>). With <paramref name="crossing"/> the arguments cross into an actor (U12):
+    /// a value that reaches a class instance is its copy (<see cref="Crossed"/>), which the slot owns, or which is a temporary where the
+    /// callee borrows it.
     /// </summary>
-    private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, (Expression Value, Unit File)?> slotDefault, bool cConvention, bool owned)
+    private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, (Expression Value, Unit File)?> slotDefault, bool cConvention, bool owned, bool crossing = false)
     {
         var values = new string?[c.Arguments.Count];
         for (var i = 0; i < c.Arguments.Count; i++)
@@ -326,8 +328,16 @@ public sealed partial class Emitter
             if (slot >= 0 && !slotMut(slot))
             {
                 var a = c.Arguments[i].Value;
+                var type = Sub(slotType(slot));
+                if (crossing && ReachesInstance(type))
+                {
+                    var copy = Crossed(Convert(EmitExpression(a), TypeOf(a), type, a.Line, owned: false), type);
+                    values[i] = owned ? copy : Temp(copy, type);
+                    continue;
+                }
+
                 var value = owned ? Owned(a) : EmitExpression(a);
-                values[i] = Convert(value, TypeOf(a), Sub(slotType(slot)), a.Line, owned);
+                values[i] = Convert(value, TypeOf(a), type, a.Line, owned);
             }
         }
 
@@ -371,7 +381,7 @@ public sealed partial class Emitter
             else
             {
                 var (d, declaredIn) = slotDefault(j) ?? throw new InvalidOperationException($"the slot {j} of the call at line {c.Line} has no argument and no default");
-                value = EmitDefault(declaredIn, d, type, owned);
+                value = EmitDefault(declaredIn, d, type, owned); // a constant, which reaches no class instance (F12)
             }
 
             arguments.Add($"{(cConvention ? Lower.CType(type) : Ir(type))} {value}");
