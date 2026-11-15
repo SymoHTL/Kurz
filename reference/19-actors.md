@@ -4,8 +4,8 @@ An actor is an object with private state and an inbox, which handles one message
 of its method through its reference is a message (§6, "Actors"). This chapter holds the actors of
 one machine and what a program writes of them: an actor's declaration, `spawn`, the call that waits
 for its result, `send`, and what crosses into a message. The scheduler, the stacks, crashes and
-supervision, deadlocks, the clauses after an actor's name and the actors of other machines (§6, §7)
-have no rule here, and `compiler/README.md` says what the compiler builds of the rules here.
+supervision, deadlocks, the clauses after an actor's name but the stack's (U1) and the actors of
+other machines (§6, §7) have no rule here, and `compiler/README.md` says what the compiler builds of the rules here.
 
 ### U1 (decided, §6) `actor`, and its words
 
@@ -33,6 +33,21 @@ instance, mutable or not, lives in one actor's heap (K18), and an immutable
 `static` field of such a type is reached from every actor, so that one of an actor shares nothing
 more, as a Rust `static` that is `Sync` stands)*. How a generic
 actor's messages and a call through an interface as a message are built stand open (§14).
+
+The stack's clause is `stack` and a literal of bytes, `kb`, `mb` or `gb` (L14), `actor Parser stack 8mb
+{ ... }`: it sets the size of the stack each message of the actor runs on, which is 2 MiB without it,
+as a thread that Rust's standard library spawns has (§6, the owner, 2026-11-13, #519, comment
+6847932993, Q4, "2 MiB + clause", and the owner, 2026-11-15, #519, comment 6892812780, Q3, "Build it now"). The size
+is read as a `long`, so that a literal that is no whole number of bytes is `inexact-literal` (L14)
+and one past the largest `long` is `constant-overflow`, as a literal that does not fit the type it
+takes (L10); the runtime rounds it up to a whole page and raises it to its floor, 64 KiB, with no
+message, so that the clause sets at least what it says (§6, the owner, 2026-11-15, #519, comment 6892835500, Q7,
+"Rust/C#: round up silently") *(assumed: the floor, as §6 marks it)*, and a stack the system refuses
+ends the process with `allocation-failed`, naming the size so rounded (O11) *(assumed: the size, as §6
+marks it)*. `stack` with no literal of bytes after it, a number with no unit or with another unit
+among them, and `stack` written twice are `syntax` (E4) *(assumed: as §6 marks it)*. On a target where
+no actor has a stack of its own the clause builds and sets nothing (§6, the owner, 2026-11-13, #519,
+comment 6851105334, "Accept, set nothing (Recommended)").
 
 Case: [actors/counter.kz](../corpus/actors/counter.kz)
 ```kurz
@@ -74,6 +89,68 @@ actor Counter {
 c = spawn Counter()
 send c.Add(1)
 print(c.Get())
+```
+
+Case: [actors/stack-clause.kz](../corpus/actors/stack-clause.kz)
+```kurz
+actor Parser stack 8mb {
+    pub long Down(long n) {
+        if n == 0 {
+            return 0
+        }
+
+        return Down(n - 1) + 1
+    }
+}
+
+p = spawn Parser()
+print(p.Down(60000))
+```
+
+Case: [actors/stack-floor.kz](../corpus/actors/stack-floor.kz)
+```kurz
+actor Small stack 1kb {
+    pub long Down(long n) {
+        if n == 0 {
+            return 0
+        }
+
+        return Down(n - 1) + 1
+    }
+}
+
+s = spawn Small()
+print(s.Down(200))
+```
+
+Case: [actors/stack-twice.kz](../corpus/actors/stack-twice.kz)
+```kurz
+actor Parser stack 8mb stack 4mb {
+    pub int Get() => 1
+}
+
+p = spawn Parser()
+print(p.Get())
+```
+
+Case: [actors/stack-without-bytes.kz](../corpus/actors/stack-without-bytes.kz)
+```kurz
+actor Parser stack 8 {
+    pub int Get() => 1
+}
+
+p = spawn Parser()
+print(p.Get())
+```
+
+Case: [actors/stack-inexact.kz](../corpus/actors/stack-inexact.kz)
+```kurz
+actor Parser stack 0.1kb {
+    pub int Get() => 1
+}
+
+p = spawn Parser()
+print(p.Get())
 ```
 
 Case: [actors/base-after-name.kz](../corpus/actors/base-after-name.kz)
@@ -643,7 +720,10 @@ after their current message (§6, the owner, 2026-11-13, #519, comment 684793299
 Q8, "All nine leans (Recommended)"). The end of any actor stops the actors it spawned so, after
 their current message, their queued messages dropped, so that the end of the top-level code reaches
 every actor of the machine (§6, the owner, 2026-10-30, "With its supervisor", and the owner,
-2026-11-13, #519, comment 6847932993, Q16).
+2026-11-13, #519, comment 6847932993, Q16). A message parked in a wait when the top-level code ends
+is dropped with the process, as a queued one is, its lines after the wait never running, as tokio
+drops its tasks when its runtime shuts down (§6, the owner, 2026-11-15, #519, comment 6892835500, Q5, "Rust:
+dropped").
 
 No case: which message runs when the top-level code ends is the scheduler's to say where actors run
 on more than one thread, so that a case's output would hang on it.

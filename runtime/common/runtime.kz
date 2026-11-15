@@ -3293,11 +3293,13 @@ pub string ExitErrorText(ExitError e) {
 // inside `block_on` (compiler/README.md, "What the emitter emits"). An actor's reference is the address
 // of its state, which the emitted code constructs, with the actor's record in the 48 bytes in front of
 // it, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps the
-// alignment of the allocator's block, as Rust's `ArcInner` pads its counts to what it holds: 8 bytes of
-// nothing, the actor's number (U2), the first message of its inbox, the last, the actor after it in the
-// run queue, and whether it stands in that queue, as a tokio task's state has a bit for "has been pushed
-// into a run queue". A message is a block the emitted code makes: the message after it in the inbox, the
-// function that runs it, its reply, and its arguments; that function frees it.
+// alignment of the allocator's block, as Rust's `ArcInner` pads its counts to what it holds: the size of
+// the actor's stack its clause asked for (U1), the actor's number (U2), the first message of its inbox,
+// the last, the actor after it in the run queue, and whether it stands in that queue, as a tokio task's
+// state has a bit for "has been pushed into a run queue". A message is a block the emitted code makes:
+// the message after it in the inbox, the function that runs it, its reply, and its arguments; that
+// function frees it. Each message runs on a stack of the actor's own, which the thread switches to and
+// back from (design record, section 6, "Own stack"), below.
 
 // The first and the last actor of the run queue, each with a message in its inbox.
 static mut byte* runFirst = null
@@ -3307,12 +3309,13 @@ static mut byte* runLast = null
 static mut long actorCount = 0
 
 // The record of a new actor, numbered after the last one spawned, its inbox empty and outside the run
-// queue, with room for a state of `size` bytes behind it: the address of that room, which is the actor's
-// reference (U2).
-pub byte* ActorNew(long size) {
+// queue, with room for a state of `size` bytes behind it, and the bytes of its stack, `stack`, the size
+// its clause wrote or 2 MiB (U1): the address of that room, which is the actor's reference (U2).
+pub byte* ActorNew(long size, long stack) {
     mut byte* state = Allocate(48 + size)
     raw {
         state = state + 48
+        *Ptr<long>(state - 48) = stack
         actorCount = actorCount + 1
         *Ptr<long>(state - 40) = actorCount
         *Ptr<byte*>(state - 32) = null
@@ -3383,7 +3386,9 @@ pub void Wait(byte* done) {
     }
 }
 
-// The first message of the first actor of the run queue, run to its end. The actor stands at the end of
+// The first message of the first actor of the run queue, run to its end on the actor's stack: the
+// thread switches to a stack of the size the actor asked for, whose entry, `ActorStart`, runs the
+// message and switches back (design record, section 6, "Own stack"). The actor stands at the end of
 // the queue again where its inbox still holds a message, unless a message sent to it while that one ran
 // put it there already (U11).
 void RunOne() {
@@ -3402,10 +3407,106 @@ void RunOne() {
             *Ptr<byte*>(state - 24) = null
         }
 
-        extern "C" (byte*, byte*) => void run = *Ptr<extern "C" (byte*, byte*) => void>(message + 8)
-        run(state, message)
+        byte* header = Held(*Ptr<long>(state - 48)) - 512
+        *Ptr<byte*>(header + 320) = state
+        *Ptr<byte*>(header + 328) = message
+        sys.Enter(header, header, ActorStart)
+        sys.Switch(threadSide, header)
         if *Ptr<byte*>(state - 32) != null && *Ptr<long>(state - 8) == 0 {
             Queue(state)
         }
+    }
+}
+
+// ---- the stacks of actors (design record, section 6) ---------------------------------------------
+
+// A message runs on a stack of the actor's own, reserved whole and given memory by the system as it is
+// touched, with a guard page below it (section 6, "Own stack", "Keep guard page", "2 MiB + clause"): the
+// size the actor's clause asked for, or 2 MiB, rounded up to the system's page and raised to the floor
+// of 64 KiB with no message (U1; the owner, 2026-11-15, #519, comment 6892835500, Q7, "Rust/C#: round up
+// silently"). A thread holds one stack at a time, made at its first message and kept for the next
+// message that asks for the same size, and given back for one that asks another, since a message runs to
+// its end before the next starts (U4); a stack the system refuses ends the process with
+// `error: allocation-failed (<n> bytes)`, the stack's size (section 6, 2026-10-09).
+//
+// At the stack's base, its highest addresses, 512 bytes hold its header: from 0 the save area of the
+// switch, where the switch keeps the registers of the stack's side it leaves, the stack pointer among
+// them (the owner, 2026-11-15, #519, comment 6892812780, Q1, "Save area at stack base"), each
+// architecture's layout of them its own (`Switch` of the architecture's directory), with the four words
+// of the thread environment block at 288 on Windows; at 320 the actor's state and at 328 the message the
+// stack runs; at 336 whether the stack has not run yet; the rest unused. The stack's frames start below
+// the header. The thread's own side of the switch, its save area, is in the thread's record,
+// `threadSide`, 320 bytes from the allocator, made at the thread's first message.
+thread static mut byte* threadSide = null
+thread static mut byte* stackTop = null
+thread static mut long stackSize = 0
+
+// The stack of `asked` bytes the thread holds, rounded up to the page and raised to the floor (above):
+// its base, the address above its header; the one it held given back where it holds another size.
+byte* Held(long asked) {
+    raw {
+        if threadSide == null {
+            threadSide = Allocate(320)
+        }
+
+        long size = StackSize(asked)
+        if stackTop != null && stackSize != size {
+            sys.StackFree(stackTop, stackSize)
+            stackTop = null
+        }
+
+        if stackTop == null {
+            stackTop = sys.StackNew(size)
+            if stackTop == null {
+                AllocationFailed(size)
+            }
+
+            stackSize = size
+            *Ptr<long>(stackTop - 512 + 336) = 1
+        }
+
+        return stackTop
+    }
+}
+
+// The size of a stack asked for `asked` bytes: at least 64 KiB, rounded up to the system's page (U1). A
+// size past 2^62 bytes, which no system maps, is refused as it stands, before the rounding could pass
+// the largest `long`.
+long StackSize(long asked) {
+    mut long size = asked
+    if size < 65536 {
+        size = 65536
+    }
+
+    if size > 4611686018427387904 {
+        AllocationFailed(size)
+    }
+
+    long page = sys.PageSize()
+    if size % page != 0 {
+        size = size + page - size % page
+    }
+
+    return size
+}
+
+// The first frame of an actor's stack, which the switch enters with a return address of zero, so that a
+// walk of the stack ends here (design record, section 2): at the stack's first run the target's first
+// act on a stack, the guarantee of its room for an overflow on Windows (round 17, "Fiber layout +
+// guarantee"); then the message, run to its end; then the switch back to the thread's side, which never
+// comes back here: the next message enters the stack afresh.
+extern "C" void ActorStart() {
+    raw {
+        byte* header = stackTop - 512
+        if *Ptr<long>(header + 336) != 0 {
+            *Ptr<long>(header + 336) = 0
+            sys.StackFirst()
+        }
+
+        byte* state = *Ptr<byte*>(header + 320)
+        byte* message = *Ptr<byte*>(header + 328)
+        extern "C" (byte*, byte*) => void run = *Ptr<extern "C" (byte*, byte*) => void>(message + 8)
+        run(state, message)
+        sys.Switch(header, threadSide)
     }
 }

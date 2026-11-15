@@ -136,6 +136,61 @@ pub byte* Resize(byte* p, long bytes, long grown) {
     return null
 }
 
+// The system's page, 4 KiB on Windows on x86-64 and on 64-bit Arm.
+pub long PageSize() => 4096
+
+// An actor's stack of `size` bytes, laid out as the system lays out a fiber's (design record, section 2,
+// round 17, "Fiber layout + guarantee"): reserved whole (`MEM_RESERVE` is 8192), its top page committed
+// for reading and writing (`MEM_COMMIT` is 4096, `PAGE_READWRITE` 4) and the page below it the guard
+// (`PAGE_READWRITE | PAGE_GUARD` is 260), so that the system commits it further from the reserve as it
+// grows, as it grows a thread's; the four words of the thread environment block the switch sets for it
+// in its save area, at 288 of its header, the 512 bytes at its base: the stack's base, its limit, the
+// lowest page committed, the base of the reservation, which the system reads as the deallocation stack,
+// and the guaranteed bytes, none until the stack first runs (`StackFirst`). The stack's base, its highest
+// address, or null where the system refuses any of it.
+pub byte* StackNew(long size) {
+    raw {
+        byte* low = Ptr<byte>(VirtualAlloc(null, ulong(size), 8192, 4))
+        if low == null {
+            return null
+        }
+
+        byte* top = low + size
+        if VirtualAlloc(Ptr<void>(top - 4096), 4096, 4096, 4) == null || VirtualAlloc(Ptr<void>(top - 8192), 4096, 4096, 260) == null {
+            VirtualFree(Ptr<void>(low), 0, 32768)
+            return null
+        }
+
+        byte* side = top - 512
+        *Ptr<byte*>(side + 288) = top
+        *Ptr<byte*>(side + 296) = top - 4096
+        *Ptr<byte*>(side + 304) = low
+        *Ptr<long>(side + 312) = 0
+        return top
+    }
+}
+
+// The stack whose base is `top`, of `size` bytes, given back to the system, its whole reservation
+// (`MEM_RELEASE` is 32768, with the size 0).
+pub void StackFree(byte* top, long size) {
+    raw {
+        VirtualFree(Ptr<void>(top - size), 0, 32768)
+    }
+}
+
+// The target's first act on an actor's stack, on the stack itself once the switch set the thread
+// environment block's words for it: the guarantee of 0x5000 bytes, the room the system keeps on it for
+// the handling of its overflow, as `Start` sets it for the main thread's stack and Rust's standard
+// library for every thread it starts, which the guaranteed bytes keep with the stack from then on (round
+// 17, "Fiber layout + guarantee"); where the system refuses it the message runs with the system's own
+// room, as the main thread does.
+pub void StackFirst() {
+    mut uint room = 20480
+    raw {
+        SetThreadStackGuarantee(&room)
+    }
+}
+
 // The trace of the calls below an error line (design record, section 6), which Windows reads through
 // `dbghelp.dll` and the PDB: not written on Windows by this runtime, so the error line stands alone.
 pub void Trace() {

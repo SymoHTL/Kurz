@@ -23,16 +23,20 @@ public sealed partial class Emitter
     /// <c>ActorNew</c> gives behind the actor's record, both its counts at one, as <see cref="EmitClassNew"/> makes them, which the
     /// record holds to the end of the process, so that a count a lambda takes of <c>this</c> never lets go of the state; the arguments,
     /// the constructor and the defaults of the body run here, before <c>spawn</c> gives the reference, which on one thread is the new
-    /// actor running its constructor while the spawner waits (U3).
+    /// actor running its constructor while the spawner waits (U3). The record keeps the size of the actor's stack, the one its <c>stack</c>
+    /// clause writes or 2 MiB, which the runtime rounds up to its page and raises to its floor (U1; section 6, "2 MiB + clause").
     /// </summary>
     private string EmitActorSpawn(SpawnExpression s)
     {
         var info = Model.CallOf(s.Call);
         var symbol = ((ClassType)info.Target!).Symbol;
         var block = layout.ClassBlock(symbol);
+        var stack = symbol.Declaration.Clauses?.FirstOrDefault(c => c.Size is not null)?.Size is { } size
+            ? ((IntegerConstant)Model.TypeOf(size).Constant!).Value.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : "2097152";
         return Construct(symbol, s.Call, info, () =>
         {
-            var state = fn.Value($"call ptr {RuntimeFunction("ActorNew")}(i64 {IrSize(block)})");
+            var state = fn.Value($"call ptr {RuntimeFunction("ActorNew")}(i64 {IrSize(block)}, i64 {stack})");
             fn.Emit($"store i64 1, ptr {state}");
             fn.Emit($"store i64 1, ptr {fn.Value($"getelementptr {block}, ptr {state}, i32 0, i32 1")}");
             return state;

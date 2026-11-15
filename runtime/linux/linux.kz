@@ -311,6 +311,55 @@ pub void Exit(int code) {
     }
 }
 
+// ---- the stacks of actors (design record, section 6) ---------------------------------------------
+
+// The system's page, the unit of a mapping, from `AT_PAGESZ` (6), as `Faults` reads it.
+pub long PageSize() {
+    raw {
+        return long(getauxval(6))
+    }
+}
+
+// An actor's stack of `size` bytes, a multiple of the page, with its guard page below it, as Rust's
+// stackful coroutines map one (corosensei's `DefaultStack::new` in `src/stack/unix.rs`): one mapping of
+// the size and the page with no access (`PROT_NONE`, `MAP_PRIVATE | MAP_ANONYMOUS` is 34), then read and
+// write (3) on all of it but its lowest page, so that the stack is two mappings (design record, section
+// 6, "Keep guard page") and the system gives memory to a page at its first touch. The guard page is the
+// one the handler reads as the actor's stack's (`OnFault`). The stack's base, its highest address, or
+// null where the system refuses either call.
+pub byte* StackNew(long size) {
+    raw {
+        long unit = long(getauxval(6))
+        void* got = mmap(null, size + unit, 0, 34, -1, 0)
+        if long(got) == -1 {
+            return null
+        }
+
+        if mprotect(Ptr<void>(Ptr<byte>(got) + unit), size, 3) != 0 {
+            munmap(got, size + unit)
+            return null
+        }
+
+        stackGuardLow = long(got)
+        stackGuardHigh = long(got) + unit
+        return Ptr<byte>(got) + unit + size
+    }
+}
+
+// The stack whose base is `top`, of `size` bytes, given back to the system with its guard page.
+pub void StackFree(byte* top, long size) {
+    raw {
+        long unit = long(getauxval(6))
+        munmap(Ptr<void>(top - size - unit), size + unit)
+        stackGuardLow = 0
+        stackGuardHigh = 0
+    }
+}
+
+// The target's first act on an actor's stack: nothing on Linux, whose guard page holds no room to set.
+pub void StackFirst() {
+}
+
 // ---- the trace of the calls (design record, section 6) ---------------------------------------------
 
 // The trace's state on its thread: two pages from the system, the first a window on the executable's
@@ -331,11 +380,15 @@ thread static mut bool failed = false
 thread static mut bool tracing = false
 
 // The handler's state on its thread: the guard page of the thread's stack, from `guardLow` up to
-// `guardHigh`; whether the thread's crash path runs; where the walk of a stack overflow stands, 1 while
-// it passes the handler's frames and the signal's, 2 while it looks for the frame that holds the line,
-// and 0 from that frame on; and whether `KURZ_TRACE=0` switched the trace off.
+// `guardHigh`, and that of the actor's stack the thread holds, from `stackGuardLow` up to
+// `stackGuardHigh`, 0 and 0 where it holds none; whether the thread's crash path runs; where the walk of
+// a stack overflow stands, 1 while it passes the handler's frames and the signal's, 2 while it looks for
+// the frame that holds the line, and 0 from that frame on; and whether `KURZ_TRACE=0` switched the trace
+// off.
 thread static mut long guardLow = 0
 thread static mut long guardHigh = 0
+thread static mut long stackGuardLow = 0
+thread static mut long stackGuardHigh = 0
 thread static mut bool crashing = false
 thread static mut int seeking = 0
 thread static mut bool quiet = false
@@ -387,8 +440,8 @@ thread static mut long rangesAttribute = -1
 thread static mut long linesAttribute = -1
 
 // The trace of the calls below the error line of an exception that ends the process (design record,
-// section 6), on standard error, from the frame that raised to `main`, innermost first, the runtime's
-// frames left out where the symbol table names them: `  at <function> in <file>:<n>`, `  at <function>`
+// section 6), on standard error, from the frame that raised to `main`, or on an actor's stack to the
+// message's method, innermost first, the runtime's frames left out where the symbol table names them: `  at <function> in <file>:<n>`, `  at <function>`
 // where the line tables hold no line there, and `  at <unknown> (0x55d2a8c5b2e4)` where the executable's
 // file cannot be read or names no function there. Where the file cannot be read or holds no symbol
 // table, every frame the unwinder gives is written so, the runtime's and the C library's start below
@@ -505,17 +558,18 @@ void Faults() {
 }
 
 // The handler of a fault (design record, section 6), on its own stack. A fault whose address is
-// outside the guard page is not the handler's: it sets the signal's default action back and returns,
-// so that the instruction faults again and the system ends the process, as Rust's handler does (the
-// owner, 2026-10-29, "Guard page first, as Rust"). A fault in the guard page while the thread's crash
-// path runs, a walk of a raise that overflowed among it, ends the process with the exit code 1 of the
-// error line and no second trace; any other is a stack overflow of the top-level code, the root actor,
-// whose error line and trace `Overflow` writes before the process ends with the exit code 1.
+// outside the guard page of the thread's stack and outside that of the actor's stack it holds is not the
+// handler's: it sets the signal's default action back and returns, so that the instruction faults again
+// and the system ends the process, as Rust's handler does (the owner, 2026-10-29, "Guard page first, as
+// Rust"). A fault in a guard page while the thread's crash path runs, a walk of a raise that overflowed
+// among it, ends the process with the exit code 1 of the error line and no second trace; any other is a
+// stack overflow, of the top-level code, the root actor, in the thread's guard, or of a message in the
+// actor's, whose error line and trace `Overflow` writes before the process ends with the exit code 1.
 extern "C" void OnFault(int number, void* details, void* context) {
     raw {
         // `si_addr` of `siginfo_t`
         long address = *Ptr<long>(Ptr<byte>(details) + 16)
-        if address < guardLow || address >= guardHigh {
+        if (address < guardLow || address >= guardHigh) && (address < stackGuardLow || address >= stackGuardHigh) {
             signal(number, null)
             return
         }
@@ -720,7 +774,8 @@ bool Open() {
 // One frame of the walk, as the unwinder hands it over: its address, which is the return address, or
 // the address of the instruction itself where the unwinder says so, and whose line is looked up at
 // the call, the return address less one, as unwinders look a return address up (design record,
-// section 6); the walk ends at `main`, at a write that failed, and where the unwinder has no frame.
+// section 6); the walk ends at `main`, at the first frame of an actor's stack, whose return address of
+// zero ends the unwinder's walk (`Enter`), at a write that failed, and where the unwinder has no frame.
 extern "C" int OnFrame(void* context, void* argument) {
     raw {
         mut int before = 0
@@ -774,7 +829,8 @@ extern "C" int OnFrame(void* context, void* argument) {
 // and before it one for each call inlined there, named by the debug information, innermost first (the
 // owner, 2026-10-29, "As Rust: a frame each"), each with the line of its call in the frame outside it;
 // `  at <unknown> (0x...)` with the return address where the file cannot be read or names no function
-// there (the owner, 2026-10-29). The frame of `main`, the actor's entry, is the last.
+// there (the owner, 2026-10-29). The frame of `main`, the root actor's entry, is the last, and on an
+// actor's stack the frame of the message's method, whose entry is the runtime's.
 void Frame(long ip, long at) {
     raw {
         if frames >= 100 {

@@ -367,25 +367,28 @@ both, by its path from the top of the repository (`Build/Runtime.cs`, `Runtime.F
 compiles `std/` with every program as it compiles the runtime. Code in `common/` reaches the functions of the target it is built for as the
 folder `sys`: it writes `use sys` and calls `sys.Write(...)`, and `sys` is that target's directory
 with the directory of the build's architecture read into it (the owner, 2026-10-23, "Rust's sys"),
-a directory this compiler does not read (below). The checker reads `use sys` at the top of a file of
+`runtime/linux/x86-64/` for a build for Linux on x86-64 (below). The checker reads `use sys` at the top of a file of
 `common/`, and a call qualified by `sys` picks among the folder's `pub` functions; a function of the
 folder that is not `pub` is `not-visible` there (F9), and a name the folder does not declare is
 `unknown-name` (V10). `std/` reaches the target's directory as `sys` in the same way, and `common/`
 reaches `std/` as the folder `std`, `use std` and `std.Allocate(...)` (the owner, 2026-10-24, "As built").
 
-`Runtime.CheckEveryTarget` checks the runtime for every target, each folder granted `raw` and
-`native` (R7, R16): the target's directory on its own, then `std/` with it as `sys`, then `common/`
-with it as `sys` and `std/` as `std`. It is also red where a function `common/` or `std/` calls has
-other parameters or another result in one target's directory than in another's, the line naming
-which of the two calls it; a function only its own directory calls can differ freely (record,
-section 2, round 20). A line of `common/` or `std/` that the check for every target reports stands
-once, and one that the check for some targets reports names them, `(in the check for windows)`. The
-compiler reads one file in each of the four directories and no directory inside them: a second file
-of a directory, which section 8 makes one folder, the directory of an architecture inside a
-target's (`runtime/linux/x86-64/`, where round 20 places that code) and a directory inside `std/`
-are `not supported`, and a
-directory of a target it does not know, a directory inside `common/` and a directory of no file are
-refused, each named by its path. The checks and the layout are pinned by `RuntimeTests`, which also
+`Runtime.CheckEveryTarget` checks the runtime for every target on each architecture, Linux and
+Windows each on x86-64 and on 64-bit Arm, each folder granted `raw` and `native` (R7, R16): the
+target's directory with its architecture's read into it, then `std/` with them as `sys`, then
+`common/` with them as `sys` and `std/` as `std`. It is also red where a function `common/` or `std/`
+calls has other parameters or another result in one pair's `sys` than in that of Linux on x86-64, the
+line naming which of the two calls it; a function only its own directory calls can differ freely
+(record, section 2, round 20). A line of `common/` or `std/` that the check for every pair reports
+stands once, and one that the check for some pairs reports names them, a target by its name alone
+where the check for each of its architectures reports it, `(in the check for windows)`, and else the
+pair, `(in the check for windows/arm64)`. The compiler reads one file in each directory of the
+runtime: `common/`, a target's, an architecture's inside a target's (`runtime/linux/x86-64/`,
+`runtime/linux/arm64/`, where round 20 places that code) and `std/`; a name the target's file and its
+architecture's both declare is `redeclared` at the architecture's line. A second file of a directory,
+which section 8 makes one folder, and a directory inside `std/` are `not supported`, and a directory
+of a target or an architecture it does not know, a directory inside an architecture's or inside
+`common/`, and a directory of no file are refused, each named by its path. The checks and the layout are pinned by `RuntimeTests`, which also
 holds what the compiler carries to the files of the tree.
 
 A build checks the runtime for its target and emits it into the program's module, its functions
@@ -434,6 +437,40 @@ over `kernel32`, `Start` setting the guarantee of the main thread's stack (below
 giving null, as a region `VirtualAlloc` reserved cannot grow, and `Random` calling `ProcessPrng` of
 `bcryptprimitives.dll`, and false where the library or the call is missing (below). The
 Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
+
+A target's directory also gives `PageSize`, `StackNew`, `StackFree` and `StackFirst`, and an
+architecture's directory `Switch` and `Enter`: the stacks of section 6, on which every message runs
+(the owner, 2026-11-13, #519, comment 6847932993, Q1, "Own stack (Recommended)"). `StackNew` maps a
+stack whole with a guard page under it and gives the address of its top, on Linux by an `mmap` of
+the size and a page with no access, then an `mprotect` that opens every page but the lowest, and on
+Windows by a `VirtualAlloc` that reserves the size, then commits its top page, and the page under it
+with `PAGE_GUARD`, through which the system grows the stack, as round 17's fiber layout has it, and
+writes into the stack's header the four words of the thread environment block that the switch keeps
+with it, its base, its limit, the deallocation stack and no guaranteed bytes; `StackFree` gives it
+back, and `StackFirst` runs once on a thread before its first switch, on Windows calling
+`SetThreadStackGuarantee` for 0x5000 bytes, as `Start` does for the main thread's stack. A stack's
+header is its top 512 bytes: the save area of the switch, 320 bytes, which holds on Windows the four
+words at 288 to 312, then the actor whose message runs on it, the message and a word that marks its
+first run, and room for what a message that waits keeps with its stack (the owner, 2026-11-15, #519,
+comment 6892812780, Q1, "Save area at stack base"); the thread's own side is a save area in a
+thread-local static of `common/`. `Switch` is a `naked` function (R12) of each architecture's file
+that stores the registers its calling convention keeps across a call and the stack pointer into the
+save area at its first argument, loads them from the one at its second and goes on where that side
+left off: on System V's x86-64 rsp, rbx, rbp and r12 to r15; on Windows' x64 rsp, rbx, rbp, rdi,
+rsi, r12 to r15, xmm6 to xmm15 and the four words of the thread environment block, read through
+`gs`; on AArch64 sp, x19 to x30, the address it resumes at and d8 to d15, and on Windows on Arm the
+four words through x18, at the offsets of x86-64's block (the owner, 2026-11-15, #519, comment
+6892812780, Q2, "Rust: AArch64 switch now"). `Enter` sets a save area so that the switch to it enters
+a function on a fresh stack with a return address of zero, where an unwinder's walk ends. `common/`'s
+`RunOne` runs a message on the stack its thread holds: it writes the actor and the message into the
+header and switches to the stack, where `ActorStart`, its entry, runs the message and switches back;
+the top-level code runs on the thread's own stack, the main thread's, as section 6 has it (the
+owner, 2026-11-14, #519, comment 6880404917, Q11). On Linux a fault on a stack's guard page is a
+`stack-overflow` as one on the main thread's is (below), and a stack the system refuses ends the
+process with `allocation-failed` and the size asked for. `ActorTests` pins the stacks, the guard page,
+the overflow, the refusal, the sizes and the registers a switch keeps, `RuntimeTests` the directories
+of the architectures, and `EmitterTests.The_switch_of_every_target_and_architecture_is_assembled_by_clang_for_its_machine`
+that clang assembles each switch for its machine.
 
 The Linux file also gives the calls on files and sockets of chapter 13 (section 12), which the emitted
 code of a program and of `std/`'s reader of requests (W5) calls and nothing of `common/` does, so that the Windows file gives none of
@@ -882,7 +919,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   K7), in a block of the runtime's `ActorNew` that holds the actor's record in the 48 bytes in front
   of it, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps
   the alignment of the allocator's block, as Rust's `ArcInner` pads its counts to what it holds, a
-  `Vector128` field's 16 among it: 8 bytes of nothing, the actor's number, the first and the last
+  `Vector128` field's 16 among it: the size of the stack its messages run on, 2 MiB or what its
+  `stack` clause sets (U1), the actor's number, the first and the last
   message of its inbox, the actor after it in the run queue, and whether it stands there. The number
   counts the actors of every type from 1, in the order `ActorNew` makes them (U2). The reference is
   the address of the state, which nothing counts, an actor living to the end of the process: `==` of
@@ -900,7 +938,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   out with the runtime's, calls the method on the state, lets go of the arguments, moves the result
   beside the reply and sets the reply's byte, as tokio's `oneshot` stores its value and marks it
   sent, and frees the message. A call that waits (U4) passes a reply in its own frame, and the
-  runtime's `Wait` runs the first message of the first actor of the run queue, an actor that still
+  runtime's `Wait` runs the first message of the first actor of the run queue, on the stack its
+  thread holds for that actor's size ("The runtime"), an actor that still
   holds a message going to the end of the queue again, in a loop until the byte is set, as tokio's
   `block_on` runs its queue until its future is ready, so that a call behind any count of messages
   takes the stack of one (`ActorTests`);
@@ -1797,7 +1836,8 @@ derived from it (D6, T19) or that holds a value of its own type (D1, T19), `Size
 command line, the environment or the clock, and a log call, in a build for Windows (S11, P6), a vector held in a list, a
 map, a field or a union and a lambda that reads a variable of a vector's type, whose places are not
 aligned to it, and on a 64-bit Arm machine a test of a class under `Arm`, whose intrinsics are not
-built (R18), and an `asm` and a `naked` function, whose operands the checker reads for x86-64 (R11, R12), and a construct of the other chapters the checker does not read. The line
+built (R18), and an `asm`, whose operands the checker reads for x86-64 alone (R11), where a `naked` function, whose
+operands are `sym` and `const` alone, builds (R12), and a construct of the other chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use"); a call on a socket or a file that a
 function of `std/` makes is refused at the line of the program's statement whose call reached that function, which the queue of
@@ -1825,11 +1865,19 @@ reads the guarantee in force on Windows and on Linux compiles the program alone.
 Of section 6 the emitter builds the actors of one thread, each message run to its end (Q1 (a), the
 answers of 2026-11-14, issue 519, comment 6880404917), and no case shows
 where a program it builds differs from the section: every actor runs on the one thread the runtime
-runs, a message with no stack of its own, and messages run only while the top-level code waits for
-a call's result, one message of each actor in turn, so that a `send` made after the last call that
-waits does not run (U13); a crash in a method ends the process with its error line and the exit code
-1, as a crash outside an actor ends it, the method's frame and `main`'s in its trace, and no
-actor restarts; a call waits with no bound, where section 6 bounds it by 5 seconds (`call-timeout`);
+runs, each message on a stack of its own ("The runtime"), and messages run only while the top-level
+code waits for a call's result, one message of each actor in turn, so that a `send` made after the
+last call that waits does not run (U13); a crash in a method ends the process with its error line and
+the exit code 1, as a crash outside an actor ends it, on Linux with a trace that ends at the method's
+frame, the first of its stack, and names no `main`, and no actor restarts; a message has 2 MiB of
+stack where its clause sets no other size, where a message on Linux had the main thread's 8 MiB
+while messages ran on it, and a server whose actors hold many stacks at once, two mappings each, needs Linux's limit
+of mappings, `vm.max_map_count`, raised past its default of 65,530, as section 6 says; a recursion
+past a message's stack ends the process with `stack-overflow` at its line on Linux, while on Windows
+it ends it as an overflow of the main thread's stack does, with the system's `0xC00000FD` and no line
+of Kurz, the handler of section 2 for an actor's stack not being built there; on 64-bit Arm the
+switch, `naked` on Arm and the stacks build, and no run of this repository's gates runs them but the
+job `compiler-arm`, which is not required; a call waits with no bound, where section 6 bounds it by 5 seconds (`call-timeout`);
 and an inbox grows with no bound, where section 13 spills it at 64 MB, until the allocator ends the
 process with `allocation-failed`. An actor and its state live to the end of the process, which is
 section 6's end of an actor in a program the build takes: an actor ends with its supervisor, the
@@ -2025,6 +2073,22 @@ ask about it.
   as Python's `re.split` does (the walk and the order: the owner, 2026-11-12, issue 176, comment 6819137493, Q1 and Q2 of
   comment 6810129884). Pinned
   by `RegexTests` and `corpus/regex/replace.kz` and `split.kz`.
+- U1 and section 6's stacks: a thread holds one stack at a time, the one its last message ran on,
+  kept for the next message of an actor of the same size and given back and mapped anew for one of
+  another size, where section 6 keeps a pool of stacks for each thread; the bounds of a stack's guard
+  page, which the handler of a fault reads on Linux, are set in the thread's record when the thread
+  maps the stack and cleared when it gives the stack back, where section 2 stores the stack's limit
+  before each switch to an actor and clears it after the switch back, which reads the same while a
+  thread holds one stack, since no fault reaches that stack's guard page while the thread runs on
+  another. The floor of a stack's size is 64 KiB on every target and architecture *(assumed in
+  section 6)*, and a size past 2^62 bytes, which no system maps, is refused at once with
+  `allocation-failed`, as a stack the system refuses is. The mapping on Linux takes neither
+  `MAP_STACK` nor `MAP_NORESERVE`. The switch saves neither the control
+  and status register of SSE nor x87's control word nor Arm's floating-point control register, and
+  carries no unwind directives (section 2, both assumed there). Pinned by
+  `ActorTests.A_thread_holds_one_stack_and_takes_another_for_a_message_that_asks_another_size`,
+  `ActorTests.A_message_runs_on_a_stack_of_2_mib_with_a_guard_page_and_the_top_level_code_on_the_threads_own`
+  and `corpus/actors/stack-floor.kz`.
 
 ## What the compiler says about a program
 
@@ -2413,7 +2477,7 @@ or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` 
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
 type or a time type (T10, T29);
 a modifier of a method on a top-level function, which leaves the function and every call of its
-name unread (K7, M6); of an actor, a clause after its name (U1), a modifier but `pub`, type parameters and
+name unread (K7, M6); of an actor, a clause after its name but `stack` (U1), a modifier but `pub`, type parameters and
 an interface, which an actor may declare (U1), a `static` method and an immutable `static` field of a type that holds no class,
 or of a type not written (U1), and a modifier of a method but `pub`, which a method
 may take as a class's does (U1, U9), each of which leaves the

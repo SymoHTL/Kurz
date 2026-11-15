@@ -46,6 +46,7 @@ public sealed partial class Checker
             return;
         }
 
+        CheckStackClause(d);
         DeclareClass(d);
         foreach (var member in d.Members ?? [])
         {
@@ -73,6 +74,25 @@ public sealed partial class Checker
     }
 
     /// <summary>
+    /// U1: the literal of bytes of the <c>stack</c> clause, read as a <c>long</c> (L14), whose error, <c>inexact-literal</c> or a size
+    /// past a <c>long</c>, it reports; whether it reported one. The size is a lower bound the runtime rounds up to its page and raises to
+    /// its floor with no message (section 6, the owner, 2026-11-15, #519, comment 6892835500, Q7, "Rust/C#: round up silently"), so no
+    /// size the literal can hold is an error of its own.
+    /// </summary>
+    private bool CheckStackClause(TypeDeclaration d)
+    {
+        foreach (var clause in d.Clauses ?? [])
+        {
+            if (clause.Size is { } size && Types.IsError(CheckExpression(size, Types.Long).Type))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// The first part of an actor's declaration that the build does not read beyond a class's, with its line and what it is; null where
     /// there is none: a clause, a modifier, type parameters, a type after its name and a <c>static</c> member (U1), and a modifier of a
     /// method but <c>pub</c> (U9). A type after the name is named here as an interface, since <see cref="RefuseUnreadActors"/>
@@ -81,7 +101,7 @@ public sealed partial class Checker
     /// </summary>
     private static (int Line, string Construct)? UnreadActorPart(TypeDeclaration d)
     {
-        if (d.Clauses is [var clause, ..])
+        if ((d.Clauses ?? []).FirstOrDefault(c => c.Word != "stack") is { } clause)
         {
             return (clause.Line, $"the clause `{clause.Word}` after an actor's name (U1)");
         }
@@ -171,6 +191,11 @@ public sealed partial class Checker
                 Report(ErrorIds.Syntax, b.Line, $"`{type}` after the name of the actor `{d.Name}`, which names interfaces alone and has no base, is text no rule gives a meaning (U1, E4)");
                 return true;
             }
+        }
+
+        if (CheckStackClause(d))
+        {
+            return true;
         }
 
         if (d.EqualBy.Count > 0)

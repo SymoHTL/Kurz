@@ -1,0 +1,9 @@
+// expect: error inexact-literal at 4
+// rules: U1
+
+actor Parser stack 0.1kb {
+    pub int Get() => 1
+}
+
+p = spawn Parser()
+print(p.Get())

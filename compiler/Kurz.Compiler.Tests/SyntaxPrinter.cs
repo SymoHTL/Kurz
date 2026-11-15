@@ -101,7 +101,7 @@ internal static class SyntaxPrinter
 
         if (t.Clauses is { Count: > 0 } clauses)
         {
-            sb.Append(' ').Append(string.Join(" ", clauses.Select(c => $"[{c.Word} {c.Line}]"))); // U1: each clause's word with its line
+            sb.Append(' ').Append(string.Join(" ", clauses.Select(c => c.Size is { } size ? $"[{c.Word} {c.Line} {Print(size)}]" : $"[{c.Word} {c.Line}]"))); // U1: each clause's word with its line, `stack`'s size
         }
 
         if (t.Members is not null)

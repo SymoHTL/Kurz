@@ -25,7 +25,7 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
 
     private string Ir(string text, Cpu? cpu = null, params string[] grants)
     {
-        var compilation = Compile(text, toolchain.Runtime, cpu, grants);
+        var compilation = Compile(text, cpu is null ? toolchain.Runtime : toolchain.For(cpu), cpu, grants);
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         return compilation.Program.Ir;
     }
@@ -422,7 +422,7 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
         Assert.DoesNotContain("@kz.cpu", ir, StringComparison.Ordinal);
         Assert.DoesNotContain("guarded", ir, StringComparison.Ordinal);
         Assert.Contains("plain", ir, StringComparison.Ordinal);
-        var compilation = Compile("v = Vector128.Create(1, 2, 3, 4)\nprint(1)\nif Arm.AdvSimd.IsSupported {\n    print(Arm.AdvSimd.Add(v, v).GetElement(0))\n}\n", toolchain.Runtime, Cpu.ArmBaseline);
+        var compilation = Compile("v = Vector128.Create(1, 2, 3, 4)\nprint(1)\nif Arm.AdvSimd.IsSupported {\n    print(Arm.AdvSimd.Add(v, v).GetElement(0))\n}\n", toolchain.For(Cpu.ArmBaseline), Cpu.ArmBaseline);
         Assert.Null(compilation.Program);
         var d = Assert.Single(compilation.Diagnostics.Items);
         Assert.Equal((DiagnosticKind.NotSupported, 3, "a test of `Arm.AdvSimd`, a class whose intrinsics the compiler builds for x86-64 alone (R18)"), (d.Kind, d.Line, d.Message));
@@ -442,7 +442,7 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
         Ran(BuildAndRun(text, toolchain.Runtime, "intrinsic-raw", "raw"), 0, ["3", "8"], "");
 
         // on an Arm machine no function of the set can be compiled: the intrinsic is refused, as one of a class under `Arm` is on x86-64
-        var arm = Compile(text, toolchain.Runtime, Cpu.ArmBaseline, "raw");
+        var arm = Compile(text, toolchain.For(Cpu.ArmBaseline), Cpu.ArmBaseline, "raw");
         Assert.Null(arm.Program);
         var d = Assert.Single(arm.Diagnostics.Items);
         Assert.Equal((DiagnosticKind.NotSupported, 3, "`X86.Sse41.Extract` outside a test of `X86.Sse41.IsSupported`, which the target does not have (R18)"), (d.Kind, d.Line, d.Message));

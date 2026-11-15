@@ -1,0 +1,71 @@
+// The runtime's code for Windows on 64-bit Arm (design record, section 2, round 20, "Dir per arch"), read
+// into the folder `sys` beside `runtime/windows/windows.kz`: the switch of a thread to an actor's stack
+// and back under the ARM64 calling convention of Windows, and the first frame of an actor's stack (the
+// owner, 2026-11-15, #519, comment 6892812780, Q2, "Rust: AArch64 switch now").
+
+// The switch from the side whose save area is `from` to the side whose save area is `to` (design record,
+// section 2; section 3, `naked`, R12): the registers of `runtime/linux/arm64/arm64.kz`'s switch at the
+// same places, which the convention of Windows keeps across a call as the AArch64 standard does, and the
+// four words of the thread environment block that belong to the stack a thread runs on at 288 to 312, as
+// the switch of `runtime/windows/x86-64/x86-64.kz` keeps them, read through x18, which holds the block's
+// address on Windows: the stack's base (`[x18, #0x08]`), its limit (`[x18, #0x10]`), the deallocation stack
+// (`[x18, #0x1478]`) and the guaranteed bytes (`[x18, #0x1748]`, 32 bits), at the offsets x86-64's block
+// has, which the source fixes for every version of Windows.
+pub naked void Switch(byte* from, byte* to) {
+    asm(
+        "mov x16, sp",
+        "str x16, [x0]",
+        "stp x19, x20, [x0, #8]",
+        "stp x21, x22, [x0, #24]",
+        "stp x23, x24, [x0, #40]",
+        "stp x25, x26, [x0, #56]",
+        "stp x27, x28, [x0, #72]",
+        "stp x29, x30, [x0, #88]",
+        "str x30, [x0, #104]",
+        "stp d8, d9, [x0, #112]",
+        "stp d10, d11, [x0, #128]",
+        "stp d12, d13, [x0, #144]",
+        "stp d14, d15, [x0, #160]",
+        "ldr x16, [x18, #0x08]",
+        "str x16, [x0, #288]",
+        "ldr x16, [x18, #0x10]",
+        "str x16, [x0, #296]",
+        "ldr x16, [x18, #0x1478]",
+        "str x16, [x0, #304]",
+        "ldr w16, [x18, #0x1748]",
+        "str w16, [x0, #312]",
+        "ldr x16, [x1, #288]",
+        "str x16, [x18, #0x08]",
+        "ldr x16, [x1, #296]",
+        "str x16, [x18, #0x10]",
+        "ldr x16, [x1, #304]",
+        "str x16, [x18, #0x1478]",
+        "ldr w16, [x1, #312]",
+        "str w16, [x18, #0x1748]",
+        "ldr x16, [x1]",
+        "mov sp, x16",
+        "ldp x19, x20, [x1, #8]",
+        "ldp x21, x22, [x1, #24]",
+        "ldp x23, x24, [x1, #40]",
+        "ldp x25, x26, [x1, #56]",
+        "ldp x27, x28, [x1, #72]",
+        "ldp x29, x30, [x1, #88]",
+        "ldp d8, d9, [x1, #112]",
+        "ldp d10, d11, [x1, #128]",
+        "ldp d12, d13, [x1, #144]",
+        "ldp d14, d15, [x1, #160]",
+        "ldr x16, [x1, #104]",
+        "br x16")
+}
+
+// The save area `side` set so that the switch to it enters `entry` on a stack whose frames start at `top`,
+// as `runtime/linux/arm64/arm64.kz`'s `Enter` sets it; the words of the thread environment block stay as
+// the stack's last switch left them (`StackNew` of `runtime/windows/windows.kz` sets them first).
+pub void Enter(byte* side, byte* top, extern "C" () => void entry) {
+    raw {
+        *Ptr<byte*>(side) = top
+        *Ptr<long>(side + 88) = 0
+        *Ptr<long>(side + 96) = 0
+        *Ptr<extern "C" () => void>(side + 104) = entry
+    }
+}

@@ -1,0 +1,92 @@
+// The runtime's code for Windows on x86-64 (design record, section 2, round 20, "Dir per arch"), read into
+// the folder `sys` beside `runtime/windows/windows.kz`: the switch of a thread to an actor's stack and back
+// under the Windows x64 calling convention, and the first frame of an actor's stack.
+
+// The switch from the side whose save area is `from` to the side whose save area is `to` (design record,
+// section 2; section 3, `naked`, R12), as Rust's stackful coroutines switch on Windows (corosensei's
+// `src/arch/x86_64_windows.rs`, not checked at source), but for where the registers go: the stack pointer and the registers the
+// Windows x64 convention keeps across a call, rbx, rbp, rdi, rsi and r12 to r15 at 0 to 64, and xmm6 to
+// xmm15 at 72 to 216, are stored into the save area of the side it leaves and loaded from the other's,
+// and not pushed onto the stack (the owner, 2026-11-15, #519, comment 6892812780, Q1, "Save area at stack
+// base"); and the four words of the thread environment block that belong to the stack a thread runs on
+// at 288 to 312, the stack's base (`gs:[0x08]`), its limit (`gs:[0x10]`), the deallocation stack
+// (`gs:[0x1478]`) and the guaranteed bytes (`gs:[0x1748]`, 32 bits), as the system's own fiber switch keeps
+// them (round 17, "Fiber layout + guarantee"), at offsets the source fixes for every version of Windows
+// (section 2), so that the limit the system moved as the stack grew is kept with it. `ret`
+// then returns into the other side, where it called the switch, or into a stack's first frame (`Enter`).
+// The control bits of MXCSR and the x87 control word, which the convention keeps too, are not saved,
+// since nothing in Kurz changes them; nor does the switch carry unwind directives, since no walk of a
+// stack crosses it (design record, section 2, both assumed there).
+pub naked void Switch(byte* from, byte* to) {
+    asm(
+        "mov qword ptr [rcx], rsp",
+        "mov qword ptr [rcx + 8], rbx",
+        "mov qword ptr [rcx + 16], rbp",
+        "mov qword ptr [rcx + 24], rdi",
+        "mov qword ptr [rcx + 32], rsi",
+        "mov qword ptr [rcx + 40], r12",
+        "mov qword ptr [rcx + 48], r13",
+        "mov qword ptr [rcx + 56], r14",
+        "mov qword ptr [rcx + 64], r15",
+        "movups xmmword ptr [rcx + 72], xmm6",
+        "movups xmmword ptr [rcx + 88], xmm7",
+        "movups xmmword ptr [rcx + 104], xmm8",
+        "movups xmmword ptr [rcx + 120], xmm9",
+        "movups xmmword ptr [rcx + 136], xmm10",
+        "movups xmmword ptr [rcx + 152], xmm11",
+        "movups xmmword ptr [rcx + 168], xmm12",
+        "movups xmmword ptr [rcx + 184], xmm13",
+        "movups xmmword ptr [rcx + 200], xmm14",
+        "movups xmmword ptr [rcx + 216], xmm15",
+        "mov rax, qword ptr gs:[0x08]",
+        "mov qword ptr [rcx + 288], rax",
+        "mov rax, qword ptr gs:[0x10]",
+        "mov qword ptr [rcx + 296], rax",
+        "mov rax, qword ptr gs:[0x1478]",
+        "mov qword ptr [rcx + 304], rax",
+        "mov eax, dword ptr gs:[0x1748]",
+        "mov dword ptr [rcx + 312], eax",
+        "mov rax, qword ptr [rdx + 288]",
+        "mov qword ptr gs:[0x08], rax",
+        "mov rax, qword ptr [rdx + 296]",
+        "mov qword ptr gs:[0x10], rax",
+        "mov rax, qword ptr [rdx + 304]",
+        "mov qword ptr gs:[0x1478], rax",
+        "mov eax, dword ptr [rdx + 312]",
+        "mov dword ptr gs:[0x1748], eax",
+        "movups xmm6, xmmword ptr [rdx + 72]",
+        "movups xmm7, xmmword ptr [rdx + 88]",
+        "movups xmm8, xmmword ptr [rdx + 104]",
+        "movups xmm9, xmmword ptr [rdx + 120]",
+        "movups xmm10, xmmword ptr [rdx + 136]",
+        "movups xmm11, xmmword ptr [rdx + 152]",
+        "movups xmm12, xmmword ptr [rdx + 168]",
+        "movups xmm13, xmmword ptr [rdx + 184]",
+        "movups xmm14, xmmword ptr [rdx + 200]",
+        "movups xmm15, xmmword ptr [rdx + 216]",
+        "mov rsp, qword ptr [rdx]",
+        "mov rbx, qword ptr [rdx + 8]",
+        "mov rbp, qword ptr [rdx + 16]",
+        "mov rdi, qword ptr [rdx + 24]",
+        "mov rsi, qword ptr [rdx + 32]",
+        "mov r12, qword ptr [rdx + 40]",
+        "mov r13, qword ptr [rdx + 48]",
+        "mov r14, qword ptr [rdx + 56]",
+        "mov r15, qword ptr [rdx + 64]",
+        "ret")
+}
+
+// The save area `side` set so that the switch to it enters `entry` on a stack whose frames start below
+// `top`, a multiple of 16, as if a call from the address 0 had made it: the 32 bytes of home space the
+// Windows x64 convention gives a callee above its return address, the return address 0 below them, at
+// `top - 40`, the entry below it for `ret` to take, and rbp 0, so that a walk of the stack ends at the
+// entry (design record, section 2). The words of the thread environment block stay as the stack's last
+// switch left them (`StackNew` of `runtime/windows/windows.kz` sets them first).
+pub void Enter(byte* side, byte* top, extern "C" () => void entry) {
+    raw {
+        *Ptr<long>(top - 40) = 0
+        *Ptr<extern "C" () => void>(top - 48) = entry
+        *Ptr<byte*>(side) = top - 48
+        *Ptr<long>(side + 16) = 0
+    }
+}

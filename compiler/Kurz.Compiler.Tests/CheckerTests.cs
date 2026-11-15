@@ -7149,7 +7149,7 @@ public sealed class CheckerTests
 
     [Theory]
     [InlineData(1, "U1", "actor A per Id {\n}\n")]
-    [InlineData(1, "U1", "actor A stack 8mb {\n}\n")]
+    [InlineData(1, "U1", "actor A stack 8mb per Id {\n}\n")]
     [InlineData(1, "U1", "actor A on crash restart {\n}\n")]
     [InlineData(1, "U1, T19", "actor A<T> {\n}\n")]
     [InlineData(1, "U1, T19", "actor Pair<T>(T First) {\n}\n\np = spawn Pair<int>(1)\nprint(p)\n")]
@@ -7166,6 +7166,19 @@ public sealed class CheckerTests
         // does and the build does not read; `spawn` of an actor with type parameters, with its type arguments (U2, U14), its arguments read
         // loosely (E1)
         NotSupportedAt(line, rule, program);
+    }
+
+    [Fact]
+    public void The_stack_clause_of_an_actor_is_a_literal_of_bytes_read_as_a_long()
+    {
+        // U1 (the owner, 2026-11-15, #519, comment 6892812780, Q3, "Build it now"): `stack` takes L14's literal of bytes, read as a `long`,
+        // so that a fraction that falls on no byte is `inexact-literal` and a size past the largest `long` is `constant-overflow`, each
+        // at the clause's line; any size a `long` holds is read, since the runtime rounds it up with no message (Q7)
+        Assert.Empty(Errors("actor A stack 8mb {\n    pub int Get() => 1\n}\n\na = spawn A()\nprint(a.Get())\n"));
+        Assert.Empty(Errors("actor A stack 1kb {\n}\n"));
+        Assert.Empty(Errors("actor A stack 8gb {\n}\n")); // past the largest `int`
+        Assert.Equal([(ErrorIds.InexactLiteral, 1)], Errors("actor A stack 0.1kb {\n}\n"));
+        Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("actor A stack 9000000000gb {\n}\n"));
     }
 
     [Theory]

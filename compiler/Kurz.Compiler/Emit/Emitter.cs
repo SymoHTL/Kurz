@@ -98,7 +98,7 @@ public sealed partial class Emitter
     /// </summary>
     private sealed record Unit(string Prefix, string File, ProgramSyntax Tree, SemanticModel Model, bool Runtime);
 
-    private Emitter(Unit program, Unit common, Unit sys, Unit std, bool test, bool lines, Target target, Cpu cpu)
+    private Emitter(Unit program, Unit common, Unit sys, Unit arch, Unit std, bool test, bool lines, Target target, Cpu cpu)
     {
         this.cpu = cpu;
         this.program = program;
@@ -106,7 +106,7 @@ public sealed partial class Emitter
         this.sys = sys;
         this.std = std;
         this.target = target;
-        units = [program, common, sys, std];
+        units = [program, common, sys, arch, std];
         unit = program;
         this.test = test;
         this.lines = test || lines;
@@ -139,10 +139,16 @@ public sealed partial class Emitter
             throw new InvalidOperationException("the emitter takes a program the checker read without an error and without `not supported`");
         }
 
+        if ((cpu ?? Cpu.Baseline).X86 != (runtime.Arch == Arch.X64))
+        {
+            throw new InvalidOperationException($"the runtime checked for {Runtime.ArchDirectory(runtime.Arch)} with a CPU of the other architecture: the build reads the directory of its own (section 2, round 20)");
+        }
+
         var emitter = new Emitter(
             new Unit("f", file, tree, checker.Model, false),
             new Unit("rt.common", runtime.CommonPath, runtime.Common, runtime.CommonChecker.Model, true),
             new Unit("rt.sys", runtime.SysPath, runtime.Sys, runtime.SysChecker.Model, true),
+            new Unit("rt.sys", runtime.ArchPath, runtime.ArchTree, runtime.ArchChecker.Model, true), // the architecture's file, read into `sys` beside the target's (section 2, round 20)
             new Unit("std", runtime.StdPath, runtime.Std, runtime.StdChecker.Model, true),
             testBuild,
             lines,

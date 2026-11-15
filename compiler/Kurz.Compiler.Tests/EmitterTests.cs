@@ -40,8 +40,8 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>The runtime of this machine's target with the target's <c>Memory</c> refusing every request, as a system out of memory does.</summary>
     internal static CheckedRuntime RuntimeWithoutMemory(Target target)
     {
-        var path = $"runtime/{Runtime.Directory(target)}/";
-        var files = Runtime.Files.Select(f => f.Path.StartsWith(path, StringComparison.Ordinal)
+        var path = $"runtime/{Runtime.Directory(target)}/{Runtime.Directory(target)}.kz"; // the target's own file, beside its architectures' directories
+        var files = Runtime.Files.Select(f => f.Path == path
             ? new RuntimeFile(f.Path, Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(f.Bytes).Replace("pub byte* Memory(long bytes) {", "byte* Granted(long bytes) {", StringComparison.Ordinal) + "\npub byte* Memory(long bytes) => null\n"))
             : f).ToList();
         Assert.NotEqual(Runtime.Files.Select(f => f.Bytes), files.Select(f => f.Bytes)); // the target's file did change
@@ -355,20 +355,62 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void On_an_arm_machine_an_asm_and_a_naked_function_are_not_supported_at_their_lines()
+    public void On_an_arm_machine_a_naked_function_is_assembly_of_the_module_and_an_asm_is_not_supported_at_its_line()
     {
-        // R11, R12: the checker reads an `asm` for x86-64, the target a program is read for where nothing names one, so a build for a
-        // 64-bit Arm machine gets one `not supported` at the construct's line and no assembly of x86-64 in a module of Arm; the same
-        // programs build for x86-64 (the control)
+        // R12 on 64-bit Arm (the owner, 2026-11-15, #519, comment 6892812780, Q2, "Rust: AArch64 switch now"): a `naked` function is the
+        // module's assembly there as on x86-64, in the one syntax Arm's assembler reads and typed `%function`, since `@` begins a comment
+        // in it; on an Arm machine it runs. R11: an `asm` statement, whose operands the checker reads for x86-64 alone, gets one `not
+        // supported` at its line in a build for Arm and no assembly of x86-64 in a module of Arm; the same program builds for x86-64
+        // (the control)
         const string asm = "mut long n = 1\nraw {\n    asm(\"add {r}, 1\", r = inout(reg) n)\n}\nprint(n)\n";
-        const string naked = "long Two() => 2\n\nnaked long Seven() {\n    asm(\"mov eax, 7\", \"ret\")\n}\n\nprint(Seven())\n";
-        foreach (var (text, line) in new[] { (asm, 3), (naked, 3) })
+        var refused = Builder.Compile(SourceText.FromString("program.kz", asm), ["raw"], toolchain.For(Cpu.ArmBaseline), testBuild: true, cpu: () => Cpu.ArmBaseline);
+        Assert.Null(refused.Program);
+        var d = Assert.Single(refused.Diagnostics.Items);
+        Assert.Equal((DiagnosticKind.NotSupported, 3), (d.Kind, d.Line));
+        Assert.NotNull(Builder.Compile(SourceText.FromString("program.kz", asm), ["raw"], toolchain.For(Cpu.Baseline), testBuild: true, cpu: () => Cpu.Baseline).Program); // x86-64's baseline, whatever machine runs the test
+
+        const string naked = "long Two() => 2\n\nnaked long Seven() {\n    asm(\"mov x0, #7\", \"ret\")\n}\n\nprint(Seven())\n";
+        var built = Builder.Compile(SourceText.FromString("program.kz", naked), ["raw"], toolchain.For(Cpu.ArmBaseline), testBuild: true, cpu: () => Cpu.ArmBaseline);
+        Assert.True(built.Program is not null, string.Join("; ", built.Diagnostics.Sorted));
+        var module = string.Join("\n", built.Program.Ir.ReplaceLineEndings("\n").Split('\n').Where(l => l.StartsWith("module asm ", StringComparison.Ordinal)));
+        Assert.Matches(@"module asm ""\.type \\22[^\\""]*\bSeven\b[^\\""]*\\22,%function""", module);
+        Assert.Contains("module asm \"mov x0, #7\"", module, StringComparison.Ordinal);
+        Assert.DoesNotContain("_syntax", module, StringComparison.Ordinal);
+        if (Builder.HostCpu.X86)
         {
-            var arm = Builder.Compile(SourceText.FromString("program.kz", text), ["raw"], toolchain.Runtime, testBuild: true, cpu: () => Cpu.ArmBaseline);
-            Assert.Null(arm.Program);
-            var d = Assert.Single(arm.Diagnostics.Items);
-            Assert.Equal((DiagnosticKind.NotSupported, line), (d.Kind, d.Line));
-            Assert.NotNull(Builder.Compile(SourceText.FromString("program.kz", text), ["raw"], toolchain.Runtime, testBuild: true, cpu: () => Cpu.Baseline).Program); // x86-64's baseline, whatever machine runs the test
+            return; // the run, on an Arm machine alone
+        }
+
+        Ran(Toolchain.Run(toolchain.Build(built.Program, "naked-arm")), 0, ["7"], "");
+    }
+
+    [Fact]
+    public void The_switch_of_every_target_and_architecture_is_assembled_by_clang_for_its_machine()
+    {
+        // section 2, the switch of a thread to an actor's stack, a `naked` function of each architecture's directory (round 20, "Dir per
+        // arch"; the owner, 2026-11-15, #519, comment 6892812780, Q1 and Q2): the program of each pair is emitted on this machine and
+        // compiled into an object by clang for the pair's machine, so that the assembler of each reads its switch, whose last load from
+        // the save area the module holds
+        var counter = "actor Counter {\n    mut long count = 0\n\n    pub void Add(long n) {\n        count = count + n\n    }\n\n    pub long Get() => count\n}\n\nc = spawn Counter()\nsend c.Add(2)\nprint(c.Get())\n";
+        foreach (var (target, arch, triple, last) in new[]
+        {
+            (Target.Linux, Arch.X64, "x86_64-unknown-linux-gnu", "mov r15, qword ptr [rsi + 48]"),
+            (Target.Windows, Arch.X64, "x86_64-pc-windows-msvc", "mov r15, qword ptr [rdx + 64]"),
+            (Target.Linux, Arch.Arm64, "aarch64-unknown-linux-gnu", "ldr x16, [x1, #104]"),
+            (Target.Windows, Arch.Arm64, "aarch64-pc-windows-msvc", "ldr x16, [x1, #104]"),
+        })
+        {
+            var cpu = arch == Arch.X64 ? Cpu.Baseline : Cpu.ArmBaseline;
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", counter), [], Builder.CheckRuntime(target, arch), true, cpu: () => cpu);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var ir = compilation.Program.Ir;
+            Assert.Contains($"module asm \"{last}\"", ir, StringComparison.Ordinal);
+            var directory = Path.Combine(toolchain.Directory, $"switch-{triple}");
+            Directory.CreateDirectory(directory);
+            var input = Path.Combine(directory, "program.ll");
+            File.WriteAllText(input, ir);
+            var (code, _, error) = Processes.Capture(toolchain.Clang.Path, [$"--target={triple}", "-O0", "-c", input, "-o", Path.Combine(directory, "program.o")], null, TimeSpan.FromMinutes(2));
+            Assert.True(code == 0, $"{triple}: {error}");
         }
     }
 

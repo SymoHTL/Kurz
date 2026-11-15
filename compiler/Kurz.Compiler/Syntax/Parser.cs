@@ -1651,23 +1651,45 @@ public sealed class Parser
     /// U1: the clauses after an actor's name, before its body, in any order (section 6, the owner, 2026-11-13, #519, comment 6847932993,
     /// Q10): each starts with <c>per</c>, <c>yield</c>, <c>inbox</c>, <c>stack</c> or <c>on crash</c>, words only there, which the parser
     /// keeps with their lines, and passes over the words that follow each, which the checker says <c>not supported</c> to, but for a
-    /// <c>:</c>, whose list stands in the head before the clauses (U1). Any other text before the body is <c>syntax</c> (E4).
+    /// <c>:</c>, whose list stands in the head before the clauses (U1). <c>stack</c> takes one literal of bytes, <c>stack 8mb</c>, and a
+    /// size written another way, or a second <c>stack</c>, is <c>syntax</c>, as C# refuses a modifier written twice (U1; section 6, the
+    /// owner, 2026-11-15, #519, comment 6892812780, Q3, "Build it now"). Any other text before the body is <c>syntax</c> (E4).
     /// </summary>
     private List<ActorClause> ParseActorClauses()
     {
         var clauses = new List<ActorClause>();
+        var passing = false; // whether the words after the last clause are its own, which the parser passes over
         while (!At(TokenKind.LeftBrace) && !At(TokenKind.Newline) && !At(TokenKind.EndOfFile))
         {
-            if (Current is { Kind: TokenKind.Name, Text: "per" or "yield" or "inbox" or "stack" })
+            if (Current is { Kind: TokenKind.Name, Text: "stack" })
+            {
+                var word = Advance();
+                if (clauses.Any(c => c.Word == "stack"))
+                {
+                    throw new ParseError(word.Line, "a second `stack` clause after the actor's name: one sets the size of its stack (U1)");
+                }
+
+                if (Current is not { Kind: TokenKind.UnitLiteral, Value: UnitLiteralValue { Unit: "kb" or "mb" or "gb" } })
+                {
+                    throw new ParseError(word.Line, "the size of an actor's stack after `stack` is a literal of bytes, `stack 8mb` (U1, L14)");
+                }
+
+                var size = Advance();
+                clauses.Add(new ActorClause(word.Line, word.Text, new UnitLiteral(size.Line, (UnitLiteralValue)size.Value!)));
+                passing = false;
+            }
+            else if (Current is { Kind: TokenKind.Name, Text: "per" or "yield" or "inbox" })
             {
                 var word = Advance();
                 clauses.Add(new ActorClause(word.Line, word.Text));
+                passing = true;
             }
             else if (Current is { Kind: TokenKind.Name, Text: "on" } && Peek() is { Kind: TokenKind.Name, Text: "crash" })
             {
                 var on = Advance();
                 Advance();
                 clauses.Add(new ActorClause(on.Line, "on crash"));
+                passing = true;
             }
             else if (clauses.Count == 0)
             {
@@ -1676,6 +1698,10 @@ public sealed class Parser
             else if (At(TokenKind.Colon))
             {
                 throw new ParseError(Current.Line, "the `:` list of an actor stands in its head, before its clauses (U1, K7)"); // no clause's words hold a `:`
+            }
+            else if (!passing)
+            {
+                throw Fail("a clause after the actor's name, `per`, `yield`, `inbox`, `stack` or `on crash`, or its body (U1)"); // `stack` takes its literal alone
             }
             else
             {

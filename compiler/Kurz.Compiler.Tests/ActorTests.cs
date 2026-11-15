@@ -174,7 +174,9 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print("after")
 
             """;
-        var error = "error: divide-by-zero at program.kz:2\n" + (OperatingSystem.IsLinux() ? "  at Calc.Div in program.kz:2\n  at main in program.kz:7\n" : string.Empty);
+        // the trace ends at the message's method, the first frame of the actor's stack, which the switch enters as if a call from the
+        // address 0 had made it (design record, section 2), so `main`, which waits on the thread's own stack, is no frame of it
+        var error = "error: divide-by-zero at program.kz:2\n" + (OperatingSystem.IsLinux() ? "  at Calc.Div in program.kz:2\n" : string.Empty);
         Ran(BuildAndRun(calc, toolchain.Runtime, "actor-crash", trace: null), 1, ["5"], error);
     }
 
@@ -348,4 +350,161 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(vector, toolchain.Runtime, "actor-aligned-release", testBuild: false), 0, ["3", "6"], "");
     }
 
+    // ---- the stacks of actors (design record, section 6, "Own stack"; the owner, 2026-11-15, #519) -------------------------------
+
+    private static string Deep(string name, string clause = "") => $$"""
+        actor {{name}}{{clause}} {
+            pub long Down(long n) {
+                if n == 0 {
+                    return 0
+                }
+
+                return Down(n - 1) + 1
+            }
+        }
+
+        """;
+
+    [Fact]
+    public void A_message_runs_on_a_stack_of_2_mib_with_a_guard_page_and_the_top_level_code_on_the_threads_own()
+    {
+        // section 6, "Own stack", "Keep guard page", "2 MiB + clause": a message's 20000 calls, about a megabyte, run on the actor's
+        // stack on every system; on Linux its 100000, about five, pass the 2 MiB and fault in the guard page below them, the
+        // error line at the call's line and the trace ending at the method, while the same 100000 calls of the top-level code run on the
+        // thread's own stack of 8 MiB (the root actor's code stays there, section 2)
+        var text = "long Top(long n) {\n    if n == 0 {\n        return 0\n    }\n\n    return Top(n - 1) + 1\n}\n\n"
+            + Deep("Deep")
+            + "print(Top(100000))\nd = spawn Deep()\nprint(d.Down(20000))\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-stack-runs"), 0, ["100000", "20000"], "");
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // an overflow on Windows ends the process as the system ends it (compiler/README.md, "What the emitter does not emit")
+        }
+
+        var run = BuildAndRun(text + "print(d.Down(100000))\n", toolchain.Runtime, "actor-stack-overflow", trace: null);
+        Assert.Equal(["100000", "20000"], run.Output);
+        Assert.Equal(1, run.Code);
+        var lines = run.Error.Split('\n');
+        Assert.Equal(["error: stack-overflow at program.kz:15", "  at Deep.Down in program.kz:15"], lines[..2]);
+        Assert.DoesNotContain(lines, l => l.StartsWith("  at main ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_fault_in_a_message_outside_its_guard_page_ends_the_process_as_the_system_ends_it()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // the handler of a fault on Linux: Windows installs none
+        }
+
+        // the guard of the actor's stack is its one page below it: a read of the address 8 inside a message is no overflow, and the fault
+        // ends the process with `SIGSEGV` (11), which .NET reports as 128 plus the signal, as one of the top-level code does
+        const string text = "actor Reader {\n    pub int Read() {\n        raw {\n            int* p = Ptr<int>(8)\n            return *p\n        }\n    }\n}\n\nr = spawn Reader()\nprint(r.Read())\n";
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), ["raw"], toolchain.Runtime, true);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var run = Toolchain.Run(toolchain.Build(compilation.Program, "actor-fault-elsewhere"), null);
+        Assert.Equal((139, ""), (run.Code, run.Error));
+    }
+
+    [Fact]
+    public void A_thread_holds_one_stack_and_takes_another_for_a_message_that_asks_another_size()
+    {
+        // U1, the clause `stack`: a thread holds the stack of the size its last message asked for, so the 8 MiB actor's 100000 calls,
+        // after a message of the actor of 2 MiB, run on a stack of 8 MiB, and the next message of 2 MiB on one of that size again
+        var text = Deep("Big", " stack 8mb") + Deep("Plain") + "b = spawn Big()\np = spawn Plain()\nprint(p.Down(20000))\nprint(b.Down(100000))\nprint(p.Down(20000))\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-stack-sizes"), 0, ["20000", "100000", "20000"], "");
+    }
+
+    [Fact]
+    public void A_stack_the_system_refuses_ends_the_process_with_allocation_failed_and_its_size_rounded_up_to_the_page()
+    {
+        // U1 (the owner, 2026-11-15, #519, comment 6892835500, Q7, "Rust/C#: round up silently") and section 6's `allocation-failed`:
+        // 1000000000000.5 KiB, 1024000000000512 bytes, rounded up to the page of 4 KiB, is more than any system maps
+        const string text = "actor Huge stack 1000000000000.5kb {\n    pub int Get() => 1\n}\n\nprint(\"before\")\nh = spawn Huge()\nprint(h.Get())\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-stack-refused"), 1, ["before"], "error: allocation-failed (1024000000004096 bytes)\n");
+    }
+
+    [Fact]
+    public void The_registers_a_call_keeps_are_the_callers_again_after_the_messages_it_waited_on()
+    {
+        // the switch keeps the registers the convention keeps across a call in the save area of the side it leaves (the owner, 2026-11-15,
+        // #519, comment 6892812780, Q1, "Save area at stack base"): in a release build the runtime's wait holds the actor it ran in them
+        // across the switch, and puts it back in the run queue for the call queued behind each `send`, while the top-level code holds its
+        // longs and doubles in them across the calls that wait, each its own after the messages ran on the actor's stack
+        const string text = """
+            actor Mix {
+                mut long n = 0
+
+                pub void Add(long k) {
+                    n = n + k
+                }
+
+                pub long Get(long k) => k * 1000 + n
+            }
+
+            m = spawn Mix()
+            send m.Add(1)
+            long a = m.Get(1)
+            send m.Add(1)
+            long b = m.Get(2)
+            send m.Add(1)
+            long c = m.Get(3)
+            send m.Add(1)
+            long d = m.Get(4)
+            send m.Add(1)
+            long e = m.Get(5)
+            send m.Add(1)
+            long f = m.Get(6)
+            send m.Add(1)
+            long g = m.Get(7)
+            send m.Add(1)
+            double x = double(m.Get(8)) / 2.0
+            send m.Add(1)
+            double y = double(m.Get(9)) / 4.0
+            send m.Add(1)
+            double z = double(m.Get(10)) / 8.0
+            send m.Add(1)
+            double w = double(m.Get(11)) / 16.0
+            send m.Add(1)
+            double v = double(m.Get(12)) / 32.0
+            send m.Add(1)
+            double u = double(m.Get(13)) / 64.0
+            send m.Add(1)
+            long t = m.Get(14)
+            print("{a} {b} {c} {d} {e} {f} {g} {t}")
+            print("{x} {y} {z} {w} {v} {u}")
+
+            """;
+        string[] expected = ["1001 2002 3003 4004 5005 6006 7007 14014", "4004 2252.25 1251.25 688.1875 375.375 203.328125"];
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-registers"), 0, expected, "");
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-registers-release", testBuild: false), 0, expected, "");
+    }
+
+    [Fact]
+    public void On_windows_a_message_runs_with_the_guarantee_of_0x5000_bytes_on_its_stack_and_the_switch_keeps_the_stacks_words()
+    {
+        // round 17, "Fiber layout + guarantee": an actor's stack takes the guarantee the main thread's takes, set at its first run, and
+        // the switch keeps the four words of the thread environment block that belong to the stack; on another system the IR of Windows
+        // for x86-64 shows both, and on Windows the guarantee in force inside a message is 0x5000 bytes
+        const string text = "extern \"C\" in \"kernel32\" {\n    int SetThreadStackGuarantee(uint* size)\n}\n\nactor Probe {\n    pub long Guarantee() {\n        mut uint size = 0\n        raw {\n            SetThreadStackGuarantee(&size)\n        }\n\n        return long(size)\n    }\n}\n\np = spawn Probe()\nprint(p.Guarantee())\n";
+        var windows = Builder.Compile(SourceText.FromString("program.kz", text), ["raw", "native"], Builder.CheckRuntime(Target.Windows, Arch.X64), true, cpu: () => Compiler.Emit.Cpu.Baseline);
+        Assert.True(windows.Program is not null, string.Join("; ", windows.Diagnostics.Sorted));
+        var ir = windows.Program.Ir.ReplaceLineEndings("\n");
+        var first = System.Text.RegularExpressions.Regex.Match(ir, @"(?ms)^define [^\n]*@""?rt\.sys\.StackFirst\b[^\n]*\n(.*?)^}");
+        Assert.True(first.Success, "no StackFirst in the IR");
+        Assert.Contains("SetThreadStackGuarantee", first.Groups[1].Value, StringComparison.Ordinal);
+        foreach (var word in new[] { "gs:[0x08]", "gs:[0x10]", "gs:[0x1478]", "gs:[0x1748]" })
+        {
+            Assert.Equal(2, ir.Split('\n').Count(l => l.StartsWith("module asm ", StringComparison.Ordinal) && l.Contains(word, StringComparison.Ordinal))); // read from the side it leaves, written from the other's
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            return; // `kernel32` is a library of Windows alone
+        }
+
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), ["raw", "native"], toolchain.Runtime, true);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        Ran(Toolchain.Run(toolchain.Build(compilation.Program, "actor-guarantee"), null), 0, ["20480"], "");
+    }
 }
