@@ -1,11 +1,8 @@
-// expect: throws deadlock at 28
-// | left asks
-// | right asks
+// expect: throws deadlock at 24
 // rules: U18
 
 actor Left {
     pub void Ask(Right other) {
-        print("left asks")
         print("left got {other.Value()}")
     }
 
@@ -14,7 +11,6 @@ actor Left {
 
 actor Right {
     pub void Ask(Left other) {
-        print("right asks")
         print("right got {other.Value()}")
     }
 

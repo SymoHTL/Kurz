@@ -1,10 +1,10 @@
 // expect: output
 // | load
 // | saved
-// | 40
 // | note
 // | load
 // | 4
+// | 40
 // rules: U17, U15
 
 actor Store(Checker Check) {
@@ -36,5 +36,6 @@ actor Checker {
 
 c = spawn Checker()
 s = spawn Store(c)
-print(s.Save(4))
+v = s.Save(4)
 print(s.Load())
+print(v)

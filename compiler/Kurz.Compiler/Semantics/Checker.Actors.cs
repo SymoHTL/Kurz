@@ -239,8 +239,8 @@ public sealed partial class Checker
     /// class, or an interface's type, a function type or a type parameter, read by its written type (<see cref="MayHoldClass"/>), is
     /// <c>static-state</c>, as K18 reads a class's field (<see cref="ResolveStaticField"/>; U1, assumed: K18's reading of <c>static</c>
     /// state); whether it has its error, reported here or, for a type that resolves to none, where the type is resolved. A
-    /// field whose type is not written takes its value's (V2), which the checker does not read in an actor it does not read, so that it
-    /// stays the build's limit, as an immutable one of another type does.
+    /// field whose type is not written is a <c>static mut</c> one, the one field the front end reads without a type (K7 with V2), and is
+    /// <c>static-state</c> by its <c>mut</c>, so that the type read here is always written, as K18 reads a class's.
     /// </summary>
     private bool StaticActorFieldError(TypeDeclaration d, FieldDeclaration f)
     {
@@ -467,6 +467,14 @@ public sealed partial class Checker
     /// </summary>
     private bool CrossingErrors(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, bool> slotMove, string callee, Action<int> mutInMessage)
     {
+        for (var i = 0; i < c.Arguments.Count; i++)
+        {
+            if (info.Binding[i] is var bound && bound >= 0 && slotMut(bound) != c.Arguments[i].Mut)
+            {
+                return true; // E1, U16: the argument's own `mut-at-call` (M7), which the call's check reported, stands alone
+            }
+        }
+
         var limits = new string?[c.Arguments.Count];
         for (var i = 0; i < c.Arguments.Count; i++)
         {
@@ -698,6 +706,7 @@ public sealed partial class Checker
             }
 
             call = call with { Kind = CallKind.ActorSend, Target = new ActorType(own) }; // U11: the actor's own method, which `this` alone calls
+            RecordWaits(s.Call);
             model.RecordCall(s.Call, call);
         }
 
@@ -787,8 +796,21 @@ public sealed partial class Checker
             }
         }
 
+        RecordWaits(c);
         model.RecordCall(c, model.CallOf(c) with { Kind = send ? CallKind.ActorSend : CallKind.ActorCall, Target = type });
         return typed;
+    }
+
+    /// <summary>
+    /// U4, U17: each argument of the message <paramref name="c"/> that runs a call as it is evaluated (<see cref="Calls"/>), which can wait,
+    /// recorded for the emitter, which builds the message in a heap of its own where such an argument follows one that crosses (U12, U21).
+    /// </summary>
+    private void RecordWaits(CallExpression c)
+    {
+        foreach (var a in c.Arguments.Where(a => !a.Mut && Calls(a.Value)))
+        {
+            model.RecordWaitingArgument(a.Value);
+        }
     }
 
     /// <summary>U8: a member of an actor's reference read without a call: its fields are no one's outside it, and a method named without a call is no value (F11).</summary>

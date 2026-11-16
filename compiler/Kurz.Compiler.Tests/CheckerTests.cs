@@ -4314,6 +4314,14 @@ public sealed class CheckerTests
         // nothing; no class's field names a type parameter, since a class takes none in this build (T19)
         Assert.Equal([(ErrorIds.StaticState, 5)], Errors("interface I {\n}\n\nclass C {\n    pub static I? None = null\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.StaticState, 2)], Errors("class C {\n    pub static () => int One = () => 1\n}\n\nprint(1)"));
+        // K18, K7: the type K18 reads is always written, a field being written `Type name`; `static mut` with no type, the one field the
+        // front end reads without one (K7 with V2), is `static-state` by its `mut` where its value is of a type K18 admits, and one with
+        // neither is `syntax` (ParserTests)
+        Assert.Equal([(ErrorIds.StaticState, 2)], Errors("class C {\n    pub static mut One = 1\n}\n\nprint(1)"));
+        // K18 (assumed in §4): a name no declaration gives in the written type is `unknown-name`, the type read whole before it is
+        // judged, and an initial value not of that type gives way to `static-state`, the value read after the type
+        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors("interface I {\n}\n\nclass C {\n    pub static Map<I, Nope>? m = null\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.StaticState, 5)], Errors("interface I {\n}\n\nclass C {\n    pub static I x = \"a\"\n}\n\nprint(1)"));
         // V9: a `static` field of the name of another field or of a method is `redeclared`
         Assert.Equal([(ErrorIds.Redeclared, 3)], Errors("class C(int V) {\n    pub static int A = 1\n    pub static int A = 2\n}\n\nprint(C.A)"));
         Assert.Equal([(ErrorIds.Redeclared, 2)], Errors("class C(int V) {\n    pub static int V = 1\n}\n\nprint(C.V)"));
@@ -7326,6 +7334,12 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.MutInMessage, 16)], Errors(Take + "send a.Give(mut x, move b)\nprint(x)\n"));
         Assert.Equal([(ErrorIds.SendNeedsWord, 17)], Errors(Take + "send a.Give(mut x,\n    b)\nprint(x)\n")); // `send-needs-word` before an earlier argument's `mut-in-message`
         Assert.Equal([(ErrorIds.MutInMessage, 16)], Errors(Take + "send a.Give(mut x, copy b)\nprint(x)\n"));
+        // an argument's own `mut-at-call` (M7) stands alone, before the stage's `send-needs-word` and `mut-in-message`, a `move` or a
+        // `copy` into a `mut` parameter among them (E1, U16)
+        const string Set = "class Box(mut int N)\n\nactor A {\n    pub void Set(mut Box bx) {\n        bx.N = 2\n    }\n\n    pub void Take(Box bx) {\n        print(bx.N)\n    }\n}\n\na = spawn A()\n";
+        Assert.Equal([(ErrorIds.MutAtCall, 15)], Errors(Set + "b = Box(1)\nsend a.Set(move b)\n"));
+        Assert.Equal([(ErrorIds.MutAtCall, 15)], Errors(Set + "b = Box(1)\na.Set(copy b)\n"));
+        Assert.Equal([(ErrorIds.MutAtCall, 15)], Errors(Set + "mut b = Box(1)\nsend a.Take(mut b)\n"));
         Assert.Equal([(ErrorIds.MutInMessage, 11)], Errors("class Node(int N, weak Node? Next)\n\nactor A {\n    pub void Take(mut int n, Node d) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Node(1, null))\nprint(x)\n")); // a class that reaches itself, read once
         Assert.Equal([(ErrorIds.MutInMessage, 13)], Errors("class Box(int N)\n\ndata Tree(Box B, List<Tree> Kids)\n\nactor A {\n    pub void Take(mut int n, Tree t) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Tree(Box(1), []))\nprint(x)\n")); // a data value that reaches itself, read once
         Assert.Equal([(ErrorIds.MutInMessage, 11)], Errors("class Box(int N)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(1))\nprint(x)\n"));
@@ -7356,6 +7370,18 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "cart = Cart(1)\nshop.Two(move cart,\n    cart.Items)\n"));
         Assert.Equal([(ErrorIds.UsedAfterMove, 63)], Errors(MoveShop + "cart = Cart(1)\nf = () => cart.Items\nshop.Add(move cart)\nprint(f())\n"));
         Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "cart = Cart(1)\nshop.Add(move cart)\nf = () => cart.Items\nprint(f())\n"));
+    }
+
+    [Fact]
+    public void A_move_on_the_right_side_of_and_or_or_may_have_ended_its_variable_after_it()
+    {
+        // U12, section 6: the right side of `&&` runs where the left is true and of `||` where it is false (N3), so that a `move` there may
+        // have ended its variable after the expression, as a branch's may (comment 6897444564, the points taken as following from the
+        // record); a read on the left side runs before the `move`
+        const string Done = "bool Done(move Cart c) => c.Items > 0\n\ncart = Cart(1)\n";
+        Assert.Equal([(ErrorIds.UsedAfterMove, 66)], Errors(MoveShop + Done + "if args.Count > 0 && Done(move cart) {\n    print(1)\n}\nprint(cart.Items)\nsend shop.Name(\"x\")\n"));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 66)], Errors(MoveShop + Done + "if args.Count > 0 || Done(move cart) {\n    print(1)\n}\nprint(cart.Items)\nsend shop.Name(\"x\")\n"));
+        Clean(MoveShop + Done + "if cart.Items > 0 && Done(move cart) {\n    print(1)\n}\nsend shop.Name(\"x\")\n");
     }
 
     [Fact]
