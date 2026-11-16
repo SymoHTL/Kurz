@@ -981,7 +981,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   message of its inbox, the actor after it in the run queue, and the activation at the top of its
   stacks, the one that runs or waits, none while it is idle, which nothing marks while its
   constructor runs, since no message can reach an actor before `spawn` gives its reference and a
-  default reads neither `this` nor its methods (K7). The number
+  default reads neither `this` nor its methods (K7), while the life of the record marks it, so that a
+  crash passed up into an actor whose constructor runs at its `spawn` goes on to its spawner (U25, U3). The number
   counts the actors of every type from 1, in the order `ActorNew` makes them (U2). The reference is
   the address of the state, which nothing counts, an actor living to the end of the process: `==` of
   two references compares the two addresses, `this` as a value inside an actor is the address of its
@@ -2002,12 +2003,24 @@ then, its own heap freed, as Erlang builds a message in the sender's heap and co
 receiver's at its send: the wait lets the actor crash, which frees or empties the heap taken before it,
 that the arguments and the message would have gone into (U21), or end (U13), and where it ended the copy
 is dropped as any message to an ended actor; the crash of the actor whose code builds it frees that heap
-with its own. Where no argument can wait, the message is built in its actor's heap. What stays `not supported`
-of section 6's supervision: the words of a policy (`on crash`, `restart`, `stop`, `escalate`,
-`after`, `max N in`) after `spawn` and after a type's name, with `restart-limit`, and the block
-`on crash (c) { ... }` with its `Crashed` and its `Reason`; every actor has the default, and a
-crash at the root, the top-level code, still ends the process with its error line, its trace and
-the exit code 1. A call whose caller crashed runs to its end and its result goes nowhere, which on
+with its own. Where no argument can wait, the message is built in its actor's heap. The words of a policy after
+`spawn` and after a type's name, the type's default, which a `spawn`'s own wins over (U25 to U27), are
+built: the emitted `spawn` gives the runtime its policy in the block of its restart, which a `stop`
+leaves out and whose function an `escalate` leaves null, and a block of the knobs in the supervisor's
+heap only where `after` or `max N in` is written, so that an actor that writes neither keeps one word
+for them; `stop` ends the actor after its log line as an end does, so that a call after the stop, and
+one queued in its inbox, raises `actor-gone`; `escalate` writes no line and crashes the supervisor with
+the crash whole, ending its other children, and at the root ends the process with the child's error
+line and the trace of the child's stack, a crash passed into an actor whose constructor runs at its
+`spawn` going on to its spawner; `after` sets the first pause; and `max N in` keeps the times of the
+crashes in the window in a ring in the supervisor's heap, which grows by doubling up to N, the crash
+that finds N there writing its line, ending the actor and crashing the supervisor with `restart-limit`
+at the line of the `spawn`, at the root the end of the process with the trace of the top-level code
+where it waits. What stays `not supported` of section 6's supervision: the block `on crash (c) { ... }`
+with its `Crashed` and its `Reason`, after `spawn` and after a type's name, a policy after the name of
+a `per` actor with `per` itself (U1), and, on Windows, an actor's stack overflow, which ends the process
+as the system ends it whatever the policy (U19); a crash at the root, the top-level code, still ends
+the process with its error line, its trace and the exit code 1. A call whose caller crashed runs to its end and its result goes nowhere, which on
 one thread no program reaches but through the crash path, a caller that waits crashing only through
 a call of its own chain; an actor that ended keeps its first page to the end of the process, so that
 a call that still reaches it raises `actor-gone`, where section 6 frees the page at the end through a
@@ -2037,7 +2050,8 @@ and an inbox grows with no bound, where section 13 spills it at 64 MB, until the
 process with `allocation-failed`. An actor and its state live to the end of the process, which is
 section 6's end of an actor in a program the build takes: an actor ends with its supervisor, the
 actor that spawned it (the owner, 2026-10-30), at the root the top-level code, which ends with the
-process, and no actor stops but a child of a supervisor that crashed. Every actor's blocks come from
+process, and no actor stops but a child of a supervisor that crashed, one whose policy stops it at its
+crash and one whose crash passes its limit (U25, U26). Every actor's blocks come from
 its own heap (section 3, "The runtime"), and the end of the top-level code frees every actor's heap
 whole before the process exits (`EndActors`), as the end of an actor frees its heap (U13); a crossing
 copies every counted block it reaches, so that no actor holds a block of another's heap (U12). Of
@@ -2452,9 +2466,18 @@ that sit under a rule by its id. Every one is pinned by a test.
   before what can begin one, which is `syntax` there, as a statement form's word is. After an
   actor's name and its primary constructor the parser keeps each clause's first word, `per`, `yield`,
   `inbox`, `stack` or `on crash`, with its line, passes over the words that follow it up to the body,
-  and reads any other word there as `syntax`; an `on crash` after the arguments of a `spawn` is kept
-  by its line and passed over to the end of the expression. The checker says `not supported` to
-  both. `spawn` binds as C#'s `new`, so that `spawn Counter().Get()` calls `Get` on the new
+  but for `stack`'s literal and the words of a policy, and reads any other word there as `syntax`.
+  The words of a policy after `on crash`, there and after the arguments of a `spawn`, which they end,
+  are `restart`, `stop` or `escalate`, and after `restart` the knobs `after <duration>` and
+  `max N in <duration>`, each once, in either order, each value a number literal with its sign where it
+  has one; another word there, a knob after `stop` or `escalate` or written twice, `max N` without its
+  `in`, a value that is no number literal, anything but the end of the expression after a policy at
+  `spawn` and a second `on crash` after an actor's name are `syntax` (U25, U26, U27). An `on crash`
+  block, `on crash (c) { ... }`, after the arguments of a `spawn` is kept by its line and passed over
+  to the end of the expression, and after an actor's name passed over with its parameters and its
+  braces, so that the braces after it are the body. The checker says
+  `not supported` to the blocks and to the clauses but `stack` and a policy, and reads a policy's
+  duration and count (U26, `type-mismatch`). `spawn` binds as C#'s `new`, so that `spawn Counter().Get()` calls `Get` on the new
   reference, a name after `spawn` without its `(` is `syntax`, and `send` before what the parser
   reads as no call is `syntax` (U14), and before a call of anything but an actor's method the
   checker's `syntax`. A `spawn` as a statement on its own is a value on its own, F5's `syntax`.
@@ -2702,14 +2725,14 @@ or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` 
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
 type or a time type (T10, T29);
 a modifier of a method on a top-level function, which leaves the function and every call of its
-name unread (K7, M6); of an actor, a clause after its name but `stack` (U1), a modifier but `pub`, type parameters and
+name unread (K7, M6); of an actor, a clause after its name but `stack` and the words of a policy (U1, U27), the block of `on crash` among them, a modifier but `pub`, type parameters and
 an interface, which an actor may declare (U1), a `static` method and an immutable `static` field of a type that holds no class,
 or of a type not written (U1), and a modifier of a method but `pub`, which a method
 may take as a class's does (U1, U9), each of which leaves the
 actor and every use of its name unread, besides what a class's body does not read, as the checker's `syntax` for a base after
 an actor's name, `equal by` and a constructor in its body (U1, U2), and its `static-state` for a `static mut` field and one
 whose type is or holds a class (U1), leave it too, while an actor after a class's `:` is `syntax` and the class is read without
-that base (U1); an `on crash` after a `spawn` (U2); `move` before a field of a primary
+that base (U1); the block `on crash (c) { ... }` after a `spawn` (U2, U25); `move` before a field of a primary
 constructor, a parameter of a constructor of K14, of a C function's declaration or of a `naked`
 function, a `move` of the variable of a loop over anything but a list, and a `move` of a value whose
 region the checker does not keep (U12); an argument

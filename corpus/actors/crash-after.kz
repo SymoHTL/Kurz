@@ -1,0 +1,24 @@
+// expect: output
+// | 1
+// | 1
+// rules: U26
+
+actor Flaky {
+    mut int n = 0
+
+    pub void Fail() {
+        throw "flaky"
+    }
+
+    pub int Ping() {
+        n = n + 1
+        return n
+    }
+}
+
+f = spawn Flaky() on crash restart after 1ms
+send f.Fail()
+print(f.Ping())
+send f.Fail()
+send f.Fail()
+print(f.Ping())

@@ -1,0 +1,17 @@
+// expect: throws thrown at 7
+// | 1
+// rules: U25
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash escalate
+print(w.Ping())
+send w.Fail()
+print(w.Ping())
+print("after")

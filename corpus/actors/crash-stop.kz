@@ -1,0 +1,23 @@
+// expect: throws actor-gone at 23
+// | 1
+// | 2
+// rules: U25
+
+actor Flaky {
+    pub void Fail() {
+        throw "flaky"
+    }
+
+    pub int Ping() => 1
+}
+
+actor Other {
+    pub int Ping() => 2
+}
+
+f = spawn Flaky() on crash stop
+o = spawn Other()
+print(f.Ping())
+send f.Fail()
+print(o.Ping())
+print(f.Ping())

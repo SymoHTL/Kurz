@@ -75,13 +75,19 @@ public sealed partial class Checker
     /// U1: the literal of bytes of the <c>stack</c> clause, read as a <c>long</c> (L14), whose error, <c>inexact-literal</c> or a size
     /// past a <c>long</c>, it reports; whether it reported one. The size is a lower bound the runtime rounds up to its page and raises to
     /// its floor with no message (section 6, the owner, 2026-11-15, #519, comment 6892835500, Q7, "Rust/C#: round up silently"), so no
-    /// size the literal can hold is an error of its own.
+    /// size the literal can hold is an error of its own; and the values of the type's policy (U27, <see cref="CheckPolicy"/>), each clause in
+    /// the order it is written.
     /// </summary>
     private bool CheckStackClause(TypeDeclaration d)
     {
         foreach (var clause in d.Clauses ?? [])
         {
             if (clause.Size is { } size && Types.IsError(CheckExpression(size, Types.Long).Type))
+            {
+                return true;
+            }
+
+            if (clause.Policy is { } policy && CheckPolicy(policy))
             {
                 return true;
             }
@@ -99,9 +105,11 @@ public sealed partial class Checker
     /// </summary>
     private static (int Line, string Construct)? UnreadActorPart(TypeDeclaration d)
     {
-        if ((d.Clauses ?? []).FirstOrDefault(c => c.Word != "stack") is { } clause)
+        if ((d.Clauses ?? []).FirstOrDefault(c => c.Word != "stack" && c.Policy is null) is { } clause)
         {
-            return (clause.Line, $"the clause `{clause.Word}` after an actor's name (U1)");
+            return (clause.Line, clause.Word == "on crash"
+                ? "the block `on crash (c) { ... }` after an actor's name (U1, U25)"
+                : $"the clause `{clause.Word}` after an actor's name (U1)");
         }
 
         if ((d.Modifiers & ~Modifiers.Pub) != 0)
@@ -533,7 +541,7 @@ public sealed partial class Checker
     {
         if (s.OnCrashLine != 0)
         {
-            NotSupported(s.OnCrashLine, "`on crash` after `spawn` (U2)");
+            NotSupported(s.OnCrashLine, "the block `on crash (c) { ... }` after `spawn` (U2, U25)");
             CheckArgumentsLoosely(s.Call);
             return Typed.Error;
         }
@@ -561,14 +569,97 @@ public sealed partial class Checker
 
         var outer = spawning;
         spawning = s.Call;
+        Push();
         var state = CheckExpression(s.Call, null);
+        var reported = Pop(commit: true).Count > 0;
         spawning = outer;
         if (state.IsError || CrossingErrors(s.Call, model.CallOf(s.Call), j => symbol.Constructor[j].Field.Type, _ => false, _ => false, name, _ => { }))
         {
             return Typed.Error; // U12: the constructor's arguments cross as a call's do (Q13 of comment 6847932993)
         }
 
+        if (s.Policy is { } policy && !reported && CheckPolicy(policy))
+        {
+            return Typed.Error; // U25, U16: the policy is read after the arguments, as it is written after them
+        }
+
         return new Typed(new ActorType(symbol));
+    }
+
+    /// <summary>
+    /// U26: the values of a policy's knobs, each a constant the emitter reads, reported; whether one has an error. <c>after</c> takes a duration
+    /// above 0 and at most the cap of 30 s, <c>max</c> an <c>int</c> of at least 1 and its <c>in</c> a duration above 0, each written as a
+    /// literal, with its sign where it has one (the parser's); a value past its bound and any other literal there are <c>type-mismatch</c>, as
+    /// a value of one type where another is required (T1), and a literal's own error, <c>inexact-literal</c> or <c>constant-overflow</c> (L10,
+    /// L14), stands as it does elsewhere (section 6, "Policy at <c>spawn</c>"; the bounds assumed, as Akka's backoff supervisor refuses a
+    /// minimum of 0 or past its maximum and Erlang's a period below 1).
+    /// </summary>
+    private bool CheckPolicy(CrashPolicy p)
+    {
+        if (p.After is { } after && !Duration(after, "the first pause after `after`", 30_000_000_000))
+        {
+            return true;
+        }
+
+        if (p.Max is { } max)
+        {
+            if (max is not (IntegerLiteral or UnaryExpression { Operand: IntegerLiteral }))
+            {
+                Report(ErrorIds.TypeMismatch, max.Line, "the count after `max` is an `int`, `max 10 in 1min` (U26)");
+                return true;
+            }
+
+            var count = CheckExpression(max, Types.Int);
+            if (count.IsError)
+            {
+                return true;
+            }
+
+            if (max is UnaryExpression || count.Constant is IntegerConstant { Value: var n } && n < 1)
+            {
+                Report(ErrorIds.TypeMismatch, max.Line, "the count after `max` is at least 1: `on crash stop` ends the actor at its first crash (U26)");
+                return true;
+            }
+
+            if (!Duration(p.Within!, "the window after `in`", long.MaxValue))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>U26: a knob's duration, a literal of a time unit (L14) above 0 and at most <paramref name="most"/> nanoseconds; whether it is one.</summary>
+    private bool Duration(Expression literal, string what, long most)
+    {
+        var unit = literal switch
+        {
+            UnitLiteral u => u.Value.Unit,
+            UnaryExpression { Operand: UnitLiteral u } => u.Value.Unit,
+            _ => null,
+        };
+        if (unit is null || !CoreWords.IsDurationUnit(unit))
+        {
+            Report(ErrorIds.TypeMismatch, literal.Line, $"{what} is a duration, a number with a unit of time, `1s` (U26, L14)");
+            return false;
+        }
+
+        var typed = CheckExpression(literal, Types.Duration);
+        if (typed.IsError)
+        {
+            return false;
+        }
+
+        if (literal is UnaryExpression || typed.Constant is IntegerConstant { Value: var ns } && (ns <= 0 || ns > most))
+        {
+            Report(ErrorIds.TypeMismatch, literal.Line, most == long.MaxValue
+                ? $"{what} is a duration above 0 (U26)"
+                : $"{what} is a duration above 0 and at most 30 s, the cap of the growing pause (U26)");
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>U2: an actor's name called without <c>spawn</c> is <c>spawn-required</c>.</summary>

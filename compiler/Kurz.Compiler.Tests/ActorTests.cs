@@ -22,7 +22,9 @@ namespace Kurz.Compiler.Tests;
 /// the pool and its trim, the registers a parked message keeps, the top-level code's <c>deadlock</c>, a parked message at the end (U13),
 /// the chains the top-level code starts, and an overflow in a call of the chain. Then crashes (U19 to U24): the state after a restart,
 /// the inbox kept, memory over 10,000 crashes, an overflow restarted, a reply into a caller that crashed, children ending, the pause,
-/// the top-level code's sleep through it, <c>callee-crashed</c>, and the log line; a stack fault inside the allocator, the scheduler and
+/// the top-level code's sleep through it, <c>callee-crashed</c>, and the log line; the words of a policy (U25 to U27): a stopped actor, a
+/// crash escalated to the root, into an actor and into one whose constructor runs, the first pause of <c>after</c>, the window of
+/// <c>max N in</c> and <c>restart-limit</c>; a stack fault inside the allocator, the scheduler and
 /// the copy of a crossing, which ends the process, and the count of their entries back at 0; the size a refused heap at a crash names;
 /// and <c>print-failed</c> and <c>not-char-boundary</c> in a message.
 /// </summary>
@@ -2295,6 +2297,370 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         var off = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = "0", ["KURZ_LOG"] = "Kurz.Actor=None" });
         Assert.Equal((0, "1\n", ""), (off.Code, off.Output, off.Error));
+    }
+
+    // ---- the words of a policy (U25 to U27; section 6, "Policy at `spawn`"; comment 6902210646, Q2 to Q4) --------------------------
+
+    [Fact]
+    public void A_stopped_actor_writes_its_log_line_its_waiting_caller_gets_callee_crashed_and_a_call_after_the_stop_actor_gone()
+    {
+        // U25: `Calc`'s crash under `on crash stop` writes its line (U24) and ends it; `Asker`, which waited on it, crashes with
+        // `callee-crashed` at its call (U20) and restarts after its 1 ms, serving its queued `Ping`; the call of the top-level code that
+        // comes after the stop raises `actor-gone`, as a call to an actor that ended does (U20)
+        const string text = """
+            actor Calc {
+                pub int Div(int n) => 10 / n
+            }
+
+            actor Asker(Calc C) {
+                pub void Ask(int n) {
+                    print("asked {C.Div(n)}")
+                }
+
+                pub int Ping() => 1
+            }
+
+            c = spawn Calc() on crash stop
+            a = spawn Asker(c) on crash restart after 1ms
+            send a.Ask(5)
+            send a.Ask(0)
+            print(a.Ping())
+            print(c.Div(2))
+            print("after")
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-policy-stop");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Calc#1 crashed: divide-by-zero at program.kz:2", "Asker#2 crashed: callee-crashed at program.kz:7"], crashes);
+        Ran((run.Code, run.Output, rest), 1, ["asked 2", "1"], "error: actor-gone at program.kz:18\n");
+    }
+
+    [Fact]
+    public void A_call_queued_in_the_inbox_of_a_stopped_actor_raises_actor_gone()
+    {
+        // U25 (assumed): the stopped actor's inbox goes as an ended actor's does (U21), so that `Get`, queued behind the crashing `Fail`,
+        // raises `actor-gone` in its caller, where a restart would have answered it
+        const string text = """
+            actor Slow {
+                pub void Fail() {
+                    throw "slow"
+                }
+
+                pub int Get() => 7
+            }
+
+            s = spawn Slow() on crash stop
+            send s.Fail()
+            print(s.Get())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-policy-stop-queued");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Slow#1 crashed: thrown \"slow\" at program.kz:3"], crashes);
+        Ran((run.Code, run.Output, rest), 1, [], "error: actor-gone at program.kz:11\n");
+    }
+
+    [Fact]
+    public void An_escalated_crash_at_the_root_ends_the_process_with_the_childs_error_line_and_trace_and_no_log_line()
+    {
+        // U25: the root is the supervisor of `Worker`, so that its escalated crash ends the process with the child's error line, the
+        // thrown text below it, and the trace of the child's stack, from the raise to its message's method (assumed), and no log line
+        // (comment 6902210646, Q4)
+        const string text = """
+            actor Worker {
+                pub void Fail() {
+                    throw "worker fails"
+                }
+
+                pub int Ping() => 1
+            }
+
+            w = spawn Worker() on crash escalate
+            print(w.Ping())
+            send w.Fail()
+            print(w.Ping())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-policy-escalate-root", trace: null);
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Empty(crashes);
+        var error = "error: thrown at program.kz:3:\nworker fails\n" + (OperatingSystem.IsLinux() ? "  at Worker.Fail in program.kz:3\n" : string.Empty);
+        Ran((run.Code, run.Output, rest), 1, ["1"], error);
+    }
+
+    [Fact]
+    public void An_escalated_overflow_at_the_root_ends_the_process_with_its_stack_overflow_line_and_the_childs_trace()
+    {
+        // U25, U19: an overflow in the guard page of an escalating actor's stack, on Linux, ends the process as an overflow of the
+        // top-level code does, with the trace of the child's stack, cut at its hundredth frame
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // an actor's overflow on Windows ends the process as the system ends it (compiler/README.md)
+        }
+
+        const string text = """
+            actor Deep {
+                int Down(int n) => Down(n) + 1
+
+                pub void Go() {
+                    print(Down(0))
+                }
+            }
+
+            d = spawn Deep() on crash escalate
+            d.Go()
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-policy-escalate-overflow", trace: null);
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Empty(crashes);
+        var (error, trace) = TraceTests.Split(rest);
+        Assert.Equal((1, "error: stack-overflow at program.kz:2\n"), (run.Code, error));
+        TraceTests.AssertTrace(trace, "program.kz:2", true);
+    }
+
+    [Fact]
+    public void An_escalated_crash_crashes_the_supervisor_whose_restart_ends_its_other_children()
+    {
+        // U25: `Kid(1)`'s crash under `on crash escalate` is `Boss`'s, passed up whole: the root restarts `Boss`, whose log line carries
+        // the child's id, place and text (assumed: the line names the supervisor that crashed), and none is written for the child; the
+        // crash ends `Boss`'s other child, `Kid(2)`, whose queued `Tick(2)` is dropped (U21); `Boss`'s new instance has run no `Make`
+        const string text = """
+            actor Kid(int N) {
+                pub void Fail() {
+                    throw "kid {N} fails"
+                }
+
+                pub void Tick(int t) {
+                    print("kid {N} tick {t}")
+                }
+            }
+
+            actor Boss {
+                mut Kid? first = null
+                mut Kid? second = null
+                mut int starts = 0
+
+                pub void Make() {
+                    starts = starts + 1
+                    first = spawn Kid(1) on crash escalate
+                    second = spawn Kid(2)
+                }
+
+                pub void Break() {
+                    k = first
+                    if k != null {
+                        send k.Fail()
+                    }
+                }
+
+                pub Kid? Second() => second
+
+                pub int Starts() => starts
+            }
+
+            b = spawn Boss() on crash restart after 1ms
+            b.Make()
+            s = b.Second()
+            if s != null {
+                send s.Tick(1)
+                b.Break()
+                send s.Tick(2)
+            }
+
+            print(b.Starts())
+
+            """;
+        var run = BuildAndRun(text, ListTests.Fenced, "actor-policy-escalate");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Boss#1 crashed: thrown \"kid 1 fails\" at program.kz:3"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["kid 2 tick 1", "0"], "");
+    }
+
+    [Theory]
+    [InlineData("on crash escalate", 1, new[] { "Top#1 crashed: thrown \"kid fails\" at program.kz:3" })]
+    [InlineData("on crash restart after 1ms max 1 in 1min", 2, new[] { "Kid#3 crashed: thrown \"kid fails\" at program.kz:3", "Kid#3 crashed: thrown \"kid fails\" at program.kz:3", "Top#1 crashed: restart-limit at program.kz:10" })]
+    public void A_crash_passed_into_an_actor_whose_constructor_runs_at_its_spawn_is_its_spawners(string policy, int fails, string[] lines)
+    {
+        // U25, U26, U3 (assumed): `Boss` has no instance while its constructor runs at its `spawn`, whose throw is its spawner's crash
+        // (U3), so that the crash `Kid` escalates into it, and the `restart-limit` its second crash gives it, crash `Top`, which writes
+        // the line and restarts, and the top-level code's wait on `Top` raises `callee-crashed` (U20)
+        var text = $$"""
+            actor Kid {
+                pub void Fail() {
+                    throw "kid fails"
+                }
+
+                pub int Ping() => 2
+            }
+
+            int Start() {
+                k = spawn Kid() {{policy}}
+                for i in 0..<{{fails}} {
+                    send k.Fail()
+                }
+
+                return k.Ping()
+            }
+
+            actor Boss {
+                mut int x = Start()
+
+                pub int X() => x
+            }
+
+            actor Top {
+                pub int Make() {
+                    b = spawn Boss()
+                    return b.X()
+                }
+            }
+
+            t = spawn Top() on crash restart after 1ms
+            print(t.Make())
+
+            """;
+        var run = BuildAndRun(text, ListTests.Fenced, $"actor-policy-into-building-{fails}");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(lines, crashes);
+        Ran((run.Code, run.Output, rest), 1, [], "error: callee-crashed at program.kz:32\n");
+    }
+
+    [Fact]
+    public void A_spawn_makes_the_block_of_its_knobs_only_where_it_writes_after_or_max()
+    {
+        // U26: the first pause, the limit's count and window, the ring of the crash times and the place of the `spawn` stand in a block of
+        // their own in the supervisor's heap, made where `after` or `max N in` is written, so that the block of a restart that writes
+        // neither grows by one word alone and an idle actor stays within its 512 bytes (section 13)
+        const string knobs = "{ i64, i64, i64, ptr, i64, i64, i64, %kz.str, i64 }";
+        string Ir(string spawn)
+        {
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", $"actor A {{\n    pub int Get() => 1\n}}\n\na = {spawn}\nprint(a.Get())\n"), [], toolchain.Runtime, true);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            return compilation.Program.Ir;
+        }
+
+        Assert.DoesNotContain(knobs, Ir("spawn A()"), StringComparison.Ordinal);
+        Assert.DoesNotContain(knobs, Ir("spawn A() on crash restart"), StringComparison.Ordinal);
+        Assert.Contains(knobs, Ir("spawn A() on crash restart after 1ms"), StringComparison.Ordinal);
+        Assert.Contains(knobs, Ir("spawn A() on crash restart max 2 in 1min"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void After_sets_the_first_pause_which_doubles_to_the_cap_and_comes_back_after_a_full_cap()
+    {
+        // U26: `after 5ms` is the first pause, doubled at each crash, 5, 10 and 20 ms, and after a run of 31 s with no crash 5 ms again;
+        // `after 20s` doubles to the cap of 30 s (U23), each within 20% either way, read through the clock of the pauses, which this
+        // runtime stands in for
+        const string text = """
+            actor Flaky {
+                pub void Fail() {
+                    throw "flaky"
+                }
+
+                pub int Ping() => 1
+            }
+
+            f = spawn Flaky() on crash restart after 5ms
+            for i in 0..<3 {
+                send f.Fail()
+                print(f.Ping())
+            }
+
+            eprint("advance")
+            send f.Fail()
+            print(f.Ping())
+            g = spawn Flaky() on crash restart after 20s
+            for i in 0..<2 {
+                send g.Fail()
+                print(g.Ping())
+            }
+
+            """;
+        var run = BuildAndRun(text, StoodIn(print: true), "actor-policy-after");
+        Assert.Equal((0, 6), (run.Code, Logged(run.Error).Crashes.Count));
+        Assert.Equal(12, run.Output.Count);
+        long[] pauses = [5, 10, 20, 5, 20000, 30000];
+        for (var i = 0; i < pauses.Length; i++)
+        {
+            Assert.Equal("1", run.Output[(2 * i) + 1]);
+            var slept = long.Parse(run.Output[2 * i]["pause ".Length..], System.Globalization.CultureInfo.InvariantCulture);
+            Assert.True(slept >= pauses[i] * 8 / 10 && slept <= pauses[i] * 12 / 10, $"pause {i}: {slept} ms where {pauses[i]} ms within 20% was expected");
+        }
+    }
+
+    [Fact]
+    public void Max_counts_the_crashes_in_a_sliding_window_and_the_one_past_it_is_the_supervisors_restart_limit_at_the_spawns_line()
+    {
+        // U26: under `max 2 in 1min`, crashes at 0 s, 31 s and 62 s each restart, since the first has left the window by the third, as
+        // Erlang's `supervisor` drops the restarts older than its period, where a count with no window, or a window from the first
+        // crash, would differ; a fourth crash at once is the third in the window, which passes the limit: its line is written (assumed)
+        // and the top-level code, the supervisor, crashes with `restart-limit` at the line of the `spawn`, which ends the process
+        const string text = """
+            actor Flaky {
+                pub void Fail() {
+                    throw "flaky"
+                }
+
+                pub int Ping() => 1
+            }
+
+            f = spawn Flaky() on crash restart after 1ms max 2 in 1min
+            send f.Fail()
+            print(f.Ping())
+            eprint("advance")
+            send f.Fail()
+            print(f.Ping())
+            eprint("advance")
+            send f.Fail()
+            print(f.Ping())
+            send f.Fail()
+            print(f.Ping())
+
+            """;
+        var run = BuildAndRun(text, StoodIn(print: false), "actor-policy-max");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(Enumerable.Repeat("Flaky#1 crashed: thrown \"flaky\" at program.kz:3", 4), crashes);
+        Ran((run.Code, run.Output, rest), 1, ["1", "1", "1"], "error: restart-limit at program.kz:9\n");
+    }
+
+    [Fact]
+    public void A_restart_limit_in_an_actor_is_its_crash_which_its_own_supervisor_handles()
+    {
+        // U26: `Flaky`'s second crash passes its `max 1 in 1min`, and `Boss` crashes with `restart-limit` at the line of the `spawn`,
+        // after `Flaky`'s two lines; the root restarts `Boss`, and the crash ends `Flaky` with it (U21)
+        const string text = """
+            actor Flaky {
+                pub void Fail() {
+                    throw "flaky"
+                }
+
+                pub int Ping() => 1
+            }
+
+            actor Boss {
+                mut int starts = 0
+
+                pub void Break() {
+                    starts = starts + 1
+                    k = spawn Flaky() on crash restart after 1ms max 1 in 1min
+                    send k.Fail()
+                    send k.Fail()
+                    print(k.Ping())
+                }
+
+                pub int Starts() => starts
+            }
+
+            b = spawn Boss() on crash restart after 1ms
+            send b.Break()
+            print(b.Starts())
+
+            """;
+        var run = BuildAndRun(text, ListTests.Fenced, "actor-policy-limit-in-actor");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Flaky#2 crashed: thrown \"flaky\" at program.kz:3", "Flaky#2 crashed: thrown \"flaky\" at program.kz:3", "Boss#1 crashed: restart-limit at program.kz:14"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["0"], "");
     }
 
     /// <summary>The Kurz of <see cref="Burning"/>: the recursion with no end, armed by the program's <c>eprint("arm")</c> for one call.</summary>

@@ -3336,8 +3336,9 @@ pub string ExitErrorText(ExitError e) {
 // stands in front of its bytes, a multiple of 16 so that the state keeps the alignment of the allocator's
 // block, as Rust's `ArcInner` pads its counts to what it holds: the name of the actor's type, two words the
 // emitted code holds (U2), whether the actor runs (0), waits for its restart (1), ends after its current
-// message (2) or ended (3) (U19, U22), the block of its restart, which its supervisor's heap holds (U22),
-// null where it does not restart, its supervisor, null for the top-level code (U13), the actor's heap
+// message (2), ended (3) (U19, U22) or has its constructor run at its `spawn` (4) (U3, U25), the block of its
+// restart, which its supervisor's heap holds (U22), a block that names no function to run where its policy
+// is `escalate`, null where it does not restart (U25), its supervisor, null for the top-level code (U13), the actor's heap
 // (design record, section 3), the actor spawned before it, the size of the actor's stack its clause asked
 // for (U1), the actor's number (U2), the first message of its inbox, the last, the actor after it in the
 // run queue, and its top activation, null while it is idle. The record and the state are the first block of
@@ -3477,14 +3478,14 @@ pub void HeapLeft(byte* heap) {
 // section 6 has it (assumed there): its reference is the spawner's once `spawn` returns, and a default of
 // its body reads neither `this` nor its methods (K7). The record names the name of the actor's type,
 // `name`, for the log line of its crash (U24), the block `side` of its restart (U22), and its supervisor,
-// the actor whose code spawns it (`Supervisor`).
+// the actor whose code spawns it (`Supervisor`), and says that its constructor runs until `ActorBuilt`.
 pub byte* ActorNew(byte* heap, long size, long stack, byte* side, byte* name) {
     sys.Entered()
     mut byte* state = std.HeapFirst(heap)
     raw {
         state = state + 96
         *Ptr<byte*>(state - 96) = name
-        *Ptr<long>(state - 88) = 0
+        *Ptr<long>(state - 88) = 4
         *Ptr<byte*>(state - 80) = side
         *Ptr<byte*>(state - 72) = Supervisor()
         *Ptr<byte*>(state - 64) = heap
@@ -3501,6 +3502,16 @@ pub byte* ActorNew(byte* heap, long size, long stack, byte* side, byte* name) {
 
     sys.Left()
     return state
+}
+
+// The end of the constructor of the actor whose reference is `state` at its `spawn`, which the emitted `spawn`
+// calls once the constructor returned: its record no longer says that its constructor runs (U3, U25).
+pub void ActorBuilt(byte* state) {
+    raw {
+        if *Ptr<long>(state - 88) == 4 {
+            *Ptr<long>(state - 88) = 0
+        }
+    }
 }
 
 // The actor whose constructor runs in the code of the thread, which the emitted `spawn` sets around the
@@ -3983,7 +3994,10 @@ static mut byte* paused = null
 // The crash of the actor whose message runs, at a raise inside it (U19): its id, its place and, where
 // `hasText` holds, the text that stands below the error line, a thrown value's or the position of a cut,
 // stored in the activation's header, and the thread switched to the scheduler's stack, which never comes
-// back here (`Run` reads the crash). Nothing in the top-level code, whose raise ends the process.
+// back here (`Run` reads the crash). Nothing in the top-level code, whose raise ends the process, nor where
+// the actor's policy, and its supervisors' on the way up, escalate the crash to the top-level code, which
+// ends the process with this error line and the trace of this stack (U25; design record, section 6, the
+// trace from the stack of the actor that raised).
 void CrashActor(string id, string file, int line, bool hasText, string text) {
     long idCount = long(id.Bytes.Count)
     long fileCount = long(file.Bytes.Count)
@@ -3991,6 +4005,10 @@ void CrashActor(string id, string file, int line, bool hasText, string text) {
     raw {
         byte* header = running
         if header == null {
+            return
+        }
+
+        if Taker(*Ptr<byte*>(header + 320)) == null {
             return
         }
 
@@ -4012,10 +4030,15 @@ void CrashActor(string id, string file, int line, bool hasText, string text) {
 
 // The crash of the actor whose message overflowed its stack (U19), which the target's handler of the fault
 // calls on its own stack with the error line it wrote of the overflow, from its id on, `count` bytes at
-// `line`, the place in it, which the log line carries (U24).
+// `line`, the place in it, which the log line carries (U24); where the policies escalate it to the top-level
+// code, it returns, and the handler ends the process with that error line and its trace (U25).
 extern "C" void ActorOverflow(byte* line, long count) {
     raw {
         byte* header = running
+        if Taker(*Ptr<byte*>(header + 320)) == null {
+            return
+        }
+
         *Ptr<long>(header + 448) = 1
         *Ptr<byte*>(header + 456) = line
         *Ptr<long>(header + 464) = count
@@ -4026,32 +4049,59 @@ extern "C" void ActorOverflow(byte* line, long count) {
 }
 
 // The crash of the actor whose reference is `state` in its activation `header`, on the scheduler's stack
-// (U19). The text below the error line is copied into the heap of the actor's supervisor, as the taken
-// points of comment 6899225864 have it. Each activation of the actor, from the top down, has its open copy
-// sessions ended (`CopyAbort`); where it waits, the message it waits on no longer names its reply, so that
-// the callee runs to its end and its reply goes nowhere; the call it runs answered `callee crashed`, which
-// wakes its caller (U20); and its stack goes back to the pool. The heaps of their own of the messages the
-// actor's code was building are freed (`MessageHeapNew`). The calls of the top activation's side list
-// go to the front of the inbox, which is kept, the crashing message dropped (U21), and the actor's children
-// end after their current message (U13). The inbox's messages are copied into a new heap, each by the
-// function its call site's table names, and the actor's heap is freed whole but for its first block
-// (`Emptied`). Then the log line (U24), and the pause before the restart (U22), or the end of an actor that
-// was to end after its current message or whose supervisor crashed.
+// (U19): its id, its place and the text below its error line, as the header holds them (`CrashActor`),
+// taken by the policies above it (`Fell`).
 void Crashed(byte* state, byte* header) {
+    mut bool hasText = false
+    mut byte* id = null
+    mut long idCount = 0
+    mut byte* file = null
+    mut long fileCount = 0
+    mut long line = 0
+    mut byte* text = null
+    mut long count = 0
     raw {
-        long life = *Ptr<long>(state - 88)
-        *Ptr<long>(state - 88) = 1
-        byte* parent = *Ptr<byte*>(state - 72)
+        hasText = *Ptr<long>(header + 448) == 2
+        id = *Ptr<byte*>(header + 456)
+        idCount = *Ptr<long>(header + 464)
+        file = *Ptr<byte*>(header + 472)
+        fileCount = *Ptr<long>(header + 480)
+        line = *Ptr<long>(header + 488)
+        text = *Ptr<byte*>(header + 496)
+        count = *Ptr<long>(header + 504)
+    }
+
+    Fell(state, header, hasText, id, idCount, file, fileCount, line, text, count)
+}
+
+// The crash of the actor whose reference is `state`, `header` its top activation, null where it has none,
+// with the id `id`, `idCount` bytes, its place, and, where `hasText` holds, the text below the error line,
+// `count` bytes at `from` (U19). The actor that takes the crash is found first (`Taker`): where it is the
+// top-level code, the process ends with that error line (`Ends`). The text is copied into the heap of the
+// supervisor of the actor that takes it, as the taken points of comment 6899225864 have it; then the actor
+// falls (`Fall`), and after it each supervisor its policy crashes on the way up, `escalate` passing the
+// crash up whole, and an actor whose constructor runs at its `spawn` passing it to its spawner, whose fall
+// ends it (U3, U25). The actor that takes the crash writes the log line (U24), the supervisor that escalated
+// writing none, and restarts after its pause (U22, U23), or ends where its policy is `stop`, where it was to
+// end after its current message or where its supervisor crashed (U25); where its crash passes the limit of
+// its `max N in`, it ends, and its supervisor crashes with `restart-limit` at the line of its `spawn` (U26).
+void Fell(byte* state, byte* header, bool hasText, byte* id, long idCount, byte* file, long fileCount, long line, byte* from, long count) {
+    byte* taker = Taker(state)
+    if taker == null {
+        Ends(hasText, id, idCount, file, fileCount, line, from, count)
+    }
+
+    raw {
+        long life = *Ptr<long>(taker - 88)
+        byte* parent = *Ptr<byte*>(taker - 72)
         mut byte* above = null
         if parent != null {
             above = *Ptr<byte*>(parent - 64)
         }
 
-        long count = *Ptr<long>(header + 504)
         mut byte* text = null
         if count > 0 {
             text = AllocateIn(above, count)
-            byte* from = *Ptr<byte*>(header + 496)
             mut long i = 0
             while i < count {
                 text[i] = from[i]
@@ -4059,14 +4109,108 @@ void Crashed(byte* state, byte* header) {
             }
         }
 
-        bool hasText = *Ptr<long>(header + 448) == 2
-        byte* id = *Ptr<byte*>(header + 456)
-        long idCount = *Ptr<long>(header + 464)
-        byte* file = *Ptr<byte*>(header + 472)
-        long fileCount = *Ptr<long>(header + 480)
-        long line = *Ptr<long>(header + 488)
-        byte* sideFirst = *Ptr<byte*>(header + 376)
-        byte* sideLast = *Ptr<byte*>(header + 384)
+        Fall(state, header)
+        mut byte* at = state
+        while at != taker {
+            byte* up = *Ptr<byte*>(at - 72)
+            Fall(up, *Ptr<byte*>(up - 8))
+            at = up
+        }
+
+        Logged(taker, id, idCount, file, fileCount, line, hasText, text, count)
+        if text != null {
+            std.Free(text, count)
+        }
+
+        byte* side = *Ptr<byte*>(taker - 80)
+        if life == 2 || side == null {
+            EndActor(taker)
+            return
+        }
+
+        byte* knobs = *Ptr<byte*>(side + 48)
+        if knobs != null && Limited(knobs, above, PauseClock()) {
+            if parent == null {
+                Ends(false, "restart-limit".Pointer, 13, *Ptr<byte*>(knobs + 56), *Ptr<long>(knobs + 64), *Ptr<long>(knobs + 72), null, 0)
+            }
+
+            Fell(parent, *Ptr<byte*>(parent - 8), false, "restart-limit".Pointer, 13, *Ptr<byte*>(knobs + 56), *Ptr<long>(knobs + 64), *Ptr<long>(knobs + 72), null, 0)
+            return
+        }
+
+        Pause(taker)
+    }
+}
+
+// The actor that takes the crash of the actor whose reference is `state` (U25): the first, from it up through
+// its supervisors, whose own policy restarts or stops it, or which ends after its current message or ended;
+// null where the top-level code takes it. An actor whose policy is `escalate` passes its crash to its
+// supervisor, which crashes too, and so does one whose constructor runs at its `spawn`, whose crash is the
+// spawner's (U3).
+byte* Taker(byte* state) {
+    raw {
+        mut byte* at = state
+        while at != null {
+            long life = *Ptr<long>(at - 88)
+            byte* side = *Ptr<byte*>(at - 80)
+            if life != 4 && (life != 0 || side == null || *Ptr<byte*>(side) != null) {
+                return at
+            }
+
+            at = *Ptr<byte*>(at - 72)
+        }
+
+        return null
+    }
+}
+
+// The end of the process at a crash that the top-level code takes from the scheduler's side, while it
+// waits (U25, U26): the error line of the id `id` at its place, with the text below it where `hasText`
+// holds, `count` bytes at `text`, the trace of the calls of the top-level code that waits, and the exit
+// code 1, as `Raise` and `Throw` end it at a raise of the top-level code.
+void Ends(bool hasText, byte* id, long idCount, byte* file, long fileCount, long line, byte* text, long count) {
+    string what = TextAt(id, idCount)
+    string place = TextAt(file, fileCount)
+    string below = TextAt(text, count)
+    sys.Crashing()
+    WriteError("error: ")
+    WriteError(what)
+    if fileCount > 0 {
+        WriteError(" at ")
+        WriteError(place)
+        WriteError(":")
+        WriteNumber(ulong(line))
+    }
+
+    if hasText {
+        WriteError(":\n")
+        WriteError(below)
+    }
+
+    WriteError("\n")
+    sys.Trace()
+    sys.Exit(1)
+}
+
+// The fall of the actor whose reference is `state` at its crash, `header` its top activation, null where it
+// has none (U19, U21). Each activation of the actor, from the top down, has its open copy sessions ended
+// (`CopyAbort`); where it waits, the message it waits on no longer names its reply, so that the callee runs
+// to its end and its reply goes nowhere; the call it runs answered `callee crashed`, which wakes its caller
+// (U20); and its stack goes back to the pool. The heaps of their own of the messages the actor's code was
+// building are freed (`MessageHeapNew`). The calls of the top activation's side list go to the front of
+// the inbox, which is kept, the crashing message dropped (U21), and the actor's children end after their
+// current message (U13). The inbox's messages are copied into a new heap, each by the function its call
+// site's table names, and the actor's heap is freed whole but for its first block (`Emptied`).
+void Fall(byte* state, byte* header) {
+    raw {
+        *Ptr<long>(state - 88) = 1
+        mut byte* sideFirst = null
+        mut byte* sideLast = null
+        if header != null {
+            sideFirst = *Ptr<byte*>(header + 376)
+            sideLast = *Ptr<byte*>(header + 384)
+        }
+
         mut byte* at = header
         while at != null {
             while *Ptr<byte*>(at + 440) != null {
@@ -4137,17 +4281,71 @@ void Crashed(byte* state, byte* header) {
 
         Emptied(state)
         *Ptr<byte*>(state - 64) = heap
-        Logged(state, id, idCount, file, fileCount, line, hasText, text, count)
-        if text != null {
-            std.Free(text, count)
+    }
+}
+
+// Whether the crash at `now` of the actor whose block of its knobs is `knobs` passes the limit of its
+// `max N in <duration>`, N at 8 of the block and the window at 16, where N is not 0 (U26): the times of its
+// crashes in the window, older ones dropped first, as Erlang's `supervisor` keeps the times of its restarts
+// in its period and keeps one that falls at its start (`add_restart`), so that the crash passes the limit
+// where N of them still stand; else its time joins them. The times stand in a ring in the heap `heap`, the
+// supervisor's, its address at 24, its slots at 32, its first at 40 and its count at 48, which grows by
+// doubling up to N slots, so that it holds no more times than the crashes in the window.
+bool Limited(byte* knobs, byte* heap, long now) {
+    raw {
+        long max = *Ptr<long>(knobs + 8)
+        if max == 0 {
+            return false
         }
 
-        if life == 2 || *Ptr<byte*>(state - 80) == null {
-            EndActor(state)
-            return
+        mut byte* ring = *Ptr<byte*>(knobs + 24)
+        mut long slots = *Ptr<long>(knobs + 32)
+        mut long head = *Ptr<long>(knobs + 40)
+        mut long count = *Ptr<long>(knobs + 48)
+        long oldest = now - *Ptr<long>(knobs + 16)
+        while count > 0 && *Ptr<long>(ring + head * 8) < oldest {
+            head = (head + 1) % slots
+            count = count - 1
         }
 
-        Pause(state)
+        *Ptr<long>(knobs + 40) = head
+        *Ptr<long>(knobs + 48) = count
+        if count >= max {
+            return true
+        }
+
+        if count == slots {
+            mut long grown = slots * 2
+            if grown < 4 {
+                grown = 4
+            }
+
+            if grown > max {
+                grown = max
+            }
+
+            byte* larger = AllocateIn(heap, grown * 8)
+            mut long i = 0
+            while i < count {
+                *Ptr<long>(larger + i * 8) = *Ptr<long>(ring + (head + i) % slots * 8)
+                i = i + 1
+            }
+
+            if ring != null {
+                std.Free(ring, slots * 8)
+            }
+
+            ring = larger
+            slots = grown
+            head = 0
+            *Ptr<byte*>(knobs + 24) = ring
+            *Ptr<long>(knobs + 32) = slots
+            *Ptr<long>(knobs + 40) = 0
+        }
+
+        *Ptr<long>(ring + (head + count) % slots * 8) = now
+        *Ptr<long>(knobs + 48) = count + 1
+        return false
     }
 }
 
@@ -4215,9 +4413,10 @@ void EndChildren(byte* state) {
     }
 }
 
-// The pause before the restart of the actor whose reference is `state` (U23), as the record has it: 100 ms
-// at its first crash, and at each crash after it twice the one before, up to 30 s, where it crashes before
-// it ran 30 s since its last restart, else 100 ms again; each varied at random by up to 20% either way,
+// The pause before the restart of the actor whose reference is `state` (U23), as the record has it: 100 ms,
+// or the first pause its `after` sets, which the block of its knobs holds (U26), at its first crash,
+// and at each crash after it twice the one before, up to 30 s, where it crashes before
+// it ran 30 s since its last restart, else that first pause again; each varied at random by up to 20% either way,
 // drawn from the thread's generator, as Akka's `BackoffSupervisor` varies its pause by its random factor.
 // The block of the restart holds the pause, the time of the last restart, the time the pause ends and the
 // next actor of the queue of the pauses, in which the actor waits by that time.
@@ -4228,6 +4427,10 @@ void Pause(byte* state) {
         mut long pause = *Ptr<long>(side + 16)
         if pause == 0 || now - *Ptr<long>(side + 24) >= 30000000000 {
             pause = 100000000
+            byte* knobs = *Ptr<byte*>(side + 48)
+            if knobs != null {
+                pause = *Ptr<long>(knobs)
+            }
         } else {
             pause = pause * 2
             if pause > 30000000000 {

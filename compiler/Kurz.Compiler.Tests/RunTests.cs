@@ -134,7 +134,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     private static partial Regex LogLine();
 
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls, the reads of standard input and running a program. The number for Linux is the count measured in the gates image, with no margin, so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156). The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 565 : 692;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 570 : 697;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -216,6 +216,18 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         ["memory/long-chain-freed.kz"] = "a million instances alive at once, each in pages of its own with an inaccessible page after them: " +
             "two million mappings, past the limit of a process on Linux (`vm.max_map_count`, 1048576 where the run was seen " +
             "ending with `allocation-failed`), and a page of memory each, about four gibibytes",
+    };
+
+    /// <summary>
+    /// U25, U26: the <c>throws</c> cases whose trace is no raise of the top-level code at the error line, each with the line of its first
+    /// frame and the name of its last: a crash escalated to the root, whose trace is the child's stack, from its raise to its message's
+    /// method, and the root's <c>restart-limit</c>, whose trace is the top-level code's where it waits, and not at the line of the
+    /// <c>spawn</c> that its error line names (assumed readings of section 6, "Policy at <c>spawn</c>").
+    /// </summary>
+    private static readonly Dictionary<string, (int First, string Last)> OwnTraces = new(StringComparer.Ordinal)
+    {
+        ["actors/crash-escalate-root.kz"] = (7, "Worker.Fail"),
+        ["actors/crash-restart-limit.kz"] = (18, "main"),
     };
 
     public static TheoryData<string> RunnableCases()
@@ -327,7 +339,8 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             Assert.Equal(line + "\n", error);
         }
 
-        TraceTests.AssertTrace(trace, $"{relativePath}:{header.ErrorLine}", header.Build != BuildKind.Release);
+        var (first, last) = OwnTraces.TryGetValue(relativePath, out var own) ? own : (header.ErrorLine, "main");
+        TraceTests.AssertTrace(trace, $"{relativePath}:{first}", header.Build != BuildKind.Release, last);
         Assert.Equal(1, code);
     }
 
@@ -365,6 +378,14 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         {
             var header = Header(relativePath);
             Assert.True(header.Expectation != Expectation.Error && Emit(relativePath, header).Program is not null, $"{relativePath}: listed as not run ({why}), and the emitter does not lay it out");
+        }
+
+        // a case listed with a trace of its own is a `throws` case the run runs
+        Assert.NotEmpty(OwnTraces);
+        foreach (var (relativePath, _) in OwnTraces)
+        {
+            var header = Header(relativePath);
+            Assert.True(header.Expectation == Expectation.Throws && !NotRun.ContainsKey(relativePath) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with a trace of its own, and the run does not run it as a `throws` case");
         }
 
         // a case listed as run under the plain allocator alone is one the plain run runs

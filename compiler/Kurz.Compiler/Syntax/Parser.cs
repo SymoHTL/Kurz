@@ -1670,7 +1670,10 @@ public sealed class Parser
     /// keeps with their lines, and passes over the words that follow each, which the checker says <c>not supported</c> to, but for a
     /// <c>:</c>, whose list stands in the head before the clauses (U1). <c>stack</c> takes one literal of bytes, <c>stack 8mb</c>, and a
     /// size written another way, or a second <c>stack</c>, is <c>syntax</c>, as C# refuses a modifier written twice (U1; section 6, the
-    /// owner, 2026-11-15, #519, comment 6892812780, Q3, "Build it now"). Any other text before the body is <c>syntax</c> (E4).
+    /// owner, 2026-11-15, #519, comment 6892812780, Q3, "Build it now"). <c>on crash</c> takes the words of a policy, the type's default
+    /// (U27, <see cref="ParseCrashPolicy"/>), and a second <c>on crash</c> is <c>syntax</c>, as a second <c>stack</c> is (assumed); its
+    /// block, <c>on crash (c) { ... }</c>, is passed over, its parameters and its braces, as at <c>spawn</c>, so that the braces after it
+    /// are the body and the checker says <c>not supported</c> to it at its line. Any other text before the body is <c>syntax</c> (E4).
     /// </summary>
     private List<ActorClause> ParseActorClauses()
     {
@@ -1703,10 +1706,27 @@ public sealed class Parser
             }
             else if (Current is { Kind: TokenKind.Name, Text: "on" } && Peek() is { Kind: TokenKind.Name, Text: "crash" })
             {
+                if (clauses.Any(c => c.Word == "on crash"))
+                {
+                    throw new ParseError(Current.Line, "a second `on crash` clause after the actor's name: one gives the type's policy (U27)");
+                }
+
                 var on = Advance();
                 Advance();
-                clauses.Add(new ActorClause(on.Line, "on crash"));
-                passing = true;
+                var policy = ParseCrashPolicy(on.Line);
+                clauses.Add(new ActorClause(on.Line, "on crash", Policy: policy));
+                if (policy is null)
+                {
+                    // the block, `on crash (c) { ... }`, passed over as at `spawn`, its parameters and its braces, so that the braces
+                    // after it are the actor's body
+                    PassGroup();
+                    if (At(TokenKind.LeftBrace))
+                    {
+                        PassGroup();
+                    }
+                }
+
+                passing = false;
             }
             else if (clauses.Count == 0)
             {
@@ -1729,6 +1749,23 @@ public sealed class Parser
         return clauses;
     }
 
+    /// <summary>Passes over the parenthesis or the brace at the current token and every token up to the one that closes it.</summary>
+    private void PassGroup()
+    {
+        var depth = 0;
+        do
+        {
+            depth += Current.Kind switch
+            {
+                TokenKind.LeftParen or TokenKind.LeftBracket or TokenKind.LeftBrace => 1,
+                TokenKind.RightParen or TokenKind.RightBracket or TokenKind.RightBrace => -1,
+                _ => 0,
+            };
+            index++;
+        }
+        while (depth > 0 && !At(TokenKind.EndOfFile));
+    }
+
     /// <summary><c>send c.Add(1)</c> (U6): the call that follows is the statement's; anything but a call there is <c>syntax</c> (U14).</summary>
     private SendStatement ParseSend()
     {
@@ -1745,8 +1782,9 @@ public sealed class Parser
     /// <summary>
     /// <c>spawn Counter(1)</c> (U2): the actor's name, its type arguments where it writes them, <c>spawn Pair&lt;int&gt;(1)</c>, as a
     /// generic class's construction takes them (T19, U14), and the arguments of its constructor, which bind as C#'s <c>new</c> does, so
-    /// that a member after them is the new reference's, <c>spawn Counter(1).Get()</c>. An <c>on crash</c> after the arguments is passed
-    /// over to the end of the expression, its line kept, which the checker says <c>not supported</c> to.
+    /// that a member after them is the new reference's, <c>spawn Counter(1).Get()</c>. The words of a policy after the arguments,
+    /// <c>on crash stop</c>, end the expression, so that anything but its end after them is <c>syntax</c> (U25); an <c>on crash</c>
+    /// block there is passed over to the end of the expression, its line kept, which the checker says <c>not supported</c> to.
     /// </summary>
     private SpawnExpression ParseSpawn()
     {
@@ -1775,7 +1813,19 @@ public sealed class Parser
         var onCrash = 0;
         if (Current is { Kind: TokenKind.Name, Text: "on" } && Peek() is { Kind: TokenKind.Name, Text: "crash" })
         {
-            onCrash = Current.Line;
+            var line = Advance().Line;
+            Advance();
+            if (ParseCrashPolicy(line) is { } policy)
+            {
+                if (!At(TokenKind.Newline) && !At(TokenKind.Comma) && !At(TokenKind.RightParen) && !At(TokenKind.RightBracket) && !At(TokenKind.RightBrace) && !At(TokenKind.EndOfFile))
+                {
+                    throw Fail("the end of the expression after the policy of `spawn` (U25)");
+                }
+
+                return new SpawnExpression(spawn.Line, call, Policy: policy);
+            }
+
+            onCrash = line;
             var depth = 0;
             while (!At(TokenKind.EndOfFile))
             {
@@ -1795,6 +1845,80 @@ public sealed class Parser
         }
 
         return new SpawnExpression(spawn.Line, call, onCrash);
+    }
+
+    /// <summary>
+    /// U25, U26: the words of a policy after <c>on crash</c>, at <c>spawn</c> and after an actor's name (U27): <c>restart</c>, <c>stop</c> or
+    /// <c>escalate</c>, and after <c>restart</c> the knobs <c>after &lt;duration&gt;</c> and <c>max N in &lt;duration&gt;</c>, each at most once,
+    /// in either order, each value a number literal, which the checker reads (section 6, "Policy at <c>spawn</c>"); null where a <c>(</c>
+    /// follows, the block, which the caller passes over. Any other word after <c>on crash</c>, a knob after <c>stop</c> or <c>escalate</c>
+    /// (which the caller meets after the policy), a knob written twice, <c>max</c> without its <c>in</c> and a value that is no number
+    /// literal are <c>syntax</c> (E4).
+    /// </summary>
+    private CrashPolicy? ParseCrashPolicy(int line)
+    {
+        if (At(TokenKind.LeftParen))
+        {
+            return null;
+        }
+
+        if (Current is not { Kind: TokenKind.Name, Text: "restart" or "stop" or "escalate" })
+        {
+            throw Fail("`restart`, `stop`, `escalate` or the block after `on crash` (U25)");
+        }
+
+        var word = Advance().Text;
+        if (word != "restart")
+        {
+            return new CrashPolicy(line, word);
+        }
+
+        Expression? after = null, max = null, within = null;
+        while (Current is { Kind: TokenKind.Name, Text: "after" or "max" })
+        {
+            var knob = Advance();
+            if (knob.Text == "after")
+            {
+                if (after is not null)
+                {
+                    throw new ParseError(knob.Line, "a second `after` after `on crash restart`: one sets the first pause (U26)");
+                }
+
+                after = PolicyValue("a duration after `after`, `after 1ms` (U26)");
+            }
+            else
+            {
+                if (max is not null)
+                {
+                    throw new ParseError(knob.Line, "a second `max` after `on crash restart`: one sets the limit (U26)");
+                }
+
+                max = PolicyValue("a count after `max`, `max 10 in 1min` (U26)");
+                if (!MatchKeyword("in"))
+                {
+                    throw Fail("`in` and a duration after the count of `max`, `max 10 in 1min` (U26)");
+                }
+
+                within = PolicyValue("a duration after `in`, `max 10 in 1min` (U26)");
+            }
+        }
+
+        return new CrashPolicy(line, word, after, max, within);
+    }
+
+    /// <summary>
+    /// U26: the number literal a knob of a policy takes, with its sign where it has one, as an arm's literal (C9, L17), so that the
+    /// checker reads a value below its bound; anything else is <c>syntax</c> (E4).
+    /// </summary>
+    private Expression PolicyValue(string expected)
+    {
+        if (At(TokenKind.Minus) && Peek() is { Kind: TokenKind.IntegerLiteral or TokenKind.RealLiteral or TokenKind.UnitLiteral })
+        {
+            var minus = Advance();
+            return new UnaryExpression(minus.Line, minus.Kind, ParsePrimary());
+        }
+
+        return Current.Kind is TokenKind.IntegerLiteral or TokenKind.RealLiteral or TokenKind.UnitLiteral ? ParsePrimary() : throw Fail(expected);
     }
 
     private List<Statement> ParseTypeBody(string typeName, int line)
