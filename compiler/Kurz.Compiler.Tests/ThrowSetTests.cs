@@ -61,6 +61,8 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         data EWorkerHelper
         data EWorkerPrivate
         data EUnrelated
+        data ERefused
+        data EReadAgain
 
         void Direct() {
             throw EDirect
@@ -353,6 +355,26 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
             return v
         }
 
+        data Pair(int A)
+
+        pub void Refuse<T>(T value) {
+            for f in T.Fields {
+                print("{f.Name} = {f.Get(value)}")
+                throw ERefused
+            }
+        }
+
+        void ReadAgain<T>(T value) {
+            for f in T.Fields {
+                print("{f.Name} = {f.Get(value)}")
+                throw EReadAgain
+            }
+        }
+
+        void ViaCopy() {
+            ReadAgain(Pair(1))
+        }
+
         void First() {
             throw EFirst
         }
@@ -512,6 +534,17 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         Assert.Contains("string", mixed);
         Assert.Equal("RuntimeError", mixed[^1]);
         Assert.Single(mixed, "RuntimeError");
+    }
+
+    [Fact]
+    public void A_function_that_reads_its_type_runs_as_its_copies_alone()
+    {
+        // T33: the copy for `Pair` runs in the place of `ReadAgain`, its loop as one pass for each field
+        Assert.Equal(["EReadAgain", "RuntimeError"], Raised("ViaCopy"));
+
+        // a function that reads its type and that no call copies runs nowhere, and its text adds nothing
+        var listed = Program.Value.Sets.PubFunctions();
+        Assert.Equal(["RuntimeError"], Names(listed[Assert.Single(listed.Keys, f => f.Name == "Refuse")]));
     }
 
     [Fact]
