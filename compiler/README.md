@@ -456,7 +456,7 @@ on Windows, whose switch keeps the stack's limit; `StackTrim` gives back the mem
 the depth when a stack goes back to the pool, on Linux where the handler opened them, by a mapping
 with no access and `MAP_FIXED` over them, which gives their memory back as `madvise` with
 `MADV_DONTNEED` would and which the system joins to the guard page, so that the stack is two mappings
-again (section 6, the owner, 2026-11-13, #519, comment 6855469829, the call assumed there, where comment 6851105334 named `madvise`), and on Windows where the stack's limit
+again (section 6, the owner, 2026-11-13, #519, comment 6855469829, and the call, 2026-11-16, comment 6919351399, "Keep MAP_FIXED"), and on Windows where the stack's limit
 lies past the depth, by a `VirtualFree` that decommits them from the base of the reservation, a
 `VirtualAlloc` that sets the page under the depth as the guard page again and the limit moved to the
 depth (section 6, the owner, 2026-11-13, #519, comment 6853074601, the guard page and the limit
@@ -2177,7 +2177,7 @@ ask about it.
   since, measured on Linux 6.8 on 2026-11-15, an `madvise` and an `mprotect` leave them an area of
   their own beside the guard page's, a third mapping for each stack trimmed once, where the mapping
   joins them to the guard page, and a stack is two mappings fresh, after the handler opened its pages
-  and after each trim *(assumed in section 6)*. The chain
+  and after each trim (section 6, 2026-11-16). The chain
   ID is drawn from a xoshiro256++ generator of the thread, the one `rand`'s `SmallRng` is on a 64-bit
   machine, seeded with 32 bytes of `Random`, the system's randomness that a map's keys take (M9), at
   the thread's first chain, so that a chain costs two steps of the generator and no call to the
