@@ -116,8 +116,8 @@ count the emitter takes of a read of a copied type that the checker marks as met
 function value beside `Swap(mut f)` (`SemanticModel.IsHeldCopy`, the owner's "Copied", 2026-10-25), and the count
 `SortBy` takes of the list it read while its keys run, and the count a read of a `mut` parameter
 takes where a call after it in the expression can reach the field it names (`Calls` in
-`Semantics/Checker.Reads.cs`), and the heap of its own a message is built in where an argument after a
-crossing one can wait, which no crash or end of the callee frees. A construct
+`Semantics/Checker.Reads.cs`), and the heap of its own a message is built in where any of its arguments
+can wait, which no crash or end of the callee frees. A construct
 that has none takes a count of what it read. A promise of another rule that no code can reach the
 place, F11's for a lambda, is no such name: a later rule can open a way to it, as K2's methods did,
 so every member that runs a program's code while it holds a place is listed (`SortBy`, X8). Each one gets a line in a fenced program of `ListTests`

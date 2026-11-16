@@ -1970,7 +1970,8 @@ lists every case the checker reads in full and the emitter does not emit, 3 of t
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there
-`outcomes/stack-overflow.kz` is built and not run, the one case the runner lists so. On Windows the
+`outcomes/stack-overflow.kz` and `actors/crash-overflow-restarts.kz`, whose `system:` line names Linux,
+are built and not run (chapter 0). On Windows the
 runtime's `Start` sets the guarantee of the main thread's stack, the room the system keeps on it for
 the handling of its overflow, to 0x5000 bytes, 20 KiB of the 1 MiB the linker reserves for it, as
 Rust's standard library does at its start, and a program whose request the system refuses carries on
@@ -2042,8 +2043,9 @@ overflow, which ends the process as the system ends it whatever the policy (U19)
 the process with its error line, its trace and the exit code 1. A call whose caller crashed runs to its end and its result goes nowhere, which on
 one thread no program reaches but through the crash path, a caller that waits crashing only through
 a call of its own chain; an actor that ended keeps its first page to the end of the process, so that
-a call that still reaches it raises `actor-gone`, where section 6 frees the page at the end through a
-table of slots and generations (2026-11-16), which is not built; and the copies a crashed message made of the
+a call that still reaches it raises `actor-gone` and a `send` that still reaches it is dropped with no
+error, where section 6 frees the page at the end through a table of slots and generations (2026-11-16),
+under which a `send` raises `actor-gone` too, which is not built; and the copies a crashed message made of the
 arguments of a call it had not sent yet, in the callee's heap where no argument could wait, and the heap of a `spawn` whose arguments it was still
 evaluating, stay in their heaps until those are freed. A message has 2 MiB of
 stack where its clause sets no other size, where a message on Linux had the main thread's 8 MiB
@@ -2051,8 +2053,9 @@ while messages ran on it, and a server whose actors hold many stacks at once, tw
 of mappings, `vm.max_map_count`, raised past its default of 65,530, as section 6 says; a recursion
 past a message's stack is its actor's crash on Linux, the log line naming `stack-overflow` at its
 line, but inside the allocator or the scheduler it ends the process with its error line and the exit
-code 1 (O11): the allocator's entries that change a heap, the scheduler's that change its records,
-inboxes, run queue and replies, and the copy of a crossing from `CopyUse` to `CopyLeft`, the emitted
+code 1 (O11), as a check of the runtime's own code there does in a test build (chapter 12): the
+allocator's entries that change a heap, the scheduler's that change its records, inboxes, run queue
+and replies, the list of the heaps of messages among them, and the copy of a crossing from `CopyUse` to `CopyLeft`, the emitted
 functions that fill its copies among it, raise the count per thread of section 6 and lower it at their
 exit, and the scheduler and a parked activation save it around each switch and put it back, the
 scheduler clearing it on its way to an actor; the error line names the allocator's own line where the
@@ -2066,7 +2069,8 @@ that the switch of Windows on Arm is assembled
 (`EmitterTests.The_switch_of_every_target_and_architecture_is_assembled_by_clang_for_its_machine`)
 and runs nowhere; a call waits with no bound, where section 6 bounds it by 5 seconds (`call-timeout`);
 and an inbox grows with no bound, where section 13 spills it at 64 MB, until the allocator ends the
-process with `allocation-failed`. An actor and its state live to the end of the process, which is
+process with `allocation-failed`. An actor's record and the place of its state live to the end of the
+process, the state built again at each restart (U22), which is
 section 6's end of an actor in a program the build takes: an actor ends with its supervisor, the
 actor that spawned it (the owner, 2026-10-30), at the root the top-level code, which ends with the
 process, and no actor stops but a child of a supervisor that crashed, one whose policy stops it at its
