@@ -1,0 +1,20 @@
+// expect: output
+// | a
+// | b
+// rules: U2, U12
+
+actor Counter {
+}
+
+actor Hub {
+    pub string Find(Map<Counter, string> known, Counter c) => known[c] ?? "none"
+}
+
+a = spawn Counter()
+b = spawn Counter()
+mut names = Map<Counter, string>()
+names[a] = "a"
+names[b] = "b"
+h = spawn Hub()
+print(h.Find(names, a))
+print(h.Find(names, b))

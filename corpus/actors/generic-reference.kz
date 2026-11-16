@@ -1,0 +1,17 @@
+// expect: output
+// | 1
+// rules: U2, T19
+
+actor Counter {
+    mut int count = 0
+
+    pub int Bump() {
+        count = count + 1
+        return count
+    }
+}
+
+T Same<T>(T x) => x
+
+c = spawn Counter()
+print(Same(c).Bump())

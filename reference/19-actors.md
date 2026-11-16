@@ -181,7 +181,8 @@ makes an actor with a state of its own. An actor's constructor is its primary on
 actor's name without `spawn` is the compile error `spawn-required` (§6, the owner, 2026-11-13, #519,
 comment 6847932993, Q13, "Primary ctor, kept args (Recommended)"). An actor's reference compares by
 the actor it names: `==` is true of two references to one actor, `!=` of two to different actors,
-and its text is its actor's type and number, `Counter#1`, the number counted from 1 in the order in
+its hash is its actor's number's, so that a reference can be a key of a map, and its text is its
+actor's type and number, `Counter#1`, the number counted from 1 in the order in
 which the actors of one machine are spawned (§6, the owner, 2026-11-14, #519, comment 6880404917, Q10, "All eight leans (Recommended)") *(assumed: that shape and that
 count, which the answer did not give)*. `==` and `!=` take two references to actors of one type, and
 on references to actors of two types they are `type-mismatch`, since no actor's type converts to
@@ -316,6 +317,42 @@ c = a
 print("{a} {b}")
 print(a == c)
 print(a == b)
+```
+
+Case: [actors/references-map-key.kz](../corpus/actors/references-map-key.kz)
+```kurz
+actor Counter {
+}
+
+actor Hub {
+    pub string Find(Map<Counter, string> known, Counter c) => known[c] ?? "none"
+}
+
+a = spawn Counter()
+b = spawn Counter()
+mut names = Map<Counter, string>()
+names[a] = "a"
+names[b] = "b"
+h = spawn Hub()
+print(h.Find(names, a))
+print(h.Find(names, b))
+```
+
+Case: [actors/generic-reference.kz](../corpus/actors/generic-reference.kz)
+```kurz
+actor Counter {
+    mut int count = 0
+
+    pub int Bump() {
+        count = count + 1
+        return count
+    }
+}
+
+T Same<T>(T x) => x
+
+c = spawn Counter()
+print(Same(c).Bump())
 ```
 
 Case: [actors/first-error-spawn-required.kz](../corpus/actors/first-error-spawn-required.kz)
@@ -810,8 +847,8 @@ actor Worker {
 ### U12 (decided, §6) What crosses
 
 What crosses between actors is a value (a string, a number), a collection, a `data` value or an
-immutable class instance where every value it reaches crosses, a function value where every value
-it captures crosses, and an actor's reference; a mutable class instance crosses with `copy` or
+immutable class instance where every value it reaches crosses, a lambda the sending function shows
+where every value it captures crosses (§6, Q5), and an actor's reference; a mutable class instance crosses with `copy` or
 `move` alone, and so does a collection or a `data` value that reaches one, every value it reaches
 crossing or being a mutable class instance (§6, "What may cross between actors"). A message's arguments and its result cross so, and so
 do the arguments of an actor's constructor, which cross as a call's do (§6, the owner,
@@ -839,32 +876,38 @@ fields)*. A value of an interface's type given as a message's result is, by its 
 compile error of a mutable class instance given as a call's result (§6, the owner, 2026-11-15,
 issue 519, comment 6892275110, item 3, option (a), "Same error, by written type").
 An immutable class is one through which nothing
-reachable has a `mut` field, and a value crosses where every value it reaches crosses, a
-collection's items and a `data` value's fields among them, as Rust's `Send` is structural
-*(assumed: the reading of Q14 (i) said back in #519, comment 6882879015, reading 4)*; a
-function value crosses where every value it captures crosses, and a
+reachable has a `mut` field, and a value crosses where every type its type reaches crosses, a
+collection's item type and a `data` value's field types among them, as Rust's `Send` is
+structural and read from types *(assumed: the reading of Q14 (i) said back in #519, comment
+6882879015, reading 4, read by types, as a crossing copies by the parameter's type)*; a lambda
+the sending function shows crosses where every value it captures crosses (§6, Q5), and a
 mutable class instance given as a call's result, where no word can stand, is a compile error (§6,
 the owner, 2026-11-14, #519, comment 6880404917, Q14, "All eight leans (Recommended)"), and that
 error is `send-needs-word`, as rustc gives the same error to a task's output as to its input
 (`tokio::spawn` asks `F::Output: Send`) (§6, the owner, 2026-11-15, #519, comment 6896192351, Q4,
 "Rust: send-needs-word"), at the line of the call *(assumed: that place, since no argument stands
-for a result)*.
+for a result)*, and so is a function value and a value that reaches a value no word makes cross, or
+a mutable class instance, given as a result *(assumed, §6: as rustc asks `Send` of a task's output by
+its type, which Q4 named for a mutable class instance and an interface's value alone)*.
 A collection or a `data` value that reaches a mutable class instance is `send-needs-word` at its
-argument with neither word, and crosses with `copy`, a deep copy of all it reaches up to a function
-value or an actor's reference, or with `move`, every path into it ending, `move-reachable` where
+argument with neither word, and crosses with `copy`, a deep copy of all it reaches up to an actor's
+reference, since one that reaches a function value does not cross (§6, Q5), or with `move`, every path into it ending, `move-reachable` where
 one cannot *(assumed: that reading of §6's `copy` and `move`, carried from a mutable class instance
 to a value that holds one, where rustc reads `Send` through a struct's fields whatever a call
-writes)*. A collection, a `data` value or a class instance that reaches a function value whose
-captures do not cross is `send-needs-word` at its argument with a word or with none, as that
-function value is, the paths `move` ends stopping at a function value it reaches *(assumed: Q24's
+writes)*. A collection, a `data` value or a class instance that reaches a function value is
+`send-needs-word` at its argument with a word or with none, as that function value is, one
+reached through a field or an item being read by its written type (§6, Q5), the paths `move` ends stopping at a function value it reaches *(assumed: Q24's
 cost read for a word at the argument as for that function value, as rustc reads `Send` through a
 struct's fields and a closure's through its captures)*. A reference that crosses names the same
 actor, so that `==` holds across a crossing (§6, the owner, 2026-11-14, #519, comment 6880404917,
 Q10). The deep copy of `copy` stops at a function value it reaches, which the receiver gets as it
 would with no word, copied into its heap with the values it captures where the call crosses (§6,
-the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big unbuilt") and shared by
-its count with them where the call crosses nothing, `copy f` of one whose captures cross among
-them, and at an actor's reference, which the receiver gets naming the same
+the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big unbuilt"), there only
+the argument itself, a lambda the sending function shows, since one reached through a field or an
+item does not cross (§6, Q5), an instance it captures arriving as the copy that an argument
+reaching the same instance arrives as, in the memo of the call (§6) *(assumed, §6: the memo read
+for what a lambda captures)*, and shared by its count with them where the call crosses nothing, at
+any function value the copy reaches, `copy f` of one whose captures cross among them, and at an actor's reference, which the receiver gets naming the same
 actor, as a reference that crosses names it *(assumed, §6: the stop at a function value, Q24's cost read for a word at the argument, as rustc reads a closure's
 `Send` through its captures; the stop at an actor's reference, as Rust's clone of a channel's
 `Sender` is another sender to the same channel, `impl<T> Clone for Sender<T>`,
@@ -906,11 +949,14 @@ whose lambda the checker does not see, a parameter, a field or a call's result, 
 written type, as a value of an interface's type is: it crosses only as a lambda the function that
 sends it shows, and any other is `send-needs-word`, so that a callback received as a parameter is
 never sent (§6, the owner, 2026-11-15, #519, comment 6896192351, Q5, "By written type")
-*(assumed: that a lambda the function shows is one written at the argument or the one an immutable
-local variable is declared with, and that the named function the answer names stands for no case,
+*(assumed: that a lambda the function shows is one that is the argument itself or the one an
+immutable local variable is declared with, a lambda inside an argument, a field of a construction
+there, being read by its written type, and that the named function the answer names stands for no case,
 since F11 gives a function value through a lambda only)*. `copy` before an argument is a deep copy wherever it is
 written, a call that crosses nothing included, as Rust's `.clone()` stands anywhere (§6, the owner,
-2026-11-15, #519, comment 6896192351, Q6, "Rust: deep copy anywhere"). The sender makes the copy,
+2026-11-15, #519, comment 6896192351, Q6, "Rust: deep copy anywhere"), save that a block the call's
+memo holds is not copied again (Q2), so that an argument's copy of it shows the block as the first
+copy found it *(assumed, §6: the memo of the call and the order of its copies)*. The sender makes the copy,
 at the send; every class instance a crossing reaches is copied, so that identity does not survive
 a crossing; the copy walks a work list and never recurses, so that a chain of a million links crosses on a
 stack of 2 MiB; and a copy runs no program code, no `Text()` and no `equal by` *(assumed, §6: the
@@ -918,16 +964,20 @@ points comment 6895076937 takes as following from §6, which the answers left st
 having its own heap, a crossing copies every counted block it reaches into the receiver's heap,
 small or big, and §6's share of a big value by pointer stays decided and unbuilt, which no program
 can tell from a copy (§6, the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big
-unbuilt"); a `copy` at a call that crosses nothing copies every class instance it reaches and shares
-every other block by its count *(assumed, §6: the answer read for a call inside one heap)*. `copy`
+unbuilt"); a `copy` at a call that crosses nothing copies every block on a path to a class
+instance, the instance among them, and shares by its count only a block that reaches none
+*(assumed, §6: the answer read for a call inside one heap)*. What the copy of a map whose keys
+reach a class instance is stands open (§14). `copy`
 and `move` are words before an argument alone, as `mut` is there (L12), `move` before a parameter's
 type and inside a function type too, as `mut` is before a parameter's (§6, the owner, 2026-11-05,
 issue 156, comment 6657251688), and names everywhere else,
 so that `copy(x)` is the word before `(x)` and a variable named `copy` is called as `(copy)(x)` (§6,
 the owner, 2026-11-13, #519, comment 6847932993, Q10, "Any order + contextual (Recommended)"); a
 `copy` or a `move` followed by `[`, `-`, `*`, `&` or `with`, which go on from a name, is the name,
-so that `copy[0]` reads an item of a list named `copy` *(assumed, §6: as a name before what goes
-on from a name is read, which the answers did not give)*.
+so that `copy[0]` reads an item of a list named `copy`, and so is one that nothing that begins an
+expression follows, so that `f(copy)` passes a variable named `copy` and `f(copy.N)` reads its
+field *(assumed, §6: as a name before what goes on from a name is read, which the answers did not
+give)*.
 
 A `move` ends every path into the value it sends: the checker tracks, in each function, every
 variable that reaches into the value, all of them dead after the `move`, and refuses the `move`
@@ -1007,6 +1057,7 @@ s = spawn Shop()
 s.Place(order)
 f = s.First()
 print("{f.Customer} {f.Items}")
+// `Order` has no `mut` field and no `weak` one, so it compares by content (K4), and the copy of its copy equals it
 print(f == order)
 ```
 
@@ -1035,10 +1086,9 @@ b = spawn Counter()
 h = spawn Hub()
 h.Tell([a, b, a])
 print(a.Get() + b.Get())
-mut names = Map<Counter, string>()
-names[a] = "a"
-print(names[a] ?? "none")
 ```
+
+Case: [actors/references-map-key.kz](../corpus/actors/references-map-key.kz)
 
 Case: [actors/send-needs-word.kz](../corpus/actors/send-needs-word.kz)
 ```kurz
@@ -1088,6 +1138,20 @@ actor Runner {
 t = Tally(1)
 r = spawn Runner()
 r.Run(() => t.Count)
+```
+
+Case: [actors/send-lambda.kz](../corpus/actors/send-lambda.kz)
+```kurz
+class Rate(int Per)
+
+actor Worker {
+    pub int Run(() => int job) => job()
+}
+
+r = Rate(3)
+k = 4
+w = spawn Worker()
+print(w.Run(() => r.Per + k))
 ```
 
 Case: [actors/result-mutable.kz](../corpus/actors/result-mutable.kz)
@@ -1257,6 +1321,30 @@ print(s.Look(copy tag, copy box))
 print(box.N)
 ```
 
+Case: [actors/copy-weak-argument.kz](../corpus/actors/copy-weak-argument.kz)
+```kurz
+class Box(mut int N)
+data Link(weak Box? To)
+
+actor Shelf {
+    pub string Look(weak Box? w, Link l, Box b) {
+        b.N = 2
+        v = w
+        t = l.To
+        if v != null && t != null {
+            return "{v.N} {t.N} {v == b} {t == b}"
+        }
+
+        return "gone"
+    }
+}
+
+box = Box(1)
+s = spawn Shelf()
+print(s.Look(copy box, copy Link(box), copy box))
+print(box.N)
+```
+
 Case: [actors/copy-two-at-call.kz](../corpus/actors/copy-two-at-call.kz)
 ```kurz
 class Cart(mut int Items)
@@ -1269,6 +1357,28 @@ string Both(Cart a, Cart b) {
 cart = Cart(1)
 print(Both(copy cart, copy cart))
 print(cart.Items)
+```
+
+Case: [actors/copy-weak-at-call.kz](../corpus/actors/copy-weak-at-call.kz)
+```kurz
+class Box(mut int N)
+data Link(weak Box? To)
+
+string Look(Box a, Link l, Box b) {
+    b.N = 2
+    t = l.To
+    if t != null {
+        return "{a.N} {t.N} {a == b} {t == b}"
+    }
+
+    return "gone"
+}
+
+box = Box(1)
+print(Look(copy box, copy Link(box), copy box))
+f = (Box a, Link l, Box b) => Look(a, l, b)
+print(f(copy box, copy Link(box), copy box))
+print(box.N)
 ```
 
 Case: [actors/copy-left-to-right.kz](../corpus/actors/copy-left-to-right.kz)
@@ -1778,6 +1888,8 @@ print(s.Load())
 Case: [actors/send-own-method.kz](../corpus/actors/send-own-method.kz)
 
 Case: [actors/this-reference.kz](../corpus/actors/this-reference.kz)
+Case: [actors/references-in-list.kz](../corpus/actors/references-in-list.kz)
+
 
 ### U16 (decided, §6) One error for a construct that breaks two rules
 

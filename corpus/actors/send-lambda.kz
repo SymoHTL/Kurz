@@ -1,0 +1,14 @@
+// expect: output
+// | 7
+// rules: U12
+
+class Rate(int Per)
+
+actor Worker {
+    pub int Run(() => int job) => job()
+}
+
+r = Rate(3)
+k = 4
+w = spawn Worker()
+print(w.Run(() => r.Per + k))
