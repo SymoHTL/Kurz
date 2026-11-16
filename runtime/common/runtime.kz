@@ -4015,8 +4015,8 @@ void Crashed(byte* state, byte* header) {
 // top-level code, the process ends with that error line (`Ends`). The text is copied into the heap of the
 // supervisor of the actor that takes it, as the taken points of comment 6899225864 have it; then the actor
 // falls (`Fall`), and after it each supervisor its policy crashes on the way up, `escalate` passing the
-// crash up whole, while an actor whose constructor runs at its `spawn`, the supervisor of a crash past a limit
-// among them, falls not and passes it to its spawner, ending with it (U3, U25). The actor that takes the crash writes the log line (U24), the supervisor that escalated
+// crash up whole, and an actor whose constructor runs at its `spawn` passing it to its spawner, whose fall
+// ends it (U3, U25). The actor that takes the crash writes the log line (U24), the supervisor that escalated
 // writing none, and restarts after its pause (U22, U23), or ends where its policy is `stop`, where it was to
 // end after its current message or where its supervisor crashed (U25); where its crash passes the limit of
 // its `max N in`, it ends, and its supervisor crashes with `restart-limit` at the line of its `spawn` (U26).
@@ -4044,17 +4044,11 @@ void Fell(byte* state, byte* header, bool hasText, byte* id, long idCount, byte*
             }
         }
 
-        if *Ptr<long>(state - 88) != 4 {
-            Fall(state, header)
-        }
-
+        Fall(state, header)
         mut byte* at = state
         while at != taker {
             byte* up = *Ptr<byte*>(at - 72)
-            if *Ptr<long>(up - 88) != 4 {
-                Fall(up, *Ptr<byte*>(up - 8))
-            }
-
+            Fall(up, *Ptr<byte*>(up - 8))
             at = up
         }
 

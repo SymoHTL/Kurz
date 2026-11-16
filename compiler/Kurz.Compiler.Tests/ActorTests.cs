@@ -2241,6 +2241,26 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_spawn_makes_the_block_of_its_knobs_only_where_it_writes_after_or_max()
+    {
+        // U26: the first pause, the limit's count and window, the ring of the crash times and the place of the `spawn` stand in a block of
+        // their own in the supervisor's heap, made where `after` or `max N in` is written, so that the block of a restart that writes
+        // neither grows by one word alone and an idle actor stays within its 512 bytes (section 13)
+        const string knobs = "{ i64, i64, i64, ptr, i64, i64, i64, %kz.str, i64 }";
+        string Ir(string spawn)
+        {
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", $"actor A {{\n    pub int Get() => 1\n}}\n\na = {spawn}\nprint(a.Get())\n"), [], toolchain.Runtime, true);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            return compilation.Program.Ir;
+        }
+
+        Assert.DoesNotContain(knobs, Ir("spawn A()"), StringComparison.Ordinal);
+        Assert.DoesNotContain(knobs, Ir("spawn A() on crash restart"), StringComparison.Ordinal);
+        Assert.Contains(knobs, Ir("spawn A() on crash restart after 1ms"), StringComparison.Ordinal);
+        Assert.Contains(knobs, Ir("spawn A() on crash restart max 2 in 1min"), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void After_sets_the_first_pause_which_doubles_to_the_cap_and_comes_back_after_a_full_cap()
     {
         // U26: `after 5ms` is the first pause, doubled at each crash, 5, 10 and 20 ms, and after a run of 31 s with no crash 5 ms again;
