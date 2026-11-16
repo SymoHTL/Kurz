@@ -23,7 +23,8 @@ namespace Kurz.Compiler.Tests;
 /// the chains the top-level code starts, and an overflow in a call of the chain. Then crashes (U19 to U24): the state after a restart,
 /// the inbox kept, memory over 10,000 crashes, an overflow restarted, a reply into a caller that crashed, children ending, the pause,
 /// the top-level code's sleep through it, <c>callee-crashed</c>, and the log line; a stack fault inside the allocator, the scheduler and
-/// the copy of a crossing, which ends the process, and the count of their entries back at 0.
+/// the copy of a crossing, which ends the process, and the count of their entries back at 0; and <c>print-failed</c> and
+/// <c>not-char-boundary</c> in a message.
 /// </summary>
 public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -2242,5 +2243,115 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Store#1 crashed: thrown \"no 1\" at program.kz:13", "Front#2 crashed: callee-crashed at program.kz:23"], crashes);
         Ran((run.Code, run.Output, rest), 0, ["40000", "1", "0"], "entries 0\n");
+    }
+
+    [Fact]
+    public async Task A_print_the_system_refuses_inside_a_message_restarts_the_actor_and_its_waiting_caller_gets_callee_crashed()
+    {
+        // U19, U20, U24: `print-failed` raised in `Spam`, once the reader of standard output is gone, is the crash of `Printer`, whose log
+        // line names it at its line; `Ask`, which waits on it, gets `callee-crashed` at its call's line, its own crash; both restart, `Ping`
+        // runs from the kept inbox, and `Count` finds the fresh state
+        const string text = """
+            actor Printer {
+                mut int calls = 0
+
+                pub int Spam() {
+                    calls = calls + 1
+                    mut i = 0
+                    while i < 100000000 {
+                        print("line")
+                        i = i + 1
+                    }
+
+                    return i
+                }
+
+                pub int Count() {
+                    calls = calls + 1
+                    return calls
+                }
+            }
+
+            actor Caller(Printer To) {
+                pub void Ask() {
+                    eprint(To.Spam())
+                }
+
+                pub int Ping() => 7
+            }
+
+            p = spawn Printer()
+            c = spawn Caller(p)
+            send c.Ask()
+            eprint(c.Ping())
+            eprint(p.Count())
+
+            """;
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], StoodIn(print: false), true);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var info = new System.Diagnostics.ProcessStartInfo(toolchain.Build(compilation.Program, "actor-print-failed"))
+        {
+            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
+        };
+        info.Environment["KURZ_TRACE"] = "0";
+        using var process = System.Diagnostics.Process.Start(info)!;
+        try
+        {
+            process.StandardOutput.Close(); // the reader is gone: a write is refused (a closed pipe)
+            var error = process.StandardError.ReadToEndAsync();
+            Assert.True(process.WaitForExit(30_000), "the program did not end once its output was closed");
+            var (crashes, rest) = Logged(await error);
+            Assert.Equal(["Printer#1 crashed: print-failed at program.kz:8", "Caller#2 crashed: callee-crashed at program.kz:23"], crashes);
+            Assert.Equal((0, "7\n1\n"), (process.ExitCode, rest));
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill();
+            }
+        }
+    }
+
+    [Fact]
+    public void A_cut_inside_a_character_in_a_message_restarts_the_actor_and_its_waiting_caller_gets_callee_crashed()
+    {
+        // U19, U20, U24: `not-char-boundary` raised in `Cut` is the crash of `Cutter`, whose log line names it with the text below its error
+        // line at its line; `Ask`, which waits on it, gets `callee-crashed` at its call's line, its own crash; both restart, `Ping` runs from
+        // the kept inbox, and `Count` finds the fresh state
+        const string text = """
+            actor Cutter {
+                mut int calls = 0
+
+                pub string Cut(string s) {
+                    calls = calls + 1
+                    return s.Substring(0, 2)
+                }
+
+                pub int Count() {
+                    calls = calls + 1
+                    return calls
+                }
+            }
+
+            actor Caller(Cutter To) {
+                pub void Ask() {
+                    print(To.Cut("hä"))
+                }
+
+                pub int Ping() => 7
+            }
+
+            t = spawn Cutter()
+            c = spawn Caller(t)
+            send c.Ask()
+            print(c.Ping())
+            print(t.Count())
+
+            """;
+        var run = BuildAndRun(text, StoodIn(print: false), "actor-not-char-boundary");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Cutter#1 crashed: not-char-boundary \"byte 2 is inside a code point\" at program.kz:6", "Caller#2 crashed: callee-crashed at program.kz:17"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["7", "1"], "");
     }
 }
