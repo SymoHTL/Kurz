@@ -14608,3 +14608,16 @@ long RegexTimes(long a, long b) {
 
     return a * b
 }
+
+// ---- the runtime's errors (section 5) -------------------------------------------------------------------------------------
+
+// The kinds of the runtime's own errors: one for each run-time error of the reference's chapter 12, in the order of its table, but
+// `thrown`, which is a `throw` of the program and not the runtime's (design record, section 5, assumed there).
+pub enum RuntimeKind {
+    Overflow, DivideByZero, IndexOutOfRange, ReversedRangeAtRunTime, StackOverflow, PrintFailed, AllocationFailed, NotCharBoundary,
+    RandomFailed, Deadlock, CalleeCrashed, ActorGone, RestartLimit, CpuLacksSet, SettingsUnpublished
+}
+
+// The runtime's own error, the one `data` type of the runtime's errors that is a member of every `Reason` (design record, section 5):
+// its kind, and the detail its error line names, as `HttpError` holds its kind and its detail (section 5, assumed there).
+pub data RuntimeError(RuntimeKind Kind, string Detail)
