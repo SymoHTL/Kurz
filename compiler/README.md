@@ -969,9 +969,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   its tasks ("What the emitter does not emit" names what of section 6 this does not build): `spawn`
   constructs the state as an instance of the actor's body is constructed, both its counts at one (K1,
   K7), in the first block of the actor's own heap, which the runtime's `ActorHeapNew` makes and
-  `ActorNew` fills, the actor's record in the 64 bytes in front of it, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps
+  `ActorNew` fills, the actor's record in the 96 bytes in front of it, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps
   the alignment of the allocator's block, as Rust's `ArcInner` pads its counts to what it holds, a
-  `Vector128` field's 16 among it: its heap, the actor spawned before it, by which the runtime's
+  `Vector128` field's 16 among it: the name of its type and two words the emitted code holds (U2),
+  whether it runs, waits for its restart, ends after its current message or ended (U19, U22), the
+  block of its restart, which its supervisor's heap holds, null where it does not restart (U22), its
+  supervisor, null for the top-level code (U13), its heap, the actor spawned before it, by which the runtime's
   `EndActors` reaches every actor, the size of the stack its messages run on, 2 MiB or what its
   `stack` clause sets (U1), the actor's number, the first and the last
   message of its inbox, the actor after it in the run queue, and the activation at the top of its
