@@ -1,0 +1,21 @@
+// expect: output
+// | type's block at 13
+// | 1
+// rules: U31
+
+string Note(int line) => "type's block at {line}"
+
+actor Worker on crash (c) {
+    print(Note(c.Place.Line))
+    restart
+} {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+w = spawn Worker()
+send w.Fail()
+print(w.Ping())

@@ -3238,6 +3238,57 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_call_sent_to_a_child_whose_block_is_pending_waits_in_its_inbox_for_the_restart()
+    {
+        // U34: while its block waits behind `Go`, the child takes no message, so that the `Note` that `Go` sends it waits in its kept
+        // inbox and runs on the instance the block's restart constructs, whose `n` is 0 again (S11 of comment 6907441402)
+        const string text = """
+            actor Other {
+                pub int Ping() => 1
+            }
+
+            actor Worker {
+                mut int n = 0
+
+                pub void Fail() {
+                    n = 5
+                    throw "worker fails"
+                }
+
+                pub void Note() {
+                    print("note {n}")
+                }
+
+                pub int Get() => n
+            }
+
+            actor Boss {
+                pub Worker Go(Other other) {
+                    kid = spawn Worker() on crash (c) {
+                        print("block")
+                        restart
+                    }
+
+                    send kid.Fail()
+                    print(other.Ping())
+                    send kid.Note()
+                    return kid
+                }
+            }
+
+            o = spawn Other()
+            b = spawn Boss()
+            w = b.Go(o)
+            print(w.Get())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-pending-call");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Worker#3 crashed: thrown \"worker fails\" at program.kz:10"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["1", "block", "note 0", "0"], "");
+    }
+
+    [Fact]
     public void An_overflow_a_block_escalates_to_the_root_reads_as_the_runtimes_stack_overflow()
     {
         // U30, U34: the overflow's `Reason` is the runtime's error of the kind `StackOverflow`, and its escalation ends the process with

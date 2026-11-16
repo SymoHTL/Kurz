@@ -1,0 +1,19 @@
+// expect: output
+// | died: worker fails
+// | 1
+// rules: U28, U33
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash (c) {
+    print("died: {c.Reason}")
+    restart
+}
+send w.Fail()
+print(w.Ping())
