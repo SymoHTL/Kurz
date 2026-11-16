@@ -529,7 +529,7 @@ public sealed class Parser
                 case "break": Advance(); return new BreakStatement(token.Line); // C7
                 case "continue": Advance(); return new ContinueStatement(token.Line); // C7
                 case "return" when deciding:
-                    // U29: the block decides with its words, and a path of it ends with one (assumed: S3 of 2026-11-16, comment 6907441402)
+                    // U29: the block decides with its words, and a path of it ends with one (assumed: S3 of issue 519, comment 6907441402)
                     throw new ParseError(token.Line, "`return` in the block of `on crash`, which ends a path with `restart`, `stop` or `escalate` (U29)");
                 case "return": Advance(); return new ReturnStatement(token.Line, EndsStatement() ? null : ParseExpression());
                 case "throw":
@@ -1885,7 +1885,7 @@ public sealed class Parser
     /// type, which names the crash, and the block on the same line, whose statements <c>restart</c>, <c>stop</c> and <c>escalate</c> are
     /// its decisions (<see cref="ParseDecision"/>), held as a lambda of that parameter (section 6, the owner, 2026-11-15, #519, comment
     /// 6902210646, Q2). No name, a second one, a written type, a block on the next line and a <c>return</c> in it are <c>syntax</c> (E4;
-    /// assumed: S3 of 2026-11-16, comment 6907441402, a typed parameter and <c>return</c> among it).
+    /// assumed: S3 of issue 519, comment 6907441402, a typed parameter and <c>return</c> among it).
     /// </summary>
     private CrashPolicy ParseCrashBlock(int line)
     {
@@ -1922,7 +1922,7 @@ public sealed class Parser
 
     /// <summary>
     /// U29: <c>restart</c>, <c>stop</c> or <c>escalate</c> as a statement of the block of <c>on crash</c>, which ends its statement: a word
-    /// after it, a knob of <c>restart</c> among them, is <c>syntax</c> (assumed: S3 of 2026-11-16, comment 6907441402, <c>restart</c> with no
+    /// after it, a knob of <c>restart</c> among them, is <c>syntax</c> (assumed: S3 of issue 519, comment 6907441402, <c>restart</c> with no
     /// knobs, as Akka's directive carries none).
     /// </summary>
     private DecisionStatement ParseDecision()

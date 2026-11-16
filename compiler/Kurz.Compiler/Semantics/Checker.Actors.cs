@@ -586,7 +586,7 @@ public sealed partial class Checker
     /// U28 to U31: the block of a policy, <c>on crash (c) { ... }</c>, of the actor <paramref name="child"/>, read as the body of a lambda of
     /// its one parameter, the crash, a <c>Crashed</c> of <c>std/</c> whose <c>Reason</c> is the child's (section 5): where it stands at
     /// <c>spawn</c>, it takes the variables around it by value and reads the fields of the actor whose code spawns, as a lambda there does
-    /// (F15, K7), and after a type's name it reads what a top-level function reads (F16; assumed: S6 and S7 of 2026-11-16, issue 519,
+    /// (F15, K7), and after a type's name it reads what a top-level function reads (F16; assumed: S6 and S7 of issue 519,
     /// comment 6907441402); each path of it ends with a decision or a <c>throw</c>, and one that ends with neither is <c>missing-return</c>,
     /// as for a lambda whose path ends with no value (F3; the owner, 2026-11-16, comment 6919351399, "missing-return error"). Whether it
     /// reported an error. The <c>Reason</c> read is the one the reading before found (<see cref="Check(ProgramSyntax, DiagnosticBag)"/>):
@@ -639,6 +639,7 @@ public sealed partial class Checker
         frame = outer;
         var reported = Pop(commit: reasons is not null).Count > 0;
         model.RecordLambda(l, new LambdaInfo([parameter], block.Captures.ToList(), new FunctionType([type], Types.Void)));
+        model.RecordCrashReason(type.TypeArguments[0]);
         return reported && reasons is not null;
     }
 
