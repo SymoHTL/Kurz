@@ -20,8 +20,8 @@ public sealed record NullableType(int Line, TypeSyntax Inner) : TypeSyntax(Line)
 /// <summary><c>A | B</c> (D9).</summary>
 public sealed record UnionType(int Line, IReadOnlyList<TypeSyntax> Cases) : TypeSyntax(Line);
 
-/// <summary><c>(int) => bool</c> (F11).</summary>
-public sealed record FunctionType(int Line, IReadOnlyList<TypeSyntax> Parameters, TypeSyntax Result) : TypeSyntax(Line);
+/// <summary><c>(int) => bool</c> (F11), with <c>move</c> before a parameter's type where <paramref name="Moves"/> says so, <c>(move Cart) => void</c> (U12); null where no parameter has it.</summary>
+public sealed record FunctionType(int Line, IReadOnlyList<TypeSyntax> Parameters, TypeSyntax Result, IReadOnlyList<bool>? Moves = null) : TypeSyntax(Line);
 
 /// <summary><c>weak T?</c> (R3, R5). The inner type is what was written after <c>weak</c>, with or without its <c>?</c>.</summary>
 public sealed record WeakType(int Line, TypeSyntax Inner) : TypeSyntax(Line);
@@ -294,8 +294,12 @@ public enum Modifiers
     Internal = 512, // F9: visible to the files of the folder that declares it
 }
 
-/// <summary>A parameter of a function, a lambda or a primary constructor: <c>mut</c> (M7), a type (absent on an untyped lambda parameter), a name and a default (D11).</summary>
-public sealed record Parameter(int Line, bool Mut, TypeSyntax? Type, string Name, Expression? Default);
+/// <summary>
+/// A parameter of a function, a lambda or a primary constructor: <c>mut</c> (M7), a type (absent on an untyped lambda parameter), a name
+/// and a default (D11); <paramref name="Move"/> where <c>move</c> stands before its type, or before the name of an untyped lambda
+/// parameter, a parameter the function may send (U12; section 6, a parameter written <c>move</c>).
+/// </summary>
+public sealed record Parameter(int Line, bool Mut, TypeSyntax? Type, string Name, Expression? Default, bool Move = false);
 
 /// <summary>
 /// A type parameter with its limit (T19): <c>T</c>, <c>T: Comparable</c>; or one that holds a constant of a type, with its default

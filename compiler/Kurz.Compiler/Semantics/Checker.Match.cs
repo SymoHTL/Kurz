@@ -44,6 +44,8 @@ public sealed partial class Checker
         var allEnd = true;
         var start = frame.Known; // N3: each arm starts with what held after the subject, and after the match holds what every arm that completes keeps
         var reaching = new List<ImmutableHashSet<NullPath>>();
+        var startMoves = frame.Moves; // U12: each arm is a branch (comment 6897444564)
+        var movesReaching = new List<MoveState>();
         var subjectPath = Types.NonNull(subjectType) is not null ? PathOf(subject) : null; // N3: a nullable variable or path of fields the arms test
         var nullNamed = false;
         var kind = KindMatch(subject, typed); // T33: a `match` on `T.Kind` in a copy reads the one arm that takes the copy's kind
@@ -54,6 +56,8 @@ public sealed partial class Checker
         {
             PushScope();
             frame.Known = start;
+            frame.Moves = startMoves;
+            var reached = reaching.Count;
             KurzType? patternType = null;
             var (coveredBefore, literalsBefore) = (covered.Count, literals.Count);
             switch (arm.Pattern)
@@ -114,6 +118,7 @@ public sealed partial class Checker
                         if (tp.Binding is not null)
                         {
                             DeclareChecked(tp.Binding, type, false, VariableKind.Binding, arm.Line, tp);
+                            BindRegion(model.DeclarationOf(tp), subject, tp); // U12: a binding joins its subject's region (comment 6897444564)
                         }
 
                         break;
@@ -253,10 +258,15 @@ public sealed partial class Checker
             }
 
             PopScope();
+            if (reaching.Count > reached)
+            {
+                movesReaching.Add(frame.Moves);
+            }
         }
 
         fieldsLoopDepth = loops;
         frame.Known = Join(reaching, start);
+        frame.Moves = MoveState.Join(movesReaching, startMoves);
 
         if (kind is { } k)
         {
@@ -422,7 +432,7 @@ public sealed partial class Checker
         var cases = result.Type is UnionType u && Types.NonNull(u) is null ? u.Cases.ToList() : [result.Type]; // N8: a `T?` is no outcome list
         var success = cases[0];
         var rest = cases.Skip(1).ToList();
-        CheckElseArms(e.Arms, success, rest, e.Line, e.Line, "a call with no case beside its success (O5, C4)", "the call can return beside its success (O5, T1)"); // `e.Line` is the `else` keyword's
+        CheckElseArms(e.Arms, success, rest, e.Line, e.Line, "a call with no case beside its success (O5, C4)", "the call can return beside its success (O5, T1)", e.Call); // `e.Line` is the `else` keyword's
 
         if (!isStatement && Types.IsVoid(success))
         {
@@ -440,7 +450,7 @@ public sealed partial class Checker
     /// <c>else =&gt;</c> arm there is (section 5, the owner, 2026-11-02). An arm of a type that is none of the cases is
     /// <c>type-mismatch</c>, "is no case" followed by <paramref name="wrong"/>, which names the call (O5) or the loop (S16).
     /// </summary>
-    private void CheckElseArms(IReadOnlyList<MatchArm> arms, KurzType success, List<KurzType> rest, int line, int elseLine, string after, string wrong)
+    private void CheckElseArms(IReadOnlyList<MatchArm> arms, KurzType success, List<KurzType> rest, int line, int elseLine, string after, string wrong, Expression? subject = null)
     {
         if (arms.Count == 0 && rest.Count == 0)
         {
@@ -453,10 +463,14 @@ public sealed partial class Checker
         var armWrong = false;
         var start = frame.Known; // N3: the success goes on with what held after the call, an arm with that too, and after both holds what each keeps
         var reaching = new List<ImmutableHashSet<NullPath>> { start };
+        var startMoves = frame.Moves; // U12: each arm is a branch
+        var movesReaching = new List<MoveState> { startMoves };
         foreach (var arm in arms)
         {
             PushScope();
             frame.Known = start;
+            frame.Moves = startMoves;
+            var reached = reaching.Count;
             switch (arm.Pattern)
             {
                 case ElsePattern:
@@ -499,6 +513,10 @@ public sealed partial class Checker
                         if (tp.Binding is not null)
                         {
                             DeclareChecked(tp.Binding, type, false, VariableKind.Binding, arm.Line, tp);
+                            if (subject is not null)
+                            {
+                                BindRegion(model.DeclarationOf(tp), subject, tp); // U12: a binding joins the region of the call it takes a case of (comment 6897444564)
+                            }
                         }
 
                         break;
@@ -520,9 +538,14 @@ public sealed partial class Checker
             }
 
             PopScope();
+            if (reaching.Count > reached)
+            {
+                movesReaching.Add(frame.Moves);
+            }
         }
 
         frame.Known = Join(reaching, start);
+        frame.Moves = MoveState.Join(movesReaching, startMoves);
         if (!hasElse && !armWrong)
         {
             // E1: an arm that names no case was reported at the arm; which case it meant is unknown, so no case is reported as unlisted

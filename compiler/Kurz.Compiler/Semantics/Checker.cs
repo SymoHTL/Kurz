@@ -149,6 +149,7 @@ public sealed partial class Checker
 
         var checker = new Checker(diagnostics, grants, folders, std);
         checker.Run(program);
+        checker.KeepOneUseAfterMove();
         foreach (var lint in checker.lints.Values)
         {
             diagnostics.Add(lint);
@@ -220,6 +221,9 @@ public sealed partial class Checker
 
         /// <summary>N3, N7: the variables and paths of fields that the flow of the code shows are not null where the checker reads; a lambda starts with what held where it was made (F15).</summary>
         public ImmutableHashSet<NullPath> Known { get; set; } = [];
+
+        /// <summary>U12, section 6: the regions of the variables and the moves that may have ended them, joined where <see cref="Known"/> is; a lambda starts with what its code saw moved (F15).</summary>
+        public MoveState Moves { get; set; } = MoveState.Empty;
 
         /// <summary>N3: the loops around the code being read, innermost last, with what held at each <c>break</c> and <c>continue</c> of theirs that can be reached.</summary>
         public List<LoopExits> Loops { get; } = [];
@@ -1137,6 +1141,11 @@ public sealed partial class Checker
 
         foreach (var p in d.PrimaryConstructor ?? [])
         {
+            if (p.Move)
+            {
+                NotSupported(p.Line, "`move` before a field of a primary constructor, which section 6 writes before a parameter (U12)");
+            }
+
             if (p.Mut)
             {
                 Report(ErrorIds.Syntax, p.Line, $"`mut` on the field `{p.Name}` of a data type has no meaning: the variable that holds the value decides (D4)");
@@ -1200,7 +1209,7 @@ public sealed partial class Checker
                         return Types.Error;
                     }
 
-                    return parameters.Any(Types.IsError) || Types.IsError(result) ? Types.Error : new FunctionType(parameters, result);
+                    return parameters.Any(Types.IsError) || Types.IsError(result) ? Types.Error : new FunctionType(parameters, result, f.Moves);
                 }
 
             case WeakType w:
@@ -1586,7 +1595,12 @@ public sealed partial class Checker
                 Report(ErrorIds.Redeclared, p.Line, $"the parameter `{p.Name}` is declared already (V9)");
             }
 
-            symbol.Parameters.Add(new ParameterSymbol(p.Name, type, p.Mut, p.Default is not null, p.Line));
+            if (p.Move && (d.Modifiers & Modifiers.Naked) != 0)
+            {
+                NotSupported(p.Line, "`move` before a parameter of a `naked` function (U12, R12)");
+            }
+
+            symbol.Parameters.Add(new ParameterSymbol(p.Name, type, p.Mut, p.Default is not null, p.Line, p.Move));
         }
     }
 
@@ -1756,7 +1770,7 @@ public sealed partial class Checker
         frame = new Frame { ReturnType = f.ReturnType, Line = d.Line, TypeParameters = f.TypeParameters, Reserved = reservedTopLevel, Copy = copies.GetValueOrDefault(f) };
         foreach (var (p, node) in f.Parameters.Zip(d.Parameters))
         {
-            DeclareParameter(p.Name, p.Type, p.Mut, p.Line, node);
+            DeclareParameter(p.Name, p.Type, p.Mut, p.Line, node, p.Move);
         }
 
         var returnType = f.ReturnType;
@@ -1834,7 +1848,7 @@ public sealed partial class Checker
         return e;
     }
 
-    private VariableSymbol DeclareParameter(string name, KurzType type, bool mut, int line, Parameter node)
+    private VariableSymbol DeclareParameter(string name, KurzType type, bool mut, int line, Parameter node, bool move = false)
     {
         if (frame.Reserved is not null && frame.Reserved.Contains(name))
         {
@@ -1850,9 +1864,14 @@ public sealed partial class Checker
             Report(ErrorIds.Redeclared, line, $"`{name}` is visible already (V9)"); // a function's, a type's or `print`'s name, as for a local
         }
 
-        var symbol = new VariableSymbol(name, type, mut, VariableKind.Parameter, line);
+        var symbol = new VariableSymbol(name, type, mut, VariableKind.Parameter, line) { Move = move };
         frame.Scope.Variables[name] = symbol;
         model.RecordDeclaration(node, symbol);
+        if (move)
+        {
+            BindRegion(symbol, null, node); // section 6: a parameter written `move` starts a region of its own, the function's to send
+        }
+
         return symbol;
     }
 
@@ -1995,6 +2014,7 @@ public sealed partial class Checker
         if (frame.Scope.Variables.Count > 0)
         {
             frame.Known = Unweak(frame.Known); // N9: the end of a block that declares a variable lets go of counts, which can free a `weak` target
+            EndRegions(frame.Scope);
         }
 
         frame.Scope = frame.Scope.Parent!;
@@ -2124,28 +2144,35 @@ public sealed partial class Checker
                     CheckCondition(i.Condition);
                     var constant = ConstantCondition(i.Condition);
                     var start = frame.Known;
+                    var startMoves = frame.Moves; // U12: each branch with what was moved before it; after the `if`, what any branch that completes moved
                     var unreached = frame.Unreached;
                     var (whenTrue, whenFalse) = ConditionTests(i.Condition, calls);
                     frame.Known = start.Union(whenTrue);
                     frame.Unreached = unreached || constant == false;
                     var then = CheckBlock(i.Then);
                     var afterThen = frame.Known;
+                    var movesThen = frame.Moves;
                     frame.Known = start.Union(whenFalse);
+                    frame.Moves = startMoves;
                     frame.Unreached = unreached || constant == true;
                     var other = i.Else is null ? Flow.Completes : CheckStatement(i.Else);
                     frame.Unreached = unreached;
                     var reaching = new List<ImmutableHashSet<NullPath>>();
+                    var movesReaching = new List<MoveState>();
                     if (then == Flow.Completes && constant != false)
                     {
                         reaching.Add(afterThen);
+                        movesReaching.Add(movesThen);
                     }
 
                     if (other == Flow.Completes && constant != true)
                     {
                         reaching.Add(frame.Known);
+                        movesReaching.Add(frame.Moves);
                     }
 
                     frame.Known = Join(reaching, start);
+                    frame.Moves = MoveState.Join(movesReaching, startMoves);
                     return constant switch
                     {
                         true => then,
@@ -2177,6 +2204,7 @@ public sealed partial class Checker
                 else if (!frame.Unreached)
                 {
                     frame.Loops[^1].Breaks.Add(frame.Known); // N3: what holds after the loop; F3: a `break` that is reached lets the loop end
+                    frame.Loops[^1].BreakMoves.Add(frame.Moves);
                 }
 
                 return Flow.Ends;
@@ -2192,6 +2220,7 @@ public sealed partial class Checker
                 else if (!frame.Unreached)
                 {
                     frame.Loops[^1].Continues.Add(frame.Known); // N3: what holds at the loop's head, from a `continue` that is reached
+                    frame.Loops[^1].ContinueMoves.Add(frame.Moves);
                 }
 
                 return Flow.Ends;
@@ -2425,6 +2454,7 @@ public sealed partial class Checker
 
         Declare(v.Name, type, v.Mut, VariableKind.Local, v.Line, v);
         Assigned(new NullPath(model.DeclarationOf(v), string.Empty), type, t); // N7: a value that is not null, as C# reads a declaration
+        BindRegion(model.DeclarationOf(v), v.Value, v); // U12
     }
 
     /// <summary>V8: an assignment where the name is visible, a declaration where it is not; F16 inside a top-level function.</summary>
@@ -2496,6 +2526,7 @@ public sealed partial class Checker
             variable.Changed = true;
             model.RecordAssignment(a, variable);
             Assigned(new NullPath(variable, string.Empty), variable.Type, value); // N7
+            BindRegion(variable, a.Value, a); // U12: the variable holds a value of its own again, which no move ended
             return;
         }
 
@@ -2526,6 +2557,7 @@ public sealed partial class Checker
         }
 
         Declare(a.Name, type, false, VariableKind.Local, a.Line, a);
+        BindRegion(model.DeclarationOf(a), a.Value, a); // U12
     }
 
     /// <summary>M4, D4: an assignment into a path of fields from a variable; a path through an index is not read (M9's map is not read).</summary>
@@ -2604,6 +2636,7 @@ public sealed partial class Checker
             variable.Read = true; // V6: an assignment into a path reads the variable
             model.RecordName(name, variable);
             model.RecordType(name, new Typed(variable.Type));
+            UseOfMoved(name, variable, a.Line); // U12: an assignment into a path is a use of the variable
             RequireRawForState(variable, a.Line);
             if (Types.IsError(variable.Type))
             {
@@ -2725,6 +2758,10 @@ public sealed partial class Checker
         }
 
         Assigned(through, current, value); // N7, N9: a path of `data` fields is narrowed by its assignment as a variable is
+        if (changed is not null)
+        {
+            Merge([TagsOf(changed), RegionOf(a.Value)]); // U12: the value joins the region of the variable it is stored in
+        }
     }
 
     /// <summary>Reads the parts of a statement the checker does not read, with their diagnostics dropped, so that the variables they use count as used (E1).</summary>
@@ -2842,7 +2879,14 @@ public sealed partial class Checker
         }
 
         fieldsLoopDepth += fields ? 1 : 0;
-        CheckLoop(null, f.Body);
+        CheckLoop(null, f.Body, () =>
+        {
+            BindRegion(model.DeclarationOf(f), f.Collection, f); // U12: each round's item, which joins the region of its collection (section 6: a list reaches each value it holds)
+            if (f.Second is not null)
+            {
+                BindRegion(model.DeclarationOf(f.Second), f.Collection, f.Second);
+            }
+        });
         fieldsLoopDepth -= fields ? 1 : 0;
         PopScope();
         if (untyped && f.Arms is not null)
@@ -2854,7 +2898,7 @@ public sealed partial class Checker
             // S16: the cases a pull fails with are handled by the arms of the `else` after the block, as a call's (O5), and every other
             // one leaves the function at the loop's line (O2, O3, O9); a collection that fails with none gives its arms no case
             var over = Unwrap(f.Collection) is RangeExpression ? "a range" : failing ?? Types.A(model.TypeOf(f.Collection).Type);
-            CheckElseArms(f.Arms ?? [], Types.Void, failures?.Cases.Skip(1).ToList() ?? [], f.Line, f.ElseLine, $"a loop over {over}, whose collection fails with no case (S16, C4)", $"a loop over {over} fails with (S16, T1)");
+            CheckElseArms(f.Arms ?? [], Types.Void, failures?.Cases.Skip(1).ToList() ?? [], f.Line, f.ElseLine, $"a loop over {over}, whose collection fails with no case (S16, C4)", $"a loop over {over} fails with (S16, T1)", f.Collection);
         }
 
         KurzType Report(int line, KurzType type)

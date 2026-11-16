@@ -331,7 +331,7 @@ public sealed partial class Emitter
     private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, (Expression Value, Unit File)?> slotDefault, bool cConvention, bool owned, bool crossing = false)
     {
         var values = new string?[c.Arguments.Count];
-        var session = crossing ? CallSession(Enumerable.Range(0, c.Arguments.Count).Count(i => info.Binding[i] >= 0 && !slotMut(info.Binding[i]) && ReachesInstance(Sub(slotType(info.Binding[i]))))) : null;
+        var session = crossing ? CallSession(Enumerable.Range(0, c.Arguments.Count).Count(i => info.Binding[i] >= 0 && !slotMut(info.Binding[i]) && !Model.IsMove(c.Arguments[i].Value) && ReachesInstance(Sub(slotType(info.Binding[i]))))) : null;
         for (var i = 0; i < c.Arguments.Count; i++)
         {
             var slot = info.Binding[i];
@@ -339,6 +339,15 @@ public sealed partial class Emitter
             {
                 var a = c.Arguments[i].Value;
                 var type = Sub(slotType(slot));
+                var takes = owned || TakesSlot(c, info, slot); // U12: a parameter written `move` owns its argument
+                if (Model.IsMove(a))
+                {
+                    // U12: the value goes to the place with no copy and no count changed (comment 6895076937)
+                    var moved = Convert(MovedValue(a), TypeOf(a), type, a.Line);
+                    values[i] = takes ? moved : Temp(moved, type);
+                    continue;
+                }
+
                 if (crossing && ReachesInstance(type))
                 {
                     // U12: each argument copied where it is evaluated, left to right, in the call's session
@@ -347,8 +356,8 @@ public sealed partial class Emitter
                     continue;
                 }
 
-                var value = owned ? Owned(a) : EmitExpression(a);
-                values[i] = Convert(value, TypeOf(a), type, a.Line, owned);
+                var value = takes ? Owned(a) : EmitExpression(a);
+                values[i] = Convert(value, TypeOf(a), type, a.Line, takes);
             }
         }
 

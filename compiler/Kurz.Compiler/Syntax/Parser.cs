@@ -1518,11 +1518,12 @@ public sealed class Parser
     {
         var start = Current;
         var mut = MatchKeyword("mut");
+        var move = !mut && MoveWord(); // U12: `move` before the type, or before an untyped lambda parameter, read as `mut` is
         TypeSyntax? type = null;
         if (typesOptional && At(TokenKind.Name) && Peek().Kind is TokenKind.Comma or TokenKind.RightParen)
         {
             var only = Advance();
-            return new Parameter(start.Line, mut, null, only.Text, null);
+            return new Parameter(start.Line, mut, null, only.Text, null, move);
         }
 
         type = ParseType();
@@ -1533,7 +1534,23 @@ public sealed class Parser
             defaultValue = ParseExpression(); // D11, F12: a default value after the name, `int Count = 1`
         }
 
-        return new Parameter(start.Line, mut, type, name.Text, defaultValue);
+        return new Parameter(start.Line, mut, type, name.Text, defaultValue, move);
+    }
+
+    /// <summary>
+    /// U12: <c>move</c> before a parameter's type or before a parameter of a function type (section 6, a parameter written <c>move</c>),
+    /// taken where a type or a name follows it, as <c>mut</c> stands there; before anything else it is a name, so that a parameter or a
+    /// type named <c>move</c> reads as before, <c>(move) => void</c> and <c>int move</c>.
+    /// </summary>
+    private bool MoveWord()
+    {
+        if (!At(TokenKind.Name) || Current.Text != "move" || !(Peek().Kind is TokenKind.Name or TokenKind.LeftParen || (Peek().Kind == TokenKind.Keyword && CoreWords.TypeNames.Contains(Peek().Text))))
+        {
+            return false;
+        }
+
+        Advance();
+        return true;
     }
 
     private TypeDeclaration ParseTypeDeclaration(Modifiers modifiers)
@@ -1879,10 +1896,12 @@ public sealed class Parser
             Advance();
             suppressNewlines++;
             var parameters = new List<TypeSyntax>();
+            var moves = new List<bool>();
             if (!At(TokenKind.RightParen))
             {
                 do
                 {
+                    moves.Add(MoveWord()); // U12: `(move Cart) => void`
                     parameters.Add(ParseType());
                 }
                 while (Match(TokenKind.Comma));
@@ -1896,7 +1915,12 @@ public sealed class Parser
                 // F11: the `=>` of a function type reaches to the end of the type, so `(int) => int | NotFound` returns the union, and a
                 // union of a function type and another type is written `((int) => int) | NotFound` (the rule records the owner's choice of
                 // 2026-10-11)
-                return new FunctionType(token.Line, parameters, ParseType());
+                return new FunctionType(token.Line, parameters, ParseType(), moves.Contains(true) ? moves : null);
+            }
+
+            if (moves.Contains(true))
+            {
+                throw new ParseError(token.Line, "`move` stands before a parameter of a function type, `(move Cart) => void` (U12)");
             }
 
             if (parameters.Count == 1)
@@ -1927,6 +1951,11 @@ public sealed class Parser
             if (ParseCoreType() is not FunctionType function)
             {
                 throw new ParseError(token.Line, "`extern \"C\"` before a type takes a function type, `extern \"C\" (int) => void` (R17)");
+            }
+
+            if (function.Moves is not null)
+            {
+                throw new ParseError(token.Line, "a C function's parameter takes no `move`, which a function type of F11 writes (R17, U12)");
             }
 
             return new ExternFunctionType(token.Line, function.Parameters, function.Result);

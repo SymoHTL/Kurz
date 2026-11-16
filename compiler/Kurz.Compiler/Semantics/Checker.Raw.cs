@@ -672,6 +672,7 @@ public sealed partial class Checker
         }
 
         frame.Known = Unweak(frame.Known); // N9: the write lets go of the entry it replaces, whose count can be a `weak` target's last
+        Merge([RegionOf(index.Target), RegionOf(index.Index), RegionOf(a.Value)]); // U12: the key and the value join the map's region
     }
 
     /// <summary>
@@ -700,6 +701,7 @@ public sealed partial class Checker
         }
 
         frame.Known = Unweak(frame.Known); // N9: the write lets go of the item it replaces, whose count can be a `weak` target's last
+        Merge([RegionOf(index.Target), RegionOf(a.Value)]); // U12: the item joins the list's region
     }
 
     /// <summary>
@@ -2037,6 +2039,11 @@ public sealed partial class Checker
             foreach (var p in f.Parameters)
             {
                 var type = p.Type is null ? Types.Error : Resolve(p.Type);
+                if (p.Move)
+                {
+                    NotSupported(p.Line, "`move` before a parameter of a C function (U12, R17)");
+                }
+
                 if (Types.IsVoid(type))
                 {
                     Report(ErrorIds.Syntax, p.Line, "`void` is no type of a parameter (F4)");

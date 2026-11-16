@@ -848,6 +848,12 @@ public sealed partial class Emitter
             return value;
         }
 
+        if (from is FunctionType ff && to is FunctionType tf && !Types.SameMoves(ff, tf))
+        {
+            // U12: the function would borrow an argument its caller hands over as the callee's (Q4 of comment 6657251688)
+            throw Unsupported(line, "a function value whose parameter is not written `move` where its type writes `move`, which the build does not wrap (U12, F11)");
+        }
+
         if (from is ClassType fc && to is ClassType tc)
         {
             return Layout.Fat(tc.Symbol) && !Layout.Fat(fc.Symbol) ? Pair(value, Table(fc.Symbol)) : value; // K6: an instance of a derived class with its class's table

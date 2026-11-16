@@ -1,0 +1,19 @@
+// expect: error move-reachable at 15
+// rules: U12
+
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Add(Cart c) {
+        print(c.Items)
+    }
+}
+
+class Owner(Cart Mine, Shop To) {
+    pub void Give() {
+        To.Add(copy Mine)
+        To.Add(move Mine)
+    }
+}
+
+Owner(Cart(1), spawn Shop()).Give()

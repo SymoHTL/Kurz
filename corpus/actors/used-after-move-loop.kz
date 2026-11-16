@@ -1,0 +1,13 @@
+// expect: error used-after-move at 12
+// rules: U12
+
+class Cart(mut int Items)
+
+void Take(move Cart c) {
+    print(c.Items)
+}
+
+cart = Cart(1)
+for i in 0..<3 {
+    Take(move cart)
+}

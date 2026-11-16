@@ -262,12 +262,19 @@ public sealed record UnionType(IReadOnlyList<KurzType> Cases) : KurzType
     public override int GetHashCode() => HashCode.Combine(Cases[0], Cases.Count);
 }
 
-/// <summary>The type of a function value (F11): <c>(int) => bool</c>.</summary>
-public sealed record FunctionType(IReadOnlyList<KurzType> Parameters, KurzType Result) : KurzType
+/// <summary>
+/// The type of a function value (F11): <c>(int) => bool</c>, with <c>move</c> on a parameter the function may send where
+/// <paramref name="Moves"/> says so, <c>(move Cart) => void</c> (U12; section 6, a parameter written <c>move</c>); null where no
+/// parameter has it.
+/// </summary>
+public sealed record FunctionType(IReadOnlyList<KurzType> Parameters, KurzType Result, IReadOnlyList<bool>? Moves = null) : KurzType
 {
-    public override string Text => $"({string.Join(", ", Parameters.Select(p => p.Text))}) => {(Result is UnionType ? "(" + Result.Text + ")" : Result.Text)}";
+    public override string Text => $"({string.Join(", ", Parameters.Select((p, i) => (MovesAt(i) ? "move " : "") + p.Text))}) => {(Result is UnionType ? "(" + Result.Text + ")" : Result.Text)}";
 
-    public bool Equals(FunctionType? other) => other is not null && Types.AllSame(Parameters, other.Parameters) && Types.Same(Result, other.Result);
+    /// <summary>U12: whether the parameter at <paramref name="index"/> is written <c>move</c>.</summary>
+    public bool MovesAt(int index) => Moves is { } moves && index < moves.Count && moves[index];
+
+    public bool Equals(FunctionType? other) => other is not null && Types.AllSame(Parameters, other.Parameters) && Types.Same(Result, other.Result) && Types.SameMoves(this, other);
 
     public override int GetHashCode() => HashCode.Combine(Parameters.Count, Result);
 }
@@ -551,7 +558,7 @@ public static class Types
             (CommandType, CommandType) => true,
             (ChildProcessType, ChildProcessType) => true,
             (UnionType x, UnionType y) => x.Cases.Count == y.Cases.Count && Same(x.Cases[0], y.Cases[0]) && x.Cases.Skip(1).All(c => y.Cases.Skip(1).Any(d => Same(c, d))),
-            (FunctionType x, FunctionType y) => AllSame(x.Parameters, y.Parameters) && Same(x.Result, y.Result),
+            (FunctionType x, FunctionType y) => AllSame(x.Parameters, y.Parameters) && Same(x.Result, y.Result) && SameMoves(x, y),
             (PointerType x, PointerType y) => Same(x.Pointee, y.Pointee),
             (CFunctionType x, CFunctionType y) => AllSame(x.Parameters, y.Parameters) && Same(x.Result, y.Result),
             (TypeParameterType x, TypeParameterType y) => ReferenceEquals(x.Symbol, y.Symbol),
@@ -565,6 +572,14 @@ public static class Types
 
     /// <summary>R18: the width of a lane of the type in bits.</summary>
     public static int LaneBits(KurzType lane) => lane is PrimitiveType { Kind: Primitive.Float } ? 32 : lane is PrimitiveType { Kind: Primitive.Double } ? 64 : Width(lane);
+
+    /// <summary>U12: whether two function types write <c>move</c> on the same parameters.</summary>
+    public static bool SameMoves(FunctionType a, FunctionType b)
+    {
+        ArgumentNullException.ThrowIfNull(a);
+        ArgumentNullException.ThrowIfNull(b);
+        return Enumerable.Range(0, Math.Max(a.Parameters.Count, b.Parameters.Count)).All(i => a.MovesAt(i) == b.MovesAt(i));
+    }
 
     public static bool AllSame(IReadOnlyList<KurzType> a, IReadOnlyList<KurzType> b)
     {
@@ -621,6 +636,14 @@ public static class Types
         if (from is ErrorType || to is ErrorType || Same(from, to))
         {
             return true;
+        }
+
+        if (from is FunctionType ff && to is FunctionType tf)
+        {
+            // U12: the word goes one way, a parameter without `move` fitting one with it, whose caller's paths end at the call, and a
+            // parameter written `move` fitting none without it, whose callers keep theirs (section 6, the owner, 2026-11-05, issue 156,
+            // comment 6657251688, Q4)
+            return AllSame(ff.Parameters, tf.Parameters) && Same(ff.Result, tf.Result) && Enumerable.Range(0, ff.Parameters.Count).All(i => !ff.MovesAt(i) || tf.MovesAt(i));
         }
 
         if (to is WeakRefType weak)
@@ -862,7 +885,7 @@ public static class Types
                 {
                     var parameters = f.Parameters.Select(p => Substitute(p, map)).ToList();
                     var result = Substitute(f.Result, map);
-                    return parameters.Any(p => p is ErrorType) || result is ErrorType ? Error : new FunctionType(parameters, result);
+                    return parameters.Any(p => p is ErrorType) || result is ErrorType ? Error : new FunctionType(parameters, result, f.Moves);
                 }
 
             case PointerType p:

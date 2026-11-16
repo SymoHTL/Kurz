@@ -451,11 +451,12 @@ public sealed partial class Checker
     /// <summary>
     /// U12, U16: the stage of the arguments of a message or of an actor's constructor, after the own error of each argument (E1), in the
     /// order of U16: <c>send-needs-word</c> of the first argument that does not cross, at its argument, then in the order the arguments are
-    /// written, the build's <c>not supported</c> of a <c>move</c>, which stands where <c>move-reachable</c> would (section 6), and of a
-    /// value the build does not make cross (<see cref="CrossingOf"/>), and <c>mut-in-message</c> of a <c>mut</c> parameter, which
-    /// <paramref name="mutInMessage"/> reports (the owner, 2026-11-15, issue 519, comment 6891937666, item 4); whether it reported one.
+    /// written, the words of <c>move</c> (<see cref="MessageMove"/>: <c>move-at-call</c>, <c>move-reachable</c> and a later argument's
+    /// <c>used-after-move</c>), the build's <c>not supported</c> of a value it does not make cross (<see cref="CrossingOf"/>), and
+    /// <c>mut-in-message</c> of a <c>mut</c> parameter, which <paramref name="mutInMessage"/> reports (the owner, 2026-11-15, issue 519,
+    /// comment 6891937666, item 4); then each <c>move</c> ends what it sends. Whether it reported one.
     /// </summary>
-    private bool CrossingErrors(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, string callee, Action<int> mutInMessage)
+    private bool CrossingErrors(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, bool> slotMove, string callee, Action<int> mutInMessage)
     {
         var limits = new string?[c.Arguments.Count];
         for (var i = 0; i < c.Arguments.Count; i++)
@@ -478,6 +479,7 @@ public sealed partial class Checker
             }
         }
 
+        var moves = new List<(Argument Argument, VariableSymbol? Variable, System.Collections.Immutable.ImmutableHashSet<int> Ends)>();
         for (var i = 0; i < c.Arguments.Count; i++)
         {
             var slot = info.Binding[i];
@@ -492,19 +494,19 @@ public sealed partial class Checker
                 return true;
             }
 
-            if (c.Arguments[i].Word == ArgumentWord.Move)
+            if (MessageMove(c, i, slotMove(slot), moves))
             {
-                NotSupported(c.Arguments[i].Line, "`move` before an argument, whose check of the paths it ends (section 6) the build does not make (U12)");
                 return true;
             }
 
-            if (limits[i] is { } limit)
+            if (limits[i] is { } limit && c.Arguments[i].Word != ArgumentWord.Move)
             {
                 NotSupported(c.Arguments[i].Line, $"{limit}, crossing into an actor (U12)");
                 return true;
             }
         }
 
+        EndMoved(moves);
         return false;
     }
 
@@ -552,7 +554,7 @@ public sealed partial class Checker
         spawning = s.Call;
         var state = CheckExpression(s.Call, null);
         spawning = outer;
-        if (state.IsError || CrossingErrors(s.Call, model.CallOf(s.Call), j => symbol.Constructor[j].Field.Type, _ => false, name, _ => { }))
+        if (state.IsError || CrossingErrors(s.Call, model.CallOf(s.Call), j => symbol.Constructor[j].Field.Type, _ => false, _ => false, name, _ => { }))
         {
             return Typed.Error; // U12: the constructor's arguments cross as a call's do (Q13 of comment 6847932993)
         }
@@ -597,7 +599,7 @@ public sealed partial class Checker
         if (call.Kind == CallKind.Method && call.Function?.Owner is { IsActor: true } own)
         {
             var f = call.Function;
-            if (CrossingErrors(s.Call, call, j => f.Parameters[j].Type, j => f.Parameters[j].Mut, $"{own.Name}.{f.Name}", j =>
+            if (CrossingErrors(s.Call, call, j => f.Parameters[j].Type, j => f.Parameters[j].Mut, j => f.Parameters[j].Move, $"{own.Name}.{f.Name}", j =>
                 Report(ErrorIds.MutInMessage, s.Line, $"`{f.Parameters[j].Name}` of `{own.Name}.{f.Name}` is a `mut` parameter, and a message, as this `send` makes, holds no place of the code that sent it (U9, U11)")))
             {
                 return;
@@ -671,7 +673,7 @@ public sealed partial class Checker
             return typed;
         }
 
-        if (CrossingErrors(c, model.CallOf(c), j => picked.Parameters[j].Type, j => picked.Parameters[j].Mut, $"{symbol.Name}.{picked.Name}", j =>
+        if (CrossingErrors(c, model.CallOf(c), j => picked.Parameters[j].Type, j => picked.Parameters[j].Mut, j => picked.Parameters[j].Move, $"{symbol.Name}.{picked.Name}", j =>
             Report(ErrorIds.MutInMessage, m.Line, $"`{picked.Parameters[j].Name}` of `{symbol.Name}.{picked.Name}` is a `mut` parameter, and a message through a reference holds no place of its caller's (U9)")))
         {
             return Typed.Error;

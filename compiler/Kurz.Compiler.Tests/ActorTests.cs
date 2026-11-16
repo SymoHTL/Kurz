@@ -251,6 +251,215 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(rounds, ListTests.Budget(), "actor-copies-freed"), 0, ["495000"], "");
     }
 
+    /// <summary>
+    /// std/ whose allocator counts the blocks it gives and takes back, read by the program through <c>HttpServer.Allocated()</c> and
+    /// <c>HttpServer.Live()</c>, a class of std/ the program sees (W1).
+    /// </summary>
+    private static readonly Lazy<CheckedRuntime> Blocks = new(() => ListTests.Edited(
+        ("std/std.kz", "pub byte* Allocate(long size) {\n    mut byte* p = null\n", """
+            thread static mut long allocated = 0
+            thread static mut long freed = 0
+
+            pub byte* Allocate(long size) {
+                raw {
+                    allocated = allocated + 1
+                }
+
+                mut byte* p = null
+
+            """),
+        ("std/std.kz", "pub void Free(byte* p, long size) {\n", """
+            pub void Free(byte* p, long size) {
+                raw {
+                    freed = freed + 1
+                }
+
+
+            """),
+        ("std/std.kz", "pub class HttpServer {\n", """
+            pub class HttpServer {
+                pub static long Allocated() {
+                    mut long n = 0
+                    raw {
+                        n = allocated
+                    }
+
+                    return n
+                }
+
+                pub static long Live() {
+                    mut long n = 0
+                    raw {
+                        n = allocated - freed
+                    }
+
+                    return n
+                }
+
+            """)));
+
+    [Fact]
+    public void A_moved_instance_is_the_one_the_receiver_keeps_and_changes()
+    {
+        // U12: `move` hands the instance itself to the actor, which keeps it in its state past the message and changes it there, under the
+        // allocator that makes every freed block inaccessible, after the sender's place of it was let go of through the test for the empty
+        // address (comment 6895076937)
+        const string program = """
+            class Cart(mut int Items) {
+                pub void Add(int n) {
+                    Items = Items + n
+                }
+            }
+
+            actor Shop {
+                mut Cart kept = Cart(0)
+
+                pub void Keep(Cart c) {
+                    c.Add(1)
+                    kept = c
+                }
+
+                pub int Bump() {
+                    kept.Add(10)
+                    return kept.Items
+                }
+            }
+
+            void Give(Shop s) {
+                cart = Cart(1)
+                s.Keep(move cart)
+            }
+
+            shop = spawn Shop()
+            Give(shop)
+            print(shop.Bump())
+            print(shop.Bump())
+
+            """;
+        Ran(BuildAndRun(program, ListTests.Fenced, "actor-move-kept"), 0, ["12", "22"], "");
+    }
+
+    [Fact]
+    public void A_move_allocates_nothing_and_a_copy_allocates_what_it_copies()
+    {
+        // U12: a message with `move` takes as many blocks as one with a number, its own, and one with `copy` takes the copy's too, read
+        // through the count of the allocator (comment 6895076937: `move` copies nothing on one thread)
+        const string program = """
+            class Cart(mut int Items, List<int> Marks)
+
+            actor Shop {
+                pub void Add(Cart c) {
+                    c.Items = c.Items + 1
+                }
+
+                pub void Number(int n) {
+                    print(n)
+                }
+
+                pub int Ping() => 1
+            }
+
+            shop = spawn Shop()
+            shop.Ping()
+            cart = Cart(1, [1, 2, 3])
+            other = Cart(2, [4])
+            start = HttpServer.Allocated()
+            send shop.Number(1)
+            numbered = HttpServer.Allocated()
+            send shop.Add(move cart)
+            moved = HttpServer.Allocated()
+            send shop.Add(copy other)
+            copied = HttpServer.Allocated()
+            shop.Ping()
+            print("number {numbered - start}, move {moved - numbered}, copy {copied - moved - (numbered - start)}")
+
+            """;
+        Ran(BuildAndRun(program, Blocks.Value, "actor-move-allocates"), 0, ["1", "number 1, move 1, copy 2"], "");
+    }
+
+    [Fact]
+    public void Every_block_a_move_hands_on_is_let_go_of_once()
+    {
+        // U12: as many blocks taken back as given, across a second run of each, after a move on one branch, in a loop that takes its list
+        // (comment 6897778812, Q1 (b)), in a loop that assigns the moved variable again, and through a parameter written `move`, kept or
+        // moved on by the function, an actor's method among them, whose message lets go of no such argument; the places a `move` may have
+        // emptied are let go of through the test for the empty address
+        const string program = """
+            class Cart(mut int Items, List<int> Marks)
+
+            actor Shop {
+                pub void Add(Cart c) {
+                    c.Items = c.Items + 1
+                }
+
+                pub void Own(move Cart c) {
+                    c.Items = c.Items + 1
+                }
+
+                pub int Ping() => 1
+            }
+
+            void Branch(Shop s, bool give) {
+                cart = Cart(1, [1])
+                if give {
+                    send s.Add(move cart)
+                }
+            }
+
+            void Loop(Shop s) {
+                carts = [Cart(1, [1]), Cart(2, [2]), Cart(3, [3])]
+                for c in carts {
+                    if c.Items != 2 {
+                        send s.Add(move c)
+                    }
+                }
+            }
+
+            void Again(Shop s) {
+                mut cart = Cart(0, [0])
+                for i in 0..<3 {
+                    send s.Add(move cart)
+                    cart = Cart(i, [i])
+                }
+            }
+
+            void Keep(move Cart c) {
+                c.Items = c.Items + 1
+            }
+
+            void Pass(Shop s, move Cart c) {
+                send s.Add(move c)
+            }
+
+            void Through(Shop s) {
+                one = Cart(1, [1])
+                Keep(move one)
+                two = Cart(2, [2])
+                Pass(s, move two)
+                Keep(move Cart(3, [3]))
+                three = Cart(4, [4])
+                send s.Own(move three)
+            }
+
+            void All(Shop s) {
+                Branch(s, true)
+                Branch(s, false)
+                Loop(s)
+                Again(s)
+                Through(s)
+                s.Ping()
+            }
+
+            shop = spawn Shop()
+            All(shop)
+            first = HttpServer.Live()
+            All(shop)
+            print(HttpServer.Live() - first)
+
+            """;
+        Ran(BuildAndRun(program, Blocks.Value, "actor-move-freed"), 0, ["0"], "");
+    }
+
     [Fact]
     public void An_inbox_nobody_runs_grows_until_the_allocator_ends_the_process()
     {

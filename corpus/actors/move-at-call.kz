@@ -1,0 +1,11 @@
+// expect: error move-at-call at 11
+// rules: U12
+
+class Cart(mut int Items)
+
+void Take(move Cart c) {
+    print(c.Items)
+}
+
+cart = Cart(1)
+Take(cart)

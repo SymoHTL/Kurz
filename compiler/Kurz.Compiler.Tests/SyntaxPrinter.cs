@@ -115,7 +115,7 @@ internal static class SyntaxPrinter
     private static string Mods(Modifiers modifiers) => modifiers == Modifiers.None ? "" : modifiers.ToString().ToLowerInvariant().Replace(", ", " ", StringComparison.Ordinal) + " ";
 
     private static string Parameters(IReadOnlyList<Parameter> parameters) =>
-        string.Join(", ", parameters.Select(p => $"{(p.Mut ? "mut " : "")}{Type(p.Type)}{p.Name}{(p.Default is null ? "" : " = " + Print(p.Default))}"));
+        string.Join(", ", parameters.Select(p => $"{(p.Mut ? "mut " : "")}{(p.Move ? "move " : "")}{Type(p.Type)}{p.Name}{(p.Default is null ? "" : " = " + Print(p.Default))}"));
 
     private static string Arguments(IReadOnlyList<Argument> arguments) =>
         string.Join(", ", arguments.Select(a => $"{(a.Name is null ? "" : a.Name + ": ")}{(a.Word == ArgumentWord.None ? "" : a.Word.ToString().ToLowerInvariant() + " ")}{Print(a.Value)}"));
@@ -142,7 +142,7 @@ internal static class SyntaxPrinter
         NullableType { Inner: FunctionType or UnionType or WeakType or ExternFunctionType } n => "(" + Type(n.Inner).TrimEnd() + ")? ",
         NullableType n => Type(n.Inner).TrimEnd() + "? ",
         UnionType u => string.Join(" | ", u.Cases.Select(c => c is FunctionType or UnionType or ExternFunctionType ? "(" + Type(c).TrimEnd() + ")" : Type(c).TrimEnd())) + " ",
-        FunctionType f => "(" + string.Join(", ", f.Parameters.Select(p => Type(p).TrimEnd())) + ") => " + (f.Result is UnionType ? "(" + Type(f.Result).TrimEnd() + ") " : Type(f.Result)),
+        FunctionType f => "(" + string.Join(", ", f.Parameters.Select((p, i) => (f.Moves?[i] == true ? "move " : "") + Type(p).TrimEnd())) + ") => " + (f.Result is UnionType ? "(" + Type(f.Result).TrimEnd() + ") " : Type(f.Result)),
         WeakType { Inner: UnionType } w => "weak (" + Type(w.Inner).TrimEnd() + ") ",
         WeakType w => "weak " + Type(w.Inner),
         VoidType => "void ",

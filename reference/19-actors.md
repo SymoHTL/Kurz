@@ -849,20 +849,21 @@ captures cross among them, and at an actor's reference, which the receiver gets 
 actor, as a reference that crosses names it *(assumed, §6: the stop at a function value, Q24's cost read for a word at the argument, as rustc reads a closure's
 `Send` through its captures; the stop at an actor's reference, as Rust's clone of a channel's
 `Sender` is another sender to the same channel, `impl<T> Clone for Sender<T>`,
-`library/std/src/sync/mpsc.rs` of Rust 1.100.0, line 646)*. `copy` or `move` before a value that
-crosses with no word, an immutable class instance or a number among them, stands and does what it
-does before a mutable class instance, the receiver getting a deep copy, or the sender's variable
-dead after it and every path into the value ending, `move-reachable` where one cannot, as §6's
-`move` reads of any value it sends *(assumed: as Rust clones or moves a value that is `Send`
-already, the word being no error, and as rustc refuses a move of a borrowed value whatever its type
-(E0505, `MoveBorrow`, `compiler/rustc_borrowck/src/session_diagnostics.rs` of Rust 1.100.0, lines
-318 to 322))*.
+`library/std/src/sync/mpsc.rs` of Rust 1.100.0, line 646)*. `copy` before a value that crosses
+with no word, an immutable class instance or a number among them, stands and does what it does
+before a mutable class instance, the receiver getting a deep copy *(assumed, §6: as Rust clones a
+value that is `Send` already, the word being no error)*. `move` before such a value stands and ends
+the variable it names alone, since a value that crosses with no word joins no region, so that
+`s = x.Name` written before `move x` stays alive; a `move` of a field of `this`, of a static or of a
+parameter not written `move` stays `move-reachable`, as Swift's SE-0414 tracks no `Sendable` value
+and Rust's move of a `Send` binding ends that binding alone (§6, the owner, 2026-11-15, #519,
+comment 6897778812, Q2, "Swift/Rust: that name only").
 
 A use of a variable after its `move` is the compile error `used-after-move`, at the use, naming the
 line of the `move`, on every path on which the value may have moved, as rustc reports a use after a
 move at the use (E0382) (§6, the owner, 2026-11-15, #519, comment 6896192351, Q1, "Rust: at the
-use, own id"); no case expects it, so that its id stands in this rule and not in the table of
-errors, as `move-reachable`'s does (§6). Two paths to one block of a value that crosses, or of a
+use, own id"), and its id has its row in the table of errors, as `move-reachable`'s and
+`move-at-call`'s do, since cases of this rule expect them (§6). Two paths to one block of a value that crosses, or of a
 value after `copy`, arrive as two paths to one copy, as Rust's clone of an `Rc` graph keeps its
 sharing, so that a copy is never larger than its source and a mutable graph keeps its shape (§6,
 the owner, 2026-11-15, #519, comment 6896192351, Q2, "Sharing kept"). The copies one call makes,
@@ -896,12 +897,65 @@ a crossing, and every other block is shared by its count, which no program can t
 the copy walks a work list and never recurses, so that a chain of a million links crosses on a
 stack of 2 MiB; and a copy runs no program code, no `Text()` and no `equal by` *(assumed, §6: the
 points comment 6895076937 takes as following from §6, which the answers left standing)*. `copy`
-and `move` are words before an argument alone, as `mut` is there (L12), and names everywhere else,
+and `move` are words before an argument alone, as `mut` is there (L12), `move` before a parameter's
+type and inside a function type too, as `mut` is before a parameter's (§6, the owner, 2026-11-05,
+issue 156, comment 6657251688), and names everywhere else,
 so that `copy(x)` is the word before `(x)` and a variable named `copy` is called as `(copy)(x)` (§6,
 the owner, 2026-11-13, #519, comment 6847932993, Q10, "Any order + contextual (Recommended)"); a
 `copy` or a `move` followed by `[`, `-`, `*`, `&` or `with`, which go on from a name, is the name,
 so that `copy[0]` reads an item of a list named `copy` *(assumed, §6: as a name before what goes
 on from a name is read, which the answers did not give)*.
+
+A `move` ends every path into the value it sends: the checker tracks, in each function, every
+variable that reaches into the value, all of them dead after the `move`, and refuses the `move`
+with `move-reachable` where the value may be reached from outside the function (§6, the owner,
+2026-11-03, issue 156, comment 6603205575). A function's values form regions, as in Swift's
+SE-0414: a parameter written `move` starts a region of its own, and every other parameter, `this`
+with its fields, the captured variables and the statics form one region outside the function
+*(assumed, §6: the point of comment 6897444564 that the answers left standing)*. A call merges the regions of all its arguments, written `mut` or not, and its result's, as
+SE-0414 does, since `F(a, b)` can store `b` in a `mut` field of `a`, and an argument that crosses
+with no word merges nothing (§6, 2026-11-15, Q2) *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. A lambda joins the regions of what it
+captures, so that `f = () => m.N; send a.T(move m); f()` is `used-after-move` at `f()`, and a
+`move` of a captured variable inside a lambda is `move-reachable` *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. A `match` binding joins its
+subject's region, as a field read does, and each arm is a branch *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. `p with { A = q }` is read
+as a call that takes `p` and `q`, its result joining both regions *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. Branches unite what they
+moved: after an `if`, a `match`, `&&` or `||`, a use is `used-after-move` where any path moved the
+value, and the error names every `move` line that reaches the use *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. In a loop, a `move x` in a
+body that does not assign `x` again before the round ends is `used-after-move` at that `move`,
+moved there in an earlier round; an assignment makes a variable live again, and a variable
+declared in the body is new each round *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. `move p.A` and `move xs[0]` stand and end `p` or `xs`
+with its whole region, as Swift's regions do, which track no single field, and not as Rust's
+partial move; a `move` of a field of `this`, of a static or of a parameter not written `move` is
+`move-reachable`, and so is the `move` of a variable that aliases one of them *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. A use is any
+read of the variable or of a variable in its region, an argument after it in the same call among
+them, `s.Take(move c, c.N)`; an assignment to the variable itself is no use, and one error stands
+for each variable and the `move`s it names (E1) *(assumed, §6: the point of comment 6897444564 that the answers left standing)*.
+
+A `for` loop whose body moves its variable takes its list, as Rust's `for c in carts` takes a list
+it owns: the list is dead after the loop, a use of it there being `used-after-move`, naming the
+line of the `move`, and a list held outside the function, a field of `this` or a parameter not
+written `move`, stays `move-reachable` (§6, the owner, 2026-11-15, #519, comment 6897778812, Q1,
+"Rust: loop takes list"). A parameter written `move` takes an argument written `move`, or one
+written `copy`, since its copy is new, as a parameter written `sending` takes any value in a region
+of its own in Swift (SE-0430); no word before such an argument is `send-needs-word` at a message,
+which U16 reads first, and `move-at-call` at a plain call (§6, the owner, 2026-11-15, #519, comment
+6897778812, Q3, "Swift/Rust: copy fits"), and so is no word at a message before such a parameter of
+a value that crosses with no word, where `send-needs-word` says nothing *(assumed, §6: as at a plain
+call)*. `move` before an argument of a parameter not written `move`, at a call that is no message,
+is `move-at-call`, before what its caller holds too, the call's word checked first (§6, the owner,
+2026-11-05, issue 156, comment 6657251688, Q3) *(assumed, §6: the readings of comment 6666386552 and
+of comment 6668638888)*, at a call outside a statement of a `parallel` block, inside which `move`
+hands the instance to the statement (§6, "Parallel work") *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. A lambda's parameter whose type is
+not written takes `move` from the function type the lambda is given for, a lambda whose parameter
+is written without `move` fits such a type and holds the parameter as its caller's, and one written
+`move` where that type has none is `type-mismatch` (§6, the owner, 2026-11-05, issue 156, comment
+6657251688, Q4). A parameter takes one of `mut` and `move`, `move` standing before its type, a type
+named `move` before a name is read as the word, and a parameter of a C function's type (R17) takes no
+`move`, which is `syntax`, since C code keeps no count *(assumed, §6: as `mut` and `move` are words
+before an argument, which the round did not ask)*. On one thread `move` copies nothing and changes
+no count: the moved place's count becomes the message's or the parameter's, and a variable moved on
+some paths alone is let go of through a null test at its end, as rustc keeps a drop flag (§6, the
+owner, 2026-11-15, #519, comment 6895076937) *(assumed, §6: the point of comment 6897444564 that the answers left standing)*.
 
 Case: [actors/relay.kz](../corpus/actors/relay.kz)
 
@@ -1253,6 +1307,334 @@ match Try(h) {
 print(tag.Of == null)
 ```
 
+Case: [actors/move-mutable.kz](../corpus/actors/move-mutable.kz)
+```kurz
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Add(Cart c) {
+        c.Items = c.Items + 1
+        print("in the shop: {c.Items}")
+    }
+}
+
+cart = Cart(1)
+s = spawn Shop()
+s.Add(move cart)
+print("sent")
+```
+
+Case: [actors/move-parameter.kz](../corpus/actors/move-parameter.kz)
+```kurz
+class Cart(mut int Items)
+
+void Take(move Cart c) {
+    print("took {c.Items}")
+}
+
+cart = Cart(1)
+Take(move cart)
+other = Cart(2)
+Take(copy other)
+print("kept {other.Items}")
+```
+
+Case: [actors/move-in-loop-reassigned.kz](../corpus/actors/move-in-loop-reassigned.kz)
+```kurz
+class Cart(mut int Items)
+
+void Take(move Cart c) {
+    print("took {c.Items}")
+}
+
+mut cart = Cart(0)
+for i in 1..3 {
+    Take(move cart)
+    cart = Cart(i)
+}
+
+print("last {cart.Items}")
+```
+
+Case: [actors/move-on-one-branch.kz](../corpus/actors/move-on-one-branch.kz)
+```kurz
+class Cart(mut int Items)
+
+void Take(move Cart c) {
+    print("took {c.Items}")
+}
+
+void Maybe(bool give, int n) {
+    c = Cart(n)
+    if give {
+        Take(move c)
+    }
+}
+
+Maybe(true, 1)
+Maybe(false, 9)
+Maybe(true, 2)
+```
+
+Case: [actors/move-loop-takes-list.kz](../corpus/actors/move-loop-takes-list.kz)
+```kurz
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Add(Cart c) {
+        print("in the shop: {c.Items}")
+    }
+}
+
+s = spawn Shop()
+carts = [Cart(1), Cart(2), Cart(3)]
+for c in carts {
+    if c.Items != 2 {
+        s.Add(move c)
+    }
+}
+
+print("sent")
+```
+
+Case: [actors/move-crossing-value.kz](../corpus/actors/move-crossing-value.kz)
+```kurz
+class Cart(mut int Items, string Name)
+
+actor Shop {
+    pub void Add(string name) {
+        print("in the shop: {name}")
+    }
+}
+
+cart = Cart(1, "apples")
+s = spawn Shop()
+label = cart.Name
+s.Add(move label)
+print("kept {cart.Name}")
+```
+
+Case: [actors/used-after-move.kz](../corpus/actors/used-after-move.kz)
+```kurz
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Add(Cart c) {
+        print(c.Items)
+    }
+}
+
+cart = Cart(1)
+s = spawn Shop()
+s.Add(move cart)
+print(cart.Items)
+```
+
+Case: [actors/used-after-move-branch.kz](../corpus/actors/used-after-move-branch.kz)
+```kurz
+class Cart(mut int Items)
+
+void Take(move Cart c) {
+    print(c.Items)
+}
+
+void Maybe(bool give) {
+    c = Cart(1)
+    if give {
+        Take(move c)
+    }
+    print(c.Items)
+}
+
+Maybe(true)
+```
+
+Case: [actors/used-after-move-loop.kz](../corpus/actors/used-after-move-loop.kz)
+```kurz
+class Cart(mut int Items)
+
+void Take(move Cart c) {
+    print(c.Items)
+}
+
+cart = Cart(1)
+for i in 0..<3 {
+    Take(move cart)
+}
+```
+
+Case: [actors/used-after-move-region.kz](../corpus/actors/used-after-move-region.kz)
+```kurz
+class Line(mut int Count)
+class Cart(Line First)
+
+void Take(move Cart c) {
+    print(c.First.Count)
+}
+
+void Run() {
+    cart = Cart(Line(1))
+    first = cart.First
+    Take(move cart)
+    print(first.Count)
+}
+
+Run()
+```
+
+Case: [actors/used-after-move-list.kz](../corpus/actors/used-after-move-list.kz)
+```kurz
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Add(Cart c) {
+        print(c.Items)
+    }
+}
+
+s = spawn Shop()
+carts = [Cart(1), Cart(2)]
+for c in carts {
+    s.Add(move c)
+}
+print(carts.Count)
+```
+
+Case: [actors/move-reachable-field.kz](../corpus/actors/move-reachable-field.kz)
+```kurz
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Add(Cart c) {
+        print(c.Items)
+    }
+}
+
+class Owner(Cart Mine, Shop To) {
+    pub void Give() {
+        To.Add(copy Mine)
+        To.Add(move Mine)
+    }
+}
+
+Owner(Cart(1), spawn Shop()).Give()
+```
+
+Case: [actors/move-reachable-parameter.kz](../corpus/actors/move-reachable-parameter.kz)
+```kurz
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Add(Cart c) {
+        print(c.Items)
+    }
+}
+
+void Give(Shop to, Cart cart) {
+    to.Add(move cart)
+}
+
+Give(spawn Shop(), Cart(1))
+```
+
+Case: [actors/move-reachable-capture.kz](../corpus/actors/move-reachable-capture.kz)
+```kurz
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Add(Cart c) {
+        print(c.Items)
+    }
+}
+
+cart = Cart(1)
+give = (Shop s) => s.Add(move cart)
+give(spawn Shop())
+```
+
+Case: [actors/move-reachable-merged.kz](../corpus/actors/move-reachable-merged.kz)
+```kurz
+class Cart(mut int Items)
+class Basket(mut List<Cart> Carts)
+
+actor Shop {
+    pub void Add(Cart c) {
+        print(c.Items)
+    }
+}
+
+void Fill(Basket basket, Shop to) {
+    mut carts = [Cart(1)]
+    c = Cart(2)
+    carts.Add(c)
+    basket.Carts = carts
+    to.Add(move c)
+}
+
+Fill(Basket([]), spawn Shop())
+```
+
+Case: [actors/move-reachable-list.kz](../corpus/actors/move-reachable-list.kz)
+```kurz
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Add(Cart c) {
+        print(c.Items)
+    }
+}
+
+void Send(Shop to, List<Cart> carts) {
+    for c in carts {
+        to.Add(move c)
+    }
+}
+
+Send(spawn Shop(), [Cart(1)])
+```
+
+Case: [actors/move-at-call.kz](../corpus/actors/move-at-call.kz)
+```kurz
+class Cart(mut int Items)
+
+void Take(move Cart c) {
+    print(c.Items)
+}
+
+cart = Cart(1)
+Take(cart)
+```
+
+Case: [actors/move-at-call-plain.kz](../corpus/actors/move-at-call-plain.kz)
+```kurz
+class Cart(mut int Items)
+
+void Show(Cart c) {
+    print(c.Items)
+}
+
+cart = Cart(1)
+Show(move cart)
+```
+
+Case: [actors/first-error-move.kz](../corpus/actors/first-error-move.kz)
+```kurz
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Take(move Cart c, mut int n) {
+        n = c.Items
+    }
+}
+
+void Give(Shop to, Cart cart) {
+    mut n = 0
+    send to.Take(move cart, mut n)
+}
+
+Give(spawn Shop(), Cart(1))
+```
+
 ### U13 (decided, §6) The end of the program drops what is queued
 
 When the top-level code ends, a message that runs in an actor it spawned runs to its end, and the
@@ -1386,8 +1768,11 @@ stage of its arguments an argument's own error comes first, a `type-mismatch` am
 `send-needs-word` (U12), then `mut-in-message` (U9, U11), as rustc reports a type that is not
 `Send` (E0277) in its type check and its borrow check skips a body with a type error (§6, the
 owner, 2026-11-14, #519, comment 6884160133, item 6, option (a), "Rust's order"). `move-reachable`
-of an argument written with `move` (§6, U12) comes after `send-needs-word` too, and between it and
-`mut-in-message` the error of the argument written first comes first, as rustc's borrow check,
+of an argument written with `move` (§6, U12) comes after `send-needs-word` too, and so do
+`move-at-call` of an argument (§6, the owner, 2026-11-15, #519, comment 6897778812, Q3) and
+`used-after-move` of an argument after a `move` in the same call *(assumed, §6: that place, which the
+round of comment 6897444564 did not ask)*, and between them and `mut-in-message` the error of the
+argument written first comes first, as rustc's borrow check,
 whose errors both are, sorts its errors by their place (§6, the owner, 2026-11-15, issue 519,
 comment 6891937666, item 4, option (a), "Rust: by argument order"). An argument's own error
 stands alone before U14's `cannot-infer` of `spawn`'s type arguments, which is said only where every
@@ -1407,6 +1792,8 @@ Case: [actors/first-error-spawn-without-arguments.kz](../corpus/actors/first-err
 Case: [actors/first-error-spawn-required.kz](../corpus/actors/first-error-spawn-required.kz)
 
 Case: [actors/first-error-mut-in-message.kz](../corpus/actors/first-error-mut-in-message.kz)
+
+Case: [actors/first-error-move.kz](../corpus/actors/first-error-move.kz)
 
 ### U17 (decided, §6) A waiting actor takes the calls of its chain
 

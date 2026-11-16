@@ -1,0 +1,23 @@
+// expect: output
+// | in the shop: 1
+// | in the shop: 3
+// | sent
+// rules: U12
+
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Add(Cart c) {
+        print("in the shop: {c.Items}")
+    }
+}
+
+s = spawn Shop()
+carts = [Cart(1), Cart(2), Cart(3)]
+for c in carts {
+    if c.Items != 2 {
+        s.Add(move c)
+    }
+}
+
+print("sent")
