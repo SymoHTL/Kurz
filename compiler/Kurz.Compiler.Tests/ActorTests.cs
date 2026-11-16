@@ -705,6 +705,235 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_lambda_that_crosses_into_an_actor_takes_a_copy_of_its_environment_in_the_actors_heap()
+    {
+        // U12 (the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big unbuilt"): a lambda that captures a string crosses
+        // as a new environment in the actor's heap, the string copied into it, which the actor keeps in its state, so that the heap of
+        // the top-level code holds as many blocks as before the send once its lambda was let go of, and the actor's two more
+        const string program = """
+            actor Keeper {
+                mut () => int kept = () => 0
+
+                pub void Keep(() => int f) {
+                    kept = f
+                }
+
+                pub int Run() {
+                    f = kept
+                    return f()
+                }
+
+                pub long Live() => HttpServer.HeapLive()
+            }
+
+            void Give(Keeper keeper, string text) {
+                send keeper.Keep(() => text.Bytes.Count)
+            }
+
+            k = spawn Keeper()
+            word = "w {k.Run()}"
+            own = HttpServer.HeapLive()
+            held = k.Live()
+            Give(k, word)
+            ran = k.Run()
+            ownLeft = HttpServer.HeapLive() - own
+            heldLeft = k.Live() - held
+            print("{ran} {ownLeft} {heldLeft}")
+
+            """;
+        Ran(BuildAndRun(program, HeapBlocks.Value, "actor-lambda-heap"), 0, ["3 0 2"], "");
+    }
+
+    /// <summary>
+    /// std/ that counts the heaps of the thread, one more at each heap made and one less at each heap freed whole, read by the program
+    /// through <c>HttpServer.Heaps()</c> (design record, section 3).
+    /// </summary>
+    private static (string Path, string Old, string New)[] HeapCount =>
+    [
+        ("std/std.kz", "thread static mut long keptBytes = 0\n", "thread static mut long keptBytes = 0\nthread static mut long heapsLive = 0\n"),
+        ("std/std.kz", "        *Ptr<long>(heap + 40) = 0\n", "        *Ptr<long>(heap + 40) = 0\n        heapsLive = heapsLive + 1\n"),
+        ("std/std.kz", "pub void HeapFree(byte* heap) {\n    raw {\n", "pub void HeapFree(byte* heap) {\n    raw {\n        heapsLive = heapsLive - 1\n"),
+        ("std/std.kz", "pub class HttpServer {\n", """
+            pub class HttpServer {
+                pub static long Heaps() {
+                    mut long n = 0
+                    raw {
+                        n = heapsLive
+                    }
+
+                    return n
+                }
+
+            """),
+    ];
+
+    [Fact]
+    public void A_spawn_left_by_a_case_of_a_later_argument_frees_the_heap_it_made()
+    {
+        // section 3, U12: the heap a `spawn` makes before its arguments, freed whole where a case propagates out of a later argument before
+        // the actor is made (the runtime's `HeapLeft`), once the copy of the earlier argument in it was let go of; the heap of an actor that
+        // was made stays
+        const string program = """
+            actor Holder(string Name, int N) {
+                pub string Text() => "{Name} {N}"
+            }
+
+            int | ParseError Made(string s) {
+                h = spawn Holder("holder {s}", int.Parse(s))
+                return h.Text().Bytes.Count
+            }
+
+            print("spawns")
+            start = HttpServer.Heaps()
+            made = Made("7") else {
+                ParseError => -1
+            }
+
+            kept = HttpServer.Heaps() - start
+            for i in 0..<3 {
+                n = Made("x{i}") else {
+                    ParseError => -1
+                }
+
+                print(n)
+            }
+
+            print("{made} {kept} {HttpServer.Heaps() - start}")
+
+            """;
+        Ran(BuildAndRun(program, ListTests.Edited(HeapCount), "actor-heap-left"), 0, ["spawns", "-1", "-1", "-1", "10 1 1"], "");
+    }
+
+    [Fact]
+    public void A_constructor_that_waits_inside_a_message_allocates_in_the_new_actors_heap_again()
+    {
+        // section 3, U3, U4: a default of an actor's body whose call waits, inside the message of another actor, parks that message, which
+        // its actor's heap serves when it resumes; the runtime's `Wait` then serves the heap of the actor `spawn` makes again, so that the
+        // string the default makes after the call is a block of that heap, as it is for the same actor spawned by the top-level code
+        const string program = """
+            actor Config {
+                pub int Size() => 3
+            }
+
+            actor Pool(Config Settings) {
+                string name = "pool {Settings.Size()}"
+
+                pub string Name() => name
+
+                pub long Live() => HttpServer.HeapLive()
+            }
+
+            actor Owner(Config Settings) {
+                pub long Spawned() {
+                    p = spawn Pool(Settings)
+                    return p.Live()
+                }
+            }
+
+            s = spawn Config()
+            top = spawn Pool(s)
+            print(top.Live())
+            print(spawn Owner(s).Spawned())
+
+            """;
+        Ran(BuildAndRun(program, HeapBlocks.Value, "actor-wait-heap"), 0, ["2", "2"], "");
+    }
+
+    /// <summary>
+    /// std/ whose <c>HttpServer.Fill(n, size)</c> takes <c>n</c> blocks of <c>size</c> bytes from the allocation entry and keeps them, and
+    /// whose <c>HttpServer.PageCount()</c> and <c>HttpServer.PageSize(i)</c> read the pages of the heap the entry serves, its first page at 0.
+    /// </summary>
+    private static (string Path, string Old, string New) Pages => ("std/std.kz", "pub class HttpServer {\n", """
+        pub class HttpServer {
+            pub static void Fill(int n, long size) {
+                mut int i = 0
+                while i < n {
+                    Allocate(size)
+                    i = i + 1
+                }
+            }
+
+            pub static int PageCount() {
+                mut int n = 0
+                raw {
+                    mut byte* page = *Ptr<byte*>(HeapCurrent() + 16)
+                    while page != null {
+                        n = n + 1
+                        page = *Ptr<byte*>(page)
+                    }
+                }
+
+                return n
+            }
+
+            pub static long PageSize(int i) {
+                mut long size = 0
+                raw {
+                    mut int skip = PageCount() - 1 - i
+                    mut byte* page = *Ptr<byte*>(HeapCurrent() + 16)
+                    while skip > 0 {
+                        page = *Ptr<byte*>(page)
+                        skip = skip - 1
+                    }
+
+                    size = *Ptr<long>(page + 8)
+                }
+
+                return size
+            }
+
+        """);
+
+    [Fact]
+    public void A_heaps_pages_double_from_its_first_up_to_65536_bytes()
+    {
+        // section 3 (the owner, 2026-11-15, #519, comment 6902210646, Q6, "Small growing pages"): the heap of an actor with no field, its
+        // first page of 256 bytes, takes 10000 blocks of 16 bytes in pages each twice the size of the one before it, up to 65536 bytes,
+        // and a page of 65536 bytes again after one of 65536
+        const string program = """
+            actor Grower {
+                pub string Grow(int n) {
+                    HttpServer.Fill(n, 16)
+                    count = HttpServer.PageCount()
+                    mut sizes = List<long>()
+                    for i in 0..<count {
+                        sizes.Add(HttpServer.PageSize(i))
+                    }
+
+                    return "{sizes}"
+                }
+            }
+
+            g = spawn Grower()
+            print(g.Grow(10000))
+
+            """;
+        Ran(BuildAndRun(program, ListTests.Edited(Pages), "actor-heap-pages"), 0, ["[256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 65536]"], "");
+    }
+
+    [Fact]
+    public void Every_actors_heap_is_freed_whole_at_the_end_of_the_program()
+    {
+        // section 3, U13: the end of the top-level code ends every actor it spawned, each heap freed whole (ListTests.EndingActors, the
+        // runtime's `EndActors`, which `Finish` calls)
+        const string program = """
+            actor Idle(int N) {
+                pub int Get() => N
+            }
+
+            a = spawn Idle(1)
+            b = spawn Idle(2)
+            c = spawn Idle(3)
+            print(a.Get() + b.Get() + c.Get())
+            before = HttpServer.Heaps()
+            eprint("end actors")
+            print(before - HttpServer.Heaps())
+
+            """;
+        Ran(BuildAndRun(program, ListTests.Edited([.. HeapCount, ListTests.EndingActors]), "actor-heaps-ended"), 0, ["6", "3"], "");
+    }
+
+    [Fact]
     public void An_inbox_nobody_runs_grows_until_the_allocator_ends_the_process()
     {
         // the positive control of the test of the freed messages: with no call that waits, every message stays in the inbox, and the

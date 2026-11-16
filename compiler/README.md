@@ -418,7 +418,8 @@ the block, only where one block needs more (record, section 3: the owner, 2026-1
 and the first page of a heap holds the heap's record, 48 bytes, and its first block behind them. The
 pages are carved from pieces of a mebibyte at an address that is a multiple of a mebibyte, the aligned
 mebibyte of a mapping of 2 mebibytes that the thread takes from the system's `Memory`, as mimalloc
-aligns its segments; a piece starts with its table, a word for each 256 bytes of it, 32768 bytes in
+aligns its segments, the build's own way to the aligned piece, of which the record names no mapping (record, section 3);
+a piece starts with its table, a word for each 256 bytes of it, 32768 bytes in
 all, which names the heap whose page holds those bytes, so that `Free` finds a block's heap by a mask,
 a shift and a load. The entry gives a block of one of fifteen size classes, the powers of two from 16
 to 262144 bytes, of the heap it serves: the block of its class the heap freed last, else one carved
@@ -969,7 +970,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   its tasks ("What the emitter does not emit" names what of section 6 this does not build): `spawn`
   constructs the state as an instance of the actor's body is constructed, both its counts at one (K1,
   K7), in the first block of the actor's own heap, which the runtime's `ActorHeapNew` makes and
-  `ActorNew` fills, the actor's record in the 96 bytes in front of it, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps
+  `ActorNew` fills, the actor's record in the 96 bytes in front of it, the build's own layout, which no rule of the record names, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps
   the alignment of the allocator's block, as Rust's `ArcInner` pads its counts to what it holds, a
   `Vector128` field's 16 among it: the name of its type and two words the emitted code holds (U2),
   whether it runs, waits for its restart, ends after its current message or ended (U19, U22), the
