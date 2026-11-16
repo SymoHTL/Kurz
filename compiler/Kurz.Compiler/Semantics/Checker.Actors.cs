@@ -905,7 +905,8 @@ public sealed partial class Checker
 
     /// <summary>
     /// U4, U17: each argument of the message <paramref name="c"/> that runs a call as it is evaluated (<see cref="Calls"/>), which can wait,
-    /// recorded for the emitter, which builds the message in a heap of its own where any argument is such (U12, U21).
+    /// recorded for the emitter, which builds the message in a heap of its own where any argument is such (U12, U21). The arguments written
+    /// at the call are all: a parameter's default is a constant expression (F12), which runs no call and cannot wait.
     /// </summary>
     private void RecordWaits(CallExpression c)
     {
