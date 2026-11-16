@@ -2597,7 +2597,8 @@ interpolation's hole and `string.Join` call, through the fields, items and cases
 from it through each instantiation of it that the program builds (the owner, 2026-11-16); the construction of an actor it spawns; and
 the code of an actor it spawns under `escalate`. The instantiations are found as Rust's monomorphization finds its instances: the
 fixed point joins the generic `data` types each unit constructs with those of the units it runs, through the same type arguments, and
-the program builds those that the sets of its roots, the top-level code and the `pub` functions without type parameters, hold with
+with those of the lambdas it makes, as Rust collects a closure's instance in the instance of the function that makes it, and the
+program builds those that the sets of its roots, the top-level code and the `pub` functions without type parameters, hold with
 every type argument named. A call through an actor's reference reaches nothing of the callee's
 code, the text of a thrown value adds nothing, and a function of a folder of the runtime throws nothing. A bare `throw` throws the
 case its arm of `else` took. No build reads the sets: `ThrowSetTests` holds one thrown type for each of these forms over a fenced

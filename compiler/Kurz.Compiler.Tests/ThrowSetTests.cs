@@ -770,11 +770,13 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     public void The_text_of_a_generic_type_derived_from_the_printed_one_is_the_text_of_each_instantiation_the_program_builds()
     {
         // section 5, the owner, 2026-11-16, "Each instantiation": the top-level code builds `Sub<int>` and `Sub<Loud>`, and the `pub`
-        // function `Listed` builds `Sub<Wrapped>` through the type argument its call gives `Wrap`; `Sub<Quiet>` stands in a function no
-        // root reaches, so the program does not build it, as Rust's monomorphization builds nothing for a function nothing calls
+        // function `Listed` builds `Sub<Wrapped>` through the type argument its call gives `Wrap`, and `Sub<Handed>` through the lambda
+        // that `Maker` makes for its type argument, which `Listed` calls as a function value; `Sub<Quiet>` stands in a function no root
+        // reaches, so the program does not build it, as Rust's monomorphization builds nothing for a function nothing calls
         const string text = """
             data ELoud
             data EWrapped
+            data EHanded
             data EQuiet
 
             data Plain(int N)
@@ -793,6 +795,12 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
                 }
             }
 
+            class Handed(int N) {
+                pub string Text() {
+                    throw EHanded
+                }
+            }
+
             class Quiet(int N) {
                 pub string Text() {
                     throw EQuiet
@@ -805,12 +813,16 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
 
             Plain Wrap<T>(T x) => Sub<T>(1, x)
 
+            () => Plain Maker<T>(T x) => () => Sub<T>(1, x)
+
             void Unreached() {
                 Show(Sub<Quiet>(1, Quiet(2)))
             }
 
             pub void Listed() {
                 Show(Wrap(Wrapped(3)))
+                made = Maker(Handed(4))
+                Show(made())
             }
 
             Show(Sub<int>(1, 2))
@@ -822,7 +834,7 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         var checker = Checker.Check(tree, diagnostics, [], CorpusTests.StdChecker.Value);
         Assert.Empty(diagnostics.Items);
         var show = checker.Model.FunctionOf(tree.Statements.OfType<FunctionDeclaration>().Single(f => f.Name == "Show"));
-        Assert.Equal(["ELoud", "EWrapped", "RuntimeError"], Names(new ThrowSets(checker, CorpusTests.StdChecker.Value).RaisedBy(show)));
+        Assert.Equal(["ELoud", "EWrapped", "EHanded", "RuntimeError"], Names(new ThrowSets(checker, CorpusTests.StdChecker.Value).RaisedBy(show)));
     }
 
     [Fact]

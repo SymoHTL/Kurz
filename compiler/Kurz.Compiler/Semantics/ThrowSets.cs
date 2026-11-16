@@ -14,7 +14,8 @@ namespace Kurz.Compiler.Semantics;
 /// program builds (section 5, the owner, 2026-11-16); the construction of an actor it spawns, whose throw is its crash (U3); and the code
 /// of an actor it spawns under <c>escalate</c>, whose crash passes up whole (U25). The instantiations a program builds are found as Rust's
 /// monomorphization finds its instances: from the roots, the top-level code and every <c>pub</c> function without type parameters, through
-/// the type arguments each call gives, with the fixed point's edges, and each with no type parameter left. A call through an actor's
+/// the type arguments each call gives, with the fixed point's edges, a lambda's in the unit that makes it, and each with no type parameter
+/// left. A call through an actor's
 /// reference reaches none of the callee's code, whose crash its caller gets as <c>callee-crashed</c> (U20). The text of a thrown value
 /// adds nothing, since a raise while it is made ends the process (section 6), and <c>==</c>, <c>equal by</c> and a hash run no code of the program, which declares no <c>Equals</c> and no
 /// <c>GetHashCode</c> (K5, K8, D16). A set is in the order of the first <c>throw</c> of each type that the code reaches, the program's
@@ -66,7 +67,7 @@ public sealed class ThrowSets
         [typeof(UnaryExpression)] = "its operand",
         [typeof(BinaryExpression)] = "its operands",
         [typeof(RangeExpression)] = "its ends",
-        [typeof(LambdaExpression)] = "nothing where it is made: its body where a value of its type is called",
+        [typeof(LambdaExpression)] = "nothing where it is made but what its body builds: its body where a value of its type is called",
         [typeof(MatchExpression)] = "its subject and its arms",
         [typeof(WithExpression)] = "its target, its values, and the fields of the data type's body",
         [typeof(ElseExpression)] = "its call and its arms",
@@ -148,8 +149,12 @@ public sealed class ThrowSets
     /// <summary>A thrown type, with the place of the first <c>throw</c> of it that the code reaches: the file, 0 for the program's and 1 for <c>std/</c>, and the line.</summary>
     private sealed record Thrown(KurzType Type, int File, int Line);
 
-    /// <summary>An edge from a unit to a unit it runs, with the type arguments the call gives the type parameters of that unit (T19).</summary>
-    private sealed record Edge(object Unit, IReadOnlyDictionary<TypeParameterSymbol, KurzType>? Map);
+    /// <summary>
+    /// An edge from a unit to a unit it runs, with the type arguments the call gives the type parameters of that unit (T19); or, where it
+    /// does not run it, from a unit to a lambda it makes, which brings what the lambda builds and nothing it throws (section 5), as Rust
+    /// collects a closure's instance in the instance of the function that makes it.
+    /// </summary>
+    private sealed record Edge(object Unit, IReadOnlyDictionary<TypeParameterSymbol, KurzType>? Map, bool Runs = true);
 
     /// <summary>The code of an actor (section 5): its construction, its constructors and every method it declares.</summary>
     private sealed record Root(ClassSymbol Actor);
@@ -259,7 +264,8 @@ public sealed class ThrowSets
 
                 foreach (var edge in unit.Edges)
                 {
-                    foreach (var thrown in units[edge.Unit].Set.ToList())
+                    List<Thrown> reached = edge.Runs ? units[edge.Unit].Set.ToList() : []; // the making of a lambda throws nothing
+                    foreach (var thrown in reached)
                     {
                         foreach (var one in Cases(Through(edge, thrown.Type)))
                         {
@@ -653,7 +659,14 @@ public sealed class ThrowSets
         {
             switch (e)
             {
-                case IntegerLiteral or RealLiteral or UnitLiteral or CharLiteral or BoolLiteral or NullLiteral or ThisExpression or LambdaExpression:
+                case IntegerLiteral or RealLiteral or UnitLiteral or CharLiteral or BoolLiteral or NullLiteral or ThisExpression:
+                    break;
+                case LambdaExpression l:
+                    if (model.HasLambda(l))
+                    {
+                        unit.Edges.Add(new Edge(l, null, Runs: false)); // section 5: what its body builds, in the terms of this unit's type parameters
+                    }
+
                     break;
                 case StringLiteral s:
                     foreach (var hole in s.Segments.OfType<HoleSegment>())
