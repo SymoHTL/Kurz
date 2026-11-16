@@ -169,9 +169,11 @@ public static class Runtime
 
     /// <summary>
     /// As above, over the files given; a directory that does not hold one file is read as empty, and <see cref="Layout"/> names it. The
-    /// architecture's file is read into the folder <c>sys</c> beside the target's (round 20, "Dir per arch"): a qualified call of <c>sys</c>
-    /// picks among the functions of both, and a name both declare is <c>redeclared</c> at its line in the architecture's file (V9), as two
-    /// files of one folder are one namespace (section 8).
+    /// architecture's file is read into the folder <c>sys</c> beside the target's by its functions (round 20, "Dir per arch"): a qualified
+    /// call of <c>sys</c> from <c>std/</c> and <c>common/</c>, which are checked once both files are, picks among the functions of both, and
+    /// a function both declare is <c>redeclared</c> at its line in the architecture's file (V9), as two files of one folder declare a
+    /// function once (section 8). Each of the two files is checked on its own, the architecture's first, so that neither calls a function
+    /// of the other by its name alone, and only their functions are compared.
     /// </summary>
     internal static CheckedRuntime Check(IReadOnlyList<RuntimeFile> files, Target target, Arch arch, List<string> errors)
     {
