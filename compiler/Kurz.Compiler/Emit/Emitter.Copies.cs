@@ -25,7 +25,9 @@ namespace Kurz.Compiler.Emit;
 /// the copy"), so that each copy of a call of more than one is read after its last, or made in the place its callee reads (CrossInto),
 /// one that holds a <c>weak</c> reference in its own bytes among them; and the blocks whose items or fields wait to be copied go on the runtime's work list, so that a chain of any
 /// length crosses with no deeper stack than the nesting of its types (<c>runtime/common/runtime.kz</c>, "the copy of a value that
-/// crosses"). A copy runs no program code.
+/// crosses"). The copy of a map whose keys reach a class instance places each key again under its copy's hash once the run's work list
+/// is empty (<see cref="FillMap"/>; the owner, 2026-11-16, #519, comment 6923513534, "Rehash each key (Recommended)"). A copy runs no
+/// program code.
 /// </summary>
 public sealed partial class Emitter
 {
@@ -219,8 +221,9 @@ public sealed partial class Emitter
     /// <summary>
     /// The run of a copy in the session <c>%a3</c>, which it names to the runtime first (<c>CopyUse</c>), since another call's session
     /// may have run since its last: the function of the value's type copies the value at <c>%a1</c> into <c>%a0</c>, then each block the
-    /// work list holds is filled by its function, the last put on it first, until the list is empty, and the runtime's <c>CopyLeft</c>
-    /// counts the copy made, the session's last pointing each <c>weak</c> reference of its copies and emptying the memo.
+    /// work list holds is filled by its function, the last put on it first, until the list is empty, then each copy of a map whose keys
+    /// reach a class instance is placed again by its function (<c>CopyAfter</c>, <see cref="FillMap"/>), and the runtime's
+    /// <c>CopyLeft</c> counts the copy made, the session's last pointing each <c>weak</c> reference of its copies and emptying the memo.
     /// </summary>
     private string CopyRun() => Helper("copy.run", "void", ["ptr", "ptr", "ptr", "ptr"], () =>
     {
@@ -239,6 +242,16 @@ public sealed partial class Emitter
         fn.Emit($"call void {filler}(ptr {copy}, ptr {source})");
         fn.Branch(next);
         fn.Block(done);
+        var place = fn.Label("place");
+        var placed = fn.Label("placed");
+        var waiting = fn.Value($"call ptr {RuntimeFunction("CopyAfterNext")}()");
+        fn.CondBranch(fn.Value($"icmp eq ptr {waiting}, null"), placed, place);
+        fn.Block(place);
+        var map = fn.Value($"load ptr, ptr {waiting}");
+        var placer = fn.Value($"load ptr, ptr {fn.Value($"getelementptr i8, ptr {waiting}, i64 8")}");
+        fn.Emit($"call void {placer}(ptr {map})");
+        fn.Branch(done);
+        fn.Block(placed);
         fn.Emit($"call void {RuntimeFunction("CopyLeft")}(ptr %a3)");
         fn.Return(null);
     });
@@ -595,8 +608,9 @@ public sealed partial class Emitter
     });
 
     /// <summary>
-    /// M9 with U12: the copy of a map's block, its slots' bytes as they stand, since the keys' hashes are the thread's (<c>MapCopy</c>),
-    /// which the work list fills: each key one count more, each value copied in its place.
+    /// M9 with U12: the copy of a map's block, its slots' bytes as they stand, with its source's hash and keys (<c>MapCopy</c>), which the
+    /// work list fills, each key and each value copied in its place, and which the run places again where its keys reach a class instance
+    /// (<see cref="FillMap"/>).
     /// </summary>
     private string CopyMap(MapType type) => Helper($"copy.map.{Lower.Mangle(type)}", "ptr", ["ptr"], () =>
     {
@@ -619,8 +633,13 @@ public sealed partial class Emitter
     });
 
     /// <summary>
-    /// The entries of the copy <c>%a0</c> of a map's block, which holds the block's bytes: each key and each value copied in its slot, a
-    /// key with the hash of its bytes, which a copy keeps.
+    /// The entries of the copy <c>%a0</c> of a map's block, which holds the block's bytes: each key and each value copied in its slot. A
+    /// key that reaches no class instance keeps the hash of its bytes, which its copy has too. The copy of a map whose keys reach one is
+    /// placed again, each key under its copy's hash, by identity or by content as its class compares (K4, K5), by the helper a lookup past the
+    /// bound rehashes with (<see cref="Rehash"/>), once the run's work list is empty, since a key's hash reads the fields of the instances
+    /// it reaches, and a copy the memo gave can still wait there to be filled (the runtime's <c>CopyAfter</c>; section 6, the owner,
+    /// 2026-11-16, #519, comment 6923513534, "Rehash each key (Recommended)"). No two keys are compared: two keys of the source are two of
+    /// the copy, since a copy gives each block of its source one copy (Q2).
     /// </summary>
     private string FillMap(MapType type) => Helper($"fill.map.{Lower.Mangle(type)}", "void", ["ptr", "ptr"], () =>
     {
@@ -634,6 +653,11 @@ public sealed partial class Emitter
             CopyAt(value, value, type.Value);
         });
         fn.Block(done);
+        if (ReachesInstance(type.Key))
+        {
+            fn.Emit($"call void {RuntimeFunction("CopyAfter")}(ptr %a0, ptr {Rehash(type)})");
+        }
+
         fn.Return(null);
     });
 

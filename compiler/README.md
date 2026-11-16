@@ -519,7 +519,9 @@ lets other sessions run between two copies of one call, and `CopyAbort` ends a s
 was left before its last copy. The work list, which `CopyPush` fills with a block, its copy and the
 function that fills the copy, and `CopyNext` empties, the last first, is the thread's own, from the
 thread's own heap (`AllocateOwn`), as the memo and the room of the `weak` references are, grown by doubling and kept for the thread's next copy, since a run runs no program code
-and leaves it empty. `ActorTests` pins the stacks, the guard page,
+and leaves it empty; so is the list of the copies of maps whose keys reach a class instance, which
+`CopyAfter` fills with a copy and the function that places its entries again, and `CopyAfterNext`
+empties once the work list is empty (section 6, 2026-11-16). `ActorTests` pins the stacks, the guard page,
 the overflow, the refusal, the sizes, the pool, the trim and the registers a switch keeps, `RuntimeTests` the directories
 of the architectures, and `EmitterTests.The_switch_of_every_target_and_architecture_is_assembled_by_clang_for_its_machine`
 that clang assembles each switch for its machine.
@@ -1035,7 +1037,18 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `copy-weak-argument.kz` and `copy-weak-at-call.kz` the memo of a call, `copy-left-to-right.kz` the order, `copy-memo-keeps-block.kz` a block the memo
   holds living to the call's last copy and `copy-left-early.kz` a call left before it, whose copies
   the call had not read yet are let go of (`ActorTests`, by the count of blocks); and
-  `corpus/actors/copy-derived.kz` an instance of a derived class held as its base.
+  `corpus/actors/copy-derived.kz` an instance of a derived class held as its base. The copy of a map whose
+  keys reach a class instance is the copy of its block's bytes, with its source's hash and keys, each key
+  and each value copied in its slot, and then each entry placed again under its copied key's hash, by
+  identity or by content as the key's class compares, by the helper a lookup past the bound rehashes with,
+  once the run's work list is empty, since a key's hash reads the fields of the instances it reaches and a
+  copy the memo gave can still wait there to be filled (`CopyAfter`; section 6, the owner, 2026-11-16, #519,
+  comment 6923513534, "Rehash each key (Recommended)"); it compares no two keys, allocates no block of the
+  receiver's heap beyond the copy of the map's block, and runs no program code, since a key's hash is the
+  one the map's type takes, built from the fields its class compares. `corpus/actors/copy-map-instance-keys.kz` sends maps
+  keyed by instances that compare by identity and by content, one of whose keys the memo gives before its
+  fields are filled, and finds each copied key in the receiver's map, at a message and after `copy` at a
+  plain call.
   A `move` before an argument of a call that crosses nothing copies nothing and changes no count
   (U12): a variable's value leaves its place, which is stored null, or a string of no block, the count
   it held going to the parameter written `move` the argument fills, which its function owns and lets go of where it
@@ -2748,8 +2761,7 @@ function, a `move` of the variable of a loop over anything but a list, and a `mo
 region the checker does not keep (U12); an argument
 or a result of a message or of an actor's constructor, and a value after `copy` at any call, that
 reaches a value of a type parameter, an instance of a class of `std/`, `HttpRequest` and
-`HttpHeaders` among them, a handle of section 12, a pointer or a map whose keys reach a class
-instance, whose hash a copy would keep (U12); `copy` at a call that is no message before a value that
+`HttpHeaders` among them, a handle of section 12 or a pointer (U12); `copy` at a call that is no message before a value that
 reaches a function value or an interface's value, which no word makes cross (U12); and a log call
 inside an actor (P8). The refusal of
 the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered

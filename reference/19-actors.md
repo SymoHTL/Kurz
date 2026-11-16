@@ -1287,6 +1287,58 @@ s.Add(copy cart)
 print("at home: {cart.Show()}")
 ```
 
+Case: [actors/copy-map-instance-keys.kz](../corpus/actors/copy-map-instance-keys.kz)
+```kurz
+class Box(mut int N)
+class Tag(string Name, Box Owner)
+data Shelf(Tag First, Map<Tag, int> Counts)
+
+string ByBox(Map<Box, string> known, Box a, Box b) {
+    mut found = 0
+    for e in known {
+        if (known[e.Key] ?? "") == e.Value {
+            found = found + 1
+        }
+    }
+
+    return "{known[a] ?? "none"} {known[b] ?? "none"}, {found} found"
+}
+
+string ByTag(Shelf s) {
+    mut found = 0
+    for e in s.Counts {
+        if (s.Counts[e.Key] ?? 0) == e.Value {
+            found = found + 1
+        }
+    }
+
+    bob = Tag("bob", s.First.Owner)
+    return "{s.Counts[s.First] ?? 0} {s.Counts[bob] ?? 0}, {found} found"
+}
+
+actor Hub {
+    pub string Names(Map<Box, string> known, Box a, Box b) => ByBox(known, a, b)
+
+    pub string Tags(Shelf s) => ByTag(s)
+}
+
+one = Box(1)
+two = Box(2)
+mut names = Map<Box, string>()
+names[one] = "a"
+names[two] = "b"
+box = Box(3)
+ann = Tag("ann", box)
+mut counts = Map<Tag, int>()
+counts[ann] = 3
+counts[Tag("bob", box)] = 4
+h = spawn Hub()
+print(h.Names(copy names, copy one, copy two))
+print(h.Tags(copy Shelf(ann, counts)))
+print(ByBox(copy names, copy one, copy two))
+print(ByTag(copy Shelf(ann, counts)))
+```
+
 Case: [actors/copy-two-arguments.kz](../corpus/actors/copy-two-arguments.kz)
 ```kurz
 class Counter(mut int N)

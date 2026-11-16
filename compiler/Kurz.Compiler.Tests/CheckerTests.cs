@@ -7569,14 +7569,25 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_map_whose_keys_reach_a_class_instance_crosses_as_its_keys_and_values_do()
+    {
+        // U12 (the owner, 2026-11-16, #519, comment 6923513534, "Rehash each key (Recommended)"): the copy hashes each key again, so such a
+        // map is no limit of the build: it crosses with `copy` where its keys hold a `mut` field, with no word where they hold none, and
+        // stands after `copy` at a call that crosses nothing; with no word before keys that hold a `mut` field it is `send-needs-word`
+        const string Take = "class Box(mut int N)\nclass Tag(string Name)\n\nactor A {\n    pub void Take(Map<Box, int> m, Map<Tag, int> t) {\n        print(m.Count + t.Count)\n    }\n}\n\nint Count(Map<Box, int> m) => m.Count\n\na = spawn A()\n";
+        Assert.Empty(Errors(Take + "send a.Take(copy Map<Box, int>(), Map<Tag, int>())\nprint(Count(copy Map<Box, int>()))\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 13)], Errors(Take + "send a.Take(Map<Box, int>(), Map<Tag, int>())\n"));
+    }
+
+    [Fact]
     public void What_this_build_does_not_make_cross_is_not_supported()
     {
-        // U12: a map whose keys reach a class instance, whose hash a copy would keep; `copy` at a plain call of a function value and of an interface's value, which no
-        // word makes cross; an instance of a class of `std/`, whose classes the walk of the file's classes does not hold
+        // U12: a hasher, a handle of section 12; `copy` at a plain call of a function value and of an interface's value, which no word makes
+        // cross; an instance of a class of `std/`, whose classes the walk of the file's classes does not hold
         // (knowledge/a-class-of-std-is-no-class-of-the-file.md)
-        NotSupportedAt(10, "U12", "class Box(int N)\n\nactor A {\n    pub void Take(Map<Box, int> m) {\n        print(m.Count)\n    }\n}\n\na = spawn A()\nsend a.Take(Map<Box, int>())\n");
+        NotSupportedAt(8, "U12", "actor A {\n    pub void Take(Sha256 h) {\n        print(1)\n    }\n}\n\na = spawn A()\nsend a.Take(Sha256.New())\n");
         // beside a later argument's `mut-in-message`, an error of the language, which the build's limit does not hide (E1, U16)
-        Assert.Equal([(ErrorIds.MutInMessage, 11)], Errors("class Box(int N)\n\nactor A {\n    pub void Take(Map<Box, int> m, mut int n) {\n        n = m.Count\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(Map<Box, int>(), mut x)\nprint(x)\n"));
+        Assert.Equal([(ErrorIds.MutInMessage, 9)], Errors("actor A {\n    pub void Take(Sha256 h, mut int n) {\n        n = 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(Sha256.New(), mut x)\nprint(x)\n"));
         NotSupportedAt(5, "U12", "void Call(() => int f) {\n    print(f())\n}\n\nCall(copy () => 1)\n");
         NotSupportedAt(10, "U12", "interface I {\n}\n\nclass Box(int N) : I\n\nvoid Keep(I x) {\n}\n\nI y = Box(1)\nKeep(copy y)\n");
         var (diagnostics, _) = CheckSeeingStd("actor A {\n    pub void Take(HttpHeaders h) {\n        print(h.Get(\"a\") ?? \"\")\n    }\n}\n\na = spawn A()\nsend a.Take(HttpHeaders())\n");
