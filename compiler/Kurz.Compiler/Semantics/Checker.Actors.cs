@@ -105,7 +105,7 @@ public sealed partial class Checker
     /// </summary>
     private static (int Line, string Construct)? UnreadActorPart(TypeDeclaration d)
     {
-        if ((d.Clauses ?? []).FirstOrDefault(c => c.Word != "stack" && c.Policy is null) is { } clause)
+        if ((d.Clauses ?? []).FirstOrDefault(c => c.Word != "stack" && c.Policy is not { Block: null }) is { } clause)
         {
             return (clause.Line, clause.Word == "on crash"
                 ? "the block `on crash (c) { ... }` after an actor's name (U1, U25)"
@@ -531,9 +531,9 @@ public sealed partial class Checker
     /// </summary>
     private Typed CheckSpawn(SpawnExpression s)
     {
-        if (s.OnCrashLine != 0)
+        if (s.Policy is { Block: not null } block)
         {
-            NotSupported(s.OnCrashLine, "the block `on crash (c) { ... }` after `spawn` (U2, U25)");
+            NotSupported(block.Line, "the block `on crash (c) { ... }` after `spawn` (U2, U25)");
             CheckArgumentsLoosely(s.Call);
             return Typed.Error;
         }

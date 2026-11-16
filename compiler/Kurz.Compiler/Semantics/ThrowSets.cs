@@ -83,6 +83,7 @@ public sealed class ThrowSets
         [typeof(RawBlock)] = "its body",
         [typeof(UseStatement)] = "no code",
         [typeof(SendStatement)] = "its call's arguments",
+        [typeof(DecisionStatement)] = "no code: the runtime acts on the decision",
         [typeof(AsmStatement)] = "its operands, and the function a sym operand names",
         [typeof(ConstAssertStatement)] = "no code: the compiler reads it",
         [typeof(ExternBlock)] = "no code",
@@ -665,7 +666,7 @@ public sealed class ThrowSets
                 case MatchStatement m:
                     Match(m.Subject, m.Arms);
                     break;
-                case BreakStatement or ContinueStatement or UseStatement or ConstAssertStatement or ExternBlock or FunctionDeclaration or FieldDeclaration or ConstructorDeclaration or TypeDeclaration:
+                case BreakStatement or ContinueStatement or UseStatement or ConstAssertStatement or ExternBlock or FunctionDeclaration or FieldDeclaration or ConstructorDeclaration or TypeDeclaration or DecisionStatement:
                     break;
                 case ReturnStatement r:
                     Optional(r.Value);
