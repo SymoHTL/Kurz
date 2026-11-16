@@ -505,8 +505,8 @@ owner, 2026-11-14, #519, comment 6880404917, Q11). On Linux a fault on a stack's
 `stack-overflow` as one on the main thread's is (below), and a stack the system refuses ends the
 process with `allocation-failed` and the size asked for. `common/`'s copy of a crossing (U12) works
 in the session of a call, nine words in the caller's frame, the ninth the heap the copies go into, the
-receiver's, or none for a `copy` at a call that crosses nothing, which copies the class instances it
-reaches and shares every other block by its count (`CopyWhole`), since the copies one call makes share
+receiver's, or none for a `copy` at a call that crosses nothing, which copies every block on a path to a
+class instance and shares by its count only a block that reaches none (`CopyWhole`), since the copies one call makes share
 one memo and a result has one of its own (section 6): the memo, open addressing on a block's address
 and never more than half full, which `CopyFind` reads and `CopyKeep` fills with each block held more
 than once, or every block in a call of more than one copy, its copy and the function that lets go
@@ -1016,20 +1016,25 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   session, which the copies of all its arguments share and a result has of its own, so that two
   paths to one block, in one argument or in two, arrive as two paths to one copy (Q2), and once the
   call's last copy is made each `weak` reference in its copies points at the copy of its target
-  where they hold that target, and is null otherwise, with its weak count taken there (Q3). The
+  where they hold that target, and is null otherwise, with its weak count taken there (Q3), so that
+  the call reads each copy after its last, or makes it in the place its callee reads, a restart's
+  kept arguments and a message a crash copies among them, and a `weak` reference an argument holds
+  in its own bytes, a `weak T?` or a field of a plain `data` value, is pointed too. The
   session is zero from the function's start, begun at the call where it makes more than one copy,
   and ended by the region's end, or a jump out of it, where a case a later argument propagates left
   the call before its last copy (section 6). `copy` before an argument of any other call copies the
   same way, the copy a temporary the call reads and its statement lets go of (Q6). The copy walks a
   work list and never recurses ("The runtime"). `ActorTests` pins a chain of a million links copied,
   10,000 references to one instance arriving as references to one copy, a weak parent link pointing
-  at the copy and the allocations equal to the frees; the line `actor-crossing-fenced` of
+  at the copy, a `weak` reference an argument holds in its own bytes pointing at its copy at a
+  restart and in a message a crash copies, and the allocations equal to the frees; the line `actor-crossing-fenced` of
   `ListTests` a field's list copied before a later argument's wait replaces it, the memo, the weak
   fix-up, a result copied from a field, and two arguments of one message that reach one instance
   arriving as one copy across a later argument's wait whose chain crosses a result; the cases
-  `corpus/actors/copy-two-arguments.kz`, `copy-two-at-call.kz` and `copy-weak-across-arguments.kz`
-  the memo of a call, `copy-left-to-right.kz` the order, `copy-memo-keeps-block.kz` a block the memo
-  holds living to the call's last copy and `copy-left-early.kz` a call left before it; and
+  `corpus/actors/copy-two-arguments.kz`, `copy-two-at-call.kz`, `copy-weak-across-arguments.kz`,
+  `copy-weak-argument.kz` and `copy-weak-at-call.kz` the memo of a call, `copy-left-to-right.kz` the order, `copy-memo-keeps-block.kz` a block the memo
+  holds living to the call's last copy and `copy-left-early.kz` a call left before it, whose copies
+  the call had not read yet are let go of (`ActorTests`, by the count of blocks); and
   `corpus/actors/copy-derived.kz` an instance of a derived class held as its base.
   A `move` before an argument of a call that crosses nothing copies nothing and changes no count
   (U12): a variable's value leaves its place, which is stored null, or a string of no block, the count
@@ -2282,7 +2287,8 @@ ask about it.
   deep copy stops at one *(all assumed in section 6, "How a value crosses and what `copy`
   does")*; and an actor's reference as a key of a map hashes by the actor's number, which a crossing
   keeps, as section 6 has it ("An actor's reference compares by the actor it names"). Pinned by
-  `ActorTests`, the cases `corpus/actors/copy-shared-graph.kz`, `corpus/actors/references-in-list.kz`
+  `ActorTests`, the cases `corpus/actors/copy-shared-graph.kz`, `corpus/actors/references-in-list.kz`,
+  `corpus/actors/references-map-key.kz` (the hash a crossing keeps), `corpus/actors/send-lambda.kz`
   and the six of the memo of a call (above), and the line `actor-crossing-fenced` of `ListTests`.
 - U12 with section 6: on one thread a `move` into a parameter copies nothing and changes no count,
   the moved place's count becoming the parameter's, a `move` into a message or a `spawn` copying the
