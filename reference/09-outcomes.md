@@ -1149,7 +1149,8 @@ Case: [outcomes/else-throw.kz](../corpus/outcomes/else-throw.kz)
 form. It is a statement and can stand wherever one can. As an arm of `else` it can also stand
 alone (O5): a bare `throw` there throws the case value that reached the arm, so the arm
 `NotFound => throw` throws the `NotFound`. A bare `throw` anywhere else is the compile error
-`throw-needs-value`: there is no value it could mean. When a supervisor reads what
+`throw-needs-value`: there is no value it could mean. A bare `throw` in a lambda is one of these, a lambda
+inside an arm of `else` too, since the lambda's body is not the arm *(assumed: as §5 marks it)*. When a supervisor reads what
 was thrown as the `Reason` of a crashed child, its type is the union of everything the
 child's code can throw, found over the whole program (the owner, 2026-10-03, against a fixed type
 that carries the text and the place, and against limiting `throw` to `data` values and text). Where
