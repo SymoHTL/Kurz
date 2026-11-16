@@ -1,0 +1,27 @@
+// expect: output
+// | 67
+// rules: U21
+
+actor Slow {
+    pub int Get() => 7
+}
+
+actor Box {
+    pub void Boom() {
+        throw "boom"
+    }
+
+    pub int Sum(List<int> xs, int k) {
+        mut total = k
+        for x in xs {
+            total = total + x
+        }
+
+        return total
+    }
+}
+
+b = spawn Box()
+s = spawn Slow()
+send b.Boom()
+print(b.Sum([10, 20, 30], s.Get()))

@@ -418,7 +418,8 @@ the block, only where one block needs more (record, section 3: the owner, 2026-1
 and the first page of a heap holds the heap's record, 48 bytes, and its first block behind them. The
 pages are carved from pieces of a mebibyte at an address that is a multiple of a mebibyte, the aligned
 mebibyte of a mapping of 2 mebibytes that the thread takes from the system's `Memory`, as mimalloc
-aligns its segments; a piece starts with its table, a word for each 256 bytes of it, 32768 bytes in
+aligns its segments, the build's own way to the aligned piece, of which the record names no mapping (record, section 3);
+a piece starts with its table, a word for each 256 bytes of it, 32768 bytes in
 all, which names the heap whose page holds those bytes, so that `Free` finds a block's heap by a mask,
 a shift and a load. The entry gives a block of one of fifteen size classes, the powers of two from 16
 to 262144 bytes, of the heap it serves: the block of its class the heap freed last, else one carved
@@ -473,11 +474,11 @@ on Windows, whose switch keeps the stack's limit; `StackTrim` gives back the mem
 the depth when a stack goes back to the pool, on Linux where the handler opened them, by a mapping
 with no access and `MAP_FIXED` over them, which gives their memory back as `madvise` with
 `MADV_DONTNEED` would and which the system joins to the guard page, so that the stack is two mappings
-again (section 6, the owner, 2026-11-13, #519, comment 6855469829, the call assumed there), and on Windows where the stack's limit
+again (section 6, the owner, 2026-11-13, #519, comment 6855469829, and the call, 2026-11-16, comment 6919351399, "Keep MAP_FIXED"), and on Windows where the stack's limit
 lies past the depth, by a `VirtualFree` that decommits them from the base of the reservation, a
 `VirtualAlloc` that sets the page under the depth as the guard page again and the limit moved to the
 depth (section 6, the owner, 2026-11-13, #519, comment 6853074601, the guard page and the limit
-assumed there); `StackFree` gives a stack back, and `StackFirst` runs once on a thread before its first switch, on Windows calling
+assumed there); `StackFree` gives a stack back, and `StackFirst` runs once on each stack, at that stack's first run (`ActorStart`), on Windows calling
 `SetThreadStackGuarantee` for 0x5000 bytes, as `Start` does for the main thread's stack. A stack's
 header is its top 512 bytes: the save area of the switch, 320 bytes, which holds on Windows the four
 words at 288 to 312, then the actor whose message runs on it, the message, a word that marks its
@@ -971,7 +972,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   its tasks ("What the emitter does not emit" names what of section 6 this does not build): `spawn`
   constructs the state as an instance of the actor's body is constructed, both its counts at one (K1,
   K7), in the first block of the actor's own heap, which the runtime's `ActorHeapNew` makes and
-  `ActorNew` fills, the actor's record in the 96 bytes in front of it, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps
+  `ActorNew` fills, the actor's record in the 96 bytes in front of it, the build's own layout, which no rule of the record names, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps
   the alignment of the allocator's block, as Rust's `ArcInner` pads its counts to what it holds, a
   `Vector128` field's 16 among it: the name of its type and two words the emitted code holds (U2),
   whether it runs, waits for its restart, ends after its current message or ended (U19, U22), the
@@ -1996,7 +1997,7 @@ with the system's own room, as Rust's released library does (section 2);
 `TraceTests.A_program_on_Windows_starts_with_the_guarantee_of_its_main_threads_stack_set_to_0x5000_bytes`
 reads the guarantee in force on Windows and on Linux compiles the program alone.
 
-Of section 6 the emitter builds the actors of one thread, each message run to its end (Q1 (a), the
+Of section 6 the emitter builds the actors of one thread, each message run to its end or to a wait that parks it (Q1 (a), the
 answers of 2026-11-14, issue 519, comment 6880404917), and no case shows
 where a program it builds differs from the section: every actor runs on the one thread the runtime
 runs, each message on a stack of its own ("The runtime"), and messages run only while the top-level
@@ -2014,7 +2015,14 @@ each waiting caller `callee-crashed` (U20), ends the actor's children after thei
 to 30 s, run by the top-level code's wait, which sleeps while only a pause is left (U22, U23); the
 emitted `spawn` keeps a copy of the constructor's arguments in the spawner's heap and makes the
 function that constructs the state again from them, and each call site of a message gets a table
-of the function that runs it and the one that copies it into a new heap. The words of a policy after
+of the function that runs it and the one that copies it into a new heap. A message any of whose
+arguments can wait, one that runs a call anywhere in it, is built in a
+heap of its own (`MessageHeapNew`) and at its queueing copied by that copy into the heap its actor has
+then, its own heap freed, as Erlang builds a message in the sender's heap and copies it into the
+receiver's at its send: the wait lets the actor crash, which frees or empties the heap taken before it,
+that the arguments and the message would have gone into (U21), or end (U13), and where it ended the copy
+is dropped as any message to an ended actor; the crash of the actor whose code builds it frees that heap
+with its own. Where no argument can wait, the message is built in its actor's heap. The words of a policy after
 `spawn` and after a type's name, the type's default, which a `spawn`'s own wins over (U25 to U27), are
 built: the emitted `spawn` gives the runtime its policy in the block of its restart, which a `stop`
 leaves out and whose function an `escalate` leaves null, and a block of the knobs in the supervisor's
@@ -2036,7 +2044,7 @@ one thread no program reaches but through the crash path, a caller that waits cr
 a call of its own chain; an actor that ended keeps its first page to the end of the process, so that
 a call that still reaches it raises `actor-gone`, where section 6 frees the page at the end through a
 table of slots and generations (2026-11-16), which is not built; and the copies a crashed message made of the
-arguments of a call it had not sent yet, and the heap of a `spawn` whose arguments it was still
+arguments of a call it had not sent yet, in the callee's heap where no argument could wait, and the heap of a `spawn` whose arguments it was still
 evaluating, stay in their heaps until those are freed. A message has 2 MiB of
 stack where its clause sets no other size, where a message on Linux had the main thread's 8 MiB
 while messages ran on it, and a server whose actors hold many stacks at once, two mappings each, needs Linux's limit
@@ -2053,7 +2061,10 @@ while on Windows it ends the process as an overflow of the main thread's stack d
 system's `0xC00000FD` and no line of Kurz, the handler of section 2 for an actor's stack not being
 built there, and Windows gains a clock and a sleep for the pauses and the log line; on 64-bit Arm the
 switch, `naked` on Arm and the stacks build, and no run of this repository's gates runs them but the
-job `compiler-arm`, which is not required; a call waits with no bound, where section 6 bounds it by 5 seconds (`call-timeout`);
+job `compiler-arm`, which is not required and runs on Linux, as `compiler-windows` runs on x86-64, so
+that the switch of Windows on Arm is assembled
+(`EmitterTests.The_switch_of_every_target_and_architecture_is_assembled_by_clang_for_its_machine`)
+and runs nowhere; a call waits with no bound, where section 6 bounds it by 5 seconds (`call-timeout`);
 and an inbox grows with no bound, where section 13 spills it at 64 MB, until the allocator ends the
 process with `allocation-failed`. An actor and its state live to the end of the process, which is
 section 6's end of an actor in a program the build takes: an actor ends with its supervisor, the
@@ -2276,7 +2287,7 @@ ask about it.
   since, measured on Linux 6.8 on 2026-11-15, an `madvise` and an `mprotect` leave them an area of
   their own beside the guard page's, a third mapping for each stack trimmed once, where the mapping
   joins them to the guard page, and a stack is two mappings fresh, after the handler opened its pages
-  and after each trim *(assumed in section 6)*. The chain
+  and after each trim (section 6, 2026-11-16). The chain
   ID is drawn from a xoshiro256++ generator of the thread, the one `rand`'s `SmallRng` is on a 64-bit
   machine, seeded with 32 bytes of `Random`, the system's randomness that a map's keys take (M9), at
   the thread's first chain, so that a chain costs two steps of the generator and no call to the
@@ -2613,11 +2624,17 @@ what each throws itself with the sets of the units it runs, through the type arg
 pick, every override of a method and, through an interface, every implementer's; the constructors, the defaults and the base a
 construction runs; the fields of a `data` body that a construction or a `with` computes; the method a property's read calls; every
 lambda whose type fits a call of a function value, and a lambda a built-in call takes; the `Text()` that `print`, `eprint`, an
-interpolation's hole and `string.Join` call, through the fields, items and cases of the type; the construction of an actor it
-spawns; and the code of an actor it spawns under `escalate`. A call through an actor's reference reaches nothing of the callee's
+interpolation's hole and `string.Join` call, through the fields, items and cases of the type, and of a generic `data` type derived
+from it through each instantiation of it that the program builds (the owner, 2026-11-16); the construction of an actor it spawns; and
+the code of an actor it spawns under `escalate`. The instantiations are found as Rust's monomorphization finds its instances: the
+fixed point joins the generic `data` types each unit constructs with those of the units it runs, through the same type arguments, and
+with those of the lambdas it makes, as Rust collects a closure's instance in the instance of the function that makes it, and the
+program builds those that the sets of its roots, the top-level code and the `pub` functions without type parameters, hold with
+every type argument named. A call through an actor's reference reaches nothing of the callee's
 code, the text of a thrown value adds nothing, and a function of a folder of the runtime throws nothing. A bare `throw` throws the
 case its arm of `else` took. No build reads the sets: `ThrowSetTests` holds one thrown type for each of these forms over a fenced
-program, every kind of node of the tree to the table `ThrowSets.Kinds`, the walk of every corpus case and of `std/`, a runtime that
+program, the text of each instantiation a program builds over a program of its own, every kind of node of the tree to the table
+`ThrowSets.Kinds`, the walk of every corpus case and of `std/`, a runtime that
 throws nothing, and a kind of `RuntimeKind` for each run-time row of the error table.
 
 ### What the checker does not read

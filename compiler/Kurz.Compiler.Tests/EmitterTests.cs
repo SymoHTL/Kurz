@@ -415,6 +415,21 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_build_refuses_a_runtime_of_another_architecture_than_its_cpus()
+    {
+        // round 20, "Dir per arch": a program for one architecture calls that architecture's switch, so a runtime checked for the other
+        // is refused and not emitted, by the emitter, which `Compile` calls; the command reads `--cpu` for the machine's own
+        // architecture, and a caller of the API names both
+        var source = SourceText.FromString("program.kz", "print(1)\n");
+        foreach (var (arch, own, other) in new[] { (Arch.X64, Cpu.Baseline, Cpu.ArmBaseline), (Arch.Arm64, Cpu.ArmBaseline, Cpu.Baseline) })
+        {
+            var runtime = Builder.CheckRuntime(Target.Linux, arch);
+            Assert.NotNull(Builder.Compile(source, [], runtime, testBuild: true, cpu: () => own).Program); // the positive control
+            Assert.Throws<InvalidOperationException>(() => Builder.Compile(source, [], runtime, testBuild: true, cpu: () => other));
+        }
+    }
+
+    [Fact]
     public void An_instruction_the_assembler_refuses_is_asm_refused_at_the_line_of_its_asm()
     {
         // R11, R12 (the owner, 2026-11-13, "Rust's srcloc", for the error at the line of the `asm`, and pull request 530, comment

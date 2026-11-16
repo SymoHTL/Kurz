@@ -250,6 +250,14 @@ public sealed class RuntimeTests
         Assert.Equal(["long Here()", "long Write(int)"], Runtime.TargetCalls(checkedRuntime)["common/"]);
         Assert.Empty(Runtime.CheckEveryTarget(Runtime3(common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n"))); // the positive control
 
+        // `std/` reaches the architecture's function as `common/` does, both being checked once `sys` reads the two files; neither of the
+        // two calls a function of the other by its name alone, each being checked on its own
+        Assert.Empty(Runtime.CheckEveryTarget(Runtime3(common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n", "use sys\n\npub long P() => sys.Here()\n")));
+        Assert.Contains(Runtime.CheckEveryTarget(Runtime3(common, "pub long Write(int fd) => Here()\n", "pub long Write(int fd) => 0\n")), e => e.StartsWith("runtime/linux/a.kz:1: unknown-name:", StringComparison.Ordinal));
+        var calling = Runtime3(common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n");
+        calling[^4] = File("runtime/linux/x86-64/a.kz", "pub long Here() => Write(1)\n");
+        Assert.Contains(Runtime.CheckEveryTarget(calling), e => e.StartsWith("runtime/linux/x86-64/a.kz:1: unknown-name:", StringComparison.Ordinal));
+
         // one architecture's file that gives `Here` with another result is named by its pair, against the first pair, linux/x86-64
         var files = Runtime3(common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n");
         files[^1] = File("runtime/windows/arm64/a.kz", "pub int Here() => 0\n");

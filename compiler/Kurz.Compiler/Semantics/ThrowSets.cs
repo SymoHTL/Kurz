@@ -10,10 +10,14 @@ namespace Kurz.Compiler.Semantics;
 /// override of it and, through an interface, every implementer's method; a construction of a class or of a <c>data</c> value, with the
 /// defaults and the constructors it runs; a read of a property; a call of a function value, which reaches every lambda of the program
 /// whose type fits; the <c>Text()</c> that <c>print</c>, <c>eprint</c>, a hole of an interpolation and <c>string.Join</c> call on the
-/// types they make text of; the construction of an actor it spawns, whose throw is its crash (U3); and the code of an actor it spawns
-/// under <c>escalate</c>, whose crash passes up whole (U25). A call through an actor's reference reaches none of the callee's code, whose
-/// crash its caller gets as <c>callee-crashed</c> (U20). The text of a thrown value adds nothing, since a raise while it is made ends the
-/// process (section 6), and <c>==</c>, <c>equal by</c> and a hash run no code of the program, which declares no <c>Equals</c> and no
+/// types they make text of, and for a generic <c>data</c> type derived from such a type the text of each instantiation of it that the
+/// program builds (section 5, the owner, 2026-11-16); the construction of an actor it spawns, whose throw is its crash (U3); and the code
+/// of an actor it spawns under <c>escalate</c>, whose crash passes up whole (U25). The instantiations a program builds are found as Rust's
+/// monomorphization finds its instances: from the roots, the top-level code and every <c>pub</c> function without type parameters, through
+/// the type arguments each call gives, with the fixed point's edges, a lambda's in the unit that makes it, and each with no type parameter
+/// left. A call through an actor's
+/// reference reaches none of the callee's code, whose crash its caller gets as <c>callee-crashed</c> (U20). The text of a thrown value
+/// adds nothing, since a raise while it is made ends the process (section 6), and <c>==</c>, <c>equal by</c> and a hash run no code of the program, which declares no <c>Equals</c> and no
 /// <c>GetHashCode</c> (K5, K8, D16). A set is in the order of the first <c>throw</c> of each type that the code reaches, the program's
 /// file before <c>std/</c> and by line, with the runtime's type last (section 5, assumed there). No build reads the sets; the tests do.
 /// </summary>
@@ -26,6 +30,8 @@ public sealed class ThrowSets
     private readonly KurzType runtimeError;
     private List<(LambdaExpression Lambda, FunctionType Type, SemanticModel Model, int File)>? lambdas;
     private Dictionary<FunctionSymbol, List<FunctionSymbol>>? overrides;
+    private List<DataType>? instantiations;
+    private List<(object Key, Unit Unit)>? waiting;
 
     /// <summary>The sets of the code of <paramref name="program"/>, which sees the types of <paramref name="std"/> (W1); null where the program is <c>std/</c> itself.</summary>
     public ThrowSets(Checker program, Checker? std)
@@ -61,7 +67,7 @@ public sealed class ThrowSets
         [typeof(UnaryExpression)] = "its operand",
         [typeof(BinaryExpression)] = "its operands",
         [typeof(RangeExpression)] = "its ends",
-        [typeof(LambdaExpression)] = "nothing where it is made: its body where a value of its type is called",
+        [typeof(LambdaExpression)] = "nothing where it is made but what its body builds: its body where a value of its type is called",
         [typeof(MatchExpression)] = "its subject and its arms",
         [typeof(WithExpression)] = "its target, its values, and the fields of the data type's body",
         [typeof(ElseExpression)] = "its call and its arms",
@@ -113,7 +119,10 @@ public sealed class ThrowSets
     }
 
     /// <summary>Each <c>pub</c> function of the program's file that has a body, its methods and those of its data types among them, by line, with what a call of it can raise.</summary>
-    public IReadOnlyDictionary<FunctionSymbol, IReadOnlyList<KurzType>> PubFunctions()
+    public IReadOnlyDictionary<FunctionSymbol, IReadOnlyList<KurzType>> PubFunctions() => Pub().ToDictionary(f => f, RaisedBy);
+
+    // the `pub` functions of the program's file that have a body, its methods and those of its data types among them, by line
+    private IEnumerable<FunctionSymbol> Pub()
     {
         var model = program.Model;
         var copies = new HashSet<FunctionSymbol>(model.Copies, ReferenceEqualityComparer.Instance);
@@ -121,12 +130,12 @@ public sealed class ThrowSets
             .Concat(model.DataTypes.SelectMany(d => d.Methods.Values.SelectMany(list => list)))
             .Where(f => f.Declaration is { } d && (d.Modifiers & Modifiers.Pub) != 0 && (d.BlockBody is not null || d.ExpressionBody is not null))
             .Distinct()
-            .OrderBy(f => f.Line)
-            .ToDictionary(f => f, RaisedBy);
+            .OrderBy(f => f.Line);
     }
 
     private List<KurzType> Solved(object root)
     {
+        Instantiations();
         var unit = Discover(root);
         Solve();
         var types = unit.Set.OrderBy(t => (t.File, t.Line)).Select(t => t.Type).ToList();
@@ -140,8 +149,12 @@ public sealed class ThrowSets
     /// <summary>A thrown type, with the place of the first <c>throw</c> of it that the code reaches: the file, 0 for the program's and 1 for <c>std/</c>, and the line.</summary>
     private sealed record Thrown(KurzType Type, int File, int Line);
 
-    /// <summary>An edge from a unit to a unit it runs, with the type arguments the call gives the type parameters of that unit (T19).</summary>
-    private sealed record Edge(object Unit, IReadOnlyDictionary<TypeParameterSymbol, KurzType>? Map);
+    /// <summary>
+    /// An edge from a unit to a unit it runs, with the type arguments the call gives the type parameters of that unit (T19); or, where it
+    /// does not run it, from a unit to a lambda it makes, which brings what the lambda builds and nothing it throws (section 5), as Rust
+    /// collects a closure's instance in the instance of the function that makes it.
+    /// </summary>
+    private sealed record Edge(object Unit, IReadOnlyDictionary<TypeParameterSymbol, KurzType>? Map, bool Runs = true);
 
     /// <summary>The code of an actor (section 5): its construction, its constructors and every method it declares.</summary>
     private sealed record Root(ClassSymbol Actor);
@@ -155,7 +168,16 @@ public sealed class ThrowSets
     /// <summary>A call of a function value of this type, which runs a lambda of the program whose type fits (F11).</summary>
     private sealed record Valued(FunctionType Type);
 
-    /// <summary>A unit of code: what it throws itself, what it runs, and the set the fixed point gives it.</summary>
+    /// <summary>The top-level code of a file, the root actor's (O6): a root of what the program builds, as Rust's <c>main</c> is.</summary>
+    private sealed record TopLevel(SemanticModel Model);
+
+    /// <summary>The text of every instantiation of a generic <c>data</c> type that the program builds (section 5, the owner, 2026-11-16).</summary>
+    private sealed record Each(DataSymbol Data);
+
+    /// <summary>
+    /// A unit of code: what it throws itself, what it runs, and the set the fixed point gives it; and the generic <c>data</c> types it
+    /// builds itself, in the terms of its own type parameters, with those the fixed point gives it.
+    /// </summary>
     private sealed class Unit
     {
         public List<Thrown> Own { get; } = [];
@@ -163,6 +185,10 @@ public sealed class ThrowSets
         public List<Edge> Edges { get; } = [];
 
         public List<Thrown> Set { get; } = [];
+
+        public List<DataType> Builds { get; } = [];
+
+        public List<DataType> Built { get; } = [];
     }
 
     /// <summary>The keys of the units: a lambda by its node, never by its text, and every other key by its own equality.</summary>
@@ -183,8 +209,15 @@ public sealed class ThrowSets
         }
 
         var first = Added(key);
+        Read(key, first);
+        return first;
+    }
+
+    // the unit's code, and the code of every unit it reaches that no read took before
+    private void Read(object key, Unit unit)
+    {
         var pending = new Queue<(object Key, Unit Unit)>();
-        pending.Enqueue((key, first));
+        pending.Enqueue((key, unit));
         while (pending.TryDequeue(out var next))
         {
             Scan(next.Key, next.Unit);
@@ -193,8 +226,6 @@ public sealed class ThrowSets
                 pending.Enqueue((edge.Unit, Added(edge.Unit)));
             }
         }
-
-        return first;
     }
 
     private Unit Added(object key)
@@ -205,14 +236,17 @@ public sealed class ThrowSets
         return unit;
     }
 
-    /// <summary>Each unit's set made of its own throws and of the sets of the units it runs, put through each edge's type arguments, until no set grows.</summary>
+    /// <summary>
+    /// Each unit's set made of its own throws and of the sets of the units it runs, and the generic data types it builds made of its own and
+    /// of those the units it runs build, each put through each edge's type arguments, as long as a set grows.
+    /// </summary>
     private void Solve()
     {
         for (var round = 0; ; round++)
         {
             if (round > 10_000)
             {
-                throw new InvalidOperationException("the throw sets did not settle: a thrown type grows at each call");
+                throw new InvalidOperationException("the throw sets did not settle: a thrown or a built type grows at each call");
             }
 
             var grew = false;
@@ -223,14 +257,27 @@ public sealed class ThrowSets
                     grew |= Add(unit.Set, thrown);
                 }
 
+                foreach (var made in unit.Builds)
+                {
+                    grew |= Add(unit.Built, made);
+                }
+
                 foreach (var edge in unit.Edges)
                 {
-                    foreach (var thrown in units[edge.Unit].Set.ToList())
+                    List<Thrown> reached = edge.Runs ? units[edge.Unit].Set.ToList() : []; // the making of a lambda throws nothing
+                    foreach (var thrown in reached)
                     {
-                        var type = edge.Map is null ? thrown.Type : Types.Substitute(thrown.Type, edge.Map);
-                        foreach (var one in Cases(type))
+                        foreach (var one in Cases(Through(edge, thrown.Type)))
                         {
                             grew |= Add(unit.Set, thrown with { Type = one });
+                        }
+                    }
+
+                    foreach (var made in units[edge.Unit].Built.ToList())
+                    {
+                        if (Through(edge, made) is DataType d)
+                        {
+                            grew |= Add(unit.Built, d);
                         }
                     }
                 }
@@ -243,7 +290,57 @@ public sealed class ThrowSets
         }
     }
 
+    // a type of the unit an edge reaches, in the terms of the unit it leaves: the type arguments of the call put in (T19)
+    private static KurzType Through(Edge edge, KurzType type) => edge.Map is null ? type : Types.Substitute(type, edge.Map);
+
     private static IReadOnlyList<KurzType> Cases(KurzType type) => type is UnionType u ? u.Cases : new[] { type };
+
+    // a built type once
+    private static bool Add(List<DataType> built, DataType made)
+    {
+        if (built.Any(d => Types.Same(d, made)))
+        {
+            return false;
+        }
+
+        built.Add(made);
+        return true;
+    }
+
+    /// <summary>
+    /// Section 5 (the owner, 2026-11-16, "Each instantiation"): every instantiation of a generic data type that the program builds, as
+    /// Rust's monomorphization collects its instances, from the roots through the type arguments each call gives, each with no type
+    /// parameter left; read once, before the code of any set, so that the text of each instantiation (<see cref="Each"/>) is read
+    /// after the whole of it is known and a set does not depend on the order of the questions.
+    /// </summary>
+    private List<DataType> Instantiations()
+    {
+        if (instantiations is null)
+        {
+            waiting = [];
+            var roots = Roots().Select(Discover).ToList();
+            Solve();
+            instantiations = [];
+            foreach (var made in roots.SelectMany(root => root.Built).Where(d => !Open(d)))
+            {
+                Add(instantiations, made);
+            }
+
+            var deferred = waiting;
+            waiting = null;
+            foreach (var (key, unit) in deferred)
+            {
+                Read(key, unit);
+            }
+        }
+
+        return instantiations;
+    }
+
+    // the roots of what the program builds, as Rust's are `main` and its `pub` items: the top-level code and every `pub` function the
+    // list holds that has no type parameter, since a generic one builds only what a call gives it
+    private IEnumerable<object> Roots() =>
+        Pub().Where(f => f.TypeParameters.Count == 0).Prepend<object>(new TopLevel(program.Model));
 
     // a type once, at the earliest place that throws it
     private static bool Add(List<Thrown> set, Thrown thrown)
@@ -362,6 +459,34 @@ public sealed class ThrowSets
 
             case Valued v:
                 unit.Edges.AddRange(Lambdas().Where(x => Fits(x.Type, v.Type)).Select(x => new Edge(x.Lambda, null)));
+                break;
+            case TopLevel t:
+                {
+                    var walk = new Walk(this, t.Model, Checkers().First(c => ReferenceEquals(c.Checker.Model, t.Model)).File, unit);
+                    foreach (var statement in t.Model.TopLevel)
+                    {
+                        walk.Statement(statement);
+                    }
+
+                    break;
+                }
+
+            case Each e:
+                if (waiting is not null)
+                {
+                    waiting.Add((e, unit)); // read once every instantiation is known
+                    break;
+                }
+
+                {
+                    var (model, file) = Site(e.Data);
+                    var walk = new Walk(this, model, file, unit);
+                    foreach (var made in Instantiations().Where(d => ReferenceEquals(d.Symbol, e.Data)))
+                    {
+                        walk.TextOf(made);
+                    }
+                }
+
                 break;
             default:
                 throw new InvalidOperationException($"no unit of code is a `{key.GetType().Name}`");
@@ -534,7 +659,14 @@ public sealed class ThrowSets
         {
             switch (e)
             {
-                case IntegerLiteral or RealLiteral or UnitLiteral or CharLiteral or BoolLiteral or NullLiteral or ThisExpression or LambdaExpression:
+                case IntegerLiteral or RealLiteral or UnitLiteral or CharLiteral or BoolLiteral or NullLiteral or ThisExpression:
+                    break;
+                case LambdaExpression l:
+                    if (model.HasLambda(l))
+                    {
+                        unit.Edges.Add(new Edge(l, null, Runs: false)); // section 5: what its body builds, in the terms of this unit's type parameters
+                    }
+
                     break;
                 case StringLiteral s:
                     foreach (var hole in s.Segments.OfType<HoleSegment>())
@@ -855,6 +987,11 @@ public sealed class ThrowSets
                     {
                         var made = model.TypeOf(c).Type as DataType ?? new DataType(info.Data!, []);
                         unit.Edges.Add(new Edge(new Made(made.Symbol), MapOf(made)));
+                        if (made.Symbol.IsGeneric)
+                        {
+                            unit.Builds.Add(made); // section 5: an instantiation the code builds, in the terms of its own type parameters
+                        }
+
                         break;
                     }
 
@@ -909,6 +1046,9 @@ public sealed class ThrowSets
         // every type its text reads
         private void Text(KurzType type) => Text(type, new HashSet<object>(ReferenceEqualityComparer.Instance));
 
+        /// <summary>The Text() that the text of a value of an instantiation the program builds calls (section 5).</summary>
+        public void TextOf(DataType made) => Text(made);
+
         private void Text(KurzType type, HashSet<object> seen)
         {
             switch (type)
@@ -927,6 +1067,12 @@ public sealed class ThrowSets
                     {
                         if (!seen.Add(x))
                         {
+                            continue;
+                        }
+
+                        if (!ReferenceEquals(x, d.Symbol) && x.IsGeneric)
+                        {
+                            unit.Edges.Add(new Edge(new Each(x), null)); // section 5: the text of each instantiation of it that the program builds
                             continue;
                         }
 
@@ -960,7 +1106,7 @@ public sealed class ThrowSets
                     Text(m.Value, seen);
                     break;
                 case TypeParameterType p:
-                    throw new InvalidOperationException($"the text of the type parameter `{p.Symbol.Name}`, whose argument the walk does not see: `no-text`, which the checker reports (A10)");
+                    throw new InvalidOperationException($"the text of the type parameter `{p.Symbol.Name}`, whose argument the walk does not see: no program the checker reads reaches it, since the checker reports the text of a type parameter as `no-text` (A10), and the walk reads a generic data type derived from the type it makes text of only for each instantiation the program builds, which names every type argument (section 5)");
                 default:
                     break; // a text the runtime makes, which runs no code of the program
             }

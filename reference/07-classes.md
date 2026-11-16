@@ -979,7 +979,13 @@ that a static field of a generic class exists once per type argument, as in C#)*
 whose type is or holds an interface's type, a function type or a type parameter is `static-state`
 too, whatever the program puts there: the field is read by its written type, and each of the three
 may hold a class instance, as rustc asks `Sync` of a `static`'s written type (§4, the owner,
-2026-11-15, issue 519, comment 6891937666, item 3, option (a), "Written type, Rust"). The case
+2026-11-15, issue 519, comment 6891937666, item 3, option (a), "Written type, Rust"). The type it
+reads is always written, a field being written `Type name` (K7): a `static` field with no type is
+`syntax`, and `static mut` with no type, the one field the front end reads without one, as a mutable
+variable is written (V2), is `static-state` by its `mut` *(assumed: as §4 marks it)*. A name no
+declaration gives in a static field's written type is that name's `unknown-name` (V10), the type
+read whole before it is judged, and an initial value not of that type gives way to `static-state`,
+the value read after the type *(assumed: as §4 marks it)*. The case
 `static-field` shows a static field that is allowed. R13's state at the top level of a file, in a package granted `allow
 raw`, is the one exception the record decides to the reason of this rule, a C library's global
 variables standing open (§14) (§3, the owner, 2026-10-21), and a `static mut`

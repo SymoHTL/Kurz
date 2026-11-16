@@ -63,6 +63,18 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         data EUnrelated
         data ERefused
         data EReadAgain
+        data EDefault
+        data EWithDerived
+        data EDerivedText
+        data EDerivedDataText
+        data EInterfaceText
+        data EMapKeyText
+        data EMapValueText
+        data EUnionText
+        data EWeakText
+        data EKept
+        data EComparedText
+        data EKeyedText
 
         void Direct() {
             throw EDirect
@@ -439,6 +451,161 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
             }
         }
 
+        int DefaultArea(int n) {
+            throw EDefault
+        }
+
+        data Sizing(int N) {
+            pub int Area = DefaultArea(N)
+        }
+
+        int ViaDefault(Sizing s = Sizing(1)) => s.N
+
+        class Fitted(int N) {
+            pub Fitted(Sizing s = Sizing(2)) : this(s.N) { }
+        }
+
+        Fitted ViaConstructorDefault() => Fitted()
+
+        class Framed(Sizing S = Sizing(3))
+
+        Framed ViaClassDefault() => Framed()
+
+        data Padded(Sizing S = Sizing(4))
+
+        Padded ViaDataDefault() => Padded()
+
+        int RaisedArea(int h) {
+            throw EWithDerived
+        }
+
+        data Plane(int W)
+
+        data Raised(int H) : Plane {
+            pub int Area = RaisedArea(H)
+        }
+
+        Plane ViaWithDerived(Plane p) => p with { W = 3 }
+
+        class Creature(int N) {
+            pub virtual string Text() => "creature"
+        }
+
+        class Hound(int Legs) : Creature {
+            pub override string Text() {
+                throw EDerivedText
+            }
+        }
+
+        void ViaDerivedText(Creature c) {
+            print(c)
+        }
+
+        data Note(int N)
+
+        data Memo(int M) : Note {
+            pub string Text() {
+                throw EDerivedDataText
+            }
+        }
+
+        void ViaDerivedDataText(Note n) {
+            print(n)
+        }
+
+        interface Labelled {
+            string Text()
+        }
+
+        class Label(int N) : Labelled {
+            pub string Text() {
+                throw EInterfaceText
+            }
+        }
+
+        void ViaInterfaceText(Labelled l) {
+            print(l)
+        }
+
+        data MapKey(int N) {
+            pub string Text() {
+                throw EMapKeyText
+            }
+        }
+
+        class MapValue(int N) {
+            pub string Text() {
+                throw EMapValueText
+            }
+        }
+
+        void ViaMapKeyText(Map<MapKey, int> m) {
+            print(m)
+        }
+
+        void ViaMapValueText(Map<string, MapValue> m) {
+            print(m)
+        }
+
+        class Either(int N) {
+            pub string Text() {
+                throw EUnionText
+            }
+        }
+
+        void ViaUnionText(int | Either u) {
+            print(u)
+        }
+
+        class Kept(int N) {
+            pub string Text() {
+                throw EWeakText
+            }
+        }
+
+        data Keeping(weak Kept? K)
+
+        void ViaWeakText(Keeping k) {
+            print(k)
+        }
+
+        data Picked(int N)
+
+        bool KeepPicked(Picked p) {
+            throw EKept
+        }
+
+        int ViaWhereValue(List<Picked> xs, (Picked) => bool keep) => xs.Where(keep).Count
+
+        int CountPicked(List<Picked> xs) => ViaWhereValue(xs, p => KeepPicked(p))
+
+        data Compared(int N) {
+            pub string Text() {
+                throw EComparedText
+            }
+        }
+
+        class Keyed(int Id) equal by Id {
+            pub string Text() {
+                throw EKeyedText
+            }
+        }
+
+        bool ViaEquality(Compared a, Compared b) => a == b
+
+        bool ViaEqualBy(Keyed a, Keyed b) => a == b
+
+        int ViaHash(Keyed k) {
+            mut counts = Map<Keyed, int>()
+            counts[k] = 1
+            return counts[k] ?? 0
+        }
+
+        void ViaCompared(Compared c, Keyed k) {
+            print(c)
+            print(k)
+        }
+
         """;
 
     private static readonly Lazy<(ProgramSyntax Tree, Checker Checker, ThrowSets Sets)> Program = new(() =>
@@ -490,11 +657,23 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     [InlineData("ViaBase", "EBase")] // the arguments a class passes to its base (K10)
     [InlineData("ViaInitializer", "EInitializer")] // a field of a data type's body, computed at its construction (D16)
     [InlineData("ViaWith", "EWith")] // a field of a data type's body, computed again by `with` (D16)
+    [InlineData("ViaWithDerived", "EWithDerived")] // a field of the body of a type derived from the one `with` copies, computed again (D6, D16)
+    [InlineData("ViaDefault", "EDefault")] // the default of a function's parameter, walked with the function that declares it (F12)
+    [InlineData("ViaConstructorDefault", "EDefault")] // the default of a parameter of a constructor of a class's body (F12, K14)
+    [InlineData("ViaClassDefault", "EDefault")] // the default of a parameter of a class's primary constructor (F12, D11)
+    [InlineData("ViaDataDefault", "EDefault")] // the default of a field of a data type's primary constructor (F12, D11)
     [InlineData("ViaWhere", "EWhere")] // a lambda a built-in call takes (M9)
     [InlineData("ViaInterpolation", "EInterpolation")] // the Text() of a hole (L6, A5)
     [InlineData("ViaPrint", "EPrint")] // the Text() of what `print` writes (A1, A5)
     [InlineData("ViaJoin", "EJoin")] // the Text() of each item `string.Join` joins (X6)
     [InlineData("ViaNested", "ENested")] // the Text() of a field of a data type in a list of nullable values (A3, A5)
+    [InlineData("ViaDerivedText", "EDerivedText")] // the Text() of a class derived from the type printed (A9)
+    [InlineData("ViaDerivedDataText", "EDerivedDataText")] // the Text() of a data type derived from the type printed (A5, D6)
+    [InlineData("ViaInterfaceText", "EInterfaceText")] // the Text() of a class that implements the interface printed (A10)
+    [InlineData("ViaMapKeyText", "EMapKeyText")] // the Text() of the keys of a map (A6)
+    [InlineData("ViaMapValueText", "EMapValueText")] // the Text() of the values of a map (A6)
+    [InlineData("ViaUnionText", "EUnionText")] // the Text() of a case of a union (A4)
+    [InlineData("ViaWeakText", "EWeakText")] // the Text() of the target of a `weak` field of a data type without its own Text() (A3, R3)
     [InlineData("ViaSpawn", "ESpawn")] // the construction of an actor a spawn makes, whose throw is the spawner's crash (U3)
     [InlineData("ViaGeneric", "EGeneric")] // a throw of a type parameter, with the type argument the call gives it (T19)
     [InlineData("ViaBare", "EBare")] // a bare `throw` in an arm of `else` throws the case its arm took (O7)
@@ -510,6 +689,28 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         Assert.Equal("ELambda", Raised("ViaLambdaValue").First());
         Assert.Equal("RuntimeError", Raised("ViaLambdaValue").Last());
         Assert.DoesNotContain("ELambda", Raised("ViaCall")); // the positive control's negative: a lambda no call reaches adds nothing
+    }
+
+    [Fact]
+    public void A_built_in_call_given_a_function_value_reaches_the_lambdas_whose_type_fits()
+    {
+        // M9, X8: `xs.Where(keep)` is given no lambda, so it reaches every lambda whose type fits the value's, the one `CountPicked` passes
+        var raised = Raised("ViaWhereValue");
+        Assert.Equal("EKept", raised[0]);
+        Assert.Equal("RuntimeError", raised[^1]);
+        Assert.DoesNotContain("EWhere", raised); // a lambda of another parameter type does not fit
+    }
+
+    [Theory]
+    [InlineData("ViaEquality")] // `==` on two data values compares their fields (D3)
+    [InlineData("ViaEqualBy")] // `==` on two instances of a class with `equal by` compares the fields it names (K5, K8)
+    [InlineData("ViaHash")] // a key of a map is hashed from the fields `==` reads (K5)
+    public void Equality_and_a_hash_run_no_code_of_the_program(string function)
+    {
+        // K5, D16: a type declares no `Equals` and no `GetHashCode` (`equals-method`); the positive control: a `print` of the same
+        // values reaches their Text(), which the comparison and the hash do not run
+        Assert.Equal(["EComparedText", "EKeyedText", "RuntimeError"], Raised("ViaCompared"));
+        Assert.Equal(["RuntimeError"], Raised(function));
     }
 
     [Fact]
@@ -563,6 +764,99 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     public void A_function_of_type_parameters_throws_its_type_parameter_until_a_call_gives_it_a_type()
     {
         Assert.Equal(["T", "RuntimeError"], Raised("Raise"));
+    }
+
+    [Fact]
+    public void The_text_of_a_generic_type_derived_from_the_printed_one_is_the_text_of_each_instantiation_the_program_builds()
+    {
+        // section 5, the owner, 2026-11-16, "Each instantiation": the top-level code builds `Sub<int>` and `Sub<Loud>`, and the `pub`
+        // function `Listed` builds `Sub<Wrapped>` through the type argument its call gives `Wrap`, and `Sub<Handed>` through the lambda
+        // that `Maker` makes for its type argument, which `Listed` calls as a function value; `Sub<Quiet>` stands in a function no root
+        // reaches and in a generic `pub` function no call gives a type argument, so the program does not build it, as Rust's
+        // monomorphization builds nothing for a function nothing calls and takes no generic function as a root
+        const string text = """
+            data ELoud
+            data EWrapped
+            data EHanded
+            data EQuiet
+            data EMade
+
+            data Plain(int N)
+
+            data Sub<U>(U X) : Plain
+
+            class Loud(int N) {
+                pub string Text() {
+                    throw ELoud
+                }
+            }
+
+            class Wrapped(int N) {
+                pub string Text() {
+                    throw EWrapped
+                }
+            }
+
+            class Handed(int N) {
+                pub string Text() {
+                    throw EHanded
+                }
+            }
+
+            class Quiet(int N) {
+                pub string Text() {
+                    throw EQuiet
+                }
+            }
+
+            void Show(Plain p) {
+                print(p)
+            }
+
+            Plain Wrap<T>(T x) => Sub<T>(1, x)
+
+            () => Plain Maker<T>(T x) => () => Sub<T>(1, x)
+
+            void Unreached() {
+                Show(Sub<Quiet>(1, Quiet(2)))
+            }
+
+            pub void Generic<T>(T x) {
+                Show(Sub<Quiet>(1, Quiet(3)))
+            }
+
+            int Fail() {
+                throw EMade
+            }
+
+            () => int Deferred() => () => Fail()
+
+            int Called() {
+                f = Deferred()
+                return f()
+            }
+
+            pub void Listed() {
+                Show(Wrap(Wrapped(3)))
+                made = Maker(Handed(4))
+                Show(made())
+            }
+
+            Show(Sub<int>(1, 2))
+            Show(Sub<Loud>(1, Loud(2)))
+
+            """;
+        var diagnostics = new DiagnosticBag();
+        var tree = Parser.Parse(SourceText.FromString("test.kz", text), diagnostics);
+        var checker = Checker.Check(tree, diagnostics, [], CorpusTests.StdChecker.Value);
+        Assert.Empty(diagnostics.Items);
+        var sets = new ThrowSets(checker, CorpusTests.StdChecker.Value);
+        FunctionSymbol Named(string name) => checker.Model.FunctionOf(tree.Statements.OfType<FunctionDeclaration>().Single(f => f.Name == name));
+        Assert.Equal(["ELoud", "EWrapped", "EHanded", "RuntimeError"], Names(sets.RaisedBy(Named("Show"))));
+
+        // F11: the unit that makes a lambda takes what it builds and nothing it throws, which a call of the function value brings
+        Assert.Equal(["RuntimeError"], Names(sets.RaisedBy(Named("Deferred"))));
+        Assert.Equal(["EMade", "RuntimeError"], Names(sets.RaisedBy(Named("Called"))));
     }
 
     [Fact]
