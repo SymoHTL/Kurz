@@ -87,6 +87,7 @@ public sealed partial class Emitter
         {
             "restart" => KeptArguments(s.Call, info, symbol, arguments, types, supervisor, policy),
             "escalate" => Escalating(supervisor),
+            "block" => throw Unsupported(policy.Line, "the block of `on crash`, which the emitter does not build (U28)"),
             _ => "null",
         });
         fn.Emit($"call ptr {RuntimeFunction("Building")}(ptr {fn.Value($"load ptr, ptr {building}")})");

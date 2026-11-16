@@ -127,6 +127,7 @@ public static class SyntaxCopy
                 ElseExpression el => el with { Call = Expression(el.Call), Arms = el.Arms.Select(Arm).ToList() },
                 ParenthesizedExpression p => p with { Inner = Expression(p.Inner) },
                 SpawnExpression s => s with { Call = (CallExpression)Expression(s.Call), Policy = s.Policy is { Block: { } block } p ? p with { Block = (LambdaExpression)Expression(block) } : s.Policy },
+                AttemptExpression a => a with { Body = Block(a.Body) },
                 _ => throw new InvalidOperationException($"the expression `{e.GetType().Name}` has no copy"),
             };
         }

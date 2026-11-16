@@ -70,6 +70,7 @@ public sealed partial class Checker
     private readonly HashSet<UseStatement> uses = new(ReferenceEqualityComparer.Instance); // F10: those `use` lines
     private readonly List<FunctionSymbol> folderCalls = []; // design record, section 2: the functions of another folder the file's qualified calls picked
     private readonly Checker? std; // W1: the standard library's checker, whose types of the prelude every file sees
+    private readonly IReadOnlyDictionary<TypeDeclaration, IReadOnlyList<KurzType>>? reasons; // U30: the `Reason` of each block's child the reading before found, null at the first reading
     private readonly HashSet<string> preludeSeen = new(StringComparer.Ordinal); // W1: the names of those types this file sees
 
     /// <summary>
@@ -79,13 +80,14 @@ public sealed partial class Checker
     /// </summary>
     internal Checker? Beside { get; set; }
 
-    private Checker(DiagnosticBag diagnostics, IReadOnlyCollection<string> grants, IReadOnlyDictionary<string, Checker> folders, Checker? std)
+    private Checker(DiagnosticBag diagnostics, IReadOnlyCollection<string> grants, IReadOnlyDictionary<string, Checker> folders, Checker? std, IReadOnlyDictionary<TypeDeclaration, IReadOnlyList<KurzType>>? reasons = null)
     {
         this.diagnostics = diagnostics;
         allowRaw = grants.Contains("raw");
         allowNative = grants.Contains("native");
         this.folders = folders;
         this.std = std;
+        this.reasons = reasons;
     }
 
     /// <summary>
@@ -93,9 +95,11 @@ public sealed partial class Checker
     /// writes its list in <c>std</c>, as the module <c>std::prelude::rust_2021</c> (design record, section 12: the owner, 2026-11-02, Q8 (a),
     /// the list held in the compiler, and 2026-11-01, Q7 (b), that every file sees them; the names on the list are assumed there, but
     /// <c>Url</c>, <c>HttpDate</c> and <c>HttpQuery</c>, which the owner's answer of 2026-11-06, G1 (a) to G3 (a), added), and the names
-    /// of regular expressions, <c>Regex</c>, <c>Match</c>, <c>RegexError</c> and <c>RegexKind</c> (G1; section 12, the owner, 2026-11-01, "In std").
+    /// of regular expressions, <c>Regex</c>, <c>Match</c>, <c>RegexError</c> and <c>RegexKind</c> (G1; section 12, the owner, 2026-11-01, "In std"),
+    /// and the runtime's error type and its kinds, <c>RuntimeError</c> and <c>RuntimeKind</c>, which the block of <c>on crash</c> names in an
+    /// arm over the child's <c>Reason</c> (U30; assumed, as the record makes the type a member of every <c>Reason</c> and names no place for it).
     /// </summary>
-    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders", "HttpRate", "HttpLimits", "HttpRequest", "HttpBody", "HttpResponse", "HttpWriter", "HttpServer", "Uri", "UriError", "UriKind", "Url", "HttpDate", "HttpQuery", "HttpClientOptions", "HttpResponseMessage", "HttpClient", "Regex", "Match", "RegexError", "RegexKind"];
+    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders", "HttpRate", "HttpLimits", "HttpRequest", "HttpBody", "HttpResponse", "HttpWriter", "HttpServer", "Uri", "UriError", "UriKind", "Url", "HttpDate", "HttpQuery", "HttpClientOptions", "HttpResponseMessage", "HttpClient", "Regex", "Match", "RegexError", "RegexKind", "RuntimeError", "RuntimeKind"];
 
     /// <summary>The types of the variables the top level declares, by name, for a test to read.</summary>
     public IReadOnlyDictionary<string, KurzType> TopLevelVariables => topLevel;
@@ -147,16 +151,57 @@ public sealed partial class Checker
             throw new ArgumentException($"`{unknown}` is no grant: R7 and R16 name `raw` and `native`", nameof(grants));
         }
 
-        var checker = new Checker(diagnostics, grants, folders, std);
-        checker.Run(program);
-        checker.KeepOneUseAfterMove();
-        foreach (var lint in checker.lints.Values)
+        // U30: a program with a block of `on crash` is read again with the `Reason` of each block's child that the reading before found,
+        // until the `Reason`s found are the ones the reading read (CheckCrashBlock)
+        IReadOnlyDictionary<TypeDeclaration, IReadOnlyList<KurzType>>? reasons = null;
+        for (var reading = 0; ; reading++)
         {
-            diagnostics.Add(lint);
-        }
+            var bag = new DiagnosticBag();
+            var checker = new Checker(bag, grants, folders, std, reasons);
+            checker.Run(program);
+            if (checker.crashBlocks.Count > 0 && std is not null && !bag.HasErrors && !bag.HasNotSupported)
+            {
+                var sets = new ThrowSets(checker, std, blocks: reading > 0);
+                var found = new Dictionary<TypeDeclaration, IReadOnlyList<KurzType>>(ReferenceEqualityComparer.Instance);
+                foreach (var (_, child, _) in checker.crashBlocks)
+                {
+                    found[child.Declaration] = sets.ReasonOf(child);
+                }
 
-        return checker;
+                var changed = checker.crashBlocks.FirstOrDefault(b => !SameTypes(b.Read, found[b.Child.Declaration]));
+                if (reading == 0 || changed.Policy is not null)
+                {
+                    if (reading < CrashReadings)
+                    {
+                        reasons = found;
+                        continue;
+                    }
+
+                    bag.NotSupported(changed.Policy!.Line, $"a block of `on crash` whose child's `Reason` grows by what the blocks of the program read, read {CrashReadings} times (U30)");
+                }
+            }
+
+            checker.KeepOneUseAfterMove();
+            foreach (var d in bag.Items)
+            {
+                diagnostics.Add(d);
+            }
+
+            foreach (var lint in checker.lints.Values)
+            {
+                diagnostics.Add(lint);
+            }
+
+            return checker;
+        }
     }
+
+    /// <summary>U30: the readings of a program with a block of <c>on crash</c> before its <c>Reason</c>s count as not found (<see cref="Check(ProgramSyntax, DiagnosticBag)"/>).</summary>
+    private const int CrashReadings = 4;
+
+    /// <summary>Whether the two lists hold the same types, in any order.</summary>
+    private static bool SameTypes(IReadOnlyList<KurzType> a, IReadOnlyList<KurzType> b) =>
+        a.Count == b.Count && a.All(t => b.Any(u => Types.Same(t, u)));
 
     /// <summary>The functions of other folders that the file's qualified calls picked (design record, section 2), each once.</summary>
     public IReadOnlyList<FunctionSymbol> FolderCalls => folderCalls.Distinct().ToList();
@@ -227,6 +272,9 @@ public sealed partial class Checker
 
         /// <summary>N3: the loops around the code being read, innermost last, with what held at each <c>break</c> and <c>continue</c> of theirs that can be reached.</summary>
         public List<LoopExits> Loops { get; } = [];
+
+        /// <summary>U29: set for the body of the block of <c>on crash</c>, whose decisions end its paths; a lambda inside it decides nothing.</summary>
+        public bool Deciding { get; init; }
 
         /// <summary>F3, N3: set while the statement being read follows, in a block around it, a statement whose end cannot be reached, or stands in a branch that a constant condition never takes, so that a <c>break</c> or a <c>continue</c> there is never reached and counts for no loop, as C# reads reachability.</summary>
         public bool Unreached { get; set; }
@@ -388,6 +436,7 @@ public sealed partial class Checker
 
         CheckMethodBodies(); // K7
         CheckConstructorBodies(); // K14
+        CheckTypeBlocks(); // U27, U28: the block of a policy after an actor's name
         JoinPassingReaders();
         FindGrowingCycles(); // T34: after the readers are known, of which it reads the calls in a loop over `T.Fields` alone
 
@@ -2136,6 +2185,9 @@ public sealed partial class Checker
             case SendStatement s:
                 CheckSend(s); // U6
                 return Flow.Completes;
+            case DecisionStatement d:
+                // U29: a decision of the block ends its path, as `return` ends a function's; the parser makes one in the block alone
+                return frame.Deciding ? Flow.Ends : throw new InvalidOperationException($"the decision `{d.Word}` at line {d.Line} outside the block of `on crash`: the parser reads it there alone");
             case IfStatement i:
                 {
                     // N3: each branch with what the condition shows there; after the `if`, what every branch that completes keeps

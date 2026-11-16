@@ -1710,6 +1710,20 @@ public sealed class ParserTests
         Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
     }
 
+    [Theory]
+    [InlineData("x = attempt {\n    f()\n}", "(assign-or-declare x (attempt {(call f)}))")]
+    [InlineData("x = retry {\n    f()\n}", "(assign-or-declare x (retry {(call f)}))")]
+    [InlineData("attempt = 1", "(assign-or-declare attempt (int 1))")]
+    [InlineData("if attempt {\n    f()\n}", "(if attempt {(call f)})")]
+    [InlineData("while retry {\n    f()\n}", "(while retry {(call f)})")]
+    [InlineData("if g(() => attempt {\n    f()\n}) {\n}", "(if (call g (lambda () (attempt {(call f)}))) {})")]
+    public void An_attempt_is_its_block_and_a_name_before_the_block_of_a_header(string program, string tree)
+    {
+        // section 6: `attempt { ... }` and `retry { ... }` parse, for the checker to refuse; before the block of an `if`, a `while`, a `for`
+        // or a `match` the word is a name, as a struct literal is no condition in Rust, and a lambda's body is no header
+        Assert.Equal(tree, Tree(program));
+    }
+
     [Fact]
     public void An_actor_without_its_body_is_braces_required()
     {

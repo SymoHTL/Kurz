@@ -150,6 +150,12 @@ public sealed record ParenthesizedExpression(int Line, Expression Inner) : Expre
 public sealed record SpawnExpression(int Line, CallExpression Call, CrashPolicy? Policy = null) : Expression(Line);
 
 /// <summary>
+/// <c>attempt { ... }</c> or <c>retry { ... }</c> (<see cref="Word"/>), the block that runs a piece of code with its crash kept to it (section 6);
+/// the checker says <c>not supported</c> to it.
+/// </summary>
+public sealed record AttemptExpression(int Line, string Word, Block Body) : Expression(Line);
+
+/// <summary>
 /// The words of a policy after <c>on crash</c> (section 6, U25, U26, U28): <paramref name="Word"/> is <c>restart</c>, <c>stop</c> or
 /// <c>escalate</c>, or <c>block</c> for the block that decides, <c>on crash (c) { ... }</c>, which <paramref name="Block"/> holds as a
 /// lambda of its one parameter, the crash, whose body decides; after <c>restart</c>, <paramref name="After"/> is the literal after

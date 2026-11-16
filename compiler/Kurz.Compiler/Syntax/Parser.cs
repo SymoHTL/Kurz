@@ -29,6 +29,7 @@ public sealed class Parser
     private bool noLambda; // the value of an operand of `asm`, where `=>` splits the operand (R11) and starts no lambda
     private int statementDepth; // the statements being parsed around the cursor: 1 at the top level of a file, more inside a block of code (R12, R16)
     private bool deciding; // U29: inside the block of `on crash (c) { ... }`, outside a lambda in it, where `restart`, `stop` and `escalate` are statements
+    private int headers; // the conditions, collections and subjects being parsed before their blocks, where a name before `{` is no `attempt` (section 6)
     private readonly List<(int Index, Token Original)> tokenEdits = new(); // tokens a speculative parse rewrote (`>>`): undone with the rewind
 
     private Parser(SourceText source, IEnumerable<Token> tokens, DiagnosticBag diagnostics)
@@ -631,6 +632,20 @@ public sealed class Parser
         return new ExpressionStatement(token.Line, expression);
     }
 
+    /// <summary>The condition, the collection or the subject before the block of an <c>if</c>, a <c>while</c>, a <c>for</c> or a <c>match</c>.</summary>
+    private Expression Header()
+    {
+        headers++;
+        try
+        {
+            return ParseExpression();
+        }
+        finally
+        {
+            headers--;
+        }
+    }
+
     private bool EndsStatement() => At(TokenKind.Newline) || At(TokenKind.EndOfFile) || At(TokenKind.RightBrace) || At(TokenKind.Semicolon);
 
     /// <summary>
@@ -1023,7 +1038,7 @@ public sealed class Parser
     private IfStatement ParseIf()
     {
         var keyword = Advance();
-        var condition = ParseExpression();
+        var condition = Header();
         // C1: the block opens where the condition ends, and E1: a block that is missing or opens on the next line is an error of the
         // whole `if`, reported on the line of its condition, its last line when the condition runs over several lines (the two rules
         // record the owner's choices of 2026-10-10 and 2026-10-11); a statement in its place is read as the block's one statement
@@ -1083,7 +1098,7 @@ public sealed class Parser
     private WhileStatement ParseWhile()
     {
         var keyword = Advance();
-        var condition = ParseExpression();
+        var condition = Header();
         return new WhileStatement(keyword.Line, condition, ParseBlockAfter(tokens[index - 1].Line, "`while`")); // C1: the last line of the header
     }
 
@@ -1108,7 +1123,7 @@ public sealed class Parser
             throw Fail("`in`");
         }
 
-        var collection = ParseExpression();
+        var collection = Header();
         var body = ParseBlockAfter(tokens[index - 1].Line, "`for`");
         List<MatchArm>? arms = null;
         var elseLine = 0;
@@ -1134,7 +1149,7 @@ public sealed class Parser
     private MatchStatement ParseMatchStatement()
     {
         var keyword = Advance();
-        var subject = ParseExpression();
+        var subject = Header();
         return new MatchStatement(keyword.Line, subject, ParseArms(keyword.Line, "`match`"));
     }
 
@@ -2462,6 +2477,13 @@ public sealed class Parser
                     return ParseLambdaBody(token.Line, [new Parameter(token.Line, false, null, token.Text, null)]);
                 }
 
+                if (token.Text is "attempt" or "retry" && At(TokenKind.LeftBrace) && headers == 0)
+                {
+                    // section 6: `attempt { ... }` and `retry { ... }`, its block, which the checker says `not supported` to; the words stay
+                    // names elsewhere, and before the block of an `if`, a `while`, a `for` or a `match`
+                    return new AttemptExpression(token.Line, token.Text, ParseBlock());
+                }
+
                 return new NameExpression(token.Line, token.Text);
             case TokenKind.Keyword:
                 switch (token.Text)
@@ -2476,7 +2498,7 @@ public sealed class Parser
                         return new NameExpression(token.Line, token.Text);
                     case "match":
                         Advance();
-                        var subject = ParseExpression();
+                        var subject = Header();
                         return new MatchExpression(token.Line, subject, ParseArms(token.Line, "`match`"));
                     case "asm" when Peek().Kind == TokenKind.LeftParen:
                         throw new ParseError(token.Line, "`asm` is a statement of its own (R11)");
@@ -2561,7 +2583,9 @@ public sealed class Parser
     {
         SkipNewlines();
         var saved = deciding;
+        var savedHeaders = headers;
         deciding = false; // U29: a lambda inside the block of `on crash` decides nothing, its `restart` a name (assumed: S3 of comment 6907441402)
+        headers = 0;
         try
         {
             if (At(TokenKind.LeftBrace))
@@ -2574,6 +2598,7 @@ public sealed class Parser
         finally
         {
             deciding = saved;
+            headers = savedHeaders;
         }
     }
 

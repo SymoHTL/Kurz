@@ -49,6 +49,8 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         data EEscalate
         data ERestarted
         data ETypeEscalate
+        data EBlocked
+        data EInBlock
         data EGeneric
         data EBare
         data EOther
@@ -315,6 +317,25 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
             }
         }
 
+        actor Blocked {
+            pub void Fail() {
+                throw EBlocked
+            }
+        }
+
+        actor Deciding {
+            pub void Make() {
+                b = spawn Blocked() on crash (c) {
+                    if c.Place.Line > 1 {
+                        throw EInBlock
+                    }
+
+                    stop
+                }
+                send b.Fail()
+            }
+        }
+
         void Raise<T>(T value) {
             throw value
         }
@@ -578,6 +599,14 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         // U25: under `escalate` written at the spawn, or the type's default (U27), the child's crash passes up whole; under the
         // default `restart` it does not
         Assert.Equal(["EEscalate", "ETypeEscalate", "RuntimeError"], Names(Program.Value.Sets.ReasonOf(Actor("Parent"))));
+    }
+
+    [Fact]
+    public void The_reason_of_an_actor_holds_what_the_block_of_its_spawn_throws_and_what_it_can_escalate()
+    {
+        // U28, U32: a block can pass the child's crash up whole with `escalate`, and its throw is the crash of the actor whose code spawns
+        Assert.Equal(["EBlocked", "EInBlock", "RuntimeError"], Names(Program.Value.Sets.ReasonOf(Actor("Deciding"))));
+        Assert.Equal(["EBlocked", "RuntimeError"], Names(Program.Value.Sets.ReasonOf(Actor("Blocked"))));
     }
 
     [Fact]

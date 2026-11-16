@@ -174,6 +174,7 @@ internal static class SyntaxPrinter
         UnaryExpression u => $"({Op(u.Operator)} {Print(u.Operand)})",
         BinaryExpression b => $"({Op(b.Operator)} {Print(b.Left)} {Print(b.Right)})",
         RangeExpression r => $"({(r.Inclusive ? ".." : "..<")} {Print(r.Start)} {Print(r.End)})",
+        AttemptExpression a => $"({a.Word} {Print(a.Body)})",
         LambdaExpression l => $"(lambda ({Parameters(l.Parameters)}) {(l.ExpressionBody is not null ? Print(l.ExpressionBody) : Print(l.BlockBody!))})",
         MatchExpression m => $"(match-expression {Print(m.Subject)} {Arms(m.Arms)})",
         WithExpression w => $"(with {Print(w.Target)} {string.Join(", ", w.Assignments.Select(a => a.Field + " = " + Print(a.Value)))})",
