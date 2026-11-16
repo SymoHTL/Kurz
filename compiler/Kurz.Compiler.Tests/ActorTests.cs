@@ -1528,7 +1528,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// U24: the text after the category of each log line of an actor's crash on standard error, <c>&lt;Type&gt;#&lt;n&gt; crashed: ...</c>,
     /// each line in P7's layout, and the rest of standard error.
     /// </summary>
-    private static (List<string> Crashes, string Others) Logged(string error)
+    internal static (List<string> Crashes, string Others) Logged(string error)
     {
         const string category = "Error Kurz.Actor: ";
         var crashes = new List<string>();
@@ -1685,8 +1685,9 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // U19, a crash between two copied arguments: `Boom` crashes the sender after the first argument of `Take`
         // crossed, while the session of the call's two copies is open; the box went into the session's memo, of the thread's own heap,
         // as every block of a session of two copies goes, and the crash ends the session with it, so that 10,000 such crashes grow the
-        // resident memory by less than 2 MiB, where a memo of 1,536 bytes kept per crash adds 15; the copy of the box and its text stays
-        // in the sink's heap, under 100 bytes a crash (compiler/README.md)
+        // resident memory by less than 2 MiB, where a memo of 1,536 bytes kept per crash adds 15; the copy of the box and its text is made
+        // in the message's own heap, since `Boom(s)` is a call after an argument that crosses, which the sender's crash frees, where a page
+        // of 256 bytes kept per crash would add about 2.4 MiB (compiler/README.md)
         if (!OperatingSystem.IsLinux())
         {
             return; // no `/proc/self/status` reads the resident memory on Windows
@@ -1973,6 +1974,62 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["B#1 crashed: thrown \"zero\" at program.kz:4", "A#2 crashed: callee-crashed at program.kz:12"], crashes);
         Ran((run.Code, run.Output, rest), 1, ["2"], "error: callee-crashed at program.kz:18\n");
+    }
+
+    [Fact]
+    public void A_message_whose_callee_ends_while_one_of_its_arguments_waits_holds_no_block_of_the_heap_the_end_freed()
+    {
+        // U12, U13, U21: `Box` ends as the child of a supervisor that crashed during the wait of `s.Get()`, which frees its heap; the third
+        // argument reaches the list of the first, whose copy the call's memo gives it again, so a copy made in the callee's heap would be
+        // read after its free. The message is built in a heap of its own and copied into the ended callee's first heap at its queueing,
+        // where it is dropped as any message to an ended actor; a call to the ended actor so built raises `actor-gone` at its line; under
+        // the allocator that makes every freed block inaccessible
+        const string text = """
+            actor Slow {
+                pub int Get() => 7
+            }
+
+            actor Box {
+                pub void Add(List<int> xs, int k, List<int> ys) {
+                    print(xs[0] + k + ys[2])
+                }
+
+                pub int Sum(List<int> xs, int k, List<int> ys) => xs[0] + k + ys[2]
+            }
+
+            actor Parent {
+                mut Box? kid = null
+
+                pub void Make() {
+                    kid = spawn Box()
+                }
+
+                pub Box? Kid() => kid
+
+                pub void Boom() {
+                    throw "parent"
+                }
+            }
+
+            p = spawn Parent()
+            p.Make()
+            kid = p.Kid()
+            s = spawn Slow()
+            items = [10, 20, 30]
+            if kid != null {
+                send p.Boom()
+                send kid.Add(items, s.Get(), items)
+                print("sent")
+                print(kid.Sum(items, s.Get(), items))
+            }
+
+            print("end")
+
+            """;
+        var run = BuildAndRun(text, ListTests.Fenced, "actor-ended-while-waiting");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Parent#1 crashed: thrown \"parent\" at program.kz:23"], crashes);
+        Ran((run.Code, run.Output, rest), 1, ["sent"], "error: actor-gone at program.kz:36\n");
     }
 
     [Fact]

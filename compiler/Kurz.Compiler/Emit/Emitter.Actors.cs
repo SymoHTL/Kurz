@@ -22,9 +22,10 @@ namespace Kurz.Compiler.Emit;
 /// </summary>
 public sealed partial class Emitter
 {
-    // the slots of the heaps of the `spawn`s begun in each region, null once the actor took its heap, which the region's end, or a jump
-    // out of it, frees where a case propagated out of a later argument left one (EndHeaps)
-    private readonly Dictionary<List<(string Value, KurzType Type)>, List<string>> regionHeaps = new(ReferenceEqualityComparer.Instance);
+    // the slots of the heaps of the `spawn`s, and of the messages built in a heap of their own, begun in each region, null once the actor
+    // took its heap or the message was queued, which the region's end, or a jump out of it, frees where a case propagated out of an argument
+    // after it left one (EndHeaps)
+    private readonly Dictionary<List<(string Value, KurzType Type)>, List<(string Slot, string Free)>> regionHeaps = new(ReferenceEqualityComparer.Instance);
 
     // the global of each actor type's name, for the log line of a crash (U24), declared once for its type
     private readonly Dictionary<ClassSymbol, string> actorNames = [];
@@ -56,18 +57,7 @@ public sealed partial class Emitter
             : "2097152";
         var supervisor = fn.Value($"call ptr {StdFunction("HeapCurrent")}()");
         var heap = fn.Value($"call ptr {RuntimeFunction("ActorHeapNew")}(i64 {IrSize(block)})");
-        var left = fn.Alloca("ptr", "heap", "null");
-        fn.Emit($"store ptr {heap}, ptr {left}");
-        if (regions.Count > 0)
-        {
-            if (!regionHeaps.TryGetValue(regions[^1], out var begun))
-            {
-                regionHeaps[regions[^1]] = begun = [];
-            }
-
-            begun.Add(left);
-        }
-
+        var left = HeapBegun(heap, "HeapLeft");
         var spawner = fn.Alloca("ptr", "spawner");
         var building = fn.Alloca("ptr", "building");
         var side = "null";
@@ -209,16 +199,39 @@ public sealed partial class Emitter
     }).ToList();
 
     /// <summary>
+    /// The slot of the heap <paramref name="heap"/>, of a <c>spawn</c> or of a message built in a heap of its own, listed among the heaps
+    /// begun in the region with the runtime's function <paramref name="free"/> that frees it (<see cref="EndHeaps"/>); the code stores
+    /// null there once the actor took the heap or the message was queued.
+    /// </summary>
+    private string HeapBegun(string heap, string free)
+    {
+        var left = fn.Alloca("ptr", "heap", "null");
+        fn.Emit($"store ptr {heap}, ptr {left}");
+        if (regions.Count > 0)
+        {
+            if (!regionHeaps.TryGetValue(regions[^1], out var begun))
+            {
+                regionHeaps[regions[^1]] = begun = [];
+            }
+
+            begun.Add((left, free));
+        }
+
+        return left;
+    }
+
+    /// <summary>
     /// At a region's end, or a jump out of it, after the region let go of its copies, the heap of each <c>spawn</c> begun in it that a
-    /// case propagated out of a later argument left without its actor freed whole (the runtime's <c>HeapLeft</c>).
+    /// case propagated out of an argument after it left without its actor, and of each message built in a heap of its own that it left
+    /// unqueued, freed whole (the runtime's <c>HeapLeft</c> and <c>MessageHeapFree</c>).
     /// </summary>
     private void EndHeaps(List<(string Value, KurzType Type)> temporaries)
     {
         if (regionHeaps.TryGetValue(temporaries, out var begun))
         {
-            foreach (var left in begun)
+            foreach (var (left, free) in begun)
             {
-                fn.Emit($"call void {RuntimeFunction("HeapLeft")}(ptr {fn.Value($"load ptr, ptr {left}")})");
+                fn.Emit($"call void {RuntimeFunction(free)}(ptr {fn.Value($"load ptr, ptr {left}")})");
             }
         }
     }
@@ -235,7 +248,13 @@ public sealed partial class Emitter
     /// of its chain, its actor's own methods; the result is then the caller's, a temporary of its region as any call's result is. A
     /// <c>send</c> passes none (U6). The message names the table of its call site, a constant: the function that runs it and the one
     /// that copies it into the heap of the actor's new instance after a crash (<see cref="MessageCopy"/>; U21); <c>Wait</c> is given the
-    /// message, so that a crash of the waiting actor unhooks the reply from it (U20).
+    /// message, so that a crash of the waiting actor unhooks the reply from it (U20). Where an argument that can wait, one that runs a call
+    /// anywhere in it (<see cref="SemanticModel.CanWait"/>), follows an argument that crosses, the wait lets the actor crash, which frees
+    /// the heap the arguments crossed into (U21), or end (U13): the message is then built in a heap of its own, made for it (the runtime's
+    /// <c>MessageHeapNew</c>), and at its queueing copied into the heap the actor has then by the function of its call site that copies it
+    /// after a crash, its own heap then freed, as Erlang builds a message in the sender's heap and copies it into the receiver's at its
+    /// send; where the actor ended meanwhile, the copy goes into its first heap and the message is dropped as any message to an ended
+    /// actor (the runtime's <c>Enqueue</c>). Where no argument after one that crosses can wait, the message is built in the actor's heap.
     /// </summary>
     private string EmitMessage(CallExpression c, CallInfo info)
     {
@@ -246,7 +265,10 @@ public sealed partial class Emitter
             NameExpression n => This(n, n.Line),
             _ => throw new InvalidOperationException($"a message through `{c.Callee.GetType().Name}` at line {c.Line}"),
         };
-        var heap = fn.Value($"call ptr {RuntimeFunction("ActorHeap")}(ptr {actor})");
+        var crossing = Enumerable.Range(0, c.Arguments.Count).FirstOrDefault(i => info.Binding[i] >= 0 && Counted(Sub(f.Parameters[info.Binding[i]].Type)), -1);
+        var own = crossing >= 0 && c.Arguments.Skip(crossing + 1).Any(a => Model.CanWait(a.Value)) ? fn.Value($"call ptr {RuntimeFunction("MessageHeapNew")}()") : null;
+        var left = own is null ? null : HeapBegun(own, "MessageHeapFree");
+        var heap = own ?? fn.Value($"call ptr {RuntimeFunction("ActorHeap")}(ptr {actor})");
         var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => Default(f.Declaration!.Parameters[j].Default, owners[f]), cConvention: false, owned: true, into: heap);
         var message = MessageType(f);
         var block = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr {heap}, i64 {IrSize(message)})");
@@ -260,10 +282,24 @@ public sealed partial class Emitter
             fn.Emit($"store {arguments[i]}, ptr {MessageField(message, block, 5 + i)}");
         }
 
+        // a message built in a heap of its own: copied into the actor's heap of the moment it is queued, its own heap freed
+        string Queued()
+        {
+            if (own is null)
+            {
+                return block;
+            }
+
+            var moved = fn.Value($"call ptr {copy}(ptr {block}, ptr {fn.Value($"call ptr {RuntimeFunction("ActorHeap")}(ptr {actor})")})");
+            fn.Emit($"call void {RuntimeFunction("MessageHeapFree")}(ptr {own})");
+            fn.Emit($"store ptr null, ptr {left}");
+            return moved;
+        }
+
         if (info.Kind == CallKind.ActorSend)
         {
             fn.Emit($"store ptr null, ptr {MessageField(message, block, 2)}");
-            fn.Emit($"call void {RuntimeFunction("Enqueue")}(ptr {actor}, ptr {block})");
+            fn.Emit($"call void {RuntimeFunction("Enqueue")}(ptr {actor}, ptr {Queued()})");
             return "void";
         }
 
@@ -276,6 +312,7 @@ public sealed partial class Emitter
         }
 
         fn.Emit($"store ptr {reply}, ptr {MessageField(message, block, 2)}");
+        block = Queued();
         fn.Emit($"call void {RuntimeFunction("Enqueue")}(ptr {actor}, ptr {block})");
         fn.Emit($"call void {RuntimeFunction("Wait")}(ptr {reply}, ptr {block}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
         return Types.IsVoid(result) ? "void" : fn.Value($"load {Ir(result)}, ptr {fn.Value($"getelementptr {Reply(result)}, ptr {reply}, i32 0, i32 3")}");
@@ -349,9 +386,11 @@ public sealed partial class Emitter
 
     /// <summary>
     /// U21: the function that copies a message of the method <paramref name="f"/>, made at its call site, into the heap of the actor's new
-    /// instance after a crash, which the runtime calls with the message and that heap: a block of that heap with the message's table,
+    /// instance after a crash, which the runtime calls with the message and that heap, and into the actor's heap at the queueing of a
+    /// message built in a heap of its own (<see cref="EmitMessage"/>): a block of that heap with the message's table,
     /// reply and chain ID, and a copy of each argument, every counted block it reaches copied there in one session (U12, Q2), a function
-    /// value by the environment of its lambda (<paramref name="copiesInto"/>); the message's own block goes with the crashed heap.
+    /// value by the environment of its lambda (<paramref name="copiesInto"/>); the message's own block goes with the crashed heap, or with
+    /// the message's own heap.
     /// </summary>
     private string MessageCopy(FunctionSymbol f, List<string?> copiesInto) => Helper($"message.copy.{f.Owner!.Name}.{f.Name}.{Number(++actorSites)}", "ptr", ["ptr", "ptr"], () =>
     {

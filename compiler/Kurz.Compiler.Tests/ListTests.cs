@@ -4802,6 +4802,39 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(actorCrossing, fenced, "actor-crossing-fenced"), 0, ["2 a x true 0", "kept label", "kept label", "true", "101 made"], "");
+        // U12, U21: a message whose list crossed into its callee's heap before the call of the argument after it, which waits, while the callee
+        // crashes, which frees that heap, and restarts (U22): built in a heap of its own and copied into the callee's heap of the moment
+        // it is queued (Emitter.EmitMessage), so that the new instance reads the list the call gave it
+        const string actorCrashWait = """
+            actor Slow {
+                pub int Get() => 7
+            }
+
+            actor Box {
+                pub void Boom() {
+                    throw "boom"
+                }
+
+                pub int Sum(List<int> xs, int k) {
+                    mut total = k
+                    for x in xs {
+                        total = total + x
+                    }
+
+                    return total
+                }
+            }
+
+            b = spawn Box()
+            s = spawn Slow()
+            send b.Boom()
+            print(b.Sum([10, 20, 30], s.Get()))
+
+            """;
+        var crashWait = BuildAndRun(actorCrashWait, fenced, "actor-crash-wait-fenced");
+        var (crashed, others) = ActorTests.Logged(crashWait.Error);
+        Assert.Equal(["Box#1 crashed: thrown \"boom\" at program.kz:7"], crashed);
+        Ran((crashWait.Code, crashWait.Output, others), 0, ["67"], "");
         // U12 (the owner, 2026-11-15, #519, comment 6895076937): a variable moved on one branch only, whose place the scope's end lets go of
         // through the test for the empty address, and on the other branch let go of as it is; a loop that takes its list, which lets go of
         // the items it did not move and of no moved one, as the list's last holder lets go of it (comment 6897778812, Q1 (b)); a variable
