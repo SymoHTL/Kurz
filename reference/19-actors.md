@@ -34,7 +34,8 @@ instance, mutable or not, lives in one actor's heap (K18), and an immutable
 *(assumed: K18's reading of `static` state, which the answer did not name; a class's immutable
 `static` field of such a type is reached from every actor, so that one of an actor shares nothing
 more, as a Rust `static` that is `Sync` stands)*. How a generic
-actor's messages and a call through an interface as a message are built stand open (§14).
+actor's messages are built, a value of a type parameter's type among a message's arguments and its
+result included, and a call through an interface as a message stand open (§14).
 
 The stack's clause is `stack` and a literal of bytes, `kb`, `mb` or `gb` (L14), `actor Parser stack 8mb
 { ... }`: it sets the size of the stack each message of the actor runs on, which is 2 MiB without it,
@@ -45,8 +46,10 @@ and one past the largest `long` is `constant-overflow`, as a literal that does n
 takes (L10); the runtime rounds it up to a whole page and raises it to its floor, 64 KiB, with no
 message, so that the clause sets at least what it says (§6, the owner, 2026-11-15, #519, comment 6892835500, Q7,
 "Rust/C#: round up silently") *(assumed: the floor, as §6 marks it)*, and a stack the system refuses
-ends the process with `allocation-failed`, naming the size so rounded (O11) *(assumed: the size, as §6
-marks it)*. `stack` with no literal of bytes after it, a number with no unit or with another unit
+ends the process with `allocation-failed`, naming the size so rounded, 2 MiB where no clause sets
+one, without the guard page Linux maps below it (O11), and a size past 2^62 bytes, which no system
+maps, ends it so before the rounding, naming the size as written *(assumed: the size and that limit,
+as §6 marks them)*. `stack` with no literal of bytes after it, a number with no unit or with another unit
 among them, and `stack` written twice are `syntax` (E4) *(assumed: as §6 marks it)*. On a target where
 no actor has a stack of its own the clause builds and sets nothing (§6, the owner, 2026-11-13, #519,
 comment 6851105334, "Accept, set nothing (Recommended)").
@@ -515,7 +518,7 @@ no value, so that a `send` where a value stands, `print(send c.Add(1))`, is `syn
 whose success is `void` used as a value (O10). A `send` of a method that gives a result is
 the compile error `send-result`, since its result and its cases would reach nobody (§6, the owner,
 2026-11-13, #519, comment 6847932993, Q12, "send-result error (Recommended)"). `send` stands
-wherever a call does, in a function, a class's method and a lambda among them, as a call that
+as a statement wherever a call does, in a function, a class's method and a lambda among them, as a call that
 waits does (U4).
 
 Case: [actors/spawn-in-function.kz](../corpus/actors/spawn-in-function.kz)
@@ -795,9 +798,9 @@ actor Worker {
 
 What crosses between actors is a value (a string, a number), a collection, a `data` value or an
 immutable class instance where every value it reaches crosses, a function value where every value
-it captures crosses, and an actor's reference; a mutable class instance crosses with `copy` or
-`move` alone, and so does a collection or a `data` value that reaches one, every value it reaches
-crossing or being a mutable class instance (§6, "What may cross between actors"). A message's arguments and its result cross so, and so
+it captures crosses, and an actor's reference; a mutable class instance, and a collection or a `data` value that reaches one, crosses with `copy`
+or `move` alone, where every value it reaches crosses or is a mutable class instance, and with
+`move` only where every path into it ends (§6, "What may cross between actors"). A message's arguments and its result cross so, and so
 do the arguments of an actor's constructor, which cross as a call's do (§6, the owner,
 2026-11-13, #519, comment 6847932993, Q13). A mutable class instance among a message's arguments
 or a constructor's with neither word is the compile error `send-needs-word`, at its argument
@@ -819,9 +822,12 @@ such a value cross: it is `send-needs-word` with `copy` or `move` too, as `Box<d
 519, comment 6892275110, item 2, option (a), "No, never crosses"), and so is a collection, a `data`
 value or a class instance that reaches one *(assumed: the answer read through what a value reaches,
 as a function value whose captures do not cross is read, as rustc reads `Send` through a struct's
-fields)*. A value of an interface's type given as a message's result is, by its written type, the
+fields)*. An actor's reference held in a variable of an interface's type, which a call as a message
+through an interface that an actor implements would take, stands with that open point (§14, Q26). A
+value of an interface's type given as a message's result is, by its written type, the
 compile error of a mutable class instance given as a call's result (§6, the owner, 2026-11-15,
-issue 519, comment 6892275110, item 3, option (a), "Same error, by written type").
+issue 519, comment 6892275110, item 3, option (a), "Same error, by written type"), and so is a
+collection, a `data` value or a class instance that reaches one *(assumed: as §6 marks it)*.
 An immutable class is one through which nothing
 reachable has a `mut` field, and a value crosses where every value it reaches crosses, a
 collection's items and a `data` value's fields among them, as Rust's `Send` is structural
@@ -1653,7 +1659,7 @@ Q8, "All nine leans (Recommended)"). The end of any actor stops the actors it sp
 their current message, their queued messages dropped, so that the end of the top-level code reaches
 every actor of the machine (§6, the owner, 2026-10-30, "With its supervisor", and the owner,
 2026-11-13, #519, comment 6847932993, Q16). A message parked in a wait when the top-level code ends
-is dropped with the process, as a queued one is, its lines after the wait never running, as tokio
+is no current message that holds that end, and is dropped with the process, as a queued one is, its lines after the wait never running, as tokio
 drops its tasks when its runtime shuts down (§6, the owner, 2026-11-15, #519, comment 6892835500, Q5, "Rust:
 dropped").
 
@@ -1755,8 +1761,9 @@ actor Checker {
 
 c = spawn Checker()
 s = spawn Store(c)
-print(s.Save(4))
+v = s.Save(4)
 print(s.Load())
+print(v)
 ```
 
 Case: [actors/send-own-method.kz](../corpus/actors/send-own-method.kz)
@@ -1783,10 +1790,16 @@ of an argument written with `move` (§6, U12) comes after `send-needs-word` too,
 round of comment 6897444564 did not ask)*, and between them and `mut-in-message` the error of the
 argument written first comes first, as rustc's borrow check,
 whose errors both are, sorts its errors by their place (§6, the owner, 2026-11-15, issue 519,
-comment 6891937666, item 4, option (a), "Rust: by argument order"). An argument's own error
+comment 6891937666, item 4, option (a), "Rust: by argument order"). `mut-in-message` stands at the
+first argument the call writes that fills a `mut` parameter, and on one argument the two never meet,
+an argument written with `move` that fills a `mut` parameter being `mut-at-call` (M7), its own error
+*(assumed: as §6 marks it)*. An argument's own error
 stands alone before U14's `cannot-infer` of `spawn`'s type arguments, which is said only where every
 argument reads clean (§6, the owner, 2026-11-15, issue 519, comment 6892275110, item 1, option (a),
-"Argument's error only"). A declaration
+"Argument's error only"), one with no error of its own and no `send-needs-word`, so that
+`cannot-infer` comes after `send-needs-word` and before `move-reachable`, `move-at-call`,
+`used-after-move` and `mut-in-message`, each standing alone, as rustc's borrow check skips a body
+whose type check failed *(assumed: as §6 marks it)*. A declaration
 in an actor that breaks two rules, one of them this chapter's, is the error of the word read
 first, so that `pub static mut int n = 0` is `actor-field-public` (U8) and not `static-state`
 (U1), and `static mut Nope x = 0` and `static mut int n = "a"` are `static-state` and not the
@@ -1815,7 +1828,10 @@ message waits in the inbox, a `send` of the chain among them, which runs after t
 sent from (§6, "Deadlocks", layer 1; the owner, 2026-11-14, #519, comment 6880404917, Q13, "All
 eight leans (Recommended)"). Such a call runs on a stack of its own from the pool, as any message
 starts, and the parked message resumes once the calls above it end (§6, the owner,
-2026-11-15, #519, comment 6892835500, Q6, "Own pooled stack"). An actor under construction takes no
+2026-11-15, #519, comment 6892835500, Q6, "Own pooled stack"). A call that waits gets in where, as
+it is queued, the newest message its target has started and not ended, running or parked in a wait,
+carries its chain, so that a call that a message makes through a reference to its own actor gets in
+too *(assumed in §6)*. An actor under construction takes no
 message until its `spawn` returns, one of its chain neither *(assumed in §6)*. The chain ID is 16 bytes,
 drawn at random from a generator of its thread that the system's randomness seeds once, and a system
 that gives no randomness when a thread starts its first chain ends the program with `random-failed`,
@@ -1880,8 +1896,8 @@ Case: [actors/call-self-through-this.kz](../corpus/actors/call-self-through-this
 
 ### U18 (decided, §6) A wait of the top-level code that nothing can end
 
-The top-level code's call that waits runs the actors' messages in place, on the main thread's stack,
-until its reply is set, and never parks, as tokio's `block_on` runs its runtime on the thread that
+The top-level code's call that waits runs the scheduler in place on the main thread's stack, each
+message on a stack of its own (U1, U17), until its reply is set, and never parks, as tokio's `block_on` runs its runtime on the thread that
 calls it *(assumed in §6)*. A wait of it that finds nothing left to run ends the process with
 `error: deadlock at <file>:<n>`, the line of that call, and the exit code 1, so that two actors that
 call each other from different chains and wait for each other, on one thread, do not hang silently
@@ -1894,7 +1910,6 @@ Case: [actors/deadlock.kz](../corpus/actors/deadlock.kz)
 ```kurz
 actor Left {
     pub void Ask(Right other) {
-        print("left asks")
         print("left got {other.Value()}")
     }
 
@@ -1903,7 +1918,6 @@ actor Left {
 
 actor Right {
     pub void Ask(Left other) {
-        print("right asks")
         print("right got {other.Value()}")
     }
 
