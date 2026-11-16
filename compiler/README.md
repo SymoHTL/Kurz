@@ -1982,22 +1982,40 @@ last call that waits does not run, and a message parked in a wait when the top-l
 not go on (U13); of section 6's deadlocks the build makes layer 1 (U17) and the `deadlock` of a wait
 of the top-level code that nothing can end (U18), and neither layer 2, the compile error `call-loop`,
 nor layer 3, so that a loop of waits that the top-level code does not wait on stays to the end of the
-program; a crash in a method ends the process with its error line and
-the exit code 1, as a crash outside an actor ends it, on Linux with a trace that ends at the method's
-frame, the first of its stack, and names no `main`, and no actor restarts; a message has 2 MiB of
+program; a crash in a message is the crash of its actor (U19): the runtime stores it in the
+activation's header and switches to the scheduler's stack, frees the actor's heap whole but for its
+first block, the record and the state, copies the messages of its inbox into a new heap, ends the
+open copy sessions of its activations, unhooks the reply each parked activation waits on, answers
+each waiting caller `callee-crashed` (U20), ends the actor's children after their current message
+(U13, U21), writes one log line (U24) and restarts the actor after a pause of 100 ms that doubles up
+to 30 s, run by the top-level code's wait, which sleeps while only a pause is left (U22, U23); the
+emitted `spawn` keeps a copy of the constructor's arguments in the spawner's heap and makes the
+function that constructs the state again from them, and each call site of a message gets a table
+of the function that runs it and the one that copies it into a new heap. What stays `not supported`
+of section 6's supervision: the words of a policy (`on crash`, `restart`, `stop`, `escalate`,
+`after`, `max N in`) after `spawn` and after a type's name, with `restart-limit`, and the block
+`on crash (c) { ... }` with its `Crashed` and its `Reason`; every actor has the default, and a
+crash at the root, the top-level code, still ends the process with its error line, its trace and
+the exit code 1. A call whose caller crashed runs to its end and its result goes nowhere, which on
+one thread no program reaches but through the crash path, a caller that waits crashing only through
+a call of its own chain; an actor that ended keeps its first page to the end of the process, so that
+a call that still reaches it raises `actor-gone`; and the copies a crashed message made of the
+arguments of a call it had not sent yet, and the heap of a `spawn` whose arguments it was still
+evaluating, stay in their heaps until those are freed. A message has 2 MiB of
 stack where its clause sets no other size, where a message on Linux had the main thread's 8 MiB
 while messages ran on it, and a server whose actors hold many stacks at once, two mappings each, needs Linux's limit
 of mappings, `vm.max_map_count`, raised past its default of 65,530, as section 6 says; a recursion
-past a message's stack ends the process with `stack-overflow` at its line on Linux, while on Windows
-it ends it as an overflow of the main thread's stack does, with the system's `0xC00000FD` and no line
-of Kurz, the handler of section 2 for an actor's stack not being built there; on 64-bit Arm the
+past a message's stack is its actor's crash on Linux, the log line naming `stack-overflow` at its
+line, while on Windows it ends the process as an overflow of the main thread's stack does, with the
+system's `0xC00000FD` and no line of Kurz, the handler of section 2 for an actor's stack not being
+built there, and Windows gains a clock and a sleep for the pauses and the log line; on 64-bit Arm the
 switch, `naked` on Arm and the stacks build, and no run of this repository's gates runs them but the
 job `compiler-arm`, which is not required; a call waits with no bound, where section 6 bounds it by 5 seconds (`call-timeout`);
 and an inbox grows with no bound, where section 13 spills it at 64 MB, until the allocator ends the
 process with `allocation-failed`. An actor and its state live to the end of the process, which is
 section 6's end of an actor in a program the build takes: an actor ends with its supervisor, the
 actor that spawned it (the owner, 2026-10-30), at the root the top-level code, which ends with the
-process, and no actor stops, nor crashes without ending the process. Every actor's blocks come from
+process, and no actor stops but a child of a supervisor that crashed. Every actor's blocks come from
 its own heap (section 3, "The runtime"), and the end of the top-level code frees every actor's heap
 whole before the process exits (`EndActors`), as the end of an actor frees its heap (U13); a crossing
 copies every counted block it reaches, so that no actor holds a block of another's heap (U12). Of
