@@ -1681,9 +1681,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_crash_between_two_copied_arguments_ends_their_session()
     {
         // U19 and the sketch's risk "A crash between two copied arguments": `Boom` crashes the sender after the first argument of `Take`
-        // crossed, while the session of the call's two copies is open, whose memo the crash ends with it, so that 10,000 such crashes
-        // grow the resident memory by less than 2 MiB, where a memo of 1,536 bytes kept per crash adds 15; the copy of the first argument
-        // stays in the sink's heap, about 32 bytes a crash (compiler/README.md)
+        // crossed, while the session of the call's two copies is open; the box went into the session's memo, of the thread's own heap,
+        // as every block of a session of two copies goes, and the crash ends the session with it, so that 10,000 such crashes grow the
+        // resident memory by less than 2 MiB, where a memo of 1,536 bytes kept per crash adds 15; the copy of the box and its text stays
+        // in the sink's heap, under 100 bytes a crash (compiler/README.md)
         if (!OperatingSystem.IsLinux())
         {
             return; // no `/proc/self/status` reads the resident memory on Windows
@@ -1707,9 +1708,11 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 return -1
             }
 
+            class Box(string Text)
+
             actor Sink {
-                pub void Take(string a, string b) {
-                    print(a)
+                pub void Take(Box a, string b) {
+                    print(a.Text)
                 }
             }
 
@@ -1719,7 +1722,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             actor Sender(Sink Into) {
                 pub void Send(string s) {
-                    send Into.Take("x{s}", Boom(s))
+                    send Into.Take(Box("x{s}"), Boom(s))
                 }
 
                 pub int Ping() => 1
