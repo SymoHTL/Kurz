@@ -1,0 +1,35 @@
+// expect: output
+// | child 1 tick 1
+// | true
+// rules: U21
+
+actor Child(int N) {
+    pub void Tick(int t) {
+        print("child {N} tick {t}")
+    }
+}
+
+actor Parent {
+    mut Child? kid = null
+
+    pub void Make() {
+        kid = spawn Child(1)
+    }
+
+    pub void Boom() {
+        throw "parent fails"
+    }
+
+    pub Child? Kid() => kid
+}
+
+p = spawn Parent()
+p.Make()
+kid = p.Kid()
+if kid != null {
+    send kid.Tick(1)
+    send p.Boom()
+    send kid.Tick(2)
+}
+
+print(p.Kid() == null)

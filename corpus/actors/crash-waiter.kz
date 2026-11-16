@@ -1,0 +1,12 @@
+// expect: throws callee-crashed at 11
+// | 5
+// rules: U20
+
+actor Calc {
+    pub int Div(int n) => 10 / n
+}
+
+c = spawn Calc()
+print(c.Div(2))
+print(c.Div(0))
+print("after")

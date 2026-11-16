@@ -1,0 +1,15 @@
+// expect: output
+// | 1
+// rules: U23
+
+actor Flaky {
+    pub void Fail() {
+        throw "flaky"
+    }
+
+    pub int Ping() => 1
+}
+
+f = spawn Flaky()
+send f.Fail()
+print(f.Ping())

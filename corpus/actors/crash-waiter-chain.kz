@@ -1,0 +1,28 @@
+// expect: output
+// | 1
+// | 2
+// rules: U20
+
+actor B {
+    pub int Get(int n) {
+        if n == 0 {
+            throw "zero"
+        }
+
+        return n
+    }
+}
+
+actor A(B Other) {
+    pub void Ask(int n) {
+        print("asked {Other.Get(n)}")
+    }
+
+    pub int Ping() => 1
+}
+
+b = spawn B()
+a = spawn A(b)
+send a.Ask(0)
+print(a.Ping())
+print(b.Get(2))

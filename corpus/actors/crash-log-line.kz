@@ -1,0 +1,15 @@
+// expect: output
+// | shop
+// rules: U24
+
+actor Shop {
+    pub void Buy(string item) {
+        throw "no {item}"
+    }
+
+    pub string Name() => "shop"
+}
+
+s = spawn Shop()
+send s.Buy("stock")
+print(s.Name())

@@ -1,0 +1,32 @@
+// expect: output
+// | first 1
+// | first 3
+// | then 4
+// | 2
+// rules: U21
+
+actor Notes {
+    mut int count = 0
+
+    pub void Note(int n) {
+        if n == 2 {
+            throw "two"
+        }
+
+        count = count + 1
+        if count == 1 {
+            print("first {n}")
+        } else {
+            print("then {n}")
+        }
+    }
+
+    pub int Count() => count
+}
+
+l = spawn Notes()
+send l.Note(1)
+send l.Note(2)
+send l.Note(3)
+send l.Note(4)
+print(l.Count())
