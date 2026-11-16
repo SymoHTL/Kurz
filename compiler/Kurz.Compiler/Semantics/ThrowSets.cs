@@ -13,7 +13,7 @@ namespace Kurz.Compiler.Semantics;
 /// types they make text of, and for a generic <c>data</c> type derived from such a type the text of each instantiation of it that the
 /// program builds (section 5, the owner, 2026-11-16); the construction of an actor it spawns, whose throw is its crash (U3); and the code
 /// of an actor it spawns under <c>escalate</c>, whose crash passes up whole (U25). The instantiations a program builds are found as Rust's
-/// monomorphization finds its instances: from the roots, the top-level code and every <c>pub</c> function without type parameters, through
+/// monomorphization finds its instances: from the roots, the top-level code and every <c>pub</c> function, a generic one among them, through
 /// the type arguments each call gives, with the fixed point's edges, a lambda's in the unit that makes it, and each with no type parameter
 /// left. A call through an actor's
 /// reference reaches none of the callee's code, whose crash its caller gets as <c>callee-crashed</c> (U20). The text of a thrown value
@@ -346,9 +346,9 @@ public sealed class ThrowSets
     }
 
     // the roots of what the program builds, as Rust's are `main` and its `pub` items: the top-level code and every `pub` function the
-    // list holds that has no type parameter, since a generic one builds only what a call gives it
-    private IEnumerable<object> Roots() =>
-        Pub().Where(f => f.TypeParameters.Count == 0).Prepend<object>(new TopLevel(program.Model));
+    // list holds, a generic one among them, whose instantiations with every type argument named are built whatever type argument a
+    // call gives it (section 5, comment 6926485802: the list names what a call of it can raise)
+    private IEnumerable<object> Roots() => Pub().Prepend<object>(new TopLevel(program.Model));
 
     // a type once, at the earliest place that throws it
     private static bool Add(List<Thrown> set, Thrown thrown)

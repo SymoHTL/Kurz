@@ -790,16 +790,18 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     [Fact]
     public void The_text_of_a_generic_type_derived_from_the_printed_one_is_the_text_of_each_instantiation_the_program_builds()
     {
-        // section 5, the owner, 2026-11-16, "Each instantiation": the top-level code builds `Sub<int>` and `Sub<Loud>`, and the `pub`
+        // section 5, the owner, 2026-11-16, "Each instantiation": the top-level code builds `Sub<int>` and `Sub<Loud>`, the `pub`
         // function `Listed` builds `Sub<Wrapped>` through the type argument its call gives `Wrap`, and `Sub<Handed>` through the lambda
-        // that `Maker` makes for its type argument, which `Listed` calls as a function value; `Sub<Quiet>` stands in a function no root
-        // reaches and in a generic `pub` function no call gives a type argument, so the program does not build it, as Rust's
-        // monomorphization builds nothing for a function nothing calls and takes no generic function as a root
+        // that `Maker` makes for its type argument, which `Listed` calls as a function value, and the generic `pub` function `Generic`
+        // builds `Sub<Quiet>`, with every type argument named whatever type argument a call gives it, whose `EQuiet` a call of it raises
+        // (section 5, "Compiler lists them"); `Sub<Silent>` stands in a function no root reaches, so the program does not build it, as
+        // Rust's monomorphization builds nothing for a function nothing calls
         const string text = """
             data ELoud
             data EWrapped
             data EHanded
             data EQuiet
+            data ESilent
             data EMade
 
             data Plain(int N)
@@ -830,6 +832,12 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
                 }
             }
 
+            class Silent(int N) {
+                pub string Text() {
+                    throw ESilent
+                }
+            }
+
             void Show(Plain p) {
                 print(p)
             }
@@ -839,7 +847,7 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
             () => Plain Maker<T>(T x) => () => Sub<T>(1, x)
 
             void Unreached() {
-                Show(Sub<Quiet>(1, Quiet(2)))
+                Show(Sub<Silent>(1, Silent(2)))
             }
 
             pub void Generic<T>(T x) {
@@ -873,7 +881,9 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         Assert.Empty(diagnostics.Items);
         var sets = new ThrowSets(checker, CorpusTests.StdChecker.Value);
         FunctionSymbol Named(string name) => checker.Model.FunctionOf(tree.Statements.OfType<FunctionDeclaration>().Single(f => f.Name == name));
-        Assert.Equal(["ELoud", "EWrapped", "EHanded", "RuntimeError"], Names(sets.RaisedBy(Named("Show"))));
+        Assert.Equal(["ELoud", "EWrapped", "EHanded", "EQuiet", "RuntimeError"], Names(sets.RaisedBy(Named("Show"))));
+        var listed = sets.PubFunctions();
+        Assert.Equal(["ELoud", "EWrapped", "EHanded", "EQuiet", "RuntimeError"], Names(listed[Assert.Single(listed.Keys, f => f.Name == "Generic")]));
 
         // F11: the unit that makes a lambda takes what it builds and nothing it throws, which a call of the function value brings
         Assert.Equal(["RuntimeError"], Names(sets.RaisedBy(Named("Deferred"))));

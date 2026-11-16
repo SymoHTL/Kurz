@@ -2634,7 +2634,7 @@ the code of an actor it spawns under `escalate` or a block, with the block's bod
 actor whose code spawns (U32), a type's block among it. The instantiations are found as Rust's monomorphization finds its instances: the
 fixed point joins the generic `data` types each unit constructs with those of the units it runs, through the same type arguments, and
 with those of the lambdas it makes, as Rust collects a closure's instance in the instance of the function that makes it, and the
-program builds those that the sets of its roots, the top-level code and the `pub` functions without type parameters, hold with
+program builds those that the sets of its roots, the top-level code and the `pub` functions, a generic one among them, hold with
 every type argument named. A call through an actor's reference reaches nothing of the callee's
 code, the text of a thrown value adds nothing, and a function of a folder of the runtime throws nothing. A bare `throw` throws the
 case its arm of `else` took. The checker reads the sets for the block of `on crash` alone (U30): it reads a program with a block
