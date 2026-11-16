@@ -767,6 +767,65 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void The_text_of_a_generic_type_derived_from_the_printed_one_is_the_text_of_each_instantiation_the_program_builds()
+    {
+        // section 5, the owner, 2026-11-16, "Each instantiation": the top-level code builds `Sub<int>` and `Sub<Loud>`, and the `pub`
+        // function `Listed` builds `Sub<Wrapped>` through the type argument its call gives `Wrap`; `Sub<Quiet>` stands in a function no
+        // root reaches, so the program does not build it, as Rust's monomorphization builds nothing for a function nothing calls
+        const string text = """
+            data ELoud
+            data EWrapped
+            data EQuiet
+
+            data Plain(int N)
+
+            data Sub<U>(U X) : Plain
+
+            class Loud(int N) {
+                pub string Text() {
+                    throw ELoud
+                }
+            }
+
+            class Wrapped(int N) {
+                pub string Text() {
+                    throw EWrapped
+                }
+            }
+
+            class Quiet(int N) {
+                pub string Text() {
+                    throw EQuiet
+                }
+            }
+
+            void Show(Plain p) {
+                print(p)
+            }
+
+            Plain Wrap<T>(T x) => Sub<T>(1, x)
+
+            void Unreached() {
+                Show(Sub<Quiet>(1, Quiet(2)))
+            }
+
+            pub void Listed() {
+                Show(Wrap(Wrapped(3)))
+            }
+
+            Show(Sub<int>(1, 2))
+            Show(Sub<Loud>(1, Loud(2)))
+
+            """;
+        var diagnostics = new DiagnosticBag();
+        var tree = Parser.Parse(SourceText.FromString("test.kz", text), diagnostics);
+        var checker = Checker.Check(tree, diagnostics, [], CorpusTests.StdChecker.Value);
+        Assert.Empty(diagnostics.Items);
+        var show = checker.Model.FunctionOf(tree.Statements.OfType<FunctionDeclaration>().Single(f => f.Name == "Show"));
+        Assert.Equal(["ELoud", "EWrapped", "RuntimeError"], Names(new ThrowSets(checker, CorpusTests.StdChecker.Value).RaisedBy(show)));
+    }
+
+    [Fact]
     public void The_reason_of_an_actor_is_what_its_construction_and_every_method_throw()
     {
         // section 5: the default of its field, a method that calls a function, and a private method, by line; not a function it does not reach

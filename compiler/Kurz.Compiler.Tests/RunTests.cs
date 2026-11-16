@@ -195,6 +195,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     {
         ["types/string-chars.kz"] = "`s.Chars` as a list (T15)",
         ["values/text-more.kz"] = "`s.Chars` as a list (T15)",
+        ["outcomes/throw-in-text-of-instantiation.kz"] = "a generic data type in a relation of inheritance, `Sub<Loud>` (D6, T19)",
     }.Concat(OperatingSystem.IsWindows() ? FileCases.Select(c => KeyValuePair.Create(c, Emitter.NotOnWindows)) : [])
         .Concat(OperatingSystem.IsWindows() ? ProcessCases.Select(c => KeyValuePair.Create(c, Emitter.ProcessNotOnWindows)) : [])
         .Concat(OperatingSystem.IsWindows() ? LogCases.Select(c => KeyValuePair.Create(c, Emitter.LogNotOnWindows)) : [])

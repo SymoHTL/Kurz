@@ -573,6 +573,11 @@ public sealed class SemanticModel
     /// <summary>The symbol of every data type the file declares.</summary>
     internal IEnumerable<DataSymbol> DataTypes => dataTypes.Values;
 
+    /// <summary>The statements of the file's top level, in their order: the code of the root actor (O6), declarations among them.</summary>
+    internal IReadOnlyList<Statement> TopLevel { get; private set; } = [];
+
+    internal void RecordTopLevel(IReadOnlyList<Statement> statements) => TopLevel = statements;
+
     /// <summary>
     /// Whether the member is read in a chain of <c>?.</c> (N5): it is read only where the chain did not stop, from the value of the type
     /// the type of its target makes nullable, and <paramref name="member"/> is its own type, which <see cref="TypeOf"/> gives nullable.

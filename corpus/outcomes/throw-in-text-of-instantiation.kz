@@ -1,0 +1,23 @@
+// expect: throws thrown at 13
+// | before
+// rules: O7
+
+data Plain(int N)
+
+data Sub<U>(U X) : Plain
+
+data TextFailed
+
+class Loud(int N) {
+    pub string Text() {
+        throw TextFailed
+    }
+}
+
+void Show(Plain p) {
+    print(p)
+}
+
+print("before")
+Show(Sub<Loud>(1, Loud(2)))
+print("after")

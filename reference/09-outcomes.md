@@ -1200,6 +1200,29 @@ print("before")
 throw ConfigMissing("app.json")
 ```
 
+Case: [outcomes/throw-in-text-of-instantiation.kz](../corpus/outcomes/throw-in-text-of-instantiation.kz)
+```kurz
+data Plain(int N)
+
+data Sub<U>(U X) : Plain
+
+data TextFailed
+
+class Loud(int N) {
+    pub string Text() {
+        throw TextFailed
+    }
+}
+
+void Show(Plain p) {
+    print(p)
+}
+
+print("before")
+Show(Sub<Loud>(1, Loud(2)))
+print("after")
+```
+
 ### O8 (decided, §5) `match` covers every case
 
 A `match` on a union lists every case of the union, or ends in an `else` arm (C9). A missing case
