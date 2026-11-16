@@ -894,7 +894,8 @@ written type, as a value of an interface's type is: it crosses only as a lambda 
 sends it shows, and any other is `send-needs-word`, so that a callback received as a parameter is
 never sent (§6, the owner, 2026-11-15, #519, comment 6896192351, Q5, "By written type")
 *(assumed: that a lambda the function shows is one written at the argument or the one an immutable
-local variable is declared with)*. `copy` before an argument is a deep copy wherever it is
+local variable is declared with, and that the named function the answer names stands for no case,
+since F11 gives a function value through a lambda only)*. `copy` before an argument is a deep copy wherever it is
 written, a call that crosses nothing included, as Rust's `.clone()` stands anywhere (§6, the owner,
 2026-11-15, #519, comment 6896192351, Q6, "Rust: deep copy anywhere"). The sender makes the copy,
 at the send; every class instance a crossing reaches is copied, so that identity does not survive
