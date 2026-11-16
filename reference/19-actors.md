@@ -2230,8 +2230,8 @@ its place and its text (§6, "Policy at `spawn`"; the owner, 2026-11-15, #519, c
 A stopped actor's crash writes its log line (U24) (§6, Q24), a caller that waited on its crashing
 message gets `callee-crashed` (U20), and a call that comes after the stop raises `actor-gone`, as one
 to an actor that ended does (U20) (§6); its inbox goes as the inbox of an actor that ended does, so
-that a call queued in it at the crash raises `actor-gone` too *(assumed: as §6 marks it, as the
-queued messages of a child that its supervisor's crash ends are dropped (U21))*. An escalated crash
+that a call queued in it at the crash raises `actor-gone` too (§6, the owner, 2026-11-16, #519,
+comment 6919351399, "actor-gone"). An escalated crash
 writes no log line, and the supervisor that takes it, the first up the chain of supervisors whose
 policy restarts or stops, writes the one line (§6, Q24), naming the actor its policy handles, with the
 id, the place and the text of the first crash *(assumed: as §6 marks it)*; the supervisor's crash ends
@@ -2307,8 +2307,9 @@ log line of the crash that passes the limit written, as Erlang's supervisor repo
 before it shuts down, and at the top level the trace of the top-level code where it waits)*. The
 duration after `after` is above 0 and at most the cap, the count after `max` an `int` of at least 1
 and the duration after `in` above 0, and a value of another type or past its bound is
-`type-mismatch` (T1), while a literal's own error stands (L10, L14) (§6) *(assumed: as §6 marks it,
-the bounds, as Akka's backoff supervisor refuses a minimum of 0 or one past its maximum)*.
+`type-mismatch` (T1), while a literal's own error stands (L10, L14) (§6; `after` past the cap, the
+owner, 2026-11-16, #519, comment 6919351399, "Compile error") *(assumed: as §6 marks it, the other
+bounds, as Akka's backoff supervisor refuses a minimum of 0 or one past its maximum)*.
 
 Case: [actors/crash-after.kz](../corpus/actors/crash-after.kz)
 ```kurz
