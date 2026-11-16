@@ -2646,8 +2646,8 @@ whose type fits a call of a value, the text of every derived type without type p
 program does not build adds nothing. A call through an actor's reference reaches nothing of the callee's
 code, the text of a thrown value adds nothing, a function that reads its type and that no call copies adds nothing (section 5,
 assumed there), and a function of a folder of the runtime throws nothing. A bare `throw` throws the case its arm of `else` took,
-and one in a lambda is the checker's `throw-needs-value`, in a lambda inside such an arm too (O7; section 5, assumed there). The checker reads the sets for the block of `on crash` alone (U30): it reads a program with a block
-again with the `Reason` of each block's child that the reading before found, the first reading with the runtime's type alone
+and one in a lambda is the checker's `throw-needs-value`, in a lambda inside such an arm too (O7; section 5, assumed there). The
+checker reads the sets for the block of `on crash` alone (U30): it reads a program with a block again with the `Reason` of each block's child that the reading before found, the first reading with the runtime's type alone
 and the sets without the blocks' bodies, the blocks' own diagnostics left out of it, until the `Reason`s found are the ones
 read, and says `not supported` to a block whose child's `Reason` still grows at the fourth, so that a block's own errors show
 once the rest of the program reads clean. `ThrowSetTests` holds one thrown type for each of these forms over a fenced
