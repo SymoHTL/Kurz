@@ -81,6 +81,18 @@ after it in the same expression could reach takes a count held to the statement'
 `actor-waits-fenced` of `ListTests` holds both forms, with a field passed before a call that waits, a
 `for` over a field whose body waits and a key of `SortBy` that waits.
 
+One more was found on 2026-11-16, before it reached `main`, by a probe of pull request 554: **a message
+half built in its callee's heap across an argument that waits.** A message was built in the heap its
+callee allocated in at that moment, taken before the arguments ran, and each crossing argument was copied
+into it as it was evaluated. In `b.Sum([10, 20, 30], s.Get())` the wait for `s.Get()` let `b` run a
+message that crashed it, and the restart freed its later heaps and emptied its first, under the copy of
+the list. Under the fenced allocator the run ended with the exit code 139; without it the program printed
+`7` where `67` is right. Since then, where an argument after one that crosses can wait
+(`SemanticModel.CanWait`, read from the checker's `Calls`), the message is built in a heap of its own and
+copied into the callee's heap when it is queued, as Erlang copies a message at its send; a crash of the
+caller before the queueing frees that heap. The fenced program `actor-crash-wait-fenced` of `ListTests`
+holds the crash, and `ActorTests` the end of the callee.
+
 **Why:** a borrow is a claim about every path from the read to the last use, and the claim was
 checked only for the paths the author thought of. A program that frees nothing never shows the
 defect; one whose freed blocks are given out again shows it as wrong output, not as a crash.
@@ -100,7 +112,8 @@ count the emitter takes of a read of a copied type that the checker marks as met
 function value beside `Swap(mut f)` (`SemanticModel.IsHeldCopy`, the owner's "Copied", 2026-10-25), and the count
 `SortBy` takes of the list it read while its keys run, and the count a read of a `mut` parameter
 takes where a call after it in the expression can reach the field it names (`Calls` in
-`Semantics/Checker.Reads.cs`). A construct
+`Semantics/Checker.Reads.cs`), and the heap of its own a message is built in where an argument after a
+crossing one can wait, which no crash or end of the callee frees. A construct
 that has none takes a count of what it read. A promise of another rule that no code can reach the
 place, F11's for a lambda, is no such name: a later rule can open a way to it, as K2's methods did,
 so every member that runs a program's code while it holds a place is listed (`SortBy`, X8). Each one gets a line in a fenced program of `ListTests`

@@ -292,7 +292,7 @@ public sealed partial class Checker
 
         var moves = string.Join(" or ", reaching.Select(s => $"`move {s.Text}` at line {s.Line}{(s.Earlier ? " in an earlier round of the loop" : "")}"));
         var through = reaching.All(s => s.Text == variable.Name) ? "" : $", which ended every path into the value `{variable.Name}` reaches";
-        var diagnostic = Diagnostic.Error(ErrorIds.UsedAfterMove, line, $"`{variable.Name}` is used after {moves}{through} (U12)");
+        var diagnostic = Diagnostic.Error(ErrorIds.UsedAfterMove, line, $"`{variable.Name}` is used after {moves}{through}; `copy` in place of `move` keeps `{variable.Name}`, or `{variable.Name}` is assigned again before this use (U12)");
         Add(diagnostic);
         movedUses.Add((diagnostic, variable, string.Join(",", reaching.Select(s => s.Line).Distinct())));
     }
@@ -411,7 +411,7 @@ public sealed partial class Checker
             if (read.Variable is not null)
             {
                 var through = ReferenceEquals(read.Variable, variable) ? "" : $", which ended every path into the value `{read.Variable.Name}` reaches";
-                var diagnostic = Diagnostic.Error(ErrorIds.UsedAfterMove, a.Line, $"`{read.Variable.Name}` is used after `move {MovedText(moved.Value)}` at line {moved.Line}, an argument before it in the same call{through} (U12, D11)");
+                var diagnostic = Diagnostic.Error(ErrorIds.UsedAfterMove, a.Line, $"`{read.Variable.Name}` is used after `move {MovedText(moved.Value)}` at line {moved.Line}, an argument before it in the same call{through}; `copy` in place of `move` keeps `{read.Variable.Name}`, or this argument is read into a variable before the call (U12, D11)");
                 Add(diagnostic);
                 movedUses.Add((diagnostic, read.Variable, moved.Line.ToString(System.Globalization.CultureInfo.InvariantCulture)));
                 return true;
@@ -507,7 +507,7 @@ public sealed partial class Checker
 
             if (a.Word == ArgumentWord.Move)
             {
-                if (MoveEnds(a, why => Report(ErrorIds.MoveReachable, a.Line, $"`move {MovedText(a.Value)}` cannot end what it sends: {why} (U12)")) is not { } ends)
+                if (MoveEnds(a, why => Report(ErrorIds.MoveReachable, a.Line, $"`move {MovedText(a.Value)}` cannot end what it sends: {why}; `copy` in place of `move` gives the parameter a copy (U12)")) is not { } ends)
                 {
                     return true;
                 }

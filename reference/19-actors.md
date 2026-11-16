@@ -2122,6 +2122,33 @@ if kid != null {
 print(p.Kid() == null)
 ```
 
+Case: [actors/crash-during-arguments.kz](../corpus/actors/crash-during-arguments.kz)
+```kurz
+actor Slow {
+    pub int Get() => 7
+}
+
+actor Box {
+    pub void Boom() {
+        throw "boom"
+    }
+
+    pub int Sum(List<int> xs, int k) {
+        mut total = k
+        for x in xs {
+            total = total + x
+        }
+
+        return total
+    }
+}
+
+b = spawn Box()
+s = spawn Slow()
+send b.Boom()
+print(b.Sum([10, 20, 30], s.Get()))
+```
+
 ### U22 (decided, §6) The supervisor restarts the actor
 
 The default policy, `on crash restart`, runs the actor's constructor again, after the pause of U23,
