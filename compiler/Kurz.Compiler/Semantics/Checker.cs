@@ -446,6 +446,7 @@ public sealed partial class Checker
         var arguments = new VariableSymbol("args", new ListType(Types.String), false, VariableKind.Parameter, 0);
         frame.Scope.Variables[arguments.Name] = arguments;
         model.RecordArguments(arguments);
+        model.RecordTopLevel(program.Statements);
         foreach (var s in program.Statements)
         {
             CheckStatement(s);

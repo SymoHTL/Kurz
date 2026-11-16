@@ -1089,6 +1089,9 @@ public sealed class ParserTests
         Assert.Equal(
             "(class Counter {(field mut int count (int 0)) (field pub static int Step (int 2)) (function pub void Add() {(assign-or-declare count (+ count Step))}) (function pub int Value() => count)})",
             Tree(program));
+        // K7, K18: a field is written `Type name`, a `static` one among them, so that the type K18 reads at a `static` field is always
+        // written: with neither a type nor `mut`, the one word that admits a field without a type (K7 with V2), it is `syntax`
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class C {\n    pub static One = () => 1\n}"));
         Assert.Equal(
             "(class Counter(int Start) {(constructor pub Counter() this((int 0)) {}) (function pub int Value() => Start)})",
             Tree("class Counter(int Start) {\n    pub Counter() : this(0) { }\n\n    pub int Value() => Start\n}"));

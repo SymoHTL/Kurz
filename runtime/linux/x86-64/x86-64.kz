@@ -11,8 +11,8 @@
 // so that the call's return address is the one word its call puts on the stack it leaves; `ret` then
 // returns into the other side, where it called the switch, or into a stack's first frame (`Enter`). The
 // control bits of MXCSR and the x87 control word, which the convention keeps too, are not saved, since
-// nothing in Kurz changes them; nor does the switch carry unwind directives, since no walk of a stack
-// crosses it (design record, section 2, both assumed there).
+// nothing in Kurz changes them; nor does the switch carry unwind directives, since the runtime's walk of a
+// crash never crosses it (design record, section 2, both assumed there).
 pub naked void Switch(byte* from, byte* to) {
     asm(
         "mov qword ptr [rdi], rsp",
