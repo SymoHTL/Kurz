@@ -2761,7 +2761,7 @@ public sealed partial class Checker
         Assigned(through, current, value); // N7, N9: a path of `data` fields is narrowed by its assignment as a variable is
         if (changed is not null)
         {
-            Merge([TagsOf(changed), RegionOf(a.Value)]); // U12: the value joins the region of the variable it is stored in
+            Merge([TagsOf(changed), RegionOf(a.Value)]); // U12 (assumed): the value joins the region of the variable it is stored in
         }
     }
 
@@ -2871,6 +2871,7 @@ public sealed partial class Checker
         if (f.Second is not null)
         {
             DeclareChecked(f.Second.Name, value ?? Types.Error, false, VariableKind.Loop, f.Second.Line, f.Second);
+            model.RecordSecondName(f); // U12: a `move` of either name reads the loop (SemanticModel.LoopOf)
         }
 
         var fields = WalksFieldsOfTypeParameter(f); // T34: a loop over `T.Fields` read on a function's text, outside a copy

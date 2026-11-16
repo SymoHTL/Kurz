@@ -102,23 +102,41 @@ public sealed partial class Checker
     // its node, so that the rounds of a loop read the same tags and meet
     private readonly Dictionary<object, int> regionTags = new(ReferenceEqualityComparer.Instance);
 
+    // the second tag of each such place: every value an earlier round of a loop made there, which a round's new value leaves (BindRegion)
+    private readonly Dictionary<int, int> earlierTags = [];
+
+    private int lastTag;
+
     private readonly Dictionary<KurzType, bool> joinsRegions = [];
 
     // each `used-after-move` with its variable and the moves it names, so that one is kept for each (E1)
     private readonly List<(Diagnostic Diagnostic, VariableSymbol Variable, string Moves)> movedUses = [];
 
-    // the tags each variable had where its block ended, which the last expression of a block that ends an arm gives to the arm's value
+    // the tags each variable had where its block ended, which the last expression of a block that ends an arm gives to the arm's value;
+    // each reading of a loop declares the variables of its body again, so that a later reading, and a lambda in it, holds none of the
+    // variables an earlier reading ended here, and a variable a lambda captures is in scope where it is made, so that its block has not ended
     private readonly Dictionary<VariableSymbol, ImmutableHashSet<int>> endedTags = new(ReferenceEqualityComparer.Instance);
 
     private int RegionTag(object node)
     {
         if (!regionTags.TryGetValue(node, out var tag))
         {
-            tag = regionTags.Count + 1;
+            tag = ++lastTag;
             regionTags[node] = tag;
         }
 
         return tag;
+    }
+
+    private int EarlierTag(int tag)
+    {
+        if (!earlierTags.TryGetValue(tag, out var earlier))
+        {
+            earlier = ++lastTag;
+            earlierTags[tag] = earlier;
+        }
+
+        return earlier;
     }
 
     /// <summary>Whether a value of the type joins a region: one that needs a word to cross into an actor; one that crosses with no word joins none (comment 6897778812, Q2 (a)).</summary>
@@ -162,33 +180,35 @@ public sealed partial class Checker
         {
             NameExpression n => model.IsVariable(n) ? TagsOf(model.VariableOf(n)) : Outside, // K7, K18: a field of `this`, a static
             ThisExpression => Outside,
-            MemberAccess m => Through(m.Target), // section 6: a field read is in the region of what it is read from (SE-0414)
+            MemberAccess m => Through(m.Target), // section 6: a field read is in the region of what it is read from (SE-0414), a fresh value's a fresh one (U12, assumed)
             IndexExpression i => Through(i.Target), // section 6: a list reaches each value it holds
-            CallExpression c => !model.HasCall(c) ? Outside : model.CallOf(c).Kind is CallKind.ActorCall or CallKind.ActorSend ? [] : Union(CallRegions(c)),
+            CallExpression c => !model.HasCall(c) ? Outside : model.CallOf(c).Kind is CallKind.ActorCall or CallKind.ActorSend ? [] : Union(CallRegions(c)), // U12 (assumed): an actor's call gives a region of its own, what it gives having crossed
             LambdaExpression l => model.HasLambda(l) ? Union(model.LambdaOf(l).Captures.Select(TagsOf)) : Outside, // a lambda joins what it captures
             ListLiteral l => Union(l.Items.Select(RegionOf)),
             WithExpression w => Union([RegionOf(w.Target), .. w.Assignments.Select(a => RegionOf(a.Value))]), // read as a call that takes both
-            BinaryExpression b => RegionOf(b.Left).Union(RegionOf(b.Right)),
+            BinaryExpression b => RegionOf(b.Left).Union(RegionOf(b.Right)), // U12 (assumed): an operator's value joins its operands' regions
             MatchExpression m => Union([RegionOf(m.Subject), .. m.Arms.Select(a => ArmRegion(a.Body))]),
-            ElseExpression x => Union([RegionOf(x.Call), .. x.Arms.Select(a => ArmRegion(a.Body))]),
-            SpawnExpression or NullLiteral => [],
+            ElseExpression x => Union([RegionOf(x.Call), .. x.Arms.Select(a => ArmRegion(a.Body))]), // U12 (assumed): an `else` binding joins its call's region
+            SpawnExpression or NullLiteral => [], // U12 (assumed): a `spawn` gives a region of its own
             UnaryExpression u => RegionOf(u.Operand),
             TypeMemberAccess => Outside, // K18: a static
             _ => Unkept,
         };
 
-        ImmutableHashSet<int> Through(Expression target) => model.HasType(target) && RegionOf(target) is { Count: > 0 } region ? region : Outside;
+        // the empty region of a value the function made that joins none, a construction, a call that merges none, an actor's call or a
+        // `spawn`, gives an empty one, and what the function did not make, a static's path, is outside
+        ImmutableHashSet<int> Through(Expression target) => model.HasType(target) ? RegionOf(target) : Outside;
     }
 
     private ImmutableHashSet<int> ArmRegion(Statement body) => body switch
     {
         ExpressionStatement es when model.HasType(es.Expression) => RegionOf(es.Expression),
         ReturnStatement or ThrowStatement or BreakStatement or ContinueStatement => [],
-        Block { Statements: [.., var last] } => ArmRegion(last), // an arm that leaves gives no value; one that ends in a value gives its region
+        Block { Statements: [.., var last] } => ArmRegion(last), // an arm that leaves gives no value; one that ends in a value gives its region, as rustc reads a block's tail (U12, assumed)
         _ => Unkept,
     };
 
-    /// <summary>The regions a call merges: of every argument that is not written <c>copy</c> or <c>move</c>, written <c>mut</c> or not, and of what it is called on (comment 6897444564).</summary>
+    /// <summary>The regions a call merges: of every argument that is not written <c>copy</c> or <c>move</c>, written <c>mut</c> or not, and of what it is called on (comment 6897444564; the receiver, U12, assumed).</summary>
     private IEnumerable<ImmutableHashSet<int>> CallRegions(CallExpression c)
     {
         foreach (var a in c.Arguments)
@@ -204,6 +224,9 @@ public sealed partial class Checker
             MemberAccess m => model.HasType(m.Target) ? RegionOf(m.Target) : [],
             NameExpression n when model.IsVariable(n) => TagsOf(model.VariableOf(n)), // a function value
             NameExpression when model.CallOf(c) is { Kind: CallKind.Method, Function.IsStatic: false } => Outside, // K7: a method of `this`
+            // a static or top-level function gives what it made or what its arguments reach: a `static` field holds no class instance,
+            // so that no mutable class instance reaches a global (section 6, the rule of a parameter written `move`; section 4; K18),
+            // and a top-level function reads no top-level variable (F16)
             _ => [],
         };
     }
@@ -248,11 +271,35 @@ public sealed partial class Checker
         return [.. reached];
     }
 
-    /// <summary>The variable holds the value from here on: a region of its own, which the value's joins, and no move ends it (an assignment makes a variable live again).</summary>
+    /// <summary>
+    /// The variable holds the value from here on: a region of its own, which the value's joins, and no move ends it (an assignment makes a
+    /// variable live again). The node's tag names this value alone: every value an earlier round of a loop made at the node keeps its
+    /// links and its holders under the node's second tag, so that a round's value is new, as a variable declared in the body is (U12,
+    /// section 6, assumed), and what holds an earlier one stays linked.
+    /// </summary>
     private void BindRegion(VariableSymbol variable, Expression? value, object node)
     {
-        var region = JoinsRegion(variable.Type) ? (value is null ? [] : RegionOf(value)).Add(RegionTag(node)) : [];
-        frame.Moves = frame.Moves.With(tags: frame.Moves.Tags.SetItem(variable, region), moved: frame.Moves.Moved.Remove(variable));
+        if (!JoinsRegion(variable.Type))
+        {
+            frame.Moves = frame.Moves.With(tags: frame.Moves.Tags.SetItem(variable, []), moved: frame.Moves.Moved.Remove(variable));
+            return;
+        }
+
+        var made = value is null ? [] : RegionOf(value);
+        var tag = RegionTag(node);
+        var state = frame.Moves;
+        if (state.Links.Any(l => l.A == tag || l.B == tag) || state.Tags.Values.Any(t => t.Contains(tag)) || made.Contains(tag))
+        {
+            var earlier = EarlierTag(tag);
+            ImmutableHashSet<int> Renamed(ImmutableHashSet<int> tags) => tags.Remove(tag) is var rest && rest.Count != tags.Count ? rest.Add(earlier) : tags;
+            int Moved(int t) => t == tag ? earlier : t;
+            state = state.With(
+                tags: state.Tags.ToImmutableDictionary(p => p.Key, p => Renamed(p.Value), state.Tags.KeyComparer),
+                links: state.Links.Select(l => (Moved(l.A), Moved(l.B))).Where(l => l.Item1 != l.Item2).ToImmutableHashSet());
+            made = Renamed(made);
+        }
+
+        frame.Moves = state.With(tags: state.Tags.SetItem(variable, made.Add(tag)), moved: state.Moved.Remove(variable));
     }
 
     /// <summary>An assignment to a field or an item of <paramref name="target"/>: its region and the value's merge.</summary>
@@ -342,6 +389,22 @@ public sealed partial class Checker
                 return null;
             }
 
+            // Q1 (b): the variable of a loop ends with the list the loop takes, which a list held outside the function keeps
+            // `move-reachable`, as for an item that joins a region (assumed: Q1 read for an item that crosses with no word)
+            if (variable is not null && model.LoopOf(variable) is { } loop)
+            {
+                if (model.HasType(loop.Collection) && model.TypeOf(loop.Collection).Type is ListType && RootOf(loop.Collection) is { Outside: true } held)
+                {
+                    reachable($"the list the loop takes, {(held.Root is null ? $"`{MovedText(loop.Collection)}`, is a field of `this` or a static" : $"`{held.Root.Name}`, is {OutsideText(held.Root)}")}");
+                    return null;
+                }
+
+                if (!TakesItsList(loop, a.Line))
+                {
+                    return null;
+                }
+            }
+
             return (variable, []);
         }
 
@@ -361,7 +424,7 @@ public sealed partial class Checker
             return null;
         }
 
-        if (variable is { Kind: VariableKind.Loop } && model.DeclaringNode(variable) is ForInStatement f && !TakesItsList(f, a.Line))
+        if (variable is not null && model.LoopOf(variable) is { } f && !TakesItsList(f, a.Line))
         {
             return null;
         }
@@ -369,17 +432,31 @@ public sealed partial class Checker
         return (variable, ends);
     }
 
-    /// <summary>Answer 1 of comment 6897778812: a loop whose body moves its variable takes its list; a loop over anything else, which holds no item it could give up, is <c>not supported</c>.</summary>
+    /// <summary>
+    /// Answer 1 of comment 6897778812: a loop whose body moves its variable takes its list; a loop over anything else, which holds no item it
+    /// could give up, either of a loop's two names among them, is <c>not supported</c>, and so is a loop over a list whose item type holds a
+    /// type parameter, whose list the build takes by the item type it is emitted for.
+    /// </summary>
     private bool TakesItsList(ForInStatement f, int line)
     {
-        if (f.Second is not null || !model.HasType(f.Collection) || model.TypeOf(f.Collection).Type is not ListType)
+        if (f.Second is not null || !model.HasType(f.Collection) || model.TypeOf(f.Collection).Type is not ListType list)
         {
             NotSupported(line, "`move` of the variable of a loop over anything but a list, which the loop would take (U12)");
             return false;
         }
 
+        if (frame.TypeParameters.Any(p => Types.Mentions(list.Element, p)))
+        {
+            NotSupported(line, $"`move` of the variable of a loop over a list of `{list.Element}`, a type parameter's, which the loop would take (U12)");
+            return false;
+        }
+
         return true;
     }
+
+    /// <summary>The variable the list starts from that the loop of <paramref name="variable"/> takes, where the item joins no region that reaches it (Q1 (b), assumed for such an item).</summary>
+    private VariableSymbol? TakenList(VariableSymbol? variable) =>
+        variable is not null && !JoinsRegion(variable.Type) && model.LoopOf(variable) is { } loop ? RootOf(loop.Collection).Root : null;
 
     /// <summary>The variable a path of fields or items starts from, and whether it starts outside the function: at a parameter not written <c>move</c>, <c>this</c>, a field of it, a static or a captured variable.</summary>
     private (VariableSymbol? Root, bool Outside) RootOf(Expression e) => Unwrap(e) switch
@@ -401,17 +478,19 @@ public sealed partial class Checker
 
     /// <summary>
     /// A use, in a later argument of the same call, of what a <c>move</c> before an earlier one ends, <c>s.Take(move c, c.N)</c>, is
-    /// <c>used-after-move</c> at that argument, since the arguments run in the order they are written (D11); whether it reported one.
+    /// <c>used-after-move</c> at the use, since the arguments run in the order they are written (D11) and the error stands at the use
+    /// (comment 6896192351, Q1); whether it reported one.
     /// </summary>
     private bool UsedInLaterArgument(Argument a, List<(Argument Argument, VariableSymbol? Variable, ImmutableHashSet<int> Ends)> moves)
     {
         foreach (var (moved, variable, ends) in moves)
         {
-            var read = ReadsOf(a.Value).FirstOrDefault(r => ReferenceEquals(r.Variable, variable) || TagsOf(r.Variable).Overlaps(ends));
+            var list = TakenList(variable);
+            var read = ReadsOf(a.Value).FirstOrDefault(r => ReferenceEquals(r.Variable, variable) || ReferenceEquals(r.Variable, list) || TagsOf(r.Variable).Overlaps(ends));
             if (read.Variable is not null)
             {
                 var through = ReferenceEquals(read.Variable, variable) ? "" : $", which ended every path into the value `{read.Variable.Name}` reaches";
-                var diagnostic = Diagnostic.Error(ErrorIds.UsedAfterMove, a.Line, $"`{read.Variable.Name}` is used after `move {MovedText(moved.Value)}` at line {moved.Line}, an argument before it in the same call{through}; `copy` in place of `move` keeps `{read.Variable.Name}`, or this argument is read into a variable before the call (U12, D11)");
+                var diagnostic = Diagnostic.Error(ErrorIds.UsedAfterMove, read.Read.Line, $"`{read.Variable.Name}` is used after `move {MovedText(moved.Value)}` at line {moved.Line}, an argument before it in the same call{through}; `copy` in place of `move` keeps `{read.Variable.Name}`, or this argument is read into a variable before the call (U12, D11)");
                 Add(diagnostic);
                 movedUses.Add((diagnostic, read.Variable, moved.Line.ToString(System.Globalization.CultureInfo.InvariantCulture)));
                 return true;
@@ -454,9 +533,10 @@ public sealed partial class Checker
         {
             var site = new MoveSite(a.Line, MovedText(a.Value), a.Value, false);
             var moved = frame.Moves.Moved;
+            var list = TakenList(variable);
             foreach (var (v, tags) in frame.Moves.Tags)
             {
-                if (ReferenceEquals(v, variable) || tags.Overlaps(ends))
+                if (ReferenceEquals(v, variable) || ReferenceEquals(v, list) || tags.Overlaps(ends))
                 {
                     moved = moved.SetItem(v, moved.TryGetValue(v, out var sites) ? sites.Add(site) : [site]);
                 }
@@ -495,7 +575,7 @@ public sealed partial class Checker
             var moveParameter = MoveSlot(c, info, i);
             if (a.Word == ArgumentWord.Move && !moveParameter)
             {
-                Report(ErrorIds.MoveAtCall, a.Line, $"{ArgumentText(a, i)} of {callee} is written `move`, whose parameter is not; `move` stands before an argument of a parameter written `move` alone (U12)");
+                Report(ErrorIds.MoveAtCall, a.Line, $"{ArgumentText(a, i)} of {callee} is written `move`, whose parameter is not; at a call that is no message, `move` stands before an argument of a parameter written `move` alone (U12)");
                 return true;
             }
 
@@ -525,7 +605,8 @@ public sealed partial class Checker
     /// U12, U16: the words of a message's or a <c>spawn</c>'s argument after its <c>send-needs-word</c>, in its place among the arguments:
     /// no word before a parameter written <c>move</c> is <c>move-at-call</c>; <c>move</c> is the send's word however the parameter is
     /// written (section 6, the reading of comment 6668638888), which ends what it sends, <c>move-reachable</c> where the region outside
-    /// the function reaches it (comment 6897778812, Q1 and Q2); a later argument that reads what it ended is <c>used-after-move</c>.
+    /// the function reaches it (the owner, 2026-11-03, issue 156, comment 6603205575; comment 6897778812, Q1 and Q2, for a list a loop takes
+    /// and a value that crosses with no word); a later argument that reads what it ended is <c>used-after-move</c>.
     /// Whether it reported one.
     /// </summary>
     private bool MessageMove(CallExpression c, int i, bool moveParameter, List<(Argument Argument, VariableSymbol? Variable, ImmutableHashSet<int> Ends)> moves)
