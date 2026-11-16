@@ -772,12 +772,14 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         // section 5, the owner, 2026-11-16, "Each instantiation": the top-level code builds `Sub<int>` and `Sub<Loud>`, and the `pub`
         // function `Listed` builds `Sub<Wrapped>` through the type argument its call gives `Wrap`, and `Sub<Handed>` through the lambda
         // that `Maker` makes for its type argument, which `Listed` calls as a function value; `Sub<Quiet>` stands in a function no root
-        // reaches, so the program does not build it, as Rust's monomorphization builds nothing for a function nothing calls
+        // reaches and in a generic `pub` function no call gives a type argument, so the program does not build it, as Rust's
+        // monomorphization builds nothing for a function nothing calls and takes no generic function as a root
         const string text = """
             data ELoud
             data EWrapped
             data EHanded
             data EQuiet
+            data EMade
 
             data Plain(int N)
 
@@ -819,6 +821,21 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
                 Show(Sub<Quiet>(1, Quiet(2)))
             }
 
+            pub void Generic<T>(T x) {
+                Show(Sub<Quiet>(1, Quiet(3)))
+            }
+
+            int Fail() {
+                throw EMade
+            }
+
+            () => int Deferred() => () => Fail()
+
+            int Called() {
+                f = Deferred()
+                return f()
+            }
+
             pub void Listed() {
                 Show(Wrap(Wrapped(3)))
                 made = Maker(Handed(4))
@@ -833,8 +850,13 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         var tree = Parser.Parse(SourceText.FromString("test.kz", text), diagnostics);
         var checker = Checker.Check(tree, diagnostics, [], CorpusTests.StdChecker.Value);
         Assert.Empty(diagnostics.Items);
-        var show = checker.Model.FunctionOf(tree.Statements.OfType<FunctionDeclaration>().Single(f => f.Name == "Show"));
-        Assert.Equal(["ELoud", "EWrapped", "EHanded", "RuntimeError"], Names(new ThrowSets(checker, CorpusTests.StdChecker.Value).RaisedBy(show)));
+        var sets = new ThrowSets(checker, CorpusTests.StdChecker.Value);
+        FunctionSymbol Named(string name) => checker.Model.FunctionOf(tree.Statements.OfType<FunctionDeclaration>().Single(f => f.Name == name));
+        Assert.Equal(["ELoud", "EWrapped", "EHanded", "RuntimeError"], Names(sets.RaisedBy(Named("Show"))));
+
+        // F11: the unit that makes a lambda takes what it builds and nothing it throws, which a call of the function value brings
+        Assert.Equal(["RuntimeError"], Names(sets.RaisedBy(Named("Deferred"))));
+        Assert.Equal(["EMade", "RuntimeError"], Names(sets.RaisedBy(Named("Called"))));
     }
 
     [Fact]
