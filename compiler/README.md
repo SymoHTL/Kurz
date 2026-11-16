@@ -2015,7 +2015,8 @@ as the system ends it whatever the policy (U19); a crash at the root, the top-le
 the process with its error line, its trace and the exit code 1. A call whose caller crashed runs to its end and its result goes nowhere, which on
 one thread no program reaches but through the crash path, a caller that waits crashing only through
 a call of its own chain; an actor that ended keeps its first page to the end of the process, so that
-a call that still reaches it raises `actor-gone`; and the copies a crashed message made of the
+a call that still reaches it raises `actor-gone`, where section 6 frees the page at the end through a
+table of slots and generations (2026-11-16), which is not built; and the copies a crashed message made of the
 arguments of a call it had not sent yet, and the heap of a `spawn` whose arguments it was still
 evaluating, stay in their heaps until those are freed. A message has 2 MiB of
 stack where its clause sets no other size, where a message on Linux had the main thread's 8 MiB
