@@ -4835,6 +4835,44 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var (crashed, others) = ActorTests.Logged(crashWait.Error);
         Assert.Equal(["Box#1 crashed: thrown \"boom\" at program.kz:7"], crashed);
         Ran((crashWait.Code, crashWait.Output, others), 0, ["67"], "");
+        // U12, U21: the same where the argument that waits comes before the list that crosses, to a callee that crashed once before the
+        // call, so that the crash during the wait empties its first heap instead of freeing a later one: the heap taken before the wait
+        // took the message and the list's copy (the review of pull request 554, T4), so the message is built in a heap of its own
+        // wherever any argument can wait (Emitter.EmitMessage)
+        const string actorCrashWaitFirst = """
+            actor Slow {
+                pub int Get() => 7
+            }
+
+            actor Box {
+                pub void Boom() {
+                    throw "boom"
+                }
+
+                pub int Ping() => 1
+
+                pub int Sum(int k, List<int> xs) {
+                    mut total = k
+                    for x in xs {
+                        total = total + x
+                    }
+
+                    return total
+                }
+            }
+
+            b = spawn Box()
+            s = spawn Slow()
+            send b.Boom()
+            print(b.Ping())
+            send b.Boom()
+            print(b.Sum(s.Get(), [10, 20, 30]))
+
+            """;
+        var crashWaitFirst = BuildAndRun(actorCrashWaitFirst, fenced, "actor-crash-wait-first-fenced");
+        var (crashedFirst, othersFirst) = ActorTests.Logged(crashWaitFirst.Error);
+        Assert.Equal(["Box#1 crashed: thrown \"boom\" at program.kz:7", "Box#1 crashed: thrown \"boom\" at program.kz:7"], crashedFirst);
+        Ran((crashWaitFirst.Code, crashWaitFirst.Output, othersFirst), 0, ["1", "67"], "");
         // U12 (the owner, 2026-11-15, #519, comment 6895076937): a variable moved on one branch only, whose place the scope's end lets go of
         // through the test for the empty address, and on the other branch let go of as it is; a loop that takes its list, which lets go of
         // the items it did not move and of no moved one, as the list's last holder lets go of it (comment 6897778812, Q1 (b)); a variable
