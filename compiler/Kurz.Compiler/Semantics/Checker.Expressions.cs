@@ -1851,6 +1851,10 @@ public sealed partial class Checker
             parameters.Add(DeclareParameter(p.Name, type, p.Mut, p.Line, p, move));
         }
 
+        // O7: the body is code of its own, which can run after the arm of `else` that makes it, so a bare `throw` there is
+        // `throw-needs-value` (section 5, assumed there)
+        var wasInElseArm = inElseArm;
+        inElseArm = false;
         KurzType result;
         if (l.ExpressionBody is not null)
         {
@@ -1902,6 +1906,7 @@ public sealed partial class Checker
             }
         }
 
+        inElseArm = wasInElseArm;
         ReportUnused(frame.Scope);
         var lambda = frame;
         frame = outer;

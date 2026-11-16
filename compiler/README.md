@@ -2627,22 +2627,33 @@ throw, and for each `pub` function what a call of it can raise, each set ending 
 what each throws itself with the sets of the units it runs, through the type arguments of each call. A unit runs what its calls
 pick, every override of a method and, through an interface, every implementer's; the constructors, the defaults and the base a
 construction runs; the fields of a `data` body that a construction or a `with` computes; the method a property's read calls; every
-lambda whose type fits a call of a function value, and a lambda a built-in call takes; the `Text()` that `print`, `eprint`, an
-interpolation's hole and `string.Join` call, through the fields, items and cases of the type, and of a generic `data` type derived
-from it through each instantiation of it that the program builds (the owner, 2026-11-16); the construction of an actor it spawns; and
+lambda whose type fits a call of a function value, and every function of the C calling convention that a name gives as a value of
+the C function type a call names (R17); the test of `Where` and the key of `SortBy`, which they call (M9, X8), where another
+built-in call that takes a lambda, `Add` or `Insert` among them, keeps it, which brings what the lambda builds and nothing it
+throws; the `Text()` that `print`, `eprint`, an interpolation's hole and `string.Join` call, through the fields, items and cases of
+the type, each instantiation of one generic type among them, and of a generic `data` type derived from it through each
+instantiation of it that the program builds (the owner, 2026-11-16); the construction of an actor it spawns; and
 the code of an actor it spawns under `escalate` or a block, with the block's body, which runs as a message of the
 actor whose code spawns (U32), a type's block among it. The instantiations are found as Rust's monomorphization finds its instances: the
 fixed point joins the generic `data` types each unit constructs with those of the units it runs, through the same type arguments, and
 with those of the lambdas it makes, as Rust collects a closure's instance in the instance of the function that makes it, and the
-program builds those that the sets of its roots, the top-level code and the `pub` functions, a generic one among them, hold with
-every type argument named. A call through an actor's reference reaches nothing of the callee's
-code, the text of a thrown value adds nothing, and a function of a folder of the runtime throws nothing. A bare `throw` throws the
-case its arm of `else` took. The checker reads the sets for the block of `on crash` alone (U30): it reads a program with a block
+program builds those that the sets of its roots, the top-level code and the `pub` functions, a generic one and each actor's `pub`
+methods among them, which alone take messages (U9), hold with every type argument named, the text of each instantiation found read
+and the roots solved again until they grow no more. A set holds every type a run can throw, and can hold more: every override of
+the method a call names and every implementer through an interface, every lambda and every function of the C calling convention
+whose type fits a call of a value, the text of every derived type without type parameters, built or not, and, in the list of a
+`pub` function, what the children it spawns under `escalate` or a block can pass up (section 5, assumed there); an instantiation the
+program does not build adds nothing. A call through an actor's reference reaches nothing of the callee's
+code, the text of a thrown value adds nothing, a function that reads its type and that no call copies adds nothing (section 5,
+assumed there), and a function of a folder of the runtime throws nothing. A bare `throw` throws the case its arm of `else` took,
+and one in a lambda is the checker's `throw-needs-value`, in a lambda inside such an arm too (O7; section 5, assumed there). The checker reads the sets for the block of `on crash` alone (U30): it reads a program with a block
 again with the `Reason` of each block's child that the reading before found, the first reading with the runtime's type alone
 and the sets without the blocks' bodies, the blocks' own diagnostics left out of it, until the `Reason`s found are the ones
 read, and says `not supported` to a block whose child's `Reason` still grows at the fourth, so that a block's own errors show
 once the rest of the program reads clean. `ThrowSetTests` holds one thrown type for each of these forms over a fenced
-program, the text of each instantiation a program builds over a program of its own, every kind of node of the tree to the table
+program, over programs of their own the text of each instantiation a program builds, one built only in the text of another or in
+an actor's `pub` method among them, two instantiations of one type in one text, a call of a C function value, built-in calls that
+keep a lambda and the corpus case of a throw in the text of an instantiation, every kind of node of the tree to the table
 `ThrowSets.Kinds`, the walk of every corpus case and of `std/`, a runtime that
 throws nothing, and a kind of `RuntimeKind` for each run-time row of the error table.
 

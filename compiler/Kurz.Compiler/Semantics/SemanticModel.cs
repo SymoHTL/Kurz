@@ -464,6 +464,9 @@ public sealed class SemanticModel
     /// <summary>Whether the name means a function where it stands for no variable.</summary>
     public bool IsFunctionName(NameExpression name) => functionNames.ContainsKey(name);
 
+    /// <summary>Every name the checker read in the file as a function where it stands for no variable, with that function, in no order (R11, R17).</summary>
+    internal IEnumerable<(NameExpression Name, FunctionSymbol Function)> FunctionNames => functionNames.Select(p => (p.Key, p.Value));
+
     /// <summary>
     /// The variable a declaration makes: a <see cref="VariableDeclaration"/> (a local, or state outside a function, R13), an
     /// <see cref="AssignOrDeclare"/> that declares, a <see cref="ForInStatement"/>, a <see cref="Parameter"/> of a function or a
