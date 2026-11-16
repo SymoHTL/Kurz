@@ -7324,6 +7324,18 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_move_on_the_right_side_of_and_or_or_may_have_ended_its_variable_after_it()
+    {
+        // U12, section 6: the right side of `&&` runs where the left is true and of `||` where it is false (N3), so that a `move` there may
+        // have ended its variable after the expression, as a branch's may (comment 6897444564, the points taken as following from the
+        // record); a read on the left side runs before the `move`
+        const string Done = "bool Done(move Cart c) => c.Items > 0\n\ncart = Cart(1)\n";
+        Assert.Equal([(ErrorIds.UsedAfterMove, 66)], Errors(MoveShop + Done + "if args.Count > 0 && Done(move cart) {\n    print(1)\n}\nprint(cart.Items)\nsend shop.Name(\"x\")\n"));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 66)], Errors(MoveShop + Done + "if args.Count > 0 || Done(move cart) {\n    print(1)\n}\nprint(cart.Items)\nsend shop.Name(\"x\")\n"));
+        Clean(MoveShop + Done + "if cart.Items > 0 && Done(move cart) {\n    print(1)\n}\nsend shop.Name(\"x\")\n");
+    }
+
+    [Fact]
     public void A_move_ends_every_variable_its_region_reaches()
     {
         // U12, section 6: a `move` ends every path into the value it sends, by regions as Swift's SE-0414 keeps them: a call merges the regions
