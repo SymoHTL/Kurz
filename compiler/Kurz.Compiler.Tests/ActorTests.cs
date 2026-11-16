@@ -752,7 +752,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [
         ("std/std.kz", "thread static mut long keptBytes = 0\n", "thread static mut long keptBytes = 0\nthread static mut long heapsLive = 0\n"),
         ("std/std.kz", "        *Ptr<long>(heap + 40) = 0\n", "        *Ptr<long>(heap + 40) = 0\n        heapsLive = heapsLive + 1\n"),
-        ("std/std.kz", "pub void HeapFree(byte* heap) {\n    raw {\n", "pub void HeapFree(byte* heap) {\n    raw {\n        heapsLive = heapsLive - 1\n"),
+        ("std/std.kz", "pub void HeapFree(byte* heap) {\n    sys.Entered()\n    raw {\n", "pub void HeapFree(byte* heap) {\n    sys.Entered()\n    raw {\n        heapsLive = heapsLive - 1\n"),
         ("std/std.kz", "pub class HttpServer {\n", """
             pub class HttpServer {
                 pub static long Heaps() {
