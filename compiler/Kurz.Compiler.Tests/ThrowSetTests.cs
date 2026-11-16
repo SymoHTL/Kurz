@@ -728,5 +728,13 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         var kind = Assert.IsType<EnumType>(error.Fields[0].Type);
         Assert.True(Types.Same(Types.String, error.Fields[1].Type), $"the detail is {error.Fields[1].Type}");
         Assert.Equal(kinds, kind.Symbol.Declaration.Values.Select(v => v.Name));
+
+        // U30: std's `RuntimeErrorOf`, which the emitted block of `on crash` makes the runtime's error with, names each id of the table
+        // with its kind, in the order of the table
+        var std = File.ReadAllText(Path.Combine(CorpusTests.Root, "std", "std.kz"));
+        var of = std[std.IndexOf("pub RuntimeError RuntimeErrorOf(", StringComparison.Ordinal)..];
+        of = of[..of.IndexOf("\n}\n", StringComparison.Ordinal)];
+        var arms = Regex.Matches(of, "\"([a-z-]+)\" => RuntimeKind\\.([A-Za-z]+)").Select(m => (m.Groups[1].Value, m.Groups[2].Value)).ToList();
+        Assert.Equal(ids.Where(id => id != "thrown").Zip(kinds).ToList(), arms);
     }
 }

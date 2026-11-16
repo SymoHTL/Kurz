@@ -7552,6 +7552,21 @@ public sealed class CheckerTests
         Assert.Empty(ErrorsSeeingStd(Thrower + "w = spawn Worker() on crash (c) {\n    stop\n}\nprint(w.Get())\n"));
     }
 
+    [Fact]
+    public void A_reason_that_grows_by_what_the_blocks_read_is_not_supported()
+    {
+        // U30: a block that throws its own `c`, whose child is the actor that spawns it, adds a `Crashed` of the `Reason` it reads to that
+        // `Reason` at each reading, which settles at none; the program is read four times and the block is `not supported`
+        var (diagnostics, _) = CheckSeeingStd("actor A {\n    pub void Go() {\n        a = spawn A() on crash (c) {\n            throw c\n        }\n\n        send a.Go()\n    }\n}\n\nsend spawn A().Go()\n");
+        var only = Assert.Single(diagnostics.Items);
+        Assert.False(only.IsError);
+        Assert.Equal(3, only.Line);
+        Assert.EndsWith("(U30)", only.Message);
+
+        // the positive control: a block that throws a value of its own settles at the second reading
+        Assert.Empty(ErrorsSeeingStd("data Again(int N)\n\nactor A {\n    pub void Go() {\n        a = spawn A() on crash (c) {\n            throw Again(1)\n        }\n\n        send a.Go()\n    }\n}\n\nsend spawn A().Go()\n"));
+    }
+
     [Theory]
     [InlineData("class Box(int N)\n\nactor A {\n    pub void Take(Box b) {\n        print(b.N)\n    }\n}\n\na = spawn A()\nsend a.Take(Box(1))\n")]
     [InlineData("class Box(int N)\n\nactor A {\n    pub Box Make() => Box(1)\n}\n\na = spawn A()\nprint(a.Make().N)\n")]
