@@ -1,5 +1,6 @@
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
+using FunctionType = Kurz.Compiler.Semantics.FunctionType;
 using UnionType = Kurz.Compiler.Semantics.UnionType;
 using VoidType = Kurz.Compiler.Semantics.VoidType;
 
@@ -8,11 +9,15 @@ namespace Kurz.Compiler.Emit;
 /// <summary>
 /// U12: the copy of a value that crosses into an actor, at each argument of a message and of <c>spawn</c>, and back to the caller as
 /// a message's result, and of a value after <c>copy</c> at any call (the owner, 2026-11-15, #519, comment 6896192351, Q6, "Rust: deep
-/// copy anywhere"). On the one thread the runtime runs, every class instance the value reaches is copied and every other block is shared
-/// by its count, the sender making the copy (section 6): a value that reaches no instance crosses as any argument does, and one that
-/// does arrives as a copy of its own, with a count of one, made before the message is queued. The copy is made by the type's helpers: a
-/// new block for each class instance, list, map and <c>data</c> block on the way to an instance, the instance's strong and weak counts
-/// at one; a class with derived classes copies through the copy slot of the instance's table (K6). The copies one call makes, of its
+/// copy anywhere"). A crossing copies every counted block the value reaches into the heap of the actor it crosses into, or of the caller
+/// its result goes to, the sender making the copy (section 6; the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big
+/// unbuilt"), so that the heap of an actor holds every block its code reaches and is freed whole at the actor's end (section 3): a value
+/// arrives as a copy of its own, with a count of one, made before the message is queued, a string's block, a list's, a map's, a
+/// <c>data</c> block, an instance and the environment of a lambda among them; a value after <c>copy</c> at a call that is no crossing
+/// has every class instance it reaches copied and shares every other block by its count. The copy is made by the type's helpers: a new
+/// block for each block on the way, an instance's strong and weak counts at one; a class with derived classes copies through the copy
+/// slot of the instance's table (K6); whether a block that reaches no instance is copied is the session's, which the runtime's
+/// <c>CopyWhole</c> reads. The copies one call makes, of its
 /// arguments, share one memo, the call's session in the caller's frame, so that two paths that reach one block, in one argument or
 /// in two, reach one copy (Q2, "Sharing kept"), and a result has a session of its own; each argument is copied where it is evaluated,
 /// left to right, and the memo holds a count of each block it maps until the call's last copy (section 6). A <c>weak</c> reference
@@ -51,16 +56,18 @@ public sealed partial class Emitter
     };
 
     /// <summary>
-    /// U12: the copy of a value that reaches a class instance (<see cref="ReachesInstance"/>), a value of its own with one count of each
-    /// block it holds: the type's copy run from a slot that holds the value into one that takes the copy, in the call's session, else
-    /// in a session of its own (<see cref="CopyRun"/>).
+    /// U12: the copy of a value, a value of its own with one count of each block it holds: the type's copy run from a slot that holds the
+    /// value into one that takes the copy, in the call's session, else in a session of its own (<see cref="CopyRun"/>), whose copies go
+    /// into the heap <paramref name="heap"/> of a crossing, every counted block among them, or, for null, after <c>copy</c> at a call
+    /// that is no crossing, into the heap the allocation entry serves, the class instances among them (Q5). A function value crosses by
+    /// <paramref name="copyInto"/>, the copy of the environment of its lambda (<see cref="CopyEnvironmentInto"/>).
     /// </summary>
-    private string Crossed(string value, KurzType type, string? session)
+    private string Crossed(string value, KurzType type, string? session, string? heap, string? copyInto = null)
     {
         var source = fn.Alloca(Ir(type), "crossing");
         var copy = fn.Alloca(Ir(type), "copy");
         fn.Emit($"store {Ir(type)} {value}, ptr {source}");
-        fn.Emit($"call void {CopyRun()}(ptr {copy}, ptr {source}, ptr {CopyInto(type)}, ptr {session ?? CopySession(1)})");
+        fn.Emit($"call void {CopyRun()}(ptr {copy}, ptr {source}, ptr {copyInto ?? CopyInto(type)}, ptr {session ?? CopySession(1, heap)})");
         return fn.Value($"load {Ir(type)}, ptr {copy}");
     }
 
@@ -70,27 +77,33 @@ public sealed partial class Emitter
     /// could tell apart from its source (Q6, "Rust: deep copy anywhere").
     /// </summary>
     private string Copied(Expression e, string value, KurzType type) =>
-        ReachesInstance(type) ? Temp(Crossed(value, type, copySessions.Remove(e, out var session) ? session : null), type) : value;
+        ReachesInstance(type) ? Temp(Crossed(value, type, copySessions.Remove(e, out var session) ? session : null, null), type) : value;
 
     /// <summary>
-    /// U12: the session the copies of a call share where it makes <paramref name="copies"/> of them, more than one, else null, the one
-    /// copy then working in a session of its own (<see cref="Crossed"/>): the memo of a call is the call's, not the argument's (Q2,
-    /// "Sharing kept").
+    /// U12: the session the copies of a call share where it makes <paramref name="copies"/> of them, more than one, into the heap
+    /// <paramref name="heap"/> of a crossing, else null, the one copy then working in a session of its own (<see cref="Crossed"/>): the
+    /// memo of a call is the call's, not the argument's (Q2, "Sharing kept").
     /// </summary>
-    private string? CallSession(int copies) => copies > 1 ? CopySession(copies) : null;
+    private string? CallSession(int copies, string? heap) => copies > 1 ? CopySession(copies, heap) : null;
 
     /// <summary>
-    /// U12: the session of <paramref name="copies"/> copies begun, the runtime's eight words in the caller's frame (<c>runtime/common/
+    /// U12: the session of <paramref name="copies"/> copies begun, the runtime's nine words in the caller's frame (<c>runtime/common/
     /// runtime.kz</c>, "the copy of a value that crosses"), zero from the function's start, so that the end of a region whose code did
-    /// not reach the session's start finds none under way: an empty memo, no <c>weak</c> reference, the copies left to make, and
-    /// whether every block goes into the memo, as it does in a session of more than one copy, where a later argument may reach a block
-    /// by a path that holds no count of it. Such a session ends at its last copy, or, where the code leaves the region before it, at
-    /// the region's end (<see cref="LetGo"/>).
+    /// not reach the session's start finds none under way: an empty memo, no <c>weak</c> reference, the copies left to make, whether
+    /// every block goes into the memo, as it does in a session of more than one copy, where a later argument may reach a block by a
+    /// path that holds no count of it, and the heap <paramref name="heap"/> of a crossing, null for a <c>copy</c> at a call that is no
+    /// crossing. Such a session ends at its last copy, or, where the code leaves the region before it, at the region's end
+    /// (<see cref="LetGo"/>).
     /// </summary>
-    private string CopySession(int copies)
+    private string CopySession(int copies, string? heap)
     {
-        var session = fn.Alloca("[8 x i64]", "session", "zeroinitializer");
-        fn.Emit($"store [8 x i64] [i64 0, i64 0, i64 0, i64 0, i64 0, i64 0, i64 {Number(copies)}, i64 {(copies > 1 ? 1 : 0)}], ptr {session}");
+        var session = fn.Alloca("[9 x i64]", "session", "zeroinitializer");
+        fn.Emit($"store [9 x i64] [i64 0, i64 0, i64 0, i64 0, i64 0, i64 0, i64 {Number(copies)}, i64 {(copies > 1 ? 1 : 0)}, i64 0], ptr {session}");
+        if (heap is not null)
+        {
+            fn.Emit($"store ptr {heap}, ptr {fn.Value($"getelementptr [9 x i64], ptr {session}, i32 0, i32 8")}");
+        }
+
         if (copies > 1 && regions.Count > 0)
         {
             if (!regionSessions.TryGetValue(regions[^1], out var begun))
@@ -182,23 +195,42 @@ public sealed partial class Emitter
 
     /// <summary>
     /// The value of the type in the slot <paramref name="from"/> copied into the slot <paramref name="into"/>, which may be the same
-    /// slot: a value that reaches no instance with one more count, an instance as its copy, a <c>weak</c> reference kept for the copy's
-    /// end, a list, a map or a block as its copy, and a plain <c>data</c> value and a union part by part.
+    /// slot: a value that holds no block as it is; one that holds a block but reaches no instance copied in a crossing's session (Q5),
+    /// else with one more count; an instance as its copy, a <c>weak</c> reference kept for the copy's end, a string, a list, a map or a
+    /// block as its copy, and a plain <c>data</c> value and a union part by part.
     /// </summary>
     private void CopyAt(string into, string from, KurzType type)
     {
-        if (!ReachesInstance(type))
+        if (!Counted(type))
         {
-            var value = fn.Value($"load {Ir(type)}, ptr {from}");
-            if (Counted(type))
-            {
-                Retain(value, type);
-            }
-
-            fn.Emit($"store {Ir(type)} {value}, ptr {into}");
+            fn.Emit($"store {Ir(type)} {fn.Value($"load {Ir(type)}, ptr {from}")}, ptr {into}");
             return;
         }
 
+        if (ReachesInstance(type))
+        {
+            CopyParts(into, from, type);
+            return;
+        }
+
+        var whole = fn.Label("whole");
+        var shared = fn.Label("shared");
+        var done = fn.Label("copied");
+        fn.CondBranch(fn.Value($"call i1 {RuntimeFunction("CopyWhole")}()"), whole, shared);
+        fn.Block(whole);
+        CopyParts(into, from, type);
+        fn.Branch(done);
+        fn.Block(shared);
+        var value = fn.Value($"load {Ir(type)}, ptr {from}");
+        Retain(value, type);
+        fn.Emit($"store {Ir(type)} {value}, ptr {into}");
+        fn.Branch(done);
+        fn.Block(done);
+    }
+
+    /// <summary>The value of a counted type in the slot <paramref name="from"/> copied into the slot <paramref name="into"/> as <see cref="CopyAt"/> copies it, block by block.</summary>
+    private void CopyParts(string into, string from, KurzType type)
+    {
         switch (type)
         {
             case ClassType c when !Layout.Fat(c.Symbol):
@@ -272,14 +304,7 @@ public sealed partial class Emitter
                     {
                         if (c is not (VoidType or NullType) && Counted(c))
                         {
-                            if (ReachesInstance(c))
-                            {
-                                CopyAt(PartAt(u, into, 1), PartAt(u, from, 1), c);
-                            }
-                            else
-                            {
-                                Retain(Payload(value, u, c), c);
-                            }
+                            CopyAt(PartAt(u, into, 1), PartAt(u, from, 1), c);
                         }
 
                         fn.Branch(done);
@@ -288,10 +313,68 @@ public sealed partial class Emitter
                     return;
                 }
 
+            case PrimitiveType { Kind: Primitive.String }:
+                fn.Emit($"store %kz.str {fn.Value($"call %kz.str {CopyString()}(%kz.str {fn.Value($"load %kz.str, ptr {from}")})")}, ptr {into}");
+                return;
+            case FunctionType or HandleType or HasherType or CommandType or ChildProcessType:
+                {
+                    // a value no crossing reaches, as the checker refuses it inside what crosses (U12), and which a `copy` shares
+                    var value = fn.Value($"load {Ir(type)}, ptr {from}");
+                    Retain(value, type);
+                    fn.Emit($"store {Ir(type)} {value}, ptr {into}");
+                    return;
+                }
+
             default:
                 throw new InvalidOperationException($"a copy of {Types.A(type)}, which no word makes cross and the checker refuses (U12)");
         }
     }
+
+    /// <summary>
+    /// Q5: the copy of a string in a block of its own of the heap the allocation entry serves, by the runtime's <c>CopyBytes</c>; a literal,
+    /// which holds no block, as it is.
+    /// </summary>
+    private string CopyString() => Helper("copy.string", "%kz.str", ["%kz.str"], () =>
+    {
+        var count = fn.Value("extractvalue %kz.str %a0, 1");
+        var held = fn.Label("held");
+        var literal = fn.Label("literal");
+        fn.CondBranch(fn.Value($"icmp slt i64 {count}, 0"), held, literal); // the mark: a block
+        fn.Block(literal);
+        fn.Return("%kz.str %a0");
+        fn.Block(held);
+        var bytes = fn.Value($"call ptr {RuntimeFunction("CopyBytes")}(ptr {fn.Value("extractvalue %kz.str %a0, 0")}, i64 {fn.Value($"and i64 {count}, 9223372036854775807")})");
+        fn.Return($"%kz.str {fn.Value($"insertvalue %kz.str %a0, ptr {bytes}, 0")}");
+    });
+
+    /// <summary>
+    /// U12 with Q5: the function that copies a function value whose lambda captures values of the types <paramref name="captures"/> from the
+    /// slot <c>%a1</c> into the slot <c>%a0</c>, a value of its own: a new environment, held by one value, with the function that lets go
+    /// of it, each value it captured copied as <see cref="CopyAt"/> copies it; a lambda that captures nothing has no environment to copy.
+    /// </summary>
+    private string CopyEnvironmentInto(List<KurzType> captures) => Helper($"copy.into.env{string.Concat(captures.Select(t => "." + Lower.Mangle(t)))}", "void", ["ptr", "ptr"], () =>
+    {
+        var value = fn.Value("load %kz.fn, ptr %a1");
+        var environment = fn.Value($"extractvalue %kz.fn {value}, 1");
+        var none = fn.Label("none");
+        var some = fn.Label("environment");
+        fn.CondBranch(fn.Value($"icmp eq ptr {environment}, null"), none, some);
+        fn.Block(none);
+        fn.Emit($"store %kz.fn {value}, ptr %a0");
+        fn.Return(null);
+        fn.Block(some);
+        var shape = $"{{ i64, ptr{string.Concat(captures.Select(t => ", " + Ir(t)))} }}";
+        var copy = Allocate(shape);
+        fn.Emit($"store i64 1, ptr {copy}");
+        fn.Emit($"store ptr {fn.Value($"load ptr, ptr {fn.Value($"getelementptr {shape}, ptr {environment}, i32 0, i32 1")}")}, ptr {fn.Value($"getelementptr {shape}, ptr {copy}, i32 0, i32 1")}");
+        for (var i = 0; i < captures.Count; i++)
+        {
+            CopyAt(Capture(shape, copy, i), Capture(shape, environment, i), captures[i]);
+        }
+
+        fn.Emit($"store %kz.fn {fn.Value($"insertvalue %kz.fn {value}, ptr {copy}, 1")}, ptr %a0");
+        fn.Return(null);
+    });
 
     /// <summary>The address of part <paramref name="index"/> of a value of the type in the slot: a plain <c>data</c> value's field, a union's room at 1.</summary>
     private string PartAt(KurzType type, string slot, int index) =>
@@ -452,18 +535,18 @@ public sealed partial class Emitter
         }, FillMap(type));
     });
 
-    /// <summary>The entries of the copy <c>%a0</c> of a map's block, which holds the block's bytes: each key one count more, each value copied in its slot.</summary>
+    /// <summary>
+    /// The entries of the copy <c>%a0</c> of a map's block, which holds the block's bytes: each key and each value copied in its slot, a
+    /// key with the hash of its bytes, which a copy keeps.
+    /// </summary>
     private string FillMap(MapType type) => Helper($"fill.map.{Lower.Mangle(type)}", "void", ["ptr", "ptr"], () =>
     {
         var next = fn.Label("slot.next");
         var done = fn.Label("slots.done");
         EachSlot("%a0", EntryType(type), next, done, slot =>
         {
-            if (Counted(type.Key))
-            {
-                Retain(fn.Value($"load {Ir(type.Key)}, ptr {KeyAt(type, slot)}"), type.Key);
-            }
-
+            var key = KeyAt(type, slot);
+            CopyAt(key, key, type.Key);
             var value = ValueAt(type, slot);
             CopyAt(value, value, type.Value);
         });

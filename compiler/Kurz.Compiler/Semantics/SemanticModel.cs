@@ -410,6 +410,7 @@ public sealed class SemanticModel
     private readonly Dictionary<LambdaExpression, LambdaInfo> lambdas = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Expression> heldCopies = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Expression> copied = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<Expression, LambdaExpression> crossingLambdas = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Expression> moves = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<VariableSymbol> movedVariables = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<ForInStatement> takingLoops = new(ReferenceEqualityComparer.Instance);
@@ -527,6 +528,13 @@ public sealed class SemanticModel
 
     /// <summary>U12: whether the expression is an argument of a call that is no message, written after <c>copy</c>, whose value is a deep copy (Q6 of comment 6896192351).</summary>
     public bool IsCopied(Expression expression) => copied.Contains(expression);
+
+    /// <summary>
+    /// U12: the lambda the checker saw for a function value that crosses into an actor as the argument <paramref name="expression"/>, whose
+    /// environment the crossing copies with what it captures (the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big
+    /// unbuilt"); null for any other expression.
+    /// </summary>
+    public LambdaExpression? CrossingLambda(Expression expression) => crossingLambdas.GetValueOrDefault(expression);
 
     /// <summary>U12: whether the expression is an argument written after <c>move</c> that the check of what it ends passed (section 6), which the code generator passes copying nothing.</summary>
     public bool IsMove(Expression expression) => moves.Contains(expression);
@@ -669,6 +677,8 @@ public sealed class SemanticModel
     internal void RecordHeldCopy(Expression expression) => heldCopies.Add(expression);
 
     internal void RecordCopied(Expression expression) => copied.Add(expression);
+
+    internal void RecordCrossingLambda(Expression expression, LambdaExpression lambda) => crossingLambdas[expression] = lambda;
 
     internal void RecordMove(Expression value, VariableSymbol? variable)
     {

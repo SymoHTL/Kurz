@@ -413,6 +413,7 @@ public sealed partial class Checker
         {
             if (SeenLambda(a.Value) is { } l)
             {
+                model.RecordCrossingLambda(a.Value, l); // whose environment the crossing copies (comment 6902210646, Q5)
                 var (kind, why, limit) = (ActorCrossing.Crosses, (string?)null, (string?)null);
                 foreach (var captured in model.LambdaOf(l).Captures)
                 {

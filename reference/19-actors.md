@@ -850,8 +850,10 @@ cost read for a word at the argument as for that function value, as rustc reads 
 struct's fields and a closure's through its captures)*. A reference that crosses names the same
 actor, so that `==` holds across a crossing (§6, the owner, 2026-11-14, #519, comment 6880404917,
 Q10). The deep copy of `copy` stops at a function value it reaches, which the receiver gets as it
-would with no word, shared by its count with the values it captures, `copy f` of one whose
-captures cross among them, and at an actor's reference, which the receiver gets naming the same
+would with no word, copied into its heap with the values it captures where the call crosses (§6,
+the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big unbuilt") and shared by
+its count with them where the call crosses nothing, `copy f` of one whose captures cross among
+them, and at an actor's reference, which the receiver gets naming the same
 actor, as a reference that crosses names it *(assumed, §6: the stop at a function value, Q24's cost read for a word at the argument, as rustc reads a closure's
 `Send` through its captures; the stop at an actor's reference, as Rust's clone of a channel's
 `Sender` is another sender to the same channel, `impl<T> Clone for Sender<T>`,
@@ -899,10 +901,14 @@ since F11 gives a function value through a lambda only)*. `copy` before an argum
 written, a call that crosses nothing included, as Rust's `.clone()` stands anywhere (§6, the owner,
 2026-11-15, #519, comment 6896192351, Q6, "Rust: deep copy anywhere"). The sender makes the copy,
 at the send; every class instance a crossing reaches is copied, so that identity does not survive
-a crossing, and every other block is shared by its count, which no program can tell from a copy;
-the copy walks a work list and never recurses, so that a chain of a million links crosses on a
+a crossing; the copy walks a work list and never recurses, so that a chain of a million links crosses on a
 stack of 2 MiB; and a copy runs no program code, no `Text()` and no `equal by` *(assumed, §6: the
-points comment 6895076937 takes as following from §6, which the answers left standing)*. `copy`
+points comment 6895076937 takes as following from §6, which the answers left standing)*. Each actor
+having its own heap, a crossing copies every counted block it reaches into the receiver's heap,
+small or big, and §6's share of a big value by pointer stays decided and unbuilt, which no program
+can tell from a copy (§6, the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big
+unbuilt"); a `copy` at a call that crosses nothing copies every class instance it reaches and shares
+every other block by its count *(assumed, §6: the answer read for a call inside one heap)*. `copy`
 and `move` are words before an argument alone, as `mut` is there (L12), `move` before a parameter's
 type and inside a function type too, as `mut` is before a parameter's (§6, the owner, 2026-11-05,
 issue 156, comment 6657251688), and names everywhere else,
@@ -958,10 +964,12 @@ is written without `move` fits such a type and holds the parameter as its caller
 6657251688, Q4). A parameter takes one of `mut` and `move`, `move` standing before its type, a type
 named `move` before a name is read as the word, and a parameter of a C function's type (R17) takes no
 `move`, which is `syntax`, since C code keeps no count *(assumed, §6: as `mut` and `move` are words
-before an argument, which the round did not ask)*. On one thread `move` copies nothing and changes
-no count: the moved place's count becomes the message's or the parameter's, and a variable moved on
+before an argument, which the round did not ask)*. On one thread a `move` into a parameter copies
+nothing and changes no count: the moved place's count becomes the parameter's, and a variable moved on
 some paths alone is let go of through a null test at its end, as rustc keeps a drop flag (§6, the
-owner, 2026-11-15, #519, comment 6895076937) *(assumed, §6: the point of comment 6897444564 that the answers left standing)*.
+owner, 2026-11-15, #519, comment 6895076937) *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. A `move` into a message
+or a `spawn` copies the value into the receiver's heap and lets go of the original, which frees it
+*(assumed, §6: the point of comment 6895076937 that the answers left standing)*.
 
 Case: [actors/relay.kz](../corpus/actors/relay.kz)
 
