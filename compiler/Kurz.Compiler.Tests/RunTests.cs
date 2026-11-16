@@ -110,7 +110,9 @@ public sealed class Toolchain : IDisposable
 /// Every corpus case that expects a run (<c>output</c> or <c>throws</c>), built by the emitter and the pinned clang and run on this
 /// machine, an x86-64 one, as the gates image and the Windows job are: on a 64-bit Arm machine the emitter says <c>not supported</c> to
 /// an <c>asm</c> and a <c>naked</c> function (R11, R12), whose cases this runs. A case the checker reads in full and the emitter lays out prints exactly the header's lines on standard output; an
-/// <c>output</c> case then exits with 0 and writes nothing on standard error; a <c>throws</c> case exits with 1, and its error stream
+/// <c>output</c> case then exits with 0 and writes nothing on standard error but lines in P7's layout, which the runner leaves out of
+/// standard error for every case, so that a case can show an actor's restart, whose log line stands there (E3, U24; the taken points of
+/// comment 6899225864); a <c>throws</c> case exits with 1, and its error stream
 /// is the one line <c>error: &lt;id&gt; at &lt;file&gt;:&lt;n&gt;</c> of the design record's section 6, with the header's id and line and
 /// the case's path under <c>corpus/</c> as the file, or for <c>thrown</c> that line ending in a colon with the thrown text below it, and
 /// for <c>not-char-boundary</c> that line ending in a colon with the position of the cut below it (X10). A case that expects an error the
@@ -125,10 +127,14 @@ public sealed class Toolchain : IDisposable
 /// it ends that run with the system's signal; a case that allocator cannot hold is in <see cref="NotFenced"/>, with why, and is
 /// built under it and not run.
 /// </summary>
-public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
+public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
+    /// <summary>E3, U24: a line in P7's layout on standard error, the log line of an actor's crash among them, which the runner leaves out.</summary>
+    [GeneratedRegex(@"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z (?:Trace|Debug|Information|Warning|Error|Critical) [^ :\n]+: [^\n]*\n", RegexOptions.Multiline)]
+    private static partial Regex LogLine();
+
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls, the reads of standard input and running a program. The number for Linux is the count measured in the gates image, with no margin, so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156). The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 556 : 682;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 565 : 692;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -200,6 +206,7 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         ? new(StringComparer.Ordinal)
         {
             ["outcomes/stack-overflow.kz"] = "the raise of `stack-overflow` is the handler's of a fault (design record, section 6), which the runtime installs on Linux alone",
+            ["actors/crash-overflow-restarts.kz"] = "an actor's stack overflow is the handler's of a fault, which the runtime installs on Linux alone, and ends the process on Windows (compiler/README.md)",
         }
         : new(StringComparer.Ordinal);
 
@@ -293,8 +300,9 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
             return;
         }
 
-        // the trace on, as a program runs where nobody set KURZ_TRACE
-        var (code, output, all) = Toolchain.Run(executable, null);
+        // the trace on, as a program runs where nobody set KURZ_TRACE; the log lines left out (E3)
+        var (code, output, written) = Toolchain.Run(executable, null);
+        var all = LogLine().Replace(written, string.Empty);
         Assert.Equal(header.OutputLines, output);
         if (header.Expectation == Expectation.Output)
         {

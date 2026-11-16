@@ -170,8 +170,12 @@ byte* PageFor(byte* heap, long size) {
 // A new heap whose first page holds its record and a first block of `first` bytes behind it, which the
 // heap gives to nothing else and which is freed with the heap: the first page the smallest power of two
 // from 256 bytes that holds them (Q6). Null where the system refuses, and where the first page would be
-// larger than 524288 bytes, the largest page the thread carves.
+// larger than 524288 bytes, the largest page the thread carves. It and the allocator's other entries,
+// `HeapFree`, `HeapReset`, `Allocate`, `AllocateIn`, `Free` and `Reallocate`, raise the target's count of
+// the entries under way at their start and lower it at each exit (`sys.Entered`, `sys.Left`), so that a
+// stack fault inside them ends the process (design record, section 6, "End the process"; O11).
 pub byte* HeapNew(long first) {
+    sys.Entered()
     long need = 64 + (first + 15) / 16 * 16
     mut long size = 256
     while size < need {
@@ -179,6 +183,7 @@ pub byte* HeapNew(long first) {
     }
 
     if size > 524288 {
+        sys.Left()
         return null
     }
 
@@ -196,6 +201,7 @@ pub byte* HeapNew(long first) {
     if page == null {
         page = Carved(size)
         if page == null {
+            sys.Left()
             return null
         }
     }
@@ -221,6 +227,7 @@ pub byte* HeapNew(long first) {
         *Ptr<long>(heap + 40) = 0
     }
 
+    sys.Left()
     return heap
 }
 
@@ -268,6 +275,7 @@ pub byte* HeapCurrent() {
 // thread keeps, as `Free` gives them, its pages to the thread's pools. Nothing may read a block of the
 // heap after it, its record and its first block among them.
 pub void HeapFree(byte* heap) {
+    sys.Entered()
     raw {
         mut byte* at = *Ptr<byte*>(heap + 24)
         while at != null {
@@ -283,6 +291,39 @@ pub void HeapFree(byte* heap) {
             page = before
         }
     }
+
+    sys.Left()
+}
+
+// The heap emptied but for its first page, which keeps the heap's record and its first block and gives no
+// block again (chapter 19, U21): its blocks of more than 262144 bytes and its other pages freed as
+// `HeapFree` frees them, its size classes emptied. A block of the heap is then a block of a later page.
+pub void HeapReset(byte* heap) {
+    sys.Entered()
+    raw {
+        mut byte* at = *Ptr<byte*>(heap + 24)
+        while at != null {
+            byte* after = *Ptr<byte*>(at + 8)
+            Kept(at, *Ptr<long>(at))
+            at = after
+        }
+
+        byte* first = heap - 16
+        mut byte* page = *Ptr<byte*>(heap + 16)
+        while page != first {
+            byte* before = *Ptr<byte*>(page)
+            Pooled(page, *Ptr<long>(page + 8))
+            page = before
+        }
+
+        *Ptr<byte*>(heap) = first + *Ptr<long>(first + 8)
+        *Ptr<byte*>(heap + 8) = first + *Ptr<long>(first + 8)
+        *Ptr<byte*>(heap + 16) = first
+        *Ptr<byte*>(heap + 24) = null
+        *Ptr<byte*>(heap + 32) = null
+    }
+
+    sys.Left()
 }
 
 // `room` bytes from the newest page of `heap`, which takes a new page where that page is too small: twice
@@ -458,8 +499,10 @@ byte* Reused(long bytes) {
 // `handle_alloc_error`.
 pub byte* Allocate(long size) {
     mut byte* p = null
+    sys.Entered()
     byte* heap = HeapCurrent()
     if heap == null {
+        sys.Left()
         return null
     }
 
@@ -480,6 +523,7 @@ pub byte* Allocate(long size) {
             }
         }
 
+        sys.Left()
         return p
     }
 
@@ -501,15 +545,18 @@ pub byte* Allocate(long size) {
         }
     }
 
+    sys.Left()
     return p
 }
 
 // `size` bytes of `heap`, the thread's own for null, as the allocation entry gives them, which then serves
 // the heap it served before.
 pub byte* AllocateIn(byte* heap, long size) {
+    sys.Entered()
     byte* before = HeapUse(heap)
     byte* p = Allocate(size)
     HeapUse(before)
+    sys.Left()
     return p
 }
 
@@ -521,6 +568,7 @@ pub byte* AllocateIn(byte* heap, long size) {
 // class, where a request of that class takes it first. Where the table of size classes cannot be
 // carved, the block is not used again.
 pub void Free(byte* p, long size) {
+    sys.Entered()
     if size > 262144 {
         raw {
             byte* block = p - 48
@@ -529,6 +577,7 @@ pub void Free(byte* p, long size) {
             Kept(block, bytes)
         }
 
+        sys.Left()
         return
     }
 
@@ -540,6 +589,8 @@ pub void Free(byte* p, long size) {
             table[k] = long(p)
         }
     }
+
+    sys.Left()
 }
 
 // A block the allocation entry gave for `size` bytes, grown to `grown` bytes with the bytes it holds, in
@@ -551,6 +602,7 @@ pub void Free(byte* p, long size) {
 // mapped; else, and where `Resize` gives null, a new block of the heap with the bytes copied and the old
 // one freed. Null where the system refuses, the block then left as it was.
 pub byte* Reallocate(byte* p, long size, long grown) {
+    sys.Entered()
     byte* heap = Owner(p, size)
     if size > 262144 {
         long bytes = (grown + 15) / 16 * 16 + 48
@@ -592,12 +644,14 @@ pub byte* Reallocate(byte* p, long size, long grown) {
         }
 
         if moved != null {
+            sys.Left()
             return moved
         }
     }
 
     byte* q = AllocateIn(heap, grown)
     if q == null {
+        sys.Left()
         return null
     }
 
@@ -610,6 +664,7 @@ pub byte* Reallocate(byte* p, long size, long grown) {
     }
 
     Free(p, size)
+    sys.Left()
     return q
 }
 

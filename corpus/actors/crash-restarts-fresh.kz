@@ -1,0 +1,26 @@
+// expect: output
+// | added 5, now 5
+// | added 2, now 2
+// | 2
+// rules: U19
+
+actor Counter {
+    mut int n = 0
+
+    pub void Add(int k) {
+        if k < 0 {
+            throw "negative"
+        }
+
+        n = n + k
+        print("added {k}, now {n}")
+    }
+
+    pub int Get() => n
+}
+
+c = spawn Counter()
+c.Add(5)
+send c.Add(-1)
+c.Add(2)
+print(c.Get())

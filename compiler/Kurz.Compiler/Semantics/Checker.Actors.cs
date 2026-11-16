@@ -615,6 +615,7 @@ public sealed partial class Checker
             }
 
             call = call with { Kind = CallKind.ActorSend, Target = new ActorType(own) }; // U11: the actor's own method, which `this` alone calls
+            RecordWaits(s.Call);
             model.RecordCall(s.Call, call);
         }
 
@@ -704,8 +705,21 @@ public sealed partial class Checker
             }
         }
 
+        RecordWaits(c);
         model.RecordCall(c, model.CallOf(c) with { Kind = send ? CallKind.ActorSend : CallKind.ActorCall, Target = type });
         return typed;
+    }
+
+    /// <summary>
+    /// U4, U17: each argument of the message <paramref name="c"/> that runs a call as it is evaluated (<see cref="Calls"/>), which can wait,
+    /// recorded for the emitter, which builds the message in a heap of its own where any argument is such (U12, U21).
+    /// </summary>
+    private void RecordWaits(CallExpression c)
+    {
+        foreach (var a in c.Arguments.Where(a => !a.Mut && Calls(a.Value)))
+        {
+            model.RecordWaitingArgument(a.Value);
+        }
     }
 
     /// <summary>U8: a member of an actor's reference read without a call: its fields are no one's outside it, and a method named without a call is no value (F11).</summary>

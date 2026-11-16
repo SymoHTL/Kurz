@@ -1,0 +1,24 @@
+// expect: output
+// | 1
+// | 1
+// rules: U19
+
+actor Deep {
+    mut int calls = 0
+
+    int Down(int n) => Down(n) + 1
+
+    pub void Go() {
+        print(Down(0))
+    }
+
+    pub int Count() {
+        calls = calls + 1
+        return calls
+    }
+}
+
+d = spawn Deep()
+print(d.Count())
+send d.Go()
+print(d.Count())

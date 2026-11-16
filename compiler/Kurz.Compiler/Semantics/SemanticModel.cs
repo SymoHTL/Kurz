@@ -410,6 +410,7 @@ public sealed class SemanticModel
     private readonly Dictionary<LambdaExpression, LambdaInfo> lambdas = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Expression> heldCopies = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Expression> copied = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<Expression> waitingArguments = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Expression, LambdaExpression> crossingLambdas = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Expression> moves = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<VariableSymbol> movedVariables = new(ReferenceEqualityComparer.Instance);
@@ -530,6 +531,14 @@ public sealed class SemanticModel
     public bool IsCopied(Expression expression) => copied.Contains(expression);
 
     /// <summary>
+    /// U4, U17: whether the expression is an argument of a message that runs a call as it is evaluated, a call that can wait and so let
+    /// other messages run, a crash of the message's callee among them, as the checker reads every call (<c>Checker.Calls</c>, the reading
+    /// behind M7's count of a read of a <c>mut</c> parameter); the emitter builds a message in a heap of its own where any argument is
+    /// such (<c>Emitter.EmitMessage</c>).
+    /// </summary>
+    public bool CanWait(Expression argument) => waitingArguments.Contains(argument);
+
+    /// <summary>
     /// U12: the lambda the checker saw for a function value that crosses into an actor as the argument <paramref name="expression"/>, whose
     /// environment the crossing copies with what it captures (the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big
     /// unbuilt"); null for any other expression.
@@ -591,6 +600,9 @@ public sealed class SemanticModel
 
     /// <summary>Whether the file holds a log call the checker read, so that the program reads <c>KURZ_LOG</c> at its start (P4).</summary>
     public bool HasLogSites => logSites.Count > 0;
+
+    /// <summary>Whether the file holds a <c>spawn</c> the checker read, whose actor's crash writes a log line, so that the program reads <c>KURZ_LOG</c> at its start (P4, U24).</summary>
+    public bool Spawns => calls.Values.Any(i => i.Kind == CallKind.ClassNew && i.Target is ClassType { Symbol.IsActor: true });
 
     /// <summary>Whether the file holds a call on <c>Stdin</c> the checker read, so that the program declares the handle of its standard input (S22).</summary>
     public bool ReadsStdin => calls.Values.Any(i => i.Kind is CallKind.StdinLines or CallKind.StdinRead or CallKind.StdinReadLine or CallKind.StdinReadAll);
@@ -677,6 +689,8 @@ public sealed class SemanticModel
     internal void RecordHeldCopy(Expression expression) => heldCopies.Add(expression);
 
     internal void RecordCopied(Expression expression) => copied.Add(expression);
+
+    internal void RecordWaitingArgument(Expression argument) => waitingArguments.Add(argument);
 
     internal void RecordCrossingLambda(Expression expression, LambdaExpression lambda) => crossingLambdas[expression] = lambda;
 

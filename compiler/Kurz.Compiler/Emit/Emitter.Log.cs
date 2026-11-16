@@ -18,12 +18,13 @@ public sealed partial class Emitter
     private readonly Dictionary<CallExpression, string> logStates = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
-    /// P4, P5: in a program built for Linux with a log call in one of its files, <c>KURZ_LOG</c> read before the first statement, which the
-    /// runtime's <c>LogFilter</c> keeps or refuses, and the lowest level a call site may be on at; a program with no log call reads none.
+    /// P4, P5: in a program built for Linux with a log call or a <c>spawn</c> in one of its files, <c>KURZ_LOG</c> read before the first
+    /// statement, which the runtime's <c>LogFilter</c> keeps or refuses, and the lowest level a call site may be on at, so that the filter
+    /// holds for the log line of an actor's crash too (U24); a program with neither reads none.
     /// </summary>
     private void EmitLogStart()
     {
-        if (target != Target.Linux || !units.Any(u => u.Model.HasLogSites))
+        if (target != Target.Linux || !units.Any(u => u.Model.HasLogSites || u.Model.Spawns))
         {
             return;
         }

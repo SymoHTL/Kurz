@@ -110,13 +110,13 @@ expects it (V12).
 
 The exceptions a program can raise, as the header of a case names them. The line is the one that
 holds the construct that raised: the `throw`, the arithmetic, the index, the call of the type, or
-the range of the loop. Every id of the table but `stack-overflow`, `print-failed`, `deadlock`,
+the range of the loop. Every id of the table but `stack-overflow`, `print-failed`, `deadlock`, `callee-crashed`,
 `allocation-failed`, `random-failed` and `cpu-lacks-set` is raised by the program's code, a check or a `throw`, with its file and its line
 as constants (§6, an assumption there as to that list and the file), or in a test build by a check of
 the runtime's own code (below); `print-failed` is raised by the runtime with the file and the line its
-`print` passed as constants (A1; §6, the owner, 2026-10-23), `deadlock` with the file and the line
-its call that waits passed as constants (U18; §6, the owner, 2026-11-15, #519, comment 6892812780,
-Q4), and `allocation-failed`,
+`print` passed as constants (A1; §6, the owner, 2026-10-23), `deadlock` and `callee-crashed` with the file and the line
+its call that waits passed as constants (U18, U20; §6, the owner, 2026-11-15, #519, comments 6892812780,
+Q4, and 6902210646, Q1), and `allocation-failed`,
 `random-failed` and `cpu-lacks-set` name no place (O11, M9, R18). A stack overflow, which is, but for a check of the runtime's own code in a test build (below),
 the one exception a primitive of the runtime raises with a line it reads from the tables, at the call
 that did not fit or at a primitive's entry check, names no line in a release build built without its line
@@ -177,6 +177,7 @@ error line of every other id ends with its line, or with the note in its place (
 | `not-char-boundary` | X2 | a `Substring` inside its string whose start or end falls inside a code point, the bounds read first (X2; §12, assumed); the error names the position (§12, the owner, 2026-10-31, "Two ids"), on the line below the error line, as the text of a `throw` stands (X10) |
 | `random-failed` | M9, U17 | the system gave no randomness for the keys of a map's hash when a thread's first map takes its first block, or for the chain IDs of a thread when it starts its first chain (U17; §6, assumed), on Linux neither `getrandom` nor, where the system refuses that call or its pool is not ready, `/dev/urandom`, which ends the program there, where Rust's standard library panics for want of a seed for a `HashMap` (§4, the owner, 2026-10-30, "End with an error, as Rust" and "Rust's full path"); on Windows `ProcessPrng` gives the keys, which does not fail (§4, the owner, 2026-10-30, "ProcessPrng, as Rust 1.82"), and the error comes only where its library or the call is missing, on a system older than Windows 8 or Windows Server 2008 R2, the floor Microsoft's page of the call names (§4, assumed); the id is the name the owner's question gave as an example, and the error line is `error: random-failed`, with the exit code 1 and no place and no trace, as the line of `allocation-failed` (§4, assumed) (no case: a case cannot make the system refuse its randomness; `ListTests` runs a map on a runtime whose `Random` reports a failure) |
 | `deadlock` | U18 | a call that waits, made by the top-level code, found no message left to run while its reply was not set, on one thread, at the line of that call, with the exit code 1 and the trace of a crash below the error line (§6, the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level wait"); layer 3's, raised in one actor of a loop and naming both chains, stands in §6's list of the failures of actors, which gives its form |
+| `callee-crashed` | U20 | a call that waits found the actor it waits on crashed before it answered, at the line of that call, the waiting actor's own crash in its turn, and at the top-level code the end of the process (§6, the owner, 2026-11-15, #519, comment 6902210646, Q1, "Erlang: callee-crashed"); first case [actors/crash-waiter.kz](../corpus/actors/crash-waiter.kz) |
 | `cpu-lacks-set` | R18 | a build whose CPU option names sets beyond the target's baseline started on a CPU that lacks one of them, or with the run setting turning one of them off, before the program's first statement; the line names the CPU option and the sets by clang's names, those the CPU lacks first, then one group for each variable that turned off sets the CPU has, each such set under the nearest of the variables that turned it off, `avx2 turned off by KURZ_INTRINSICS_AVX2`, the groups apart by `; `, in the order R18 gives, and the exit code is 1 (§13, the owner, 2026-11-02) (no case: a case runs on the machine that builds it, whose CPU it cannot pick, with no setting) |
 | `settings-unpublished` | B18 | a read of `settings` under the mark of the start while the start's word is open, before any value is published, one the checker does not see, through a method of an interface or a message to an actor, which ends the message's actor or the body that read, and the start then refuses as B7 refuses a missing setting (§12, the owner, 2026-11-13, "Own run-time id (Recommended)", the name assumed) (no case: the compiler builds no settings type, as B1's `No case:` line says) |
 
@@ -248,6 +249,9 @@ above the cut line, and never to the case *(assumed: the reading of this rule
 for the trace, since the header names an id and a line and nothing of a trace, proposed with the
 record of round 16 and not put to the owner, and the runner's check of the trace, an assumption of
 §6)*.
+A line in P7's layout on standard error, the log line of an actor's crash among them (U24), is left out by
+the corpus runner for every case, so that a case that expects an output can show a restart *(assumed: the
+taken points of comment 6899225864, for a case that expects an exception too)*.
 The program's exit code is pinned with it (O6). The owner chose this on 2026-10-03, against a
 header that says only that something is thrown; the cost is a word the runtime carries in every
 exception.
