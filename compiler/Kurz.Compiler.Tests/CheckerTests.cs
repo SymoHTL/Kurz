@@ -7461,6 +7461,9 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.MoveReachable, 61)], Errors(MoveShop + "void Give(Cart p) {\n    Take(move p)\n}\n\nGive(Cart(1))\nsend shop.Name(\"x\")\n"));
         Assert.Equal([(ErrorIds.MoveReachable, 61)], Errors(MoveShop + "void Say(Shop to, string t) {\n    to.Name(move t)\n}\n\nSay(shop, \"a\")\n"));
         Assert.Equal([(ErrorIds.MoveReachable, 61)], Errors(MoveShop + "cart = Cart(1)\ngive = () => shop.Add(move cart)\ngive()\n"));
+        // 551 T6 146: each reading of a loop declares its body's variables again, so the lambda of a later reading holds no tag an
+        // earlier reading ended; its `move` of the captured variable is `move-reachable` once, at the lambda's line
+        Assert.Equal([(ErrorIds.MoveReachable, 62)], Errors(MoveShop + "for i in 0..<2 {\n    m = Cart(i)\n    give = () => shop.Add(move m)\n    give()\n}\n"));
         Clean(MoveShop + "void Pass(Shop to, move Cart c) {\n    to.Add(move c)\n}\n\nPass(shop, move Cart(1))\n");
     }
 
