@@ -399,9 +399,9 @@ flowchart TD
 - `tools/lint_knowledge.py` changes a check: G3. `tools/lint_ci.py` changes a fact: G4 and R6.
 - `tools/compiler_gate.py` changes (the command, the floor, a verdict, the config check): G10 and C1; its Arm
   call, filter or floor: A1.
-  `compiler/global.json` changes the SDK: G10, whose command reads it from inside `compiler/`, and C1, whose SDK
-  step installs it. A lock file, `compiler/Directory.Packages.props`, `compiler/Directory.Build.props` or
-  `compiler/NuGet.config` changes what the gate restores or builds: G10 and C1.
+  `compiler/global.json` changes the SDK: G10, whose command reads it from inside `compiler/`, and C1 and A1,
+  whose SDK steps install it. A lock file, `compiler/Directory.Packages.props`, `compiler/Directory.Build.props` or
+  `compiler/NuGet.config` changes what the gate restores or builds: G10, C1 and A1.
 - `tools/unicode_tables.py` changes (the version, a hash, the form of the tables, a floor), or
   `compiler/Kurz.Compiler/Emit/CaseTables.cs` does, or how `tools/gates.py` runs the tool: G11.
 - `.github/workflows/compiler-windows.yml` (its events, runner or steps) changes: the subgraph C and G4.

@@ -449,7 +449,9 @@ public sealed partial class Checker
     /// K7, K18: a <c>static</c> field, which exists once for the program and so holds an immutable value: <c>static mut</c>, and a type
     /// that is or holds a class or may hold one by its written type (<see cref="JudgeStaticFieldType"/>), are <c>static-state</c>; a
     /// field of the name of another field is <c>redeclared</c> (V9). A field
-    /// without a written type takes the type of its initial value (V2), judged when that value is read (<see cref="CheckStaticFields"/>).
+    /// without a written type is a <c>static mut</c> one, the one field the front end reads without a type (K7 with V2), refused here
+    /// by its <c>mut</c>, so that the type K18 reads is always written, as a field is written <c>Type name</c> (K7); the branch of
+    /// <see cref="CheckStaticFields"/> that takes such a field's type from its initial value meets none.
     /// </summary>
     private void ResolveStaticField(ClassSymbol symbol, StaticFieldSymbol s)
     {
