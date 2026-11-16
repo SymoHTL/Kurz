@@ -1995,14 +1995,14 @@ each waiting caller `callee-crashed` (U20), ends the actor's children after thei
 to 30 s, run by the top-level code's wait, which sleeps while only a pause is left (U22, U23); the
 emitted `spawn` keeps a copy of the constructor's arguments in the spawner's heap and makes the
 function that constructs the state again from them, and each call site of a message gets a table
-of the function that runs it and the one that copies it into a new heap. A message where an argument
-that can wait, one that runs a call anywhere in it, follows an argument that crosses is built in a
+of the function that runs it and the one that copies it into a new heap. A message any of whose
+arguments can wait, one that runs a call anywhere in it, is built in a
 heap of its own (`MessageHeapNew`) and at its queueing copied by that copy into the heap its actor has
 then, its own heap freed, as Erlang builds a message in the sender's heap and copies it into the
-receiver's at its send: the wait lets the actor crash, which frees the heap the arguments would have
-crossed into (U21), or end (U13), and where it ended the copy is dropped as any message to an ended
-actor; the crash of the actor whose code builds it frees that heap with its own. Where no argument
-after one that crosses can wait, the message is built in its actor's heap. What stays `not supported`
+receiver's at its send: the wait lets the actor crash, which frees or empties the heap taken before it,
+that the arguments and the message would have gone into (U21), or end (U13), and where it ended the copy
+is dropped as any message to an ended actor; the crash of the actor whose code builds it frees that heap
+with its own. Where no argument can wait, the message is built in its actor's heap. What stays `not supported`
 of section 6's supervision: the words of a policy (`on crash`, `restart`, `stop`, `escalate`,
 `after`, `max N in`) after `spawn` and after a type's name, with `restart-limit`, and the block
 `on crash (c) { ... }` with its `Crashed` and its `Reason`; every actor has the default, and a
@@ -2012,7 +2012,7 @@ one thread no program reaches but through the crash path, a caller that waits cr
 a call of its own chain; an actor that ended keeps its first page to the end of the process, so that
 a call that still reaches it raises `actor-gone`, where section 6 frees the page at the end through a
 table of slots and generations (2026-11-16), which is not built; and the copies a crashed message made of the
-arguments of a call it had not sent yet, in the callee's heap where no argument after one that crosses could wait, and the heap of a `spawn` whose arguments it was still
+arguments of a call it had not sent yet, in the callee's heap where no argument could wait, and the heap of a `spawn` whose arguments it was still
 evaluating, stay in their heaps until those are freed. A message has 2 MiB of
 stack where its clause sets no other size, where a message on Linux had the main thread's 8 MiB
 while messages ran on it, and a server whose actors hold many stacks at once, two mappings each, needs Linux's limit

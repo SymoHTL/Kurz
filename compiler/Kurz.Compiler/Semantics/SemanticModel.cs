@@ -533,8 +533,8 @@ public sealed class SemanticModel
     /// <summary>
     /// U4, U17: whether the expression is an argument of a message that runs a call as it is evaluated, a call that can wait and so let
     /// other messages run, a crash of the message's callee among them, as the checker reads every call (<c>Checker.Calls</c>, the reading
-    /// behind M7's count of a read of a <c>mut</c> parameter); the emitter builds a message in a heap of its own where such an argument
-    /// follows one that crosses (<c>Emitter.EmitMessage</c>).
+    /// behind M7's count of a read of a <c>mut</c> parameter); the emitter builds a message in a heap of its own where any argument is
+    /// such (<c>Emitter.EmitMessage</c>).
     /// </summary>
     public bool CanWait(Expression argument) => waitingArguments.Contains(argument);
 

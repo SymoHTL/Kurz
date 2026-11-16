@@ -712,7 +712,7 @@ public sealed partial class Checker
 
     /// <summary>
     /// U4, U17: each argument of the message <paramref name="c"/> that runs a call as it is evaluated (<see cref="Calls"/>), which can wait,
-    /// recorded for the emitter, which builds the message in a heap of its own where such an argument follows one that crosses (U12, U21).
+    /// recorded for the emitter, which builds the message in a heap of its own where any argument is such (U12, U21).
     /// </summary>
     private void RecordWaits(CallExpression c)
     {

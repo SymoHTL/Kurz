@@ -87,11 +87,15 @@ callee allocated in at that moment, taken before the arguments ran, and each cro
 into it as it was evaluated. In `b.Sum([10, 20, 30], s.Get())` the wait for `s.Get()` let `b` run a
 message that crashed it, and the restart freed its later heaps and emptied its first, under the copy of
 the list. Under the fenced allocator the run ended with the exit code 139; without it the program printed
-`7` where `67` is right. Since then, where an argument after one that crosses can wait
+`7` where `67` is right. The first fix built a heap of its own only where an argument after one that
+crosses can wait; the review of the same pull request found the heap still taken before a wait in the first
+crossing argument or in one before it, `b.Sum(s.Get(), [10, 20, 30])` to an actor that had crashed once,
+whose crash during the wait emptied it under the message (exit code 139 under the fence). Since then,
+where any argument can wait
 (`SemanticModel.CanWait`, read from the checker's `Calls`), the message is built in a heap of its own and
 copied into the callee's heap when it is queued, as Erlang copies a message at its send; a crash of the
-caller before the queueing frees that heap. The fenced program `actor-crash-wait-fenced` of `ListTests`
-holds the crash, and `ActorTests` the end of the callee.
+caller before the queueing frees that heap. The fenced programs `actor-crash-wait-fenced` and
+`actor-crash-wait-first-fenced` of `ListTests` hold the crash, and `ActorTests` the end of the callee.
 
 **Why:** a borrow is a claim about every path from the read to the last use, and the claim was
 checked only for the paths the author thought of. A program that frees nothing never shows the
