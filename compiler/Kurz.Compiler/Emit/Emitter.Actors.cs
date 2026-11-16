@@ -301,13 +301,13 @@ public sealed partial class Emitter
     /// of its chain, its actor's own methods; the result is then the caller's, a temporary of its region as any call's result is. A
     /// <c>send</c> passes none (U6). The message names the table of its call site, a constant: the function that runs it and the one
     /// that copies it into the heap of the actor's new instance after a crash (<see cref="MessageCopy"/>; U21); <c>Wait</c> is given the
-    /// message, so that a crash of the waiting actor unhooks the reply from it (U20). Where an argument that can wait, one that runs a call
-    /// anywhere in it (<see cref="SemanticModel.CanWait"/>), follows an argument that crosses, the wait lets the actor crash, which frees
-    /// the heap the arguments crossed into (U21), or end (U13): the message is then built in a heap of its own, made for it (the runtime's
+    /// message, so that a crash of the waiting actor unhooks the reply from it (U20). Where any argument can wait, one that runs a call
+    /// anywhere in it (<see cref="SemanticModel.CanWait"/>), the wait lets the actor crash, which frees or empties the heap taken before it,
+    /// that the arguments and the message would go into (U21), or end (U13): the message is then built in a heap of its own, made for it (the runtime's
     /// <c>MessageHeapNew</c>), and at its queueing copied into the heap the actor has then by the function of its call site that copies it
     /// after a crash, its own heap then freed, as Erlang builds a message in the sender's heap and copies it into the receiver's at its
     /// send; where the actor ended meanwhile, the copy goes into its first heap and the message is dropped as any message to an ended
-    /// actor (the runtime's <c>Enqueue</c>). Where no argument after one that crosses can wait, the message is built in the actor's heap.
+    /// actor (the runtime's <c>Enqueue</c>). Where no argument can wait, the message is built in the actor's heap.
     /// </summary>
     private string EmitMessage(CallExpression c, CallInfo info)
     {
@@ -318,8 +318,7 @@ public sealed partial class Emitter
             NameExpression n => This(n, n.Line),
             _ => throw new InvalidOperationException($"a message through `{c.Callee.GetType().Name}` at line {c.Line}"),
         };
-        var crossing = Enumerable.Range(0, c.Arguments.Count).FirstOrDefault(i => info.Binding[i] >= 0 && Counted(Sub(f.Parameters[info.Binding[i]].Type)), -1);
-        var own = crossing >= 0 && c.Arguments.Skip(crossing + 1).Any(a => Model.CanWait(a.Value)) ? fn.Value($"call ptr {RuntimeFunction("MessageHeapNew")}()") : null;
+        var own = c.Arguments.Any(a => Model.CanWait(a.Value)) ? fn.Value($"call ptr {RuntimeFunction("MessageHeapNew")}()") : null;
         var left = own is null ? null : HeapBegun(own, "MessageHeapFree");
         var heap = own ?? fn.Value($"call ptr {RuntimeFunction("ActorHeap")}(ptr {actor})");
         var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => Default(f.Declaration!.Parameters[j].Default, owners[f]), cConvention: false, owned: true, into: heap);
