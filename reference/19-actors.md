@@ -960,14 +960,21 @@ copy found it *(assumed, §6: the memo of the call and the order of its copies)*
 at the send; every class instance a crossing reaches is copied, so that identity does not survive
 a crossing; the copy walks a work list and never recurses, so that a chain of a million links crosses on a
 stack of 2 MiB; and a copy runs no program code, no `Text()` and no `equal by` *(assumed, §6: the
-points comment 6895076937 takes as following from §6, which the answers left standing)*. Each actor
+points comment 6895076937 takes as following from §6, which the answers left standing)*, but for the
+hash of each key of a map whose keys reach a class instance, by the fields its class compares,
+`equal by`'s among them (§6, the owner, 2026-11-16, #519, comment 6923513534), which runs no program
+code, since a class declares no `Equals` or `GetHashCode` (K5). Each actor
 having its own heap, a crossing copies every counted block it reaches into the receiver's heap,
 small or big, and §6's share of a big value by pointer stays decided and unbuilt, which no program
 can tell from a copy (§6, the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big
 unbuilt"); a `copy` at a call that crosses nothing copies every block on a path to a class
 instance, the instance among them, and shares by its count only a block that reaches none
-*(assumed, §6: the answer read for a call inside one heap)*. What the copy of a map whose keys
-reach a class instance is stands open (§14). `copy`
+*(assumed, §6: the answer read for a call inside one heap)*. The copy of a map whose keys reach a
+class instance, where it crosses or stands after `copy`, hashes each key again as it is copied, by
+identity or by content as its class compares (K4, K5), so that the copied map finds what the source
+found, as a Rust `HashMap` collected from cloned pairs hashes each key it takes; the cost, the key's
+hash and its `equal by` running inside the copy, falls on such maps alone (§6, the owner,
+2026-11-16, #519, comment 6923513534, "Rehash each key (Recommended)"). `copy`
 and `move` are words before an argument alone, as `mut` is there (L12), `move` before a parameter's
 type and inside a function type too, as `mut` is before a parameter's (§6, the owner, 2026-11-05,
 issue 156, comment 6657251688), and names everywhere else,
