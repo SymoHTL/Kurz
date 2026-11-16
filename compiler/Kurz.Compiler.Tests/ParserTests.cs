@@ -1622,7 +1622,7 @@ public sealed class ParserTests
     [InlineData("actor Worker on crash stop stack 8mb {\n}", "(actor Worker [on crash 1 stop] [stack 1 (unit 8mb)] {})")]
     [InlineData("actor Worker stack 8mb on crash restart max 3 in 1min after 5ms {\n}", "(actor Worker [stack 1 (unit 8mb)] [on crash 1 restart after (unit 5ms) max (int 3) in (unit 1min)] {})")]
     [InlineData("actor Worker per Id on crash escalate {\n}", "(actor Worker [per 1] [on crash 1 escalate] {})")]
-    [InlineData("actor Worker on crash (c) {\n}", "(actor Worker [on crash 1] {})")]
+    [InlineData("actor Worker on crash (c) {\n    restart\n} {\n    pub int Get() => 1\n}", "(actor Worker [on crash 1] {(function pub int Get() => (int 1))})")]
     [InlineData("actor Worker yield checks {\n}", "(actor Worker [yield 1] {})")]
     [InlineData("c = spawn Counter(1)", "(assign-or-declare c (spawn (call Counter (int 1))))")]
     [InlineData("c = spawn Pair<int>(1)", "(assign-or-declare c (spawn (call Pair<int> (int 1))))")]

@@ -7150,7 +7150,7 @@ public sealed class CheckerTests
     [Theory]
     [InlineData(1, "U1", "actor A per Id {\n}\n")]
     [InlineData(1, "U1", "actor A stack 8mb per Id {\n}\n")]
-    [InlineData(1, "U1, U25", "actor A on crash (c) {\n}\n")]
+    [InlineData(3, "U1, U25", "print(1)\n\nactor A on crash (c) {\n    restart\n} {\n    pub int Get() => 1\n}\n")]
     [InlineData(1, "U1", "actor A per Id on crash stop {\n}\n")]
     [InlineData(1, "U1, T19", "actor A<T> {\n}\n")]
     [InlineData(1, "U1, T19", "actor Pair<T>(T First) {\n}\n\np = spawn Pair<int>(1)\nprint(p)\n")]

@@ -1672,7 +1672,8 @@ public sealed class Parser
     /// size written another way, or a second <c>stack</c>, is <c>syntax</c>, as C# refuses a modifier written twice (U1; section 6, the
     /// owner, 2026-11-15, #519, comment 6892812780, Q3, "Build it now"). <c>on crash</c> takes the words of a policy, the type's default
     /// (U27, <see cref="ParseCrashPolicy"/>), and a second <c>on crash</c> is <c>syntax</c>, as a second <c>stack</c> is (assumed); its
-    /// block, <c>on crash (c) { ... }</c>, is passed over. Any other text before the body is <c>syntax</c> (E4).
+    /// block, <c>on crash (c) { ... }</c>, is passed over, its parameters and its braces, as at <c>spawn</c>, so that the braces after it
+    /// are the body and the checker says <c>not supported</c> to it at its line. Any other text before the body is <c>syntax</c> (E4).
     /// </summary>
     private List<ActorClause> ParseActorClauses()
     {
@@ -1714,7 +1715,18 @@ public sealed class Parser
                 Advance();
                 var policy = ParseCrashPolicy(on.Line);
                 clauses.Add(new ActorClause(on.Line, "on crash", Policy: policy));
-                passing = policy is null; // the block, `on crash (c) { ... }`, passed over as before
+                if (policy is null)
+                {
+                    // the block, `on crash (c) { ... }`, passed over as at `spawn`, its parameters and its braces, so that the braces
+                    // after it are the actor's body
+                    PassGroup();
+                    if (At(TokenKind.LeftBrace))
+                    {
+                        PassGroup();
+                    }
+                }
+
+                passing = false;
             }
             else if (clauses.Count == 0)
             {
@@ -1735,6 +1747,23 @@ public sealed class Parser
         }
 
         return clauses;
+    }
+
+    /// <summary>Passes over the parenthesis or the brace at the current token and every token up to the one that closes it.</summary>
+    private void PassGroup()
+    {
+        var depth = 0;
+        do
+        {
+            depth += Current.Kind switch
+            {
+                TokenKind.LeftParen or TokenKind.LeftBracket or TokenKind.LeftBrace => 1,
+                TokenKind.RightParen or TokenKind.RightBracket or TokenKind.RightBrace => -1,
+                _ => 0,
+            };
+            index++;
+        }
+        while (depth > 0 && !At(TokenKind.EndOfFile));
     }
 
     /// <summary><c>send c.Add(1)</c> (U6): the call that follows is the statement's; anything but a call there is <c>syntax</c> (U14).</summary>

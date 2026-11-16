@@ -2459,7 +2459,8 @@ that sit under a rule by its id. Every one is pinned by a test.
   `in`, a value that is no number literal, anything but the end of the expression after a policy at
   `spawn` and a second `on crash` after an actor's name are `syntax` (U25, U26, U27). An `on crash`
   block, `on crash (c) { ... }`, after the arguments of a `spawn` is kept by its line and passed over
-  to the end of the expression, and after an actor's name passed over to the body. The checker says
+  to the end of the expression, and after an actor's name passed over with its parameters and its
+  braces, so that the braces after it are the body. The checker says
   `not supported` to the blocks and to the clauses but `stack` and a policy, and reads a policy's
   duration and count (U26, `type-mismatch`). `spawn` binds as C#'s `new`, so that `spawn Counter().Get()` calls `Get` on the new
   reference, a name after `spawn` without its `(` is `syntax`, and `send` before what the parser
