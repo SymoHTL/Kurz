@@ -978,9 +978,9 @@ instance, the instance among them, and shares by its count only a block that rea
 *(assumed, §6: the answer read for a call inside one heap)*. The copy of a map whose keys reach a
 class instance, where it crosses or stands after `copy`, hashes each key again as it is copied, by
 identity or by content as its class compares (K4, K5), so that the copied map finds what the source
-found, as a Rust `HashMap` collected from cloned pairs hashes each key it takes; the cost, the key's
-hash and its `equal by` running inside the copy, falls on such maps alone (§6, the owner,
-2026-11-16, #519, comment 6923513534, "Rehash each key (Recommended)"). `copy`
+found; the cost, the key's hash and its `equal by` running inside the copy, falls on such maps alone
+(§6, the owner, 2026-11-16, #519, comment 6923513534, "Rehash each key (Recommended)"), as a Rust
+`HashMap` collected from cloned pairs hashes each key it takes *(assumed, §6: the comparison)*. `copy`
 and `move` are words before an argument alone, as `mut` is there (L12), `move` before a parameter's
 type and inside a function type too, as `mut` is before a parameter's (§6, the owner, 2026-11-05,
 issue 156, comment 6657251688), and names everywhere else,

@@ -4717,8 +4717,9 @@ extern "C" void ActorStart() {
 // program code. A crossing copies every counted block the value reaches into the heap of the actor it
 // crosses into, or of the caller its result goes to (design record, section 6; the owner, 2026-11-15,
 // #519, comment 6902210646, Q5, "Copy all, share big unbuilt"); a value after `copy` at a call that is
-// no crossing has every class instance it reaches copied into the heap the allocation entry serves, and
-// shares every other block by its count. The copies one call makes of its arguments share one memo, so
+// no crossing has every block on a path to a class instance copied into the heap the allocation entry
+// serves, the instance among them, and shares by its count only a block that reaches none (`CopyWhole`).
+// The copies one call makes of its arguments share one memo, so
 // that a block two paths of the call reach arrives as one block (Q2, "Sharing kept"), and a result has a
 // memo of its own: the session of the call, eleven words in the caller's frame, the memo, its slots and its
 // count, the `weak` references the copies hold, their room and their count, the copies the call has left
