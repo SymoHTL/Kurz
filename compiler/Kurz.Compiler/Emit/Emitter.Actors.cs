@@ -42,9 +42,11 @@ public sealed partial class Emitter
     /// actor's heap is made first, its first page sized to the record and the state (section 3), and the arguments cross into it as a
     /// message's do (U12, <see cref="Crossed"/>); the constructor and the defaults then allocate in it, as the actor's code does, and
     /// the spawner's heap is served again once the state stands. The spawner's heap, the supervisor's, holds the block of the actor's
-    /// restart with a copy of each argument the constructor is given (<see cref="KeptArguments"/>; U22), and while the constructor runs,
-    /// the runtime names the actor as the one whose constructor runs, so that an actor it spawns is its child (the runtime's
-    /// <c>Building</c>; U13).
+    /// restart with a copy of each argument the constructor is given (<see cref="KeptArguments"/>; U22) where the policy restarts, the policy
+    /// written after the <c>spawn</c>, else the type's, else <c>on crash restart</c> (U25, U27); <c>escalate</c> keeps the block alone, which
+    /// names no function, and <c>stop</c> keeps none (section 6). While the constructor runs, the runtime names the actor as the one whose
+    /// constructor runs, so that an actor it spawns is its child (the runtime's <c>Building</c>; U13), and its record says that its
+    /// constructor runs until <c>ActorBuilt</c>, so that an escalation that reaches it is its spawner's crash (U3, U25).
     /// </summary>
     private string EmitActorSpawn(SpawnExpression s)
     {
@@ -71,6 +73,7 @@ public sealed partial class Emitter
         var spawner = fn.Alloca("ptr", "spawner");
         var building = fn.Alloca("ptr", "building");
         var side = "null";
+        var policy = s.Policy ?? symbol.Declaration.Clauses?.FirstOrDefault(c => c.Policy is not null)?.Policy ?? new CrashPolicy(s.Line, "restart");
         var state = Construct(symbol, s.Call, info, () =>
         {
             var state = fn.Value($"call ptr {RuntimeFunction("ActorNew")}(ptr {heap}, i64 {IrSize(block)}, i64 {stack}, ptr {side}, ptr {ActorName(symbol)})");
@@ -80,8 +83,14 @@ public sealed partial class Emitter
             fn.Emit($"store ptr {fn.Value($"call ptr {RuntimeFunction("Building")}(ptr {state})")}, ptr {building}");
             fn.Emit($"store ptr {fn.Value($"call ptr {StdFunction("HeapUse")}(ptr {heap})")}, ptr {spawner}");
             return state;
-        }, into: heap, kept: (arguments, types) => side = KeptArguments(s.Call, info, symbol, arguments, types, supervisor));
+        }, into: heap, kept: (arguments, types) => side = policy.Word switch
+        {
+            "restart" => KeptArguments(s.Call, info, symbol, arguments, types, supervisor, policy),
+            "escalate" => Escalating(supervisor),
+            _ => "null",
+        });
         fn.Emit($"call ptr {RuntimeFunction("Building")}(ptr {fn.Value($"load ptr, ptr {building}")})");
+        fn.Emit($"call void {RuntimeFunction("ActorBuilt")}(ptr {state})");
         fn.Emit($"call ptr {StdFunction("HeapUse")}(ptr {fn.Value($"load ptr, ptr {spawner}")})");
         return state;
     }
@@ -106,17 +115,21 @@ public sealed partial class Emitter
     /// supervisor, the spawner, as Erlang's supervisor keeps the start arguments of its child: the function that runs the constructor
     /// again (<see cref="Restarted"/>), the first word of a message's table, which the restart's message names (the runtime's
     /// <c>Restart</c>), a word that stands where a table's copy stands, the pause, the time of the last restart, the time the pause ends
-    /// and the next actor of the queue of the pauses, each the runtime's (<c>Pause</c>), and a copy of each argument the constructor is
-    /// given, its default among them, every counted block it reaches copied into that heap, a <c>move</c> argument's too (the taken
-    /// points of comment 6899225864).
+    /// and the next actor of the queue of the pauses, each the runtime's (<c>Pause</c>), the block of the policy's knobs, null where it
+    /// writes none (<see cref="Knobs"/>, U26), and a copy of each argument the constructor is given, its default among them, every counted
+    /// block it reaches copied into that heap, a <c>move</c> argument's too (the taken points of comment 6899225864).
     /// </summary>
-    private string KeptArguments(CallExpression c, CallInfo info, ClassSymbol symbol, List<string> arguments, List<KurzType> types, string heap)
+    private string KeptArguments(CallExpression c, CallInfo info, ClassSymbol symbol, List<string> arguments, List<KurzType> types, string heap, CrashPolicy policy)
     {
         var copiesInto = CopiesInto(c, info, types);
         var side = SideType(types);
         var restart = Restarted(symbol, info, types, copiesInto);
         var block = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr {heap}, i64 {IrSize(side)})");
-        fn.Emit($"store {side} {{ ptr {restart}, ptr null, i64 0, i64 0, i64 0, ptr null, {Kept(types)} zeroinitializer }}, ptr {block}");
+        fn.Emit($"store {side} {{ ptr {restart}, ptr null, i64 0, i64 0, i64 0, ptr null, ptr null, {Kept(types)} zeroinitializer }}, ptr {block}");
+        if (Knobs(policy, heap, c.Line) is { } knobs)
+        {
+            fn.Emit($"store ptr {knobs}, ptr {fn.Value($"getelementptr {side}, ptr {block}, i32 0, i32 6")}");
+        }
         var session = CallSession(types.Count(Counted), heap);
         for (var i = 0; i < types.Count; i++)
         {
@@ -128,7 +141,7 @@ public sealed partial class Emitter
                 value = Crossed(value, types[i], session, heap, copiesInto[i]);
             }
 
-            fn.Emit($"store {Ir(types[i])} {value}, ptr {fn.Value($"getelementptr {side}, ptr {block}, i32 0, i32 6, i32 {Number(i)}")}");
+            fn.Emit($"store {Ir(types[i])} {value}, ptr {fn.Value($"getelementptr {side}, ptr {block}, i32 0, i32 7, i32 {Number(i)}")}");
         }
 
         return block;
@@ -151,7 +164,7 @@ public sealed partial class Emitter
             var values = new List<string>();
             for (var i = 0; i < types.Count; i++)
             {
-                var value = fn.Value($"load {Ir(types[i])}, ptr {fn.Value($"getelementptr {side}, ptr {table}, i32 0, i32 6, i32 {Number(i)}")}");
+                var value = fn.Value($"load {Ir(types[i])}, ptr {fn.Value($"getelementptr {side}, ptr {table}, i32 0, i32 7, i32 {Number(i)}")}");
                 values.Add(Counted(types[i]) ? Crossed(value, types[i], session, heap, copiesInto[i]) : value);
             }
 
@@ -187,7 +200,47 @@ public sealed partial class Emitter
         });
 
     /// <summary>The IR type of the block of a restart whose constructor takes values of the types <paramref name="types"/> (<see cref="KeptArguments"/>).</summary>
-    private string SideType(List<KurzType> types) => $"{{ ptr, ptr, i64, i64, i64, ptr, {Kept(types)} }}";
+    private string SideType(List<KurzType> types) => $"{{ ptr, ptr, i64, i64, i64, ptr, ptr, {Kept(types)} }}";
+
+    /// <summary>
+    /// U26: the block of the knobs of a restart's policy, in the heap <paramref name="heap"/> of the supervisor, made where <c>after</c> or
+    /// <c>max N in</c> is written, else null, so that a <c>spawn</c> that writes neither keeps one word for them: the first pause, 100 ms or what
+    /// <c>after</c> writes, the count of <c>max N in</c>, 0 where no limit holds, and its window, then the ring of the times of the crashes in
+    /// the window, its slots, its first and its count, the runtime's (<c>Limited</c>), and the place of the <c>spawn</c> at the line
+    /// <paramref name="line"/>, which <c>restart-limit</c> names.
+    /// </summary>
+    private string? Knobs(CrashPolicy policy, string heap, int line)
+    {
+        if (policy.After is null && policy.Max is null)
+        {
+            return null;
+        }
+
+        const string type = "{ i64, i64, i64, ptr, i64, i64, i64, %kz.str, i64 }";
+        var first = policy.After is { } after ? Knob(after) : "100000000";
+        var max = policy.Max is { } count ? Knob(count) : "0";
+        var window = policy.Within is { } within ? Knob(within) : "0";
+        var block = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr {heap}, i64 {IrSize(type)})");
+        fn.Emit($"store {type} {{ i64 {first}, i64 {max}, i64 {window}, ptr null, i64 0, i64 0, i64 0, %kz.str {StringValue(unit.File)}, i64 {Number(line)} }}, ptr {block}");
+        return block;
+    }
+
+    /// <summary>U26: the constant a knob of a policy holds, read by the checker: a duration's nanoseconds or the count.</summary>
+    private string Knob(Expression literal) =>
+        ((IntegerConstant)Model.TypeOf(literal).Constant!).Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// U25: the block of the policy <c>escalate</c> of the actor a <c>spawn</c> makes, in the heap <paramref name="heap"/> of its supervisor:
+    /// a block of a restart with no function to run, and no kept arguments, since the policy never restarts the actor (section 6), which
+    /// the runtime reads as the policy that crashes the supervisor too.
+    /// </summary>
+    private string Escalating(string heap)
+    {
+        var side = SideType([]);
+        var block = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr {heap}, i64 {IrSize(side)})");
+        fn.Emit($"store {side} zeroinitializer, ptr {block}");
+        return block;
+    }
 
     private string Kept(List<KurzType> types) => $"{{ {string.Join(", ", types.Select(Ir))} }}";
 
