@@ -144,10 +144,19 @@ public sealed record ParenthesizedExpression(int Line, Expression Inner) : Expre
 
 /// <summary>
 /// <c>spawn Counter(1)</c> (U2): an actor made by its name and the arguments of its constructor, which <paramref name="Call"/> holds.
-/// <paramref name="OnCrashLine"/> is the line of an <c>on crash</c> written after the call, the policy of section 6, whose words the
-/// parser passes over and the checker says <c>not supported</c> to; 0 without one.
+/// <paramref name="Policy"/> is the policy written after the call, <c>on crash stop</c> (U25); <paramref name="OnCrashLine"/> is the
+/// line of an <c>on crash</c> block written there, <c>on crash (c) { ... }</c>, whose words the parser passes over and the checker says
+/// <c>not supported</c> to; 0 without one.
 /// </summary>
-public sealed record SpawnExpression(int Line, CallExpression Call, int OnCrashLine = 0) : Expression(Line);
+public sealed record SpawnExpression(int Line, CallExpression Call, int OnCrashLine = 0, CrashPolicy? Policy = null) : Expression(Line);
+
+/// <summary>
+/// The words of a policy after <c>on crash</c> (section 6, U25, U26): <paramref name="Word"/> is <c>restart</c>, <c>stop</c> or
+/// <c>escalate</c>; after <c>restart</c>, <paramref name="After"/> is the literal after <c>after</c>, the first pause, and
+/// <paramref name="Max"/> and <paramref name="Within"/> the literals of <c>max N in &lt;duration&gt;</c>, the limit, each null where it
+/// is not written.
+/// </summary>
+public sealed record CrashPolicy(int Line, string Word, Expression? After = null, Expression? Max = null, Expression? Within = null);
 
 // ---- match -------------------------------------------------------------------------------------
 
@@ -344,9 +353,10 @@ public enum TypeDeclarationKind
 /// <summary>
 /// A word that starts a clause after an actor's name (section 6): <c>per</c>, <c>yield</c>, <c>inbox</c>, <c>stack</c> or <c>on crash</c>,
 /// with its line. The parser keeps the word and passes over what follows it, which the checker says <c>not supported</c> to, but for
-/// <c>stack</c>, whose <paramref name="Size"/> is the literal of bytes after it (U1).
+/// <c>stack</c>, whose <paramref name="Size"/> is the literal of bytes after it (U1), and for an <c>on crash</c> with the words of a
+/// policy, the type's default, which <paramref name="Policy"/> holds (U27).
 /// </summary>
-public sealed record ActorClause(int Line, string Word, UnitLiteral? Size = null);
+public sealed record ActorClause(int Line, string Word, UnitLiteral? Size = null, CrashPolicy? Policy = null);
 
 /// <summary>A base class or an interface after the colon (K6, K10), with the arguments of the explicit form.</summary>
 public sealed record BaseSpecifier(int Line, TypeSyntax Type, IReadOnlyList<Argument>? Arguments);

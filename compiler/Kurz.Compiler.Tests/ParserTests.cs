@@ -1618,22 +1618,30 @@ public sealed class ParserTests
     [InlineData("pub actor Account(int Start) {\n    pub int Get() => Start\n}", "(actor pub Account(int Start) {(function pub int Get() => Start)})")]
     [InlineData("actor Parser stack 8mb per Id inbox drop {\n}", "(actor Parser [stack 1 (unit 8mb)] [per 1] [inbox 1] {})")]
     [InlineData("actor Parser per Id stack 1.5kb {\n}", "(actor Parser [per 1] [stack 1 (unit 1.5kb)] {})")]
-    [InlineData("actor Worker on crash restart {\n}", "(actor Worker [on crash 1] {})")]
+    [InlineData("actor Worker on crash restart {\n}", "(actor Worker [on crash 1 restart] {})")]
+    [InlineData("actor Worker on crash stop stack 8mb {\n}", "(actor Worker [on crash 1 stop] [stack 1 (unit 8mb)] {})")]
+    [InlineData("actor Worker stack 8mb on crash restart max 3 in 1min after 5ms {\n}", "(actor Worker [stack 1 (unit 8mb)] [on crash 1 restart after (unit 5ms) max (int 3) in (unit 1min)] {})")]
+    [InlineData("actor Worker per Id on crash escalate {\n}", "(actor Worker [per 1] [on crash 1 escalate] {})")]
+    [InlineData("actor Worker on crash (c) {\n}", "(actor Worker [on crash 1] {})")]
     [InlineData("actor Worker yield checks {\n}", "(actor Worker [yield 1] {})")]
     [InlineData("c = spawn Counter(1)", "(assign-or-declare c (spawn (call Counter (int 1))))")]
     [InlineData("c = spawn Pair<int>(1)", "(assign-or-declare c (spawn (call Pair<int> (int 1))))")]
     [InlineData("print(spawn Counter().Get())", "(call print (call (. (spawn (call Counter)) Get)))")]
-    [InlineData("c = spawn Worker() on crash restart", "(assign-or-declare c (spawn (call Worker) [on crash 1]))")]
-    [InlineData("f(spawn Worker() on crash restart, 2)", "(call f (spawn (call Worker) [on crash 1]), (int 2))")]
-    [InlineData("f(spawn Worker() on crash restart(3), 2)", "(call f (spawn (call Worker) [on crash 1]), (int 2))")]
+    [InlineData("c = spawn Worker() on crash restart", "(assign-or-declare c (spawn (call Worker) [on crash 1 restart]))")]
+    [InlineData("c = spawn Worker() on crash restart after 1ms max 2 in 1min", "(assign-or-declare c (spawn (call Worker) [on crash 1 restart after (unit 1ms) max (int 2) in (unit 1min)]))")]
+    [InlineData("c = spawn Worker() on crash restart max -1 in 2 after 0.5", "(assign-or-declare c (spawn (call Worker) [on crash 1 restart after (real 0.5) max (- (int 1)) in (int 2)]))")]
+    [InlineData("f(spawn Worker() on crash stop, 2)", "(call f (spawn (call Worker) [on crash 1 stop]), (int 2))")]
+    [InlineData("f([spawn Worker() on crash escalate])", "(call f (list (spawn (call Worker) [on crash 1 escalate])))")]
+    [InlineData("f(spawn Worker() on crash (c) {\n    print(c)\n}, 2)", "(call f (spawn (call Worker) [on crash 1]), (int 2))")]
     [InlineData("send c.Add(1)", "(send (call (. c Add) (int 1)))")]
     [InlineData("send Add(1)", "(send (call Add (int 1)))")]
     [InlineData("actor.Count = 1", "(assign (. actor Count) (int 1))")]
     public void The_forms_of_actors_parse(string program, string tree)
     {
-        // U1: `actor` before a name declares an actor, the clauses after its name kept by their first word and its line; U2: `spawn` before a
-        // name, its type arguments where it writes them (U14, T19), makes one and binds as C#'s `new`, an `on crash` after it kept by its line
-        // to the end of the expression; U6: `send` before a call
+        // U1: `actor` before a name declares an actor, the clauses after its name kept by their first word and its line, an `on crash` with
+        // the words of a policy among them (U27); U2: `spawn` before a name, its type arguments where it writes them (U14, T19), makes one and
+        // binds as C#'s `new`; U25, U26: the words of a policy after it, the knobs in either order, each value a number literal with its sign,
+        // which the checker reads, and an `on crash` block after it kept by its line to the end of the expression; U6: `send` before a call
         Assert.Equal(tree, Tree(program));
     }
 
@@ -1652,6 +1660,22 @@ public sealed class ParserTests
     [InlineData("actor Parser stack size {\n}")]
     [InlineData("actor Parser stack 8mb Id {\n}")] // U1: and nothing after it, as the words of the clauses it does not build follow theirs
     [InlineData("actor Parser stack 8mb stack 4mb {\n}")] // U1: one `stack`, as C# refuses a modifier written twice (assumed)
+    [InlineData("c = spawn Worker() on crash")] // U25: a word of the policy after `on crash`
+    [InlineData("c = spawn Worker() on crash retry")]
+    [InlineData("c = spawn Worker() on crash stop after 1ms")] // U26: the knobs follow `restart` alone
+    [InlineData("c = spawn Worker() on crash escalate max 2 in 1min")]
+    [InlineData("c = spawn Worker() on crash restart after")] // U26: each knob takes its number literal
+    [InlineData("c = spawn Worker() on crash restart after pause")]
+    [InlineData("c = spawn Worker() on crash restart max 2")] // U26: `max N` takes its `in` and its duration
+    [InlineData("c = spawn Worker() on crash restart max 2 in")]
+    [InlineData("c = spawn Worker() on crash restart after 1ms after 2ms")] // U26: each knob once (assumed, as `stack`)
+    [InlineData("c = spawn Worker() on crash restart max 2 in 1min max 3 in 1min")]
+    [InlineData("f(spawn Worker() on crash restart(3), 2)")] // U25: the policy ends the expression
+    [InlineData("x = spawn Worker() on crash stop.Get()")]
+    [InlineData("actor Worker on crash {\n}")] // U27: the same words after an actor's name
+    [InlineData("actor Worker on crash stop after 1ms {\n}")]
+    [InlineData("actor Worker on crash restart max 2 {\n}")]
+    [InlineData("actor Worker on crash restart on crash stop {\n}")] // U27: one policy for the type (assumed, as `stack`)
     public void A_form_of_actors_without_its_parts_is_syntax(string program)
     {
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors(program));

@@ -7150,7 +7150,8 @@ public sealed class CheckerTests
     [Theory]
     [InlineData(1, "U1", "actor A per Id {\n}\n")]
     [InlineData(1, "U1", "actor A stack 8mb per Id {\n}\n")]
-    [InlineData(1, "U1", "actor A on crash restart {\n}\n")]
+    [InlineData(1, "U1, U25", "actor A on crash (c) {\n}\n")]
+    [InlineData(1, "U1", "actor A per Id on crash stop {\n}\n")]
     [InlineData(1, "U1, T19", "actor A<T> {\n}\n")]
     [InlineData(1, "U1, T19", "actor Pair<T>(T First) {\n}\n\np = spawn Pair<int>(1)\nprint(p)\n")]
     [InlineData(4, "U1", "interface I {\n}\n\nactor A : I {\n}\n")]
@@ -7160,7 +7161,8 @@ public sealed class CheckerTests
     [InlineData(1, "U1", "static actor A {\n}\n")]
     public void What_an_actor_declares_beyond_its_rules_is_not_supported(int line, string rule, string program)
     {
-        // U1: the clauses after the name (section 6, Q1 of issue 519, comment 6866132292), a modifier of the actor, and type parameters and
+        // U1: the clauses after the name (section 6, Q1 of issue 519, comment 6866132292), but `stack` and the words of a policy (U27), so the
+        // block of `on crash` and a `per` actor's policy among them (Q15 of 2026-11-13), a modifier of the actor, and type parameters and
         // an interface, which Q26 of comment 6881678834 lets an actor declare and the build does not read; `static` members, which U1 reads
         // as K18 reads a class's and the build does not read; U9: a modifier of a method but `pub`, which Q26 lets a method take as a class's
         // does and the build does not read; `spawn` of an actor with type parameters, with its type arguments (U2, U14), its arguments read
@@ -7179,6 +7181,53 @@ public sealed class CheckerTests
         Assert.Empty(Errors("actor A stack 8gb {\n}\n")); // past the largest `int`
         Assert.Equal([(ErrorIds.InexactLiteral, 1)], Errors("actor A stack 0.1kb {\n}\n"));
         Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("actor A stack 9000000000gb {\n}\n"));
+    }
+
+    [Fact]
+    public void The_words_of_a_crash_policy_are_read_at_spawn_and_after_an_actors_name()
+    {
+        // U25, U27 (section 6, "Policy at `spawn`"; comment 6902210646, Q2 to Q4): `restart`, `stop` and `escalate` at `spawn` and after an
+        // actor's name, the type's default, which a `spawn`'s own policy overrides, each read
+        Assert.Empty(Errors(ActorCounter + "c = spawn Counter() on crash stop\nprint(c.Get())\n"));
+        Assert.Empty(Errors(ActorCounter + "c = spawn Counter() on crash escalate\nprint(c.Get())\n"));
+        Assert.Empty(Errors(ActorCounter + "c = spawn Counter() on crash restart after 1ms max 2 in 1min\nprint(c.Get())\n"));
+        Assert.Empty(Errors(ActorCounter + "c = spawn Counter() on crash restart max 1 in 1ns after 30s\nprint(c.Get())\n")); // each bound itself
+        Assert.Empty(Errors(ActorCounter + "print(spawn Counter() on crash stop)\n"));
+        Assert.Empty(Errors("actor A stack 8mb on crash restart after 5ms max 3 in 1min {\n    pub int Get() => 1\n}\n\na = spawn A()\nprint(a.Get())\nb = spawn A() on crash stop\nprint(b.Get())\n"));
+        Assert.Empty(Errors("actor A on crash escalate {\n}\n"));
+    }
+
+    [Theory]
+    [InlineData("after 5")] // U26: the first pause is a duration (T1)
+    [InlineData("after 5kb")]
+    [InlineData("after 0.5")]
+    [InlineData("after 0ms")] // U26: above 0 and at most the cap of 30 s (assumed, as Akka's backoff supervisor)
+    [InlineData("after -1ms")]
+    [InlineData("after 31s")]
+    [InlineData("max 0 in 1min")] // U26: a count of at least 1 (comment 6902210646, Q4)
+    [InlineData("max -2 in 1min")]
+    [InlineData("max 2.5 in 1min")] // U26: the count is an `int` (T1)
+    [InlineData("max 2kb in 1min")]
+    [InlineData("max 2 in 5")] // U26: the window is a duration above 0 (assumed, as Erlang's period)
+    [InlineData("max 2 in 0s")]
+    [InlineData("after 1ms max 0 in 1min")]
+    public void A_knob_of_a_crash_policy_that_is_no_value_of_its_kind_is_type_mismatch(string knobs)
+    {
+        // U26 (section 6, "Policy at `spawn`"): the duration of `after` and of `in` and the count of `max`, at `spawn` and after an actor's
+        // name (U27), each at the line of its value
+        Assert.Equal([(ErrorIds.TypeMismatch, 13)], Errors(ActorCounter + $"c = spawn Counter() on crash restart {knobs}\nprint(c.Get())\n"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors($"actor A on crash restart {knobs} {{\n}}\n"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors($"actor A stack 8mb on crash restart {knobs} {{\n}}\n\na = spawn A() on crash stop\nprint(a)\n"));
+    }
+
+    [Fact]
+    public void A_knob_of_a_crash_policy_keeps_the_errors_of_its_literal_and_is_read_after_the_arguments()
+    {
+        // U26, L10, L14: a literal's own error stands in a knob as it does elsewhere; U16 (Q27 of comment 6881678834): the policy, written
+        // after the arguments, is read after them, so that an argument's error is the one reported
+        Assert.Equal([(ErrorIds.InexactLiteral, 13)], Errors(ActorCounter + "c = spawn Counter() on crash restart after 0.5ns\nprint(c.Get())\n"));
+        Assert.Equal([(ErrorIds.ConstantOverflow, 13)], Errors(ActorCounter + "c = spawn Counter() on crash restart max 3000000000 in 1min\nprint(c.Get())\n"));
+        Assert.Equal([(ErrorIds.UnknownName, 4)], Errors("actor B(int N) {\n}\n\nb = spawn B(nope) on crash restart max 0 in 1min\nprint(b)\n"));
     }
 
     [Theory]
@@ -7403,11 +7452,11 @@ public sealed class CheckerTests
     }
 
     [Theory]
-    [InlineData(13, "U2", "c = spawn Counter() on crash restart\nprint(c.Get())\n")]
+    [InlineData(13, "U2, U25", "c = spawn Counter() on crash (c) {\n    print(1)\n}\nprint(c.Get())\n")]
     [InlineData(14, "U4, F11", "c = spawn Counter()\nf = c.Get\nprint(f())\n")]
     public void A_message_or_a_spawn_where_the_build_makes_none_is_not_supported(int line, string rule, string program)
     {
-        // U2: `on crash` after `spawn` (Q1); U4 with F11: a method of an actor named without a call
+        // U2, U25: the block of `on crash` after `spawn` (Q1); U4 with F11: a method of an actor named without a call
         NotSupportedAt(line, rule, ActorCounter + program);
     }
 

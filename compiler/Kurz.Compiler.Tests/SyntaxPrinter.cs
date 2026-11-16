@@ -101,7 +101,7 @@ internal static class SyntaxPrinter
 
         if (t.Clauses is { Count: > 0 } clauses)
         {
-            sb.Append(' ').Append(string.Join(" ", clauses.Select(c => c.Size is { } size ? $"[{c.Word} {c.Line} {Print(size)}]" : $"[{c.Word} {c.Line}]"))); // U1: each clause's word with its line, `stack`'s size
+            sb.Append(' ').Append(string.Join(" ", clauses.Select(c => c.Policy is { } policy ? Policy(policy) : c.Size is { } size ? $"[{c.Word} {c.Line} {Print(size)}]" : $"[{c.Word} {c.Line}]"))); // U1: each clause's word with its line, `stack`'s size, the type's policy (U27)
         }
 
         if (t.Members is not null)
@@ -178,9 +178,13 @@ internal static class SyntaxPrinter
         WithExpression w => $"(with {Print(w.Target)} {string.Join(", ", w.Assignments.Select(a => a.Field + " = " + Print(a.Value)))})",
         ElseExpression e => $"(else {Print(e.Call)} {Arms(e.Arms)})",
         ParenthesizedExpression p => $"(paren {Print(p.Inner)})",
-        SpawnExpression s => $"(spawn {Print(s.Call)}{(s.OnCrashLine == 0 ? "" : $" [on crash {s.OnCrashLine}]")})",
+        SpawnExpression s => $"(spawn {Print(s.Call)}{(s.Policy is { } policy ? " " + Policy(policy) : s.OnCrashLine == 0 ? "" : $" [on crash {s.OnCrashLine}]")})",
         _ => throw new InvalidOperationException(expression.GetType().Name),
     };
+
+    /// <summary>U25, U26: the words of a policy with the line of its <c>on crash</c>, each knob with its value.</summary>
+    private static string Policy(CrashPolicy p) =>
+        $"[on crash {p.Line} {p.Word}{(p.After is null ? "" : $" after {Print(p.After)}")}{(p.Max is null ? "" : $" max {Print(p.Max)} in {Print(p.Within!)}")}]";
 
     private static string Quote(string text) => "\"" + text.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
 
