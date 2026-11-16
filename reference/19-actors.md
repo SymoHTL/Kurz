@@ -2751,7 +2751,8 @@ print(w.Fail())
 The blocks pending in one supervisor run in the order of the crashes, and a block still pending at
 the supervisor's crash or end is dropped with no line, its child ended with the supervisor's other
 children (U21, U13); while its block is pending, the child takes no message, so that a call to it
-waits in its kept inbox, and a call that waited for it goes on waiting, until the decision; and the
+waits in its kept inbox, and a call that waited for it goes on waiting, until the decision (§6, the
+owner, 2026-11-16, #519, comment 6926540546, "Keep: it waits"); and the
 block's own calls run in a chain of their own, as a restart's construction does (U22). The log line
 of a crash that a block decides (U24) is written at the decision, at `restart` and at `stop`, and
 none at `escalate` (U25) (§6, assumed there, as Erlang's supervisor reports a child's exit as it
