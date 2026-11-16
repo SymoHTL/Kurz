@@ -7248,26 +7248,34 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.MutInMessage, 10)], Errors("actor A {\n    pub int Bump(mut int n) {\n        n = n + 1\n        return n\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Bump(mut x)\nprint(x)\n"));
         Assert.Equal([(ErrorIds.MutInMessage, 4)], Errors("actor A {\n    pub void Go() {\n        mut x = 1\n        send Bump(mut x)\n        print(x)\n    }\n\n    int Bump(mut int n) {\n        n = n + 1\n        return n\n    }\n}\n"));
 
-        // U16, its stage of the arguments: an argument's own error, then a mutable class instance, one a field reaches among them,
-        // `send-needs-word` in the language and `not supported` in this build (U12), then `mut-in-message`, through a reference and in a
-        // `send` of the actor's own method (the owner, 2026-11-14, #519, comment 6884160133, item 6), which stands before the build's
-        // `not supported` of an immutable class instance, which the language lets cross with no word (U12, E1)
+        // U16, its stage of the arguments: an argument's own error, then `send-needs-word` (U12) of a mutable class instance, one a field
+        // reaches among them, of a function value, an interface's value and what reaches one (the owner, 2026-11-15, #519, comment
+        // 6896192351, Q5), then `mut-in-message`, through a reference and in a `send` of the actor's own method (the owner, 2026-11-14,
+        // #519, comment 6884160133, item 6); a lambda whose captures cross crosses, so that `mut-in-message` stands (Q5)
         Assert.Equal([(ErrorIds.TypeMismatch, 9)], Errors("actor A {\n    pub void Bump(mut int n, int k) {\n        n = n + k\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Bump(mut x, \"k\")\nprint(x)\n"));
-        NotSupportedAt(11, "U12", "class Box(mut int N)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(1))\nprint(x)\n");
-        NotSupportedAt(6, "U12", "class Box(mut int N)\n\nactor A {\n    pub void Go() {\n        mut x = 1\n        send Take(mut x, Box(1))\n        print(x)\n    }\n\n    void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n");
-        NotSupportedAt(13, "U12", "class Cell(mut int N)\n\nclass Box(Cell C)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + b.C.N\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(Cell(1)))\nprint(x)\n");
-        NotSupportedAt(9, "U12", "actor A {\n    pub void Run(mut int n, (int) => int f) {\n        n = f(n)\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Run(mut x, k => k + 1)\nprint(x)\n"); // a function value, whose captures the build does not read
-        NotSupportedAt(4, "U12", "actor A {\n    pub void Go() {\n        mut x = 1\n        send Run(mut x, k => k + 1)\n        print(x)\n    }\n\n    void Run(mut int n, (int) => int f) {\n        n = f(n)\n    }\n}\n");
-        NotSupportedAt(11, "U12", "class Box(() => int F)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(() => 2))\nprint(x)\n"); // a class whose field holds a function value
-        NotSupportedAt(6, "U12", "class Box(() => int F)\n\nactor A {\n    pub void Go() {\n        mut x = 1\n        send Take(mut x, Box(() => 2))\n        print(x)\n    }\n\n    void Take(mut int n, Box b) {\n        n = n + 1\n    }\n}\n");
-        NotSupportedAt(14, "U12", "class Cell(mut int N)\n\nclass Box(weak Cell? C)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + 1\n    }\n}\n\nc = Cell(1)\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(c))\nprint(x)\nprint(c.N)\n"); // a weak reference to a mutable class instance
-        NotSupportedAt(14, "U12", "interface I {\n}\n\nclass Box(int N) : I\n\nactor A {\n    pub void Take(mut int n, I b) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(1))\nprint(x)\n"); // an interface's type, read by its written type
-        NotSupportedAt(13, "U12", "class Base(int N)\n\nclass Cell(int K, mut int M) : Base(K)\n\nactor A {\n    pub void Take(mut int n, Base b) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Cell(1, 2))\nprint(x)\n"); // a class derived from the parameter's, with a `mut` field (K6)
-        NotSupportedAt(11, "U12", "class Cell(mut int N)\n\nactor A {\n    pub void Take(mut int n, List<Cell> cs) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, [Cell(1)])\nprint(x)\n"); // a list's items
-        NotSupportedAt(13, "U12", "class Cell(mut int N)\n\ndata Pair(Cell C, int K)\n\nactor A {\n    pub void Take(mut int n, Pair p) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Pair(Cell(1), 2))\nprint(x)\n"); // a data value's fields
-        NotSupportedAt(11, "U12", "class Cell(mut int N)\n\nactor A {\n    pub void Take(mut int n, Map<string, Cell> m) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Map<string, Cell>())\nprint(x)\n"); // a map's values
-        NotSupportedAt(11, "U12", "class Cell(mut int N)\n\nactor A {\n    pub void Take(mut int n, Map<Cell, int> m) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Map<Cell, int>())\nprint(x)\n"); // a map's keys
-        NotSupportedAt(11, "U12", "class Cell(mut int N)\n\nactor A {\n    pub void Take(mut int n, int | Cell c) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Cell(1))\nprint(x)\n"); // a union's cases
+        Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors("class Box(mut int N)\n\nactor A {\n    pub void Take(Box b, int k) {\n        print(b.N + k)\n    }\n}\n\na = spawn A()\nsend a.Take(Box(1),\n    \"k\")\n")); // the second argument's own error before the first's `send-needs-word`
+        Assert.Equal([(ErrorIds.SendNeedsWord, 11)], Errors("class Box(mut int N)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(1))\nprint(x)\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 6)], Errors("class Box(mut int N)\n\nactor A {\n    pub void Go() {\n        mut x = 1\n        send Take(mut x, Box(1))\n        print(x)\n    }\n\n    void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 13)], Errors("class Cell(mut int N)\n\nclass Box(Cell C)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + b.C.N\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(Cell(1)))\nprint(x)\n"));
+        Assert.Equal([(ErrorIds.MutInMessage, 9)], Errors("actor A {\n    pub void Run(mut int n, (int) => int f) {\n        n = f(n)\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Run(mut x, k => k + 1)\nprint(x)\n"));
+        Assert.Equal([(ErrorIds.MutInMessage, 4)], Errors("actor A {\n    pub void Go() {\n        mut x = 1\n        send Run(mut x, k => k + 1)\n        print(x)\n    }\n\n    void Run(mut int n, (int) => int f) {\n        n = f(n)\n    }\n}\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 11)], Errors("class Box(() => int F)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(() => 2))\nprint(x)\n")); // a class whose field holds a function value, by its written type
+        Assert.Equal([(ErrorIds.SendNeedsWord, 6)], Errors("class Box(() => int F)\n\nactor A {\n    pub void Go() {\n        mut x = 1\n        send Take(mut x, Box(() => 2))\n        print(x)\n    }\n\n    void Take(mut int n, Box b) {\n        n = n + 1\n    }\n}\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 14)], Errors("class Cell(mut int N)\n\nclass Box(weak Cell? C)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + 1\n    }\n}\n\nc = Cell(1)\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(c))\nprint(x)\nprint(c.N)\n")); // a weak reference to a mutable class instance
+        Assert.Equal([(ErrorIds.SendNeedsWord, 14)], Errors("interface I {\n}\n\nclass Box(int N) : I\n\nactor A {\n    pub void Take(mut int n, I b) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(1))\nprint(x)\n")); // an interface's type, read by its written type
+        Assert.Equal([(ErrorIds.SendNeedsWord, 13)], Errors("class Base(int N)\n\nclass Cell(int K, mut int M) : Base(K)\n\nactor A {\n    pub void Take(mut int n, Base b) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Cell(1, 2))\nprint(x)\n")); // a class derived from the parameter's, with a `mut` field (K6)
+        Assert.Equal([(ErrorIds.SendNeedsWord, 11)], Errors("class Cell(mut int N)\n\nactor A {\n    pub void Take(mut int n, List<Cell> cs) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, [Cell(1)])\nprint(x)\n")); // a list's items
+        Assert.Equal([(ErrorIds.SendNeedsWord, 13)], Errors("class Cell(mut int N)\n\ndata Pair(Cell C, int K)\n\nactor A {\n    pub void Take(mut int n, Pair p) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Pair(Cell(1), 2))\nprint(x)\n")); // a data value's fields
+        Assert.Equal([(ErrorIds.SendNeedsWord, 11)], Errors("class Cell(mut int N)\n\nactor A {\n    pub void Take(mut int n, Map<string, Cell> m) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Map<string, Cell>())\nprint(x)\n")); // a map's values
+        Assert.Equal([(ErrorIds.SendNeedsWord, 11)], Errors("class Cell(mut int N)\n\nactor A {\n    pub void Take(mut int n, int | Cell c) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Cell(1))\nprint(x)\n")); // a union's cases
+
+        // U16 after `send-needs-word`: the build's `not supported` of `move`, where `move-reachable` stands in the language, and
+        // `mut-in-message`, the argument written first first (the owner, 2026-11-15, issue 519, comment 6891937666, item 4)
+        const string Take = "class Box(mut int N)\n\nactor A {\n    pub void Take(Box bx, mut int n) {\n        n = n + bx.N\n    }\n\n    pub void Give(mut int n, Box bx) {\n        n = n + bx.N\n    }\n}\n\na = spawn A()\nmut x = 1\nb = Box(1)\n";
+        NotSupportedAt(16, "U12", Take + "send a.Take(move b, mut x)\nprint(x)\n");
+        Assert.Equal([(ErrorIds.MutInMessage, 16)], Errors(Take + "send a.Give(mut x, move b)\nprint(x)\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 17)], Errors(Take + "send a.Give(mut x,\n    b)\nprint(x)\n")); // `send-needs-word` before an earlier argument's `mut-in-message`
+        Assert.Equal([(ErrorIds.MutInMessage, 16)], Errors(Take + "send a.Give(mut x, copy b)\nprint(x)\n"));
         Assert.Equal([(ErrorIds.MutInMessage, 11)], Errors("class Node(int N, weak Node? Next)\n\nactor A {\n    pub void Take(mut int n, Node d) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Node(1, null))\nprint(x)\n")); // a class that reaches itself, read once
         Assert.Equal([(ErrorIds.MutInMessage, 13)], Errors("class Box(int N)\n\ndata Tree(Box B, List<Tree> Kids)\n\nactor A {\n    pub void Take(mut int n, Tree t) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Tree(Box(1), []))\nprint(x)\n")); // a data value that reaches itself, read once
         Assert.Equal([(ErrorIds.MutInMessage, 11)], Errors("class Box(int N)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(1))\nprint(x)\n"));
@@ -7306,18 +7314,24 @@ public sealed class CheckerTests
     }
 
     [Theory]
-    [InlineData(10, "U12", "class Box(int N)\n\nactor A {\n    pub void Take(Box b) {\n        print(b.N)\n    }\n}\n\na = spawn A()\nsend a.Take(Box(1))\n")]
-    [InlineData(8, "U12", "class Box(int N)\n\nactor A {\n    pub Box Make() => Box(1)\n}\n\na = spawn A()\nprint(a.Make().N)\n")]
-    [InlineData(8, "U12", "actor A {\n    pub void Run((int) => int f) {\n        print(f(1))\n    }\n}\n\na = spawn A()\nsend a.Run(n => n)\n")]
-    [InlineData(12, "U12", "class Box(int N)\n\ndata Pair(Box B)\n\nactor A {\n    pub void Take(Pair p) {\n        print(p.B.N)\n    }\n}\n\na = spawn A()\nsend a.Take(Pair(Box(1)))\n")]
-    [InlineData(3, "U12", "class Box(int N)\n\nactor A(Box B) {\n}\n")]
-    [InlineData(5, "U12", "class Box(int N)\n\nactor A {\n    pub void Go() {\n        send Take(Box(1))\n    }\n\n    void Take(Box b) {\n        print(b.N)\n    }\n}\n")]
-    public void What_crosses_no_actor_in_a_message_is_not_supported(int line, string rule, string program)
+    [InlineData("class Box(int N)\n\nactor A {\n    pub void Take(Box b) {\n        print(b.N)\n    }\n}\n\na = spawn A()\nsend a.Take(Box(1))\n")]
+    [InlineData("class Box(int N)\n\nactor A {\n    pub Box Make() => Box(1)\n}\n\na = spawn A()\nprint(a.Make().N)\n")]
+    [InlineData("actor A {\n    pub void Run((int) => int f) {\n        print(f(1))\n    }\n}\n\na = spawn A()\nsend a.Run(n => n)\n")]
+    [InlineData("class Box(int N)\n\ndata Pair(Box B)\n\nactor A {\n    pub void Take(Pair p) {\n        print(p.B.N)\n    }\n}\n\na = spawn A()\nsend a.Take(Pair(Box(1)))\n")]
+    [InlineData("class Box(int N)\n\nactor A(Box B) {\n}\n")]
+    [InlineData("class Box(int N)\n\nactor A {\n    pub void Go() {\n        send Take(Box(1))\n    }\n\n    void Take(Box b) {\n        print(b.N)\n    }\n}\n")]
+    [InlineData("class Cell(mut int N)\n\nclass Box(weak Cell? C)\n\nactor A {\n    pub void Take(Box b) {\n        print(b.C == null)\n    }\n}\n\nc = Cell(1)\na = spawn A()\nsend a.Take(copy Box(c))\nprint(c.N)\n")]
+    [InlineData("class Box(mut int N)\n\nactor A(Box B) {\n    pub int Get() => B.N\n}\n\nb = Box(1)\na = spawn A(copy b)\nprint(a.Get())\n")]
+    [InlineData("actor A {\n    pub void Take(int n) {\n        print(n)\n    }\n}\n\na = spawn A()\nk = 2\nsend a.Take(copy 1)\nsend a.Take(copy k)\n")]
+    [InlineData("class Box(int N)\n\nclass Node(weak Box? B)\n\nactor A {\n    pub void Take(Node d) {\n        print(d.B == null)\n    }\n}\n\nb = Box(1)\na = spawn A()\nsend a.Take(Node(b))\nprint(b.N)\n")]
+    public void What_section_6_lets_cross_crosses(string program)
     {
-        // U12: a class instance, a function value and a data value that holds an instance, as an argument, a result or a constructor's
-        // argument (Q1 of issue 519, comment 6866132292), in a message through a reference and in a `send` of the actor's own method
-        // (U11)
-        NotSupportedAt(line, rule, program);
+        // U12: an immutable class instance, as an argument, a result or a constructor's argument, a lambda whose captures cross, a data value
+        // that holds an immutable instance, in a message through a reference and in a `send` of the actor's own method (U11); a mutable
+        // instance after `copy`, one a weak reference reaches among them, which points at the copy's target (the owner, 2026-11-15, #519,
+        // comment 6896192351, Q3); `copy` before a value that crosses with no word, a number among them (U12); a weak reference to an
+        // immutable instance, with no word
+        Assert.Empty(Errors(program));
     }
 
     [Fact]
@@ -7348,19 +7362,80 @@ public sealed class CheckerTests
     }
 
     [Theory]
-    [InlineData(13, "U12", "List<Counter> xs = []\nprint(xs.Count)\n")]
-    [InlineData(13, "U12", "int Zero(List<Counter> xs) {\n    return 0\n}\n")]
-    [InlineData(13, "U12", "Counter? c = null\nprint(c == null)\n")]
-    [InlineData(14, "U12", "c = spawn Counter()\nxs = [c]\nprint(xs.Count)\n")]
-    [InlineData(14, "U12", "c = spawn Counter()\nf = (Counter d) => d\nprint(f(c).Get())\n")]
-    [InlineData(16, "U12", "T Same<T>(T x) => x\n\nc = spawn Counter()\nprint(Same(c).Get())\n")]
-    [InlineData(13, "U12", "data Holder(Counter C)\n")]
-    [InlineData(13, "U12", "class Holder(Counter C)\n")]
-    public void An_actors_reference_inside_another_type_is_not_supported(int line, string rule, string program)
+    [InlineData("List<Counter> xs = []\nprint(xs.Count)\n")]
+    [InlineData("int Zero(List<Counter> xs) {\n    return 0\n}\n\nprint(Zero([]))\n")]
+    [InlineData("Counter? c = null\nprint(c == null)\n")]
+    [InlineData("c = spawn Counter()\nxs = [c]\nprint(xs.Count)\n")]
+    [InlineData("c = spawn Counter()\nf = (Counter d) => d\nprint(f(c).Get())\n")]
+    [InlineData("T Same<T>(T x) => x\n\nc = spawn Counter()\nprint(Same(c).Get())\n")]
+    [InlineData("data Holder(Counter C)\n\nh = Holder(spawn Counter())\nprint(h.C.Get())\n")]
+    [InlineData("class Holder(Counter C)\n\nh = Holder(spawn Counter())\nprint(h.C.Get())\n")]
+    [InlineData("actor B {\n    pub void Take(List<Counter> cs, Map<Counter, int> m) {\n        send cs[0].Add(m[cs[0]] ?? 0)\n    }\n}\n\nc = spawn Counter()\nmut counts = Map<Counter, int>()\ncounts[c] = 1\nb = spawn B()\nb.Take([c], counts)\nprint(c.Get())\n")]
+    public void An_actors_reference_stands_inside_another_type(string program)
     {
-        // U12: a reference alone is a variable's, a parameter's or a result's type, and inside a list, a `?`, a function type, a type argument
-        // or a field of a class or a data type is what the build does not make
-        NotSupportedAt(line, rule, ActorCounter + program);
+        // U12: a reference crosses, alone and inside a list, a `?`, a function type, a type argument, a map's key (the owner, 2026-11-14,
+        // #519, comment 6880404917, Q10), a field of a class or a data type, and inside a message's argument
+        Assert.Empty(Errors(ActorCounter + program));
+    }
+
+    [Fact]
+    public void A_mutable_instance_crosses_with_a_word_alone()
+    {
+        // U12: `send-needs-word` at the argument, through a reference, in a `send` and at `spawn` of a constructor's argument, the argument named
+        // in the text, and `copy` before each makes it cross (the owner, 2026-11-15, #519, comment 6896192351, Q6); a `move` is the build's
+        // `not supported` (What_this_build_does_not_make_cross_is_not_supported)
+        const string Box = "class Box(mut int N)\n\nactor A(Box B) {\n    pub void Take(Box b) {\n        print(b.N)\n    }\n}\n\nitem = Box(1)\n";
+        Assert.Equal([(ErrorIds.SendNeedsWord, 10)], Errors(Box + "a = spawn A(item)\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 11)], Errors(Box + "a = spawn A(copy item)\na.Take(item)\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 11)], Errors(Box + "a = spawn A(copy item)\nsend a.Take(item)\n"));
+        Assert.Empty(Errors(Box + "a = spawn A(copy item)\na.Take(copy item)\nsend a.Take(copy Box(2))\n"));
+        Assert.Contains("`item`", ErrorText(Box + "a = spawn A(item)\n"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_result_that_reaches_a_mutable_instance_or_an_interfaces_value_is_send_needs_word_at_the_call()
+    {
+        // U12 (the owner, 2026-11-15, #519, comment 6896192351, Q4, "Rust: send-needs-word"): no word stands at a result, so a call that waits
+        // and gives a mutable instance, an interface's value or a list of either is `send-needs-word` at the line of the call; an immutable
+        // instance crosses back
+        const string A = "interface I {\n}\n\nclass Box(mut int N) : I\n\nclass Label(string Text)\n\nactor A {\n    pub Box Make() => Box(1)\n\n    pub I Face() => Box(2)\n\n    pub List<Box> All() => [Box(3)]\n\n    pub Label Name() => Label(\"a\")\n}\n\nvoid Keep(I x) {\n}\n\na = spawn A()\n";
+        Assert.Equal([(ErrorIds.SendNeedsWord, 22)], Errors(A + "print(a.Make().N)\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 22)], Errors(A + "Keep(a.Face())\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 23)], Errors(A + "print(\n    a.All().Count)\n"));
+        Assert.Empty(Errors(A + "print(a.Name().Text)\n"));
+    }
+
+    [Fact]
+    public void A_function_value_crosses_where_the_checker_sees_its_lambda()
+    {
+        // U12 (the owner, 2026-11-15, #519, comment 6896192351, Q5, "By written type"): a lambda written at the argument or bound to an
+        // immutable local variable of the same function, whose captures cross, cross; a lambda that captures a mutable
+        // instance, with a word or none, one bound to a `mut` variable and a parameter of a function type are `send-needs-word`
+        const string Run = "class Box(mut int N)\n\nactor A {\n    pub void Run(() => int job) {\n        print(job())\n    }\n}\n\nint Two() => 2\n\na = spawn A()\nk = 1\nb = Box(1)\n";
+        Assert.Empty(Errors(Run + "a.Run(() => k)\nf = () => k + 1\na.Run(f)\nprint(b.N + Two())\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 14)], Errors(Run + "a.Run(() => b.N + k)\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 14)], Errors(Run + "a.Run(copy () => b.N + k)\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 15)], Errors(Run + "f = () => b.N + k\na.Run(f)\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 15)], Errors(Run + "mut f = () => k\na.Run(f)\nf = () => 3\nprint(f() + b.N)\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 15)], Errors(Run + "void Pass(A target, () => int g) {\n    target.Run(g)\n}\n\nPass(a, () => b.N + k)\n"));
+    }
+
+    [Fact]
+    public void What_this_build_does_not_make_cross_is_not_supported()
+    {
+        // U12: `move` before an argument, whose region check (section 6) the build does not make, at a plain call; a map whose keys reach a
+        // class instance, whose hash a copy would keep; `copy` at a plain call of a function value and of an interface's value, which no
+        // word makes cross; an instance of a class of `std/`, whose classes the walk of the file's classes does not hold
+        // (knowledge/a-class-of-std-is-no-class-of-the-file.md)
+        NotSupportedAt(10, "U12", "class Box(int N)\n\nactor A {\n    pub void Take(Map<Box, int> m) {\n        print(m.Count)\n    }\n}\n\na = spawn A()\nsend a.Take(Map<Box, int>())\n");
+        NotSupportedAt(8, "U12", "class Box(mut int N)\n\nvoid Show(Box x) {\n    print(x.N)\n}\n\nb = Box(1)\nShow(move b)\n");
+        NotSupportedAt(5, "U12", "void Call(() => int f) {\n    print(f())\n}\n\nCall(copy () => 1)\n");
+        NotSupportedAt(10, "U12", "interface I {\n}\n\nclass Box(int N) : I\n\nvoid Keep(I x) {\n}\n\nI y = Box(1)\nKeep(copy y)\n");
+        var (diagnostics, _) = CheckSeeingStd("actor A {\n    pub void Take(HttpHeaders h) {\n        print(h.Get(\"a\") ?? \"\")\n    }\n}\n\na = spawn A()\nsend a.Take(HttpHeaders())\n");
+        var only = Assert.Single(diagnostics.Sorted);
+        Assert.False(only.IsError, only.ToString());
+        Assert.Equal(8, only.Line);
+        Assert.EndsWith("(U12)", only.Message, StringComparison.Ordinal);
     }
 
     [Fact]

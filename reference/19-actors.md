@@ -800,9 +800,9 @@ crossing or being a mutable class instance (§6, "What may cross between actors"
 do the arguments of an actor's constructor, which cross as a call's do (§6, the owner,
 2026-11-13, #519, comment 6847932993, Q13). A mutable class instance among a message's arguments
 or a constructor's with neither word is the compile error `send-needs-word`, at its argument
-*(assumed: that place, as Q24 gives a function value's)*, which stands in this
-rule and not in the table of errors, as §6 keeps it (§6, the owner, 2026-11-13, #519, comment
-6847932993, Q8, "These ids (Recommended)"), and so is a function value there whose captures do not
+*(assumed: that place, as Q24 gives a function value's)*, which has its row in the table of
+errors, since cases expect it (§6, the owner, 2026-11-13, #519, comment 6847932993, Q8, "These
+ids (Recommended)"; 2026-11-15, #519, comment 6896192351), and so is a function value there whose captures do not
 cross, at its argument, as rustc gives one error, E0277, for a closure as for any type that is not
 `Send` (§6, the owner, 2026-11-14, #519, comment 6882624606, Q24, "All six leans (Recommended)").
 No word at the argument makes such a function value cross, `copy f` and `move f` among them, the
@@ -819,16 +819,19 @@ such a value cross: it is `send-needs-word` with `copy` or `move` too, as `Box<d
 value or a class instance that reaches one *(assumed: the answer read through what a value reaches,
 as a function value whose captures do not cross is read, as rustc reads `Send` through a struct's
 fields)*. A value of an interface's type given as a message's result is, by its written type, the
-compile error of a mutable class instance given as a call's result, whose id stands open (§6, §14,
-the owner, 2026-11-15, issue 519, comment 6892275110, item 3, option (a), "Same error, by written
-type").
+compile error of a mutable class instance given as a call's result (§6, the owner, 2026-11-15,
+issue 519, comment 6892275110, item 3, option (a), "Same error, by written type").
 An immutable class is one through which nothing
 reachable has a `mut` field, and a value crosses where every value it reaches crosses, a
 collection's items and a `data` value's fields among them, as Rust's `Send` is structural
 *(assumed: the reading of Q14 (i) said back in #519, comment 6882879015, reading 4)*; a
 function value crosses where every value it captures crosses, and a
-mutable class instance given as a call's result, where no word can stand, is a compile error whose
-id stands open (§6, §14, the owner, 2026-11-14, #519, comment 6880404917, Q14, "All eight leans (Recommended)").
+mutable class instance given as a call's result, where no word can stand, is a compile error (§6,
+the owner, 2026-11-14, #519, comment 6880404917, Q14, "All eight leans (Recommended)"), and that
+error is `send-needs-word`, as rustc gives the same error to a task's output as to its input
+(`tokio::spawn` asks `F::Output: Send`) (§6, the owner, 2026-11-15, #519, comment 6896192351, Q4,
+"Rust: send-needs-word"), at the line of the call *(assumed: that place, since no argument stands
+for a result)*.
 A collection or a `data` value that reaches a mutable class instance is `send-needs-word` at its
 argument with neither word, and crosses with `copy`, a deep copy of all it reaches up to a function
 value or an actor's reference, or with `move`, every path into it ending, `move-reachable` where
@@ -841,9 +844,9 @@ cost read for a word at the argument as for that function value, as rustc reads 
 struct's fields and a closure's through its captures)*. A reference that crosses names the same
 actor, so that `==` holds across a crossing (§6, the owner, 2026-11-14, #519, comment 6880404917,
 Q10). The deep copy of `copy` stops at a function value it reaches, which the receiver gets as it
-would with no word, `copy f` of one whose captures cross among them, and at an actor's reference,
-which the receiver gets naming the same actor, as a reference that crosses names it *(assumed: the
-stop at a function value, Q24's cost read for a word at the argument, as rustc reads a closure's
+would with no word, shared by its count with the values it captures, `copy f` of one whose
+captures cross among them, and at an actor's reference, which the receiver gets naming the same
+actor, as a reference that crosses names it *(assumed, §6: the stop at a function value, Q24's cost read for a word at the argument, as rustc reads a closure's
 `Send` through its captures; the stop at an actor's reference, as Rust's clone of a channel's
 `Sender` is another sender to the same channel, `impl<T> Clone for Sender<T>`,
 `library/std/src/sync/mpsc.rs` of Rust 1.100.0, line 646)*. `copy` or `move` before a value that
@@ -855,11 +858,400 @@ already, the word being no error, and as rustc refuses a move of a borrowed valu
 (E0505, `MoveBorrow`, `compiler/rustc_borrowck/src/session_diagnostics.rs` of Rust 1.100.0, lines
 318 to 322))*.
 
+A use of a variable after its `move` is the compile error `used-after-move`, at the use, naming the
+line of the `move`, on every path on which the value may have moved, as rustc reports a use after a
+move at the use (E0382) (§6, the owner, 2026-11-15, #519, comment 6896192351, Q1, "Rust: at the
+use, own id"); no case expects it, so that its id stands in this rule and not in the table of
+errors, as `move-reachable`'s does (§6). Two paths to one block of a value that crosses, or of a
+value after `copy`, arrive as two paths to one copy, as Rust's clone of an `Rc` graph keeps its
+sharing, so that a copy is never larger than its source and a mutable graph keeps its shape (§6,
+the owner, 2026-11-15, #519, comment 6896192351, Q2, "Sharing kept"). The copies one call makes,
+of a message's arguments, of a `spawn`'s or of the arguments after `copy` at any call, share one
+memo, so that two arguments that reach one block arrive as two paths to one copy, and a `weak`
+reference in one argument points at the copy of its target where another argument's copy holds
+that target strongly; a result has a memo of its own. Each argument is copied where it is
+evaluated, left to right, so that a later argument that changes a block an earlier one copied
+changes the source alone, and one that reaches that block again reaches its copy as it was made;
+a later argument whose call waits lets other calls cross meanwhile, each in a memo of its own; a
+block the memo holds lives until the call's last copy, and a call left before its last copy, by a
+case a later argument propagates, ends its memo there. A crossing copies by the type of the
+parameter the argument fills, so that `null` given to a `Box?` of a class with a `mut` field needs
+`copy` as a `Box` would *(assumed, §6: the memo of the call, which Q2 reads at a call; the order,
+which keeps arguments evaluated left to right; and the parameter's type, the slot the message
+holds)*. A `weak` reference (R3)
+inside a value that crosses points at the copy of its target where the copy holds that target
+strongly, and is null on arrival otherwise, so that a tree with weak parent links crosses whole
+(§6, the owner, 2026-11-15, #519, comment 6896192351, Q3, "Points at the copy"). A function value
+whose lambda the checker does not see, a parameter, a field or a call's result, is read by its
+written type, as a value of an interface's type is: it crosses only as a lambda the function that
+sends it shows, and any other is `send-needs-word`, so that a callback received as a parameter is
+never sent (§6, the owner, 2026-11-15, #519, comment 6896192351, Q5, "By written type")
+*(assumed: that a lambda the function shows is one written at the argument or the one an immutable
+local variable is declared with, and that the named function the answer names stands for no case,
+since F11 gives a function value through a lambda only)*. `copy` before an argument is a deep copy wherever it is
+written, a call that crosses nothing included, as Rust's `.clone()` stands anywhere (§6, the owner,
+2026-11-15, #519, comment 6896192351, Q6, "Rust: deep copy anywhere"). The sender makes the copy,
+at the send; every class instance a crossing reaches is copied, so that identity does not survive
+a crossing, and every other block is shared by its count, which no program can tell from a copy;
+the copy walks a work list and never recurses, so that a chain of a million links crosses on a
+stack of 2 MiB; and a copy runs no program code, no `Text()` and no `equal by` *(assumed, §6: the
+points comment 6895076937 takes as following from §6, which the answers left standing)*. `copy`
+and `move` are words before an argument alone, as `mut` is there (L12), and names everywhere else,
+so that `copy(x)` is the word before `(x)` and a variable named `copy` is called as `(copy)(x)` (§6,
+the owner, 2026-11-13, #519, comment 6847932993, Q10, "Any order + contextual (Recommended)"); a
+`copy` or a `move` followed by `[`, `-`, `*`, `&` or `with`, which go on from a name, is the name,
+so that `copy[0]` reads an item of a list named `copy` *(assumed, §6: as a name before what goes
+on from a name is read, which the answers did not give)*.
+
 Case: [actors/relay.kz](../corpus/actors/relay.kz)
 
 Case: [actors/union-result.kz](../corpus/actors/union-result.kz)
 
 Case: [actors/this-reference.kz](../corpus/actors/this-reference.kz)
+
+Case: [actors/immutable-instance.kz](../corpus/actors/immutable-instance.kz)
+```kurz
+class Order(string Customer, int Items)
+
+actor Shop {
+    mut List<Order> orders = []
+
+    pub void Place(Order o) {
+        orders.Add(o)
+    }
+
+    pub Order First() => orders[0]
+}
+
+order = Order("Ann", 3)
+s = spawn Shop()
+s.Place(order)
+f = s.First()
+print("{f.Customer} {f.Items}")
+print(f == order)
+```
+
+Case: [actors/references-in-list.kz](../corpus/actors/references-in-list.kz)
+```kurz
+actor Counter {
+    mut int count = 0
+
+    pub void Add(int n) {
+        count = count + n
+    }
+
+    pub int Get() => count
+}
+
+actor Hub {
+    pub void Tell(List<Counter> all) {
+        for c in all {
+            send c.Add(1)
+        }
+    }
+}
+
+a = spawn Counter()
+b = spawn Counter()
+h = spawn Hub()
+h.Tell([a, b, a])
+print(a.Get() + b.Get())
+mut names = Map<Counter, string>()
+names[a] = "a"
+print(names[a] ?? "none")
+```
+
+Case: [actors/send-needs-word.kz](../corpus/actors/send-needs-word.kz)
+```kurz
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Keep(Cart c) {
+        print(c.Items)
+    }
+}
+
+cart = Cart(1)
+s = spawn Shop()
+s.Keep(cart)
+```
+
+Case: [actors/send-needs-word-interface.kz](../corpus/actors/send-needs-word-interface.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+actor Painter {
+    pub void Paint(Shape s) {
+        print(s.Area())
+    }
+}
+
+p = spawn Painter()
+p.Paint(copy Square(2))
+```
+
+Case: [actors/send-needs-word-function.kz](../corpus/actors/send-needs-word-function.kz)
+```kurz
+class Tally(mut int Count)
+
+actor Runner {
+    pub void Run(() => int f) {
+        print(f())
+    }
+}
+
+t = Tally(1)
+r = spawn Runner()
+r.Run(() => t.Count)
+```
+
+Case: [actors/result-mutable.kz](../corpus/actors/result-mutable.kz)
+```kurz
+class Cart(mut int Items)
+
+actor Shop {
+    pub Cart Open() => Cart(0)
+}
+
+s = spawn Shop()
+c = s.Open()
+print(c.Items)
+```
+
+Case: [actors/copy-mutable.kz](../corpus/actors/copy-mutable.kz)
+```kurz
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Add(Cart c) {
+        c.Items = c.Items + 1
+        print("in the shop: {c.Items}")
+    }
+}
+
+cart = Cart(1)
+s = spawn Shop()
+s.Add(copy cart)
+print("at home: {cart.Items}")
+```
+
+Case: [actors/copy-shared-graph.kz](../corpus/actors/copy-shared-graph.kz)
+```kurz
+class Account(mut int Balance)
+class Owner(string Name, Account Main, Account Savings)
+
+actor Bank {
+    pub string Deposit(Owner o) {
+        main = o.Main
+        main.Balance = main.Balance + 10
+        return "{o.Main.Balance} {o.Savings.Balance}"
+    }
+}
+
+joint = Account(5)
+ann = Owner("Ann", joint, joint)
+b = spawn Bank()
+print(b.Deposit(copy ann))
+print(joint.Balance)
+```
+
+Case: [actors/copy-weak-parent.kz](../corpus/actors/copy-weak-parent.kz)
+```kurz
+class Folder(string Name, List<Folder> Children, mut weak Folder? Parent)
+
+actor Archive {
+    pub string Path(Folder top) {
+        child = top.Children[0]
+        p = child.Parent
+        if p != null {
+            return "{p.Name}/{child.Name} {p == top}"
+        }
+
+        return "lost"
+    }
+}
+
+docs = Folder("docs", List<Folder>(), null)
+home = Folder("home", [docs], null)
+docs.Parent = home
+a = spawn Archive()
+print(a.Path(copy home))
+```
+
+Case: [actors/copy-word-on-number.kz](../corpus/actors/copy-word-on-number.kz)
+```kurz
+actor Printer {
+    pub void Show(int n, string s) {
+        print("{n} {s}")
+    }
+}
+
+k = 7
+p = spawn Printer()
+p.Show(copy k, copy "seven")
+print(k)
+```
+
+Case: [actors/copy-at-call.kz](../corpus/actors/copy-at-call.kz)
+```kurz
+class Cart(mut int Items)
+
+void Fill(Cart c) {
+    c.Items = c.Items + 10
+    print("filled: {c.Items}")
+}
+
+cart = Cart(1)
+Fill(copy cart)
+print("kept: {cart.Items}")
+Fill(cart)
+print("changed: {cart.Items}")
+```
+
+Case: [actors/copy-derived.kz](../corpus/actors/copy-derived.kz)
+```kurz
+class Cart(mut int Items) {
+    pub virtual string Show() => "a cart: {Items}"
+}
+
+class OwnedCart(string Owner, int Start) : Cart(Start) {
+    pub override string Show() => "{Owner}'s cart: {Items}"
+}
+
+actor Shop {
+    pub void Add(Cart c) {
+        c.Items = c.Items + 1
+        print(c.Show())
+    }
+}
+
+Cart cart = OwnedCart("Ann", 2)
+s = spawn Shop()
+s.Add(copy cart)
+print("at home: {cart.Show()}")
+```
+
+Case: [actors/copy-two-arguments.kz](../corpus/actors/copy-two-arguments.kz)
+```kurz
+class Counter(mut int N)
+
+actor Desk {
+    pub string Both(Counter a, Counter b) {
+        a.N = a.N + 10
+        return "{a.N} {b.N}"
+    }
+}
+
+c = Counter(1)
+d = spawn Desk()
+print(d.Both(copy c, copy c))
+print(c.N)
+```
+
+Case: [actors/copy-weak-across-arguments.kz](../corpus/actors/copy-weak-across-arguments.kz)
+```kurz
+class Box(mut int N)
+class Tag(weak Box? Of)
+
+actor Shelf {
+    pub string Look(Tag t, Box b) {
+        b.N = b.N + 10
+        o = t.Of
+        if o != null {
+            return "{o.N}"
+        }
+
+        return "gone"
+    }
+}
+
+box = Box(1)
+tag = Tag(box)
+s = spawn Shelf()
+print(s.Look(copy tag, copy box))
+print(box.N)
+```
+
+Case: [actors/copy-two-at-call.kz](../corpus/actors/copy-two-at-call.kz)
+```kurz
+class Cart(mut int Items)
+
+string Both(Cart a, Cart b) {
+    a.Items = a.Items + 10
+    return "{a.Items} {b.Items}"
+}
+
+cart = Cart(1)
+print(Both(copy cart, copy cart))
+print(cart.Items)
+```
+
+Case: [actors/copy-left-to-right.kz](../corpus/actors/copy-left-to-right.kz)
+```kurz
+class Cart(mut int Items)
+
+int Bump(Cart c) {
+    c.Items = c.Items + 10
+    return c.Items
+}
+
+string Show(Cart c, int now) => "{c.Items} {now}"
+
+cart = Cart(1)
+print(Show(copy cart, Bump(cart)))
+print(cart.Items)
+```
+
+Case: [actors/copy-memo-keeps-block.kz](../corpus/actors/copy-memo-keeps-block.kz)
+```kurz
+class Box(mut int N)
+class Holder(mut Box B)
+
+Box Swap(Holder held) {
+    held.B = Box(3)
+    return Box(2)
+}
+
+string Pair(Holder a, Box b) => "{a.B.N} {b.N}"
+
+h = Holder(Box(1))
+print(Pair(copy h, copy Swap(h)))
+print(h.B.N)
+```
+
+Case: [actors/copy-left-early.kz](../corpus/actors/copy-left-early.kz)
+```kurz
+data Missing
+
+class Box(mut int N)
+class Holder(mut Box B)
+class Tag(weak Box? Of)
+
+Box | Missing Lose(Holder held) {
+    held.B = Box(2)
+    return Missing
+}
+
+string Pair(Box a, Box b) => "{a.N} {b.N}"
+
+string | Missing Try(Holder held) {
+    return Pair(copy held.B, copy Lose(held))
+}
+
+h = Holder(Box(1))
+tag = Tag(h.B)
+match Try(h) {
+    string s => print(s)
+    Missing => print("missing")
+}
+print(tag.Of == null)
+```
 
 ### U13 (decided, §6) The end of the program drops what is queued
 

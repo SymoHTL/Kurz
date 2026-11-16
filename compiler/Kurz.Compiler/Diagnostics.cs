@@ -180,6 +180,7 @@ public static class ErrorIds
     public const string SendResult = "send-result";
     public const string ActorFieldPublic = "actor-field-public";
     public const string MutInMessage = "mut-in-message";
+    public const string SendNeedsWord = "send-needs-word";
 
     /// <summary>L1 names this id in its rule and keeps it out of the table, which lists the ids cases expect: no corpus file can be a file that is not UTF-8.</summary>
     public const string InvalidSource = "invalid-source";

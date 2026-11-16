@@ -455,16 +455,16 @@ those readings)*. An
 `HttpBody` for an upload is made from a stream, a file or a series of chunks (§12, the owner,
 2026-11-05, issue 156, comment 6668914650, Q11), and the makers' names and forms stand open in §14.
 
-No case: the compiler reads no `copy` and no `move`, at a send, on a parameter or at a call (§6), so
-that no case can expect the move, `copy-server-request`, `send-needs-word` or `move-at-call`, and a
+No case: the compiler reads no `move`, at a send, on a parameter or at a call, and says
+`not supported` to an `HttpRequest` that crosses or follows `copy` (§6), so that no case can expect
+the move, `copy-server-request` or `move-at-call`, and a
 send to another actor needs two actors, which the compiler does not build, as it builds no HTTP
 server or client of §12, which the halves of the stream, the first read's `100 Continue` and its
 compare-and-swap on a flag of five states, the pair's shared state, the rate
 between reads, the count of a body without a declared length, the two bodies of a client's call
 and the makers of an `HttpBody` need. The id
-`copy-server-request` stands in this rule, and `send-needs-word` and `move-at-call` in the record's
-section 6, as `move-reachable` does, and none of them in [12-errors.md](12-errors.md), since no case
-can expect them (§12, the owner, 2026-11-03, issue 156, comment 6603359338) *(assumed, §6: that
+`copy-server-request` stands in this rule, and `move-at-call` in the record's section 6, as
+`move-reachable` does, and neither in [12-errors.md](12-errors.md), since no case can expect them (§12, the owner, 2026-11-03, issue 156, comment 6603359338) *(assumed, §6: that
 answer's rule, which named the ids before it, applied to `move-at-call`)*.
 
 ### W4 (decided, §12) `HttpHeaders`

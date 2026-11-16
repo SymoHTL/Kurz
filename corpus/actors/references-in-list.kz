@@ -1,0 +1,31 @@
+// expect: output
+// | 3
+// | a
+// rules: U12
+
+actor Counter {
+    mut int count = 0
+
+    pub void Add(int n) {
+        count = count + n
+    }
+
+    pub int Get() => count
+}
+
+actor Hub {
+    pub void Tell(List<Counter> all) {
+        for c in all {
+            send c.Add(1)
+        }
+    }
+}
+
+a = spawn Counter()
+b = spawn Counter()
+h = spawn Hub()
+h.Tell([a, b, a])
+print(a.Get() + b.Get())
+mut names = Map<Counter, string>()
+names[a] = "a"
+print(names[a] ?? "none")

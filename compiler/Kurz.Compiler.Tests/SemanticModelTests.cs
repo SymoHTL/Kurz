@@ -186,11 +186,35 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void An_argument_after_copy_at_a_plain_call_is_recorded_for_the_copy()
+    {
+        // U12 (the owner, 2026-11-15, #519, comment 6896192351, Q6, "Rust: deep copy anywhere"): the argument after `copy` at a call that is no
+        // message, and not one without the word, nor one at a message, whose crossing copies what it reaches
+        var (tree, model) = Clean("class Box(mut int N)\n\nactor A {\n    pub void Take(Box x) {\n        print(x.N)\n    }\n}\n\nvoid Show(Box x) {\n    print(x.N)\n}\n\nb = Box(1)\nShow(copy b)\nShow(b)\na = spawn A()\na.Take(copy b)\n");
+        var calls = tree.Statements.OfType<ExpressionStatement>().Select(e => (CallExpression)e.Expression).ToList();
+        Assert.Equal([true, false, false], calls.Select(c => model.IsCopied(c.Arguments[0].Value)));
+    }
+
+    [Fact]
+    public void The_copy_of_a_body_that_reads_its_type_keeps_the_word_before_an_argument()
+    {
+        // U12 with T33: the copy of a body that reads its type, made for its type arguments, carries each argument's word (SyntaxCopy), so
+        // that `copy` in it is recorded for the copy as in a function that is not generic
+        var (tree, model) = Clean("class Box(mut int N)\n\ndata Order(string Id)\n\nvoid Show(Box x) {\n    print(x.N)\n}\n\nvoid Fields<T>(T value, Box b) {\n    Show(copy b)\n    for f in T.Fields {\n        print(\"{f.Name} {f.Get(value)}\")\n    }\n}\n\nFields(Order(\"a\"), Box(2))\n");
+        var copy = Assert.Single(model.CopiesOf(model.FunctionOf(Find<FunctionDeclaration>(tree, f => f.Name == "Fields"))));
+        var calls = new List<CallExpression>();
+        Nodes.Collect(copy.Declaration!, calls);
+        var show = Assert.Single(calls, c => c.Callee is NameExpression { Name: "Show" });
+        Assert.Equal(ArgumentWord.Copy, show.Arguments[0].Word);
+        Assert.True(model.IsCopied(show.Arguments[0].Value));
+    }
+
+    [Fact]
     public void The_walk_finds_a_node_the_checker_did_not_record()
     {
         // the positive control of the theory: a checked tree with a statement the checker never read, built by hand and put after the others
         var (tree, model) = Clean("x = 4\nprint(x)");
-        var stray = new ExpressionStatement(3, new CallExpression(3, new NameExpression(3, "print"), [], [new Argument(3, null, false, new IntegerLiteral(3, new IntegerLiteralValue("1", 10, "")))]));
+        var stray = new ExpressionStatement(3, new CallExpression(3, new NameExpression(3, "print"), [], [new Argument(3, null, ArgumentWord.None, new IntegerLiteral(3, new IntegerLiteralValue("1", 10, "")))]));
         var walk = new Walk(model);
         walk.Program(new ProgramSyntax([.. tree.Statements, stray]));
         Assert.Contains(walk.Missing, m => m.StartsWith("3: call", StringComparison.Ordinal));

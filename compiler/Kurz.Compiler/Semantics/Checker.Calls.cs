@@ -109,6 +109,52 @@ public sealed partial class Checker
 
     private Typed CallResult(CallExpression c, KurzType? expected)
     {
+        var result = CalleeResult(c, expected);
+        return result.IsError || !PlainCallWords(c) ? result : Typed.Error;
+    }
+
+    /// <summary>
+    /// U12: <c>copy</c> and <c>move</c> before an argument of a call that is no message and makes no actor, after the call's own errors
+    /// (E1), the words of a message and of a <c>spawn</c> being read with its crossing (<see cref="CrossingErrors"/>): <c>copy</c> is a
+    /// deep copy wherever it is written, a plain call among them, as Rust's <c>.clone()</c> stands anywhere (the owner, 2026-11-15, #519,
+    /// comment 6896192351, Q6, "Rust: deep copy anywhere"), recorded for the code generator, unless the value reaches what the build
+    /// does not copy (<see cref="CrossingOf"/>), a function value and an interface's value among them, which no word makes cross, which is
+    /// <c>not supported</c>; and <c>move</c> is <c>not supported</c>, since the build
+    /// makes no check of the paths it ends (section 6); whether it reported one.
+    /// </summary>
+    private bool PlainCallWords(CallExpression c)
+    {
+        if (ReferenceEquals(c, spawning) || ReferenceEquals(c, sending) || model.TryCallOf(c) is { Kind: CallKind.ActorCall or CallKind.ActorSend })
+        {
+            return false;
+        }
+
+        foreach (var a in c.Arguments)
+        {
+            if (a.Word == ArgumentWord.Move)
+            {
+                NotSupported(a.Line, "`move` before an argument, whose check of the paths it ends (section 6) the build does not make (U12)");
+                return true;
+            }
+
+            if (a.Word == ArgumentWord.Copy)
+            {
+                var (kind, why, limit) = CrossingOf(model.TypeOf(a.Value).Type);
+                if ((limit ?? (kind == ActorCrossing.Never ? why : null)) is { } refused)
+                {
+                    NotSupported(a.Line, $"`copy` of {refused} (U12)");
+                    return true;
+                }
+
+                model.RecordCopied(a.Value);
+            }
+        }
+
+        return false;
+    }
+
+    private Typed CalleeResult(CallExpression c, KurzType? expected)
+    {
         if (CheckMake(c) is { } made)
         {
             return made; // T33: `T.Make(f => ...)` in a copy
@@ -988,7 +1034,7 @@ public sealed partial class Checker
                 ? "`[]` has no item type, and no list type stands where it does: `List<int> xs = []` (M11, T27)"
                 : "the items have no one type, and no list type stands where the list does (M11, T27)",
         };
-        var call = new CallExpression(l.Line, l, [], l.Items.Select(e => new Argument(e.Line, null, false, e)).ToList());
+        var call = new CallExpression(l.Line, l, [], l.Items.Select(e => new Argument(e.Line, null, ArgumentWord.None, e)).ToList());
         return Call([candidate], call, null);
     }
 
@@ -1093,6 +1139,8 @@ public sealed partial class Checker
         switch (type)
         {
             case ErrorType or EnumType or FlagsType: // D13: a set by the names it holds (section 4, the owner, 2026-11-11)
+                return null;
+            case ActorType: // U12: by the actor it names, its hash its actor's number's (section 6, Q10 of comment 6880404917)
                 return null;
             case TypeParameterType when textFieldTypes.ContainsValue(type):
                 return null; // T34: the field's type on a function's text, which the walk alone reads (KeepFieldTypeOfText)
@@ -2503,12 +2551,6 @@ public sealed partial class Checker
     /// <summary>Records what a call that typed calls: the candidate picked, its type arguments, its binding and its whole result.</summary>
     private Typed Record(CallExpression c, CallKind kind, Typed typed, Candidate? picked, IReadOnlyList<int>? binding = null)
     {
-        if (picked is not null && !typed.IsError && picked.Map.Values.FirstOrDefault(IsOrHoldsActor) is { } actor)
-        {
-            NotSupported(c.Line, $"an actor's reference in the type argument `{actor}` of a call (U12)");
-            return Typed.Error;
-        }
-
         if (picked is not null && !typed.IsError)
         {
             var map = picked.Map.Count == 0 ? NoMap : picked.Map;
@@ -2629,7 +2671,7 @@ public sealed partial class Checker
     private bool FitsAnIndex(FunctionSymbol method)
     {
         var candidate = CandidateOf(method);
-        Weigh(candidate, [new Pre { Argument = new Argument(method.Line, null, false, new NameExpression(method.Line, "i")), Typed = new Typed(Types.Int) }], only: false);
+        Weigh(candidate, [new Pre { Argument = new Argument(method.Line, null, ArgumentWord.None, new NameExpression(method.Line, "i")), Typed = new Typed(Types.Int) }], only: false);
         return candidate.Fits;
     }
 

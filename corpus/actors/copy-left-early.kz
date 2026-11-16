@@ -1,0 +1,29 @@
+// expect: output
+// | missing
+// | true
+// rules: U12
+
+data Missing
+
+class Box(mut int N)
+class Holder(mut Box B)
+class Tag(weak Box? Of)
+
+Box | Missing Lose(Holder held) {
+    held.B = Box(2)
+    return Missing
+}
+
+string Pair(Box a, Box b) => "{a.N} {b.N}"
+
+string | Missing Try(Holder held) {
+    return Pair(copy held.B, copy Lose(held))
+}
+
+h = Holder(Box(1))
+tag = Tag(h.B)
+match Try(h) {
+    string s => print(s)
+    Missing => print("missing")
+}
+print(tag.Of == null)

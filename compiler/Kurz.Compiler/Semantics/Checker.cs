@@ -341,7 +341,6 @@ public sealed partial class Checker
         }
 
         RefuseUnreadActors(); // U1: once every type is resolved
-        CheckActorFields(); // U12: once every field's type is known
 
         RefuseChainMembers(); // K6, K7, K18: once every base is known
 
@@ -1170,7 +1169,7 @@ public sealed partial class Checker
         typeContext = null;
     }
 
-    private KurzType ResolveWritten(TypeSyntax type)
+    private KurzType Resolve(TypeSyntax type)
     {
         switch (type)
         {

@@ -4689,6 +4689,85 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(actorWaits, fenced, "actor-waits-fenced"), 0, ["6", "6", "6", "6", "[7, 8, 9, 10]"], "");
+        // U12 (the owner, 2026-11-15, #519, comment 6896192351, Q2, Q3): a field's list copied as it crosses, before a later argument's call
+        // that waits lets in a call of its chain that replaces the field, so that the copy reads no block the replacement freed; the copy
+        // keeps the instance two items hold as one, and the weak link of another item points at it; and a field's instance given as a
+        // result, copied before the method's count of it is let go of, which the field keeps for the next call, and a result's weak link to
+        // an instance the result does not hold, null on arrival as the copy holds no copy of its target (Q3); and two arguments of one
+        // message that reach one instance, between which a call that waits lets in a call of the chain whose result crosses in a session of
+        // its own, arrive as one copy, the call's memo unharmed by the crossing in between (section 6)
+        const string actorCrossing = """
+            class Item(string Name, mut int V, mut weak Item? Twin)
+            class Label(string Text)
+            class Pin(weak Label? L)
+
+            actor Sink(Label Kept) {
+                pub string Take(List<Item> got, int k) {
+                    first = got[0]
+                    first.V = first.V + 1
+                    t = got[1].Twin
+                    if t != null {
+                        return "{got[2].V} {t.Name} {t == got[0]} {k}"
+                    }
+
+                    return "none"
+                }
+
+                pub Label Give() => Kept
+
+                pub Pin Mark() => Pin(Kept)
+
+                pub string Both(Item x, string k, Item y) {
+                    x.V = x.V + 100
+                    return "{y.V} {k}"
+                }
+            }
+
+            actor Store(Checker Check, Sink Target) {
+                mut List<Item> items = []
+
+                pub string Pass() {
+                    a = Item("a {Check.Name()}", 1, null)
+                    items = [a, Item("b", 2, a), a]
+                    return Target.Take(copy items, Check.Valid(this))
+                }
+
+                pub void Reset() {
+                    items = []
+                }
+
+                pub string Twice() {
+                    one = Item("one", 1, null)
+                    return Target.Both(copy one, Check.Fresh(this), copy one)
+                }
+
+                pub Label Made() => Label("made")
+            }
+
+            actor Checker {
+                pub string Name() => "x"
+
+                pub int Valid(Store store) {
+                    store.Reset()
+                    return 0
+                }
+
+                pub string Fresh(Store store) {
+                    m = store.Made()
+                    return m.Text
+                }
+            }
+
+            word = "label"
+            sink = spawn Sink(Label("kept {word}"))
+            print(spawn Store(spawn Checker(), sink).Pass())
+            print(sink.Give().Text)
+            print(sink.Give().Text)
+            print(sink.Mark().L == null)
+            print(spawn Store(spawn Checker(), sink).Twice())
+
+            """;
+        Ran(BuildAndRun(actorCrossing, fenced, "actor-crossing-fenced"), 0, ["2 a x true 0", "kept label", "kept label", "true", "101 made"], "");
         Ran(BuildAndRun(Weak, fenced, "weak-fenced"), 0, WeakPrint, "");
         Ran(BuildAndRun(Equality, fenced, "class-equality-fenced"), 0, EqualityPrint, "");
         Ran(BuildAndRun(Inheritance, fenced, "class-inheritance-fenced"), 0, InheritancePrint, "");

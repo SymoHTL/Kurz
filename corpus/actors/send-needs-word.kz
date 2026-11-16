@@ -1,0 +1,14 @@
+// expect: error send-needs-word at 14
+// rules: U12
+
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Keep(Cart c) {
+        print(c.Items)
+    }
+}
+
+cart = Cart(1)
+s = spawn Shop()
+s.Keep(cart)

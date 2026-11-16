@@ -105,6 +105,153 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_chain_of_a_million_links_crosses_by_copy_on_a_messages_stack()
+    {
+        // U12: the copy walks the runtime's work list and never recurses (comment 6895076937, "Taken as they follow from the record"), so a
+        // chain of 1,000,000 instances crosses from inside a message, on its stack of 2 MiB, and arrives whole
+        const string chain = """
+            class Link(int Value, Link? Next)
+
+            actor Sink {
+                pub long Count(Link first) {
+                    mut long n = 0
+                    mut Link? at = first
+                    while at != null {
+                        n = n + 1
+                        at = at.Next
+                    }
+
+                    return n
+                }
+            }
+
+            actor Maker(Sink Target) {
+                pub long Make() {
+                    mut Link head = Link(0, null)
+                    for i in 1..<1000000 {
+                        head = Link(i, head)
+                    }
+
+                    return Target.Count(copy head)
+                }
+            }
+
+            m = spawn Maker(spawn Sink())
+            print(m.Make())
+
+            """;
+        Ran(BuildAndRun(chain, toolchain.Runtime, "actor-copy-chain"), 0, ["1000000"], "");
+    }
+
+    [Fact]
+    public void References_to_one_instance_arrive_as_references_to_one_copy()
+    {
+        // U12 (the owner, 2026-11-15, #519, comment 6896192351, Q2, "Sharing kept"): 10,000 items of one mutable instance arrive as 10,000
+        // items of one copy, which a write through the first shows at the last, and the sender's instance stays as it was
+        const string shared = """
+            class Item(mut int V)
+
+            actor Keeper {
+                pub string Take(List<Item> got) {
+                    first = got[0]
+                    first.V = 42
+                    return "{got[9999].V} {got.Count}"
+                }
+            }
+
+            one = Item(1)
+            mut items = List<Item>()
+            for i in 0..<10000 {
+                items.Add(one)
+            }
+
+            k = spawn Keeper()
+            print(k.Take(copy items))
+            print(one.V)
+
+            """;
+        Ran(BuildAndRun(shared, toolchain.Runtime, "actor-copy-shared"), 0, ["42 10000", "1"], "");
+    }
+
+    [Fact]
+    public void A_weak_parent_link_points_at_the_copy_of_its_target()
+    {
+        // U12 (the owner, 2026-11-15, #519, comment 6896192351, Q3, "Points at the copy"): a tree's weak parent link arrives pointing at the
+        // copy of the root that the copy holds, the one instance the receiver got, and a child sent alone arrives with a null parent
+        const string tree = """
+            class Tree(string Name, List<Tree> Children, mut weak Tree? Parent)
+
+            actor Keeper {
+                pub string Take(Tree top) {
+                    p = top.Children[0].Parent
+                    if p != null {
+                        return "{p.Name} {p == top}"
+                    }
+
+                    return "none"
+                }
+
+                pub bool Orphan(Tree t) => t.Parent == null
+            }
+
+            kid = Tree("kid", List<Tree>(), null)
+            root = Tree("root", [kid], null)
+            kid.Parent = root
+            k = spawn Keeper()
+            print(k.Take(copy root))
+            print(k.Orphan(copy kid))
+            print(kid.Parent == root)
+
+            """;
+        Ran(BuildAndRun(tree, toolchain.Runtime, "actor-copy-weak"), 0, ["root true", "true", "true"], "");
+    }
+
+    [Fact]
+    public void What_crosses_is_let_go_of_once_its_message_ran()
+    {
+        // U12: 5,000 copies of a list of 100 instances, each with a string and a weak link to the first, and the immutable instance each
+        // message gives back, under a system that gives 16 pieces of memory: 28 MB of copies kept is more than it gives; every weak link
+        // reaches the copy of the first instance (Q3)
+        const string rounds = """
+            class Node(string Name, mut int Seen, mut weak Node? Parent)
+            class Label(string Text)
+
+            actor Keeper {
+                mut long total = 0
+
+                pub Label Take(List<Node> nodes) {
+                    for i in 0..<nodes.Count {
+                        n = nodes[i]
+                        n.Seen = n.Seen + 1
+                        p = n.Parent
+                        if p != null {
+                            total = total + p.Seen
+                        }
+                    }
+
+                    return Label("{total}")
+                }
+            }
+
+            k = spawn Keeper()
+            mut last = ""
+            for r in 0..<5000 {
+                root = Node("root", 0, null)
+                mut nodes = [root]
+                for i in 0..<99 {
+                    nodes.Add(Node("node {i}", 0, root))
+                }
+
+                last = k.Take(copy nodes).Text
+            }
+
+            print(last)
+
+            """;
+        Ran(BuildAndRun(rounds, ListTests.Budget(), "actor-copies-freed"), 0, ["495000"], "");
+    }
+
+    [Fact]
     public void An_inbox_nobody_runs_grows_until_the_allocator_ends_the_process()
     {
         // the positive control of the test of the freed messages: with no call that waits, every message stays in the inbox, and the

@@ -1313,7 +1313,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal("%kz.obj %p0, %kz.obj %p1", Parameters("Both"));
         Assert.Equal("ptr %p0", Parameters("Own"));
         Assert.Contains("%\"c.Holder\" = type { i64, i64, %kz.obj, %kz.obj }", program.Ir, StringComparison.Ordinal);
-        Assert.Contains("@\"table.Dot.Shape\" = internal constant [7 x ptr] [", program.Ir, StringComparison.Ordinal);
+        Assert.Contains("@\"table.Dot.Shape\" = internal constant [8 x ptr] [", program.Ir, StringComparison.Ordinal);
         Assert.DoesNotContain("@\"table.Dot\" =", program.Ir, StringComparison.Ordinal);
         Ran(Toolchain.Run(toolchain.Build(program, "interface-layout")), 0, ["1", "8", "4"], string.Empty);
     }

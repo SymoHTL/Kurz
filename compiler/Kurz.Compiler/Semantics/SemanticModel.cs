@@ -398,6 +398,7 @@ public sealed class SemanticModel
     private readonly Dictionary<NameExpression, VariableSymbol> names = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<NameExpression, FunctionSymbol> functionNames = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<object, VariableSymbol> declarations = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<VariableSymbol, object> declaringNodes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<CallExpression, CallInfo> calls = new(ReferenceEqualityComparer.Instance);
     private readonly List<FunctionSymbol> copies = [];
     private readonly Dictionary<FunctionSymbol, List<FunctionSymbol>> copiesOf = new(ReferenceEqualityComparer.Instance);
@@ -408,6 +409,7 @@ public sealed class SemanticModel
     private readonly Dictionary<AssignOrDeclare, VariableSymbol> assignments = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<LambdaExpression, LambdaInfo> lambdas = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Expression> heldCopies = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<Expression> copied = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypePattern, KurzType> patterns = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FunctionDeclaration, FunctionSymbol> functions = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<ExternFunction, FunctionSymbol> cFunctions = new(ReferenceEqualityComparer.Instance);
@@ -463,6 +465,9 @@ public sealed class SemanticModel
     /// </summary>
     public VariableSymbol DeclarationOf(object node) => declarations.TryGetValue(node, out var v) ? v : throw Missing("declaration", (node as Node)?.Line ?? (node as Parameter)?.Line ?? 0);
 
+    /// <summary>The declaration that made the variable, <see cref="DeclarationOf"/> read the other way, or null for one no declaration made.</summary>
+    public object? DeclaringNode(VariableSymbol variable) => declaringNodes.TryGetValue(variable, out var node) ? node : null;
+
     /// <summary>Whether the node declares a variable: an <see cref="AssignOrDeclare"/> that assigns does not.</summary>
     public bool Declares(object node) => declarations.ContainsKey(node);
 
@@ -516,6 +521,9 @@ public sealed class SemanticModel
     /// "Copied", at a count and a release per such read).
     /// </summary>
     public bool IsHeldCopy(Expression expression) => heldCopies.Contains(expression);
+
+    /// <summary>U12: whether the expression is an argument of a call that is no message, written after <c>copy</c>, whose value is a deep copy (Q6 of comment 6896192351).</summary>
+    public bool IsCopied(Expression expression) => copied.Contains(expression);
 
     /// <summary>The type an arm's pattern names (C4, O5).</summary>
     public KurzType PatternTypeOf(TypePattern pattern) => patterns.TryGetValue(pattern, out var t) ? t : throw Missing("pattern", pattern.Line);
@@ -606,7 +614,11 @@ public sealed class SemanticModel
 
     internal void RecordFunctionName(NameExpression name, FunctionSymbol function) => functionNames[name] = function;
 
-    internal void RecordDeclaration(object node, VariableSymbol variable) => declarations[node] = variable;
+    internal void RecordDeclaration(object node, VariableSymbol variable)
+    {
+        declarations[node] = variable;
+        declaringNodes[variable] = node;
+    }
 
     internal void RecordCall(CallExpression call, CallInfo info) => calls[call] = info;
 
@@ -634,6 +646,8 @@ public sealed class SemanticModel
     internal void RecordLambda(LambdaExpression lambda, LambdaInfo info) => lambdas[lambda] = info;
 
     internal void RecordHeldCopy(Expression expression) => heldCopies.Add(expression);
+
+    internal void RecordCopied(Expression expression) => copied.Add(expression);
 
     internal void RecordPattern(TypePattern pattern, KurzType type) => patterns[pattern] = type;
 

@@ -118,7 +118,7 @@ internal static class SyntaxPrinter
         string.Join(", ", parameters.Select(p => $"{(p.Mut ? "mut " : "")}{Type(p.Type)}{p.Name}{(p.Default is null ? "" : " = " + Print(p.Default))}"));
 
     private static string Arguments(IReadOnlyList<Argument> arguments) =>
-        string.Join(", ", arguments.Select(a => $"{(a.Name is null ? "" : a.Name + ": ")}{(a.Mut ? "mut " : "")}{Print(a.Value)}"));
+        string.Join(", ", arguments.Select(a => $"{(a.Name is null ? "" : a.Name + ": ")}{(a.Word == ArgumentWord.None ? "" : a.Word.ToString().ToLowerInvariant() + " ")}{Print(a.Value)}"));
 
     private static string Arms(IReadOnlyList<MatchArm> arms) => "[" + string.Join(" ", arms.Select(a => $"({Pattern(a.Pattern)} => {Print(a.Body)})")) + "]";
 

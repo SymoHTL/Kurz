@@ -1,0 +1,18 @@
+// expect: output
+// | 11 11
+// | 1
+// rules: U12
+
+class Counter(mut int N)
+
+actor Desk {
+    pub string Both(Counter a, Counter b) {
+        a.N = a.N + 10
+        return "{a.N} {b.N}"
+    }
+}
+
+c = Counter(1)
+d = spawn Desk()
+print(d.Both(copy c, copy c))
+print(c.N)

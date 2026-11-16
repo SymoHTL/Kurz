@@ -486,7 +486,20 @@ the next one back to the system (section 6, the owner, 2026-11-14, #519, comment
 the top-level code runs on the thread's own stack, the main thread's, as section 6 has it (the
 owner, 2026-11-14, #519, comment 6880404917, Q11). On Linux a fault on a stack's guard page is a
 `stack-overflow` as one on the main thread's is (below), and a stack the system refuses ends the
-process with `allocation-failed` and the size asked for. `ActorTests` pins the stacks, the guard page,
+process with `allocation-failed` and the size asked for. `common/`'s copy of a crossing (U12) works
+in the session of a call, eight words in the caller's frame, since the copies one call makes share
+one memo and a result has one of its own (section 6): the memo, open addressing on a block's address
+and never more than half full, which `CopyFind` reads and `CopyKeep` fills with each block held more
+than once, or every block in a call of more than one copy, its copy and the function that lets go
+of the count the memo takes of the block; the `weak` references of the copies, which `CopyWeak`
+keeps with a weak count of their target; and the copies left, which `CopyLeft` counts down, the
+last pointing each `weak` reference at its target's copy, or at null, and letting go of the memo's
+counts. Each run of a copy names its session first (`CopyUse`), since an argument whose call waits
+lets other sessions run between two copies of one call, and `CopyAbort` ends a session whose call
+was left before its last copy. The work list, which `CopyPush` fills with a block, its copy and the
+function that fills the copy, and `CopyNext` empties, the last first, is the thread's own, from the
+allocator, grown by doubling and kept for the thread's next copy, since a run runs no program code
+and leaves it empty. `ActorTests` pins the stacks, the guard page,
 the overflow, the refusal, the sizes, the pool, the trim and the registers a switch keeps, `RuntimeTests` the directories
 of the architectures, and `EmitterTests.The_switch_of_every_target_and_architecture_is_assembled_by_clang_for_its_machine`
 that clang assembles each switch for its machine.
@@ -964,7 +977,34 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the state, lets go of the arguments, moves the result beside the reply and calls the runtime's
   `Replied`, which sets the reply's byte and puts the actor back in the run queue where the activation
   that waits on it is its top, as tokio's `oneshot` stores its value and wakes its receiver, and
-  frees the message. A call that waits (U4), wherever it stands, passes a reply in its own frame, the
+  frees the message. An argument of a message or of `spawn` crosses as the type of its parameter says,
+  where it is evaluated, before a later argument's call that waits can change what it reads, and a
+  result crosses before it moves beside the reply, while the method's count of it still holds it
+  (U12): a value that reaches no class instance is shared by its count, which no program tells from
+  a copy, and one that reaches a class instance is copied deep by its type's copy function, every
+  class instance it reaches copied and every other block shared by its count, an instance of a
+  derived class through the copy slot of its class's table, slot 5, so that an instance held as its base arrives as its own class; a block whose count
+  says it is held more than once, or any block in a call of more than one copy, where a later
+  argument may reach it by a path that holds no count of it, is looked up in the memo of the call's
+  session, which the copies of all its arguments share and a result has of its own, so that two
+  paths to one block, in one argument or in two, arrive as two paths to one copy (Q2), and once the
+  call's last copy is made each `weak` reference in its copies points at the copy of its target
+  where they hold that target, and is null otherwise, with its weak count taken there (Q3). The
+  session is zero from the function's start, begun at the call where it makes more than one copy,
+  and ended by the region's end, or a jump out of it, where a case a later argument propagates left
+  the call before its last copy (section 6). `copy` before an argument of any other call copies the
+  same way, the copy a temporary the call reads and its statement lets go of (Q6). The copy walks a
+  work list and never recurses ("The runtime"). `ActorTests` pins a chain of a million links copied,
+  10,000 references to one instance arriving as references to one copy, a weak parent link pointing
+  at the copy and the allocations equal to the frees; the line `actor-crossing-fenced` of
+  `ListTests` a field's list copied before a later argument's wait replaces it, the memo, the weak
+  fix-up, a result copied from a field, and two arguments of one message that reach one instance
+  arriving as one copy across a later argument's wait whose chain crosses a result; the cases
+  `corpus/actors/copy-two-arguments.kz`, `copy-two-at-call.kz` and `copy-weak-across-arguments.kz`
+  the memo of a call, `copy-left-to-right.kz` the order, `copy-memo-keeps-block.kz` a block the memo
+  holds living to the call's last copy and `copy-left-early.kz` a call left before it; and
+  `corpus/actors/copy-derived.kz` an instance of a derived class held as its base.
+  A call that waits (U4), wherever it stands, passes a reply in its own frame, the
   one-shot slot of section 6, and its file and line, and the runtime's `Wait` sets the activation
   that waits on it: in the top-level code it runs the first actor of the run queue ("The runtime"),
   in a loop until the byte is set, as tokio's `block_on` runs its queue until its future is ready, so
@@ -1914,7 +1954,9 @@ and an inbox grows with no bound, where section 13 spills it at 64 MB, until the
 process with `allocation-failed`. An actor and its state live to the end of the process, which is
 section 6's end of an actor in a program the build takes: an actor ends with its supervisor, the
 actor that spawned it (the owner, 2026-10-30), at the root the top-level code, which ends with the
-process, and no actor stops, nor crashes without ending the process. `ActorTests` pins the crash,
+process, and no actor stops, nor crashes without ending the process. Every actor's blocks come from
+the one allocator of the thread, where section 3 gives each actor a heap of its own, so that a
+crossing keeps two actors apart by its copy alone (U12). `ActorTests` pins the crash,
 the turns, the end and the inbox's growth; no test pins the wait with no bound, which would not end.
 
 On Linux an exception that ends the process writes the trace of the calls below its error line
@@ -2130,6 +2172,16 @@ ask about it.
   `ActorTests.A_stack_a_message_took_past_the_depth_is_trimmed_in_the_pool_and_grows_again`,
   `ActorTests.A_message_runs_on_a_stack_of_2_mib_with_a_guard_page_and_the_top_level_code_on_the_threads_own`
   and `corpus/actors/stack-floor.kz`.
+- U12 with section 6: a crossing copies by the type of the parameter the argument fills, the slot a
+  message holds, so that `null` given to a `Box?` of a class with a `mut` field needs `copy` as a
+  `Box` would; the copies one call makes share one memo and a result has one of its own, each
+  argument copied where it is evaluated, left to right, a block the memo holds living until the
+  call's last copy; a function value a crossing reaches is shared by its count, its captures with
+  it, as the deep copy stops at one *(all assumed in section 6, "How a value crosses and what `copy`
+  does")*; and an actor's reference as a key of a map hashes by the actor's number, which a crossing
+  keeps, as section 6 has it ("An actor's reference compares by the actor it names"). Pinned by
+  `ActorTests`, the cases `corpus/actors/copy-shared-graph.kz`, `corpus/actors/references-in-list.kz`
+  and the six of the memo of a call (above), and the line `actor-crossing-fenced` of `ListTests`.
 
 ## What the compiler says about a program
 
@@ -2298,6 +2350,12 @@ that sit under a rule by its id. Every one is pinned by a test.
   reference, a name after `spawn` without its `(` is `syntax`, and `send` before what the parser
   reads as no call is `syntax` (U14), and before a call of anything but an actor's method the
   checker's `syntax`. A `spawn` as a statement on its own is a value on its own, F5's `syntax`.
+- U12 with L12: `copy` and `move` before an argument are its word where what follows can begin an
+  expression, as `mut` is there, `copy(x)` among them, and the name where `[`, `-`, `*`, `&` or
+  `with` follows, which go on from a name, or nothing that begins an expression does; the word is
+  the argument's, beside `mut`, and the copy of a body that reads its type (T33) keeps it. Pinned by
+  `ParserTests.Copy_and_move_before_an_argument_are_its_words_and_names_elsewhere` and
+  `SemanticModelTests.The_copy_of_a_body_that_reads_its_type_keeps_the_word_before_an_argument`.
 - Recovery (no rule id): after an error the parser skips the rest of the statement, which is the
   rest of its line once every parenthesis, bracket and brace the statement opened is closed again,
   and a block the statement opened, with an `else` clause after it, so that the next statement
@@ -2347,7 +2405,10 @@ file's own declaration of one is the file's own, where W1 makes it `redeclared`)
 of P3 and its category of P6), 19 (actors of one machine: U1, U2, U4, U6 to U12, U14 and U16, the
 others the run's, an actor's body read as a class's, its reference a type of its own, the calls
 through it recorded as messages that wait or not, `CallKind.ActorCall` and `CallKind.ActorSend`, and
-a `send` of its own method inside it recorded as `CallKind.ActorSend`), and the rules of `print` and of a value's text that
+a `send` of its own method inside it recorded as `CallKind.ActorSend`, and of U12 what crosses, by
+the type of the parameter, with `send-needs-word` at an argument and at a waiting call's result, a
+function value by the lambda its function shows, and `copy` at any call recorded for the emitter,
+`SemanticModel.IsCopied`), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter and an interface, A11 to A15, of a class's `Text()` the
 one it declares itself. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
@@ -2386,7 +2447,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`, `named-asm-label`, `binary-asm-label`,
 `naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `static-cycle`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, `lane-out-of-range`,
 `equal-by-unknown`, `equals-method`, `mutable-key`, `spawn-required`, `send-result`, `actor-field-public`,
-`mut-in-message`, and
+`mut-in-message`, `send-needs-word`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
 ### What the checker does not read
@@ -2525,12 +2586,15 @@ may take as a class's does (U1, U9), each of which leaves the
 actor and every use of its name unread, besides what a class's body does not read, as the checker's `syntax` for a base after
 an actor's name, `equal by` and a constructor in its body (U1, U2), and its `static-state` for a `static mut` field and one
 whose type is or holds a class (U1), leave it too, while an actor after a class's `:` is `syntax` and the class is read without
-that base (U1); an `on crash` after a `spawn` (U2); a message, or
-an actor's constructor, that takes or gives what crosses no actor in this build, a class instance, an immutable one
-too, whose class the checker does not read through every class it reaches (U12), an interface's value or a function
-value among them (U12); an actor's reference inside a list, a map, a union, a `?`, a function type or a type argument,
-written or inferred, and as a field of a class or a data type (U12); and a log call inside an actor (P8). The refusal of
-a mutable class instance, a function value, the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered
+that base (U1); an `on crash` after a `spawn` (U2); `move` before an argument, at a message or any
+other call, whose check of the paths it ends (section 6) the checker does not make (U12); an argument
+or a result of a message or of an actor's constructor, and a value after `copy` at any call, that
+reaches a value of a type parameter, an instance of a class of `std/`, `HttpRequest` and
+`HttpHeaders` among them, a handle of section 12, a pointer or a map whose keys reach a class
+instance, whose hash a copy would keep (U12); `copy` at a call that is no message before a value that
+reaches a function value or an interface's value, which no word makes cross (U12); and a log call
+inside an actor (P8). The refusal of
+the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered
 on 2026-11-14, comment 6880404917); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
 lists the rule ids whose cases the checker may say `not supported` to, and the cases by name that

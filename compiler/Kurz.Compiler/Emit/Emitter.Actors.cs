@@ -26,7 +26,8 @@ public sealed partial class Emitter
     /// record holds to the end of the process, so that a count a lambda takes of <c>this</c> never lets go of the state; the arguments,
     /// the constructor and the defaults of the body run here, before <c>spawn</c> gives the reference, which on one thread is the new
     /// actor running its constructor while the spawner waits (U3). The record keeps the size of the actor's stack, the one its <c>stack</c>
-    /// clause writes or 2 MiB, which the runtime rounds up to its page and raises to its floor (U1; section 6, "2 MiB + clause").
+    /// clause writes or 2 MiB, which the runtime rounds up to its page and raises to its floor (U1; section 6, "2 MiB + clause"). The
+    /// arguments cross into the actor as a message's do (U12, <see cref="Crossed"/>).
     /// </summary>
     private string EmitActorSpawn(SpawnExpression s)
     {
@@ -42,12 +43,13 @@ public sealed partial class Emitter
             fn.Emit($"store i64 1, ptr {state}");
             fn.Emit($"store i64 1, ptr {fn.Value($"getelementptr {block}, ptr {state}, i32 0, i32 1")}");
             return state;
-        });
+        }, crossing: true);
     }
 
     /// <summary>
     /// U4, U6, U11: a call of an actor's method as a message: the actor, the address of its state, read first, through its reference
-    /// or, inside it, as <c>this</c> (U11), then the arguments, each taking a count of its own (D11, F13), stored into a block that the
+    /// or, inside it, as <c>this</c> (U11), then the arguments, each taking a count of its own (D11, F13), or, where it reaches a class
+    /// instance, made a copy of its own (U12, <see cref="Crossed"/>), stored into a block that the
     /// message's function frees once it ran; the block goes to the end of the actor's inbox (U5, U15), or of its side list, where it is a
     /// call of the chain the actor waits in (U17). A call that waits (U4), wherever it stands, passes a reply in its own frame, the one-shot
     /// slot of section 6, a byte the message's function sets once the result stands beside it and the activation that waits on it, and
@@ -65,7 +67,7 @@ public sealed partial class Emitter
             NameExpression n => This(n, n.Line),
             _ => throw new InvalidOperationException($"a message through `{c.Callee.GetType().Name}` at line {c.Line}"),
         };
-        var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => Default(f.Declaration!.Parameters[j].Default, owners[f]), cConvention: false, owned: true);
+        var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => Default(f.Declaration!.Parameters[j].Default, owners[f]), cConvention: false, owned: true, crossing: true);
         var message = MessageType(f);
         var block = Allocate(message);
         fn.Emit($"store ptr {MessageRun(f)}, ptr {MessageField(message, block, 1)}");
@@ -94,7 +96,8 @@ public sealed partial class Emitter
     /// U4, U6: the function of the messages of the method <paramref name="f"/>, which the runtime calls with the actor's state and the
     /// message, made at its first use and named outside the program's functions, so that a trace leaves its frame out as it leaves the
     /// runtime's: the method called on the state with the arguments the message holds, which it lets go of after the call; where the
-    /// message has a reply, the result moved beside it and the runtime's <c>Replied</c>, which sets its byte and wakes the activation that
+    /// message has a reply, the result moved beside it, a copy of its own where it reaches a class instance (U12), and the runtime's
+    /// <c>Replied</c>, which sets its byte and wakes the activation that
     /// waits on it, as tokio's <c>oneshot::Sender::send</c> stores the value and then wakes the receiver; then the message's block freed.
     /// </summary>
     private string MessageRun(FunctionSymbol f) => Helper($"message.{f.Owner!.Name}.{f.Name}.{Number(f.Line)}", "void", ["ptr", "ptr"], () =>
@@ -102,6 +105,14 @@ public sealed partial class Emitter
         var message = MessageType(f);
         var arguments = f.Parameters.Select((p, i) => (p.Type, Value: fn.Value($"load {Ir(p.Type)}, ptr {MessageField(message, "%a1", 5 + i)}"))).ToList();
         var result = CallOn(f, "%a0", new ClassType(f.Owner!), arguments.Select(a => $"{Ir(a.Type)} {a.Value}"));
+        if (ReachesInstance(f.ReturnType))
+        {
+            // U12: a result that reaches a class instance crosses back to the caller as a copy of its own, and the method's lets go
+            var crossed = Crossed(result, f.ReturnType, null); // in a session of its own, not the call's
+            Release(result, f.ReturnType);
+            result = crossed;
+        }
+
         foreach (var (type, value) in arguments.Where(a => Counted(a.Type)))
         {
             Release(value, type);

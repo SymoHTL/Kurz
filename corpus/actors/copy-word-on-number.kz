@@ -1,0 +1,15 @@
+// expect: output
+// | 7 seven
+// | 7
+// rules: U12
+
+actor Printer {
+    pub void Show(int n, string s) {
+        print("{n} {s}")
+    }
+}
+
+k = 7
+p = spawn Printer()
+p.Show(copy k, copy "seven")
+print(k)

@@ -1,0 +1,15 @@
+// expect: output
+// | 11 11
+// | 1
+// rules: U12
+
+class Cart(mut int Items)
+
+string Both(Cart a, Cart b) {
+    a.Items = a.Items + 10
+    return "{a.Items} {b.Items}"
+}
+
+cart = Cart(1)
+print(Both(copy cart, copy cart))
+print(cart.Items)

@@ -7,8 +7,9 @@ namespace Kurz.Compiler.Semantics;
 /// reference, an <see cref="ActorType"/>, takes calls of its <c>pub</c> methods as messages: a call waits for its result (U4) and one
 /// after <c>send</c> does not (U6), and a method with a result after <c>send</c> is <c>send-result</c> (U6, U7). Inside the actor its
 /// own methods and fields are direct, as a class's are (U10), and <c>send</c> of its own method is a message (U11). What crosses into a
-/// message is a value or an actor's reference (U12). What else an actor can write, and what the build does not make of it, is
-/// <c>not supported</c>, each naming its rule (<c>compiler/README.md</c>).
+/// message and back out of it is read by its type, <c>send-needs-word</c> where it does not cross (U12, <see cref="CrossingOf"/>). What
+/// else an actor can write, and what the build does not make of it, is <c>not supported</c>, each naming its rule
+/// (<c>compiler/README.md</c>).
 /// </summary>
 public sealed partial class Checker
 {
@@ -270,112 +271,252 @@ public sealed partial class Checker
         return Types.IsError(type);
     }
 
-    /// <summary>
-    /// U12: once the classes and data types are resolved, an actor's reference as a field of a class or of a data type, and a field of an
-    /// actor's primary constructor of a type that does not cross, are <c>not supported</c>, each at its field.
-    /// </summary>
-    private void CheckActorFields()
+    /// <summary>U12: what a value of a type does where it crosses into an actor or back out of it as a result.</summary>
+    private enum ActorCrossing
     {
-        foreach (var symbol in classDeclared)
-        {
-            foreach (var field in symbol.Fields.Where(f => f.Type is ActorType && !symbol.IsActor))
-            {
-                NotSupported(field.Line, $"an actor's reference, `{field.Type}`, as the field `{field.Name}` of a class (U12)");
-            }
+        /// <summary>It crosses with no word.</summary>
+        Crosses,
 
-            if (symbol.IsActor)
+        /// <summary>It reaches a mutable class instance, and crosses with <c>copy</c> or <c>move</c> alone (Q8 of comment 6847932993).</summary>
+        NeedsWord,
+
+        /// <summary>It reaches a value of an interface's type or a function value the checker does not see, which no word makes cross.</summary>
+        Never,
+    }
+
+    /// <summary>
+    /// U12: how a value of the type crosses, with why where it does not cross with no word, and the build's limit it reaches, null where
+    /// it reaches none. A type is read through the items of a list, the keys and values of a map, the cases of a union, the fields of a
+    /// data value and of a class, a class derived from it among them (K6), and the target of a <c>weak</c> reference, which crosses where
+    /// its target does (the owner, 2026-11-15, #519, comment 6896192351, Q3, "Points at the copy"), as Rust's <c>Send</c> is structural:
+    /// a <c>mut</c> field needs a word, and an interface's type and a function type are read by their written type and never cross
+    /// (comment 6892275110, item 2; comment 6896192351, Q5, "By written type"). A value of a type parameter, a handle of section 12, a
+    /// pointer, a class of <c>std/</c>, which is no class of the file (W1), <c>HttpRequest</c> among them, and a map whose keys reach a
+    /// class instance, whose hash the copy would not keep, are the build's limits.
+    /// </summary>
+    private (ActorCrossing Kind, string? Why, string? Limit) CrossingOf(KurzType type)
+    {
+        var (kind, why, limit) = (ActorCrossing.Crosses, (string?)null, (string?)null);
+        var classes = new HashSet<ClassSymbol>();
+        var data = new HashSet<DataSymbol>();
+        void Meet(ActorCrossing k, string reason)
+        {
+            if (k > kind)
             {
-                foreach (var slot in symbol.Constructor.Where(s => !CrossesActors(s.Field.Type)))
+                (kind, why) = (k, reason);
+            }
+        }
+
+        void Walk(KurzType t)
+        {
+            switch (t)
+            {
+                case FunctionType:
+                    Meet(ActorCrossing.Never, $"a function value, `{t}`, which crosses only as a lambda the sending function shows, written at the argument or bound to an immutable local variable");
+                    break;
+                case InterfaceType:
+                    Meet(ActorCrossing.Never, $"a value of the interface `{t}`, which may hold a mutable class instance whatever the program puts there");
+                    break;
+                case WeakRefType w:
+                    Walk(w.Target);
+                    break;
+                case ClassType c when !classDeclared.Contains(c.Symbol):
+                    limit ??= $"an instance of `{c.Symbol.Name}`, a class of `std/`";
+                    break;
+                case ClassType c:
+                    foreach (var k in classDeclared.Where(x => x.HasBaseOrIs(c.Symbol)).Prepend(c.Symbol).Where(classes.Add))
+                    {
+                        foreach (var f in k.Fields)
+                        {
+                            if (f.Mut)
+                            {
+                                Meet(ActorCrossing.NeedsWord, $"an instance of `{k.Name}`, whose field `{f.Name}` is `mut`");
+                            }
+
+                            Walk(f.Type);
+                        }
+                    }
+
+                    break;
+                case ListType l:
+                    Walk(l.Element);
+                    break;
+                case MapType m:
+                    if (ReachesClass(m.Key))
+                    {
+                        limit ??= $"a map whose keys of type `{m.Key}` reach a class instance";
+                    }
+
+                    Walk(m.Key);
+                    Walk(m.Value);
+                    break;
+                case UnionType u:
+                    foreach (var c in u.Cases)
+                    {
+                        Walk(c);
+                    }
+
+                    break;
+                case DataType d when data.Add(d.Symbol):
+                    foreach (var f in d.Symbol.Fields)
+                    {
+                        Walk(SubstituteData(d, f.Type));
+                    }
+
+                    break;
+                case DataType d:
+                    foreach (var a in HeldArguments(d))
+                    {
+                        Walk(a);
+                    }
+
+                    break;
+                case TypeParameterType:
+                    limit ??= $"a value of the type parameter `{t}`";
+                    break;
+                case HandleType or HasherType or CommandType or ChildProcessType or PointerType or CFunctionType:
+                    limit ??= $"{Types.A(t)}";
+                    break;
+                default:
+                    break; // a number, a `bool`, a `char`, a string, a time, an enum, a flags set, `null` and an actor's reference
+            }
+        }
+
+        Walk(type);
+        return (kind, why, limit);
+    }
+
+    /// <summary>Whether a value of the type holds a class instance, through what a copy walks: a key of a map whose hash the copy keeps (<see cref="CrossingOf"/>).</summary>
+    private static bool ReachesClass(KurzType type) => ReachesClass(type, []);
+
+    private static bool ReachesClass(KurzType type, HashSet<DataSymbol> data) => type switch
+    {
+        ClassType or InterfaceType or WeakRefType => true,
+        ListType l => ReachesClass(l.Element, data),
+        MapType m => ReachesClass(m.Key, data) || ReachesClass(m.Value, data),
+        UnionType u => u.Cases.Any(c => ReachesClass(c, data)),
+        DataType d when data.Add(d.Symbol) => d.Symbol.Fields.Any(f => ReachesClass(SubstituteData(d, f.Type), data)),
+        DataType d => HeldArguments(d).Any(a => ReachesClass(a, data)),
+        _ => false,
+    };
+
+    /// <summary>
+    /// U12: how the argument crosses into the slot of the type <paramref name="slot"/>: a function value by what it captures where the
+    /// checker sees its lambda (<see cref="SeenLambda"/>), and by its written type otherwise, so that any other value of a function type
+    /// never crosses (a named function is no value, F11) (the owner, 2026-11-15, #519, comment 6896192351, Q5, "By written type"); every other
+    /// argument by the slot's type, which a message holds (<see cref="CrossingOf"/>). What a lambda captures crosses with no word or it
+    /// does not cross, since no word at the argument makes a function value cross (§6, Q24).
+    /// </summary>
+    private (ActorCrossing Kind, string? Why, string? Limit) ArgumentCrossing(Argument a, KurzType slot)
+    {
+        if ((Types.NonNull(slot) ?? slot) is FunctionType)
+        {
+            if (SeenLambda(a.Value) is { } l)
+            {
+                var (kind, why, limit) = (ActorCrossing.Crosses, (string?)null, (string?)null);
+                foreach (var captured in model.LambdaOf(l).Captures)
                 {
-                    NotSupported(slot.Field.Line, $"the argument `{slot.Field.Name}` of `{symbol.Name}`'s constructor, {Types.A(slot.Field.Type)}, which crosses into the actor and is no value or actor's reference (U12)");
+                    var (k, w, s) = CrossingOf(captured.Type);
+                    if (k != ActorCrossing.Crosses && kind == ActorCrossing.Crosses)
+                    {
+                        (kind, why) = (ActorCrossing.Never, $"a lambda that captures `{captured.Name}`, {w}");
+                    }
+
+                    limit ??= s;
                 }
+
+                return (kind, why, limit);
             }
         }
 
-        foreach (var data in dataDeclared)
+        return CrossingOf(slot);
+    }
+
+    /// <summary>
+    /// U12: the lambda the checker sees for a function value in the function that gives it (Q5, "By written type"): one written there, or
+    /// the one an immutable local variable was declared with.
+    /// </summary>
+    private LambdaExpression? SeenLambda(Expression value) => Unwrap(value) switch
+    {
+        LambdaExpression l => l,
+        NameExpression n when model.IsVariable(n) && model.VariableOf(n) is { Kind: VariableKind.Local, Mut: false } v => model.DeclaringNode(v) switch
         {
-            foreach (var field in data.Fields.Where(f => f.Type is ActorType))
+            AssignOrDeclare d => Unwrap(d.Value) as LambdaExpression,
+            VariableDeclaration { Value: { } bound } => Unwrap(bound) as LambdaExpression,
+            _ => null,
+        },
+        _ => null,
+    };
+
+    /// <summary>
+    /// U12, U16: the stage of the arguments of a message or of an actor's constructor, after the own error of each argument (E1), in the
+    /// order of U16: <c>send-needs-word</c> of the first argument that does not cross, at its argument, then in the order the arguments are
+    /// written, the build's <c>not supported</c> of a <c>move</c>, which stands where <c>move-reachable</c> would (section 6), and of a
+    /// value the build does not make cross (<see cref="CrossingOf"/>), and <c>mut-in-message</c> of a <c>mut</c> parameter, which
+    /// <paramref name="mutInMessage"/> reports (the owner, 2026-11-15, issue 519, comment 6891937666, item 4); whether it reported one.
+    /// </summary>
+    private bool CrossingErrors(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, string callee, Action<int> mutInMessage)
+    {
+        var limits = new string?[c.Arguments.Count];
+        for (var i = 0; i < c.Arguments.Count; i++)
+        {
+            var slot = info.Binding[i];
+            if (slot < 0 || slotMut(slot))
             {
-                NotSupported(field.Line, $"an actor's reference, `{field.Type}`, as the field `{field.Name}` of a data type (U12)");
+                continue;
+            }
+
+            var a = c.Arguments[i];
+            var (kind, why, limit) = ArgumentCrossing(a, slotType(slot));
+            limits[i] = limit;
+            if (kind == ActorCrossing.Never || (kind == ActorCrossing.NeedsWord && a.Word is not (ArgumentWord.Copy or ArgumentWord.Move)))
+            {
+                Report(ErrorIds.SendNeedsWord, a.Line, kind == ActorCrossing.NeedsWord
+                    ? $"{ArgumentText(a, i)} of `{callee}` reaches {why}, and crosses into an actor only with `copy` before it, for a deep copy, or `move` (U12)"
+                    : $"{ArgumentText(a, i)} of `{callee}` reaches {why}, and no word makes it cross into an actor: pass a value, a `data` value or an immutable class instance in its place, or a lambda that captures only such values (U12)");
+                return true;
             }
         }
-    }
 
-    /// <summary>
-    /// U12: an actor's reference stands alone as a variable's, a parameter's, a field's or a result's type; one inside a list, a map, a
-    /// union, a <c>?</c>, a function type or a type argument is <c>not supported</c>, where the type is written.
-    /// </summary>
-    private KurzType Resolve(TypeSyntax type)
-    {
-        var resolved = ResolveWritten(type);
-        if (ActorInside(resolved))
+        for (var i = 0; i < c.Arguments.Count; i++)
         {
-            NotSupported(type.Line, $"an actor's reference inside `{resolved}` (U12)");
-            return Types.Error;
+            var slot = info.Binding[i];
+            if (slot < 0)
+            {
+                continue;
+            }
+
+            if (slotMut(slot))
+            {
+                mutInMessage(slot);
+                return true;
+            }
+
+            if (c.Arguments[i].Word == ArgumentWord.Move)
+            {
+                NotSupported(c.Arguments[i].Line, "`move` before an argument, whose check of the paths it ends (section 6) the build does not make (U12)");
+                return true;
+            }
+
+            if (limits[i] is { } limit)
+            {
+                NotSupported(c.Arguments[i].Line, $"{limit}, crossing into an actor (U12)");
+                return true;
+            }
         }
 
-        return resolved;
+        return false;
     }
 
-    /// <summary>U12: the same where a value's type is inferred, a list literal's or a lambda's among them, at the expression.</summary>
-    private Typed ActorInsideValue(Expression expression, Typed typed)
-    {
-        if (typed.IsError || !ActorInside(typed.Type))
-        {
-            return typed;
-        }
-
-        NotSupported(expression.Line, $"an actor's reference inside `{typed.Type}` (U12)");
-        return Typed.Error;
-    }
-
-    /// <summary>Whether an actor's reference stands inside the type, not as the type itself.</summary>
-    private static bool ActorInside(KurzType type) => type switch
-    {
-        ListType l => IsOrHoldsActor(l.Element),
-        MapType m => IsOrHoldsActor(m.Key) || IsOrHoldsActor(m.Value),
-        UnionType u => u.Cases.Any(IsOrHoldsActor),
-        FunctionType f => f.Parameters.Any(IsOrHoldsActor) || IsOrHoldsActor(f.Result),
-        DataType d => d.TypeArguments.Any(IsOrHoldsActor),
-        PointerType p => IsOrHoldsActor(p.Pointee),
-        _ => false,
-    };
-
-    private static bool IsOrHoldsActor(KurzType type) => type is ActorType || ActorInside(type);
-
-    /// <summary>U12: a type of the build's messages: a value, a number, a <c>bool</c>, a <c>char</c>, a string, a time, an enum or a flags set, and a list, map, union or data value of them, or an actor's reference; a class instance and a function value do not cross (Q1 of comment 6866132292).</summary>
-    private static bool CrossesActors(KurzType type) =>
-        !Holds(type, t => t is not (PrimitiveType or EnumType or FlagsType or NullType or VoidType or ErrorType or ListType or MapType or UnionType or DataType or ActorType), []);
-
-    /// <summary>
-    /// U12, U16: whether the language may say <c>send-needs-word</c> of a message's argument of the type written with no word, so that
-    /// the build's <c>not supported</c> stands first in the stage of the arguments, before <c>mut-in-message</c>: a type that reaches a
-    /// mutable class instance, an instance of a class through which something reachable has a <c>mut</c> field, a class derived from it
-    /// among them (K6), a weak reference's target too; or one that reaches a function value, whose captures decide it (U12), or an
-    /// interface's type, which is read by its written type, at a <c>static</c> field by K18 and at a message's argument by U12 (the
-    /// owner, 2026-11-15, issue 519, comment 6891937666), neither of which the build reads. A type is read through the items of a list,
-    /// the keys and values of a map, the cases of a union and the fields of a data value and of a class.
-    /// </summary>
-    private bool MayNeedWord(KurzType type) => MayNeedWord(type, [], []);
-
-    private bool MayNeedWord(KurzType type, HashSet<ClassSymbol> classes, HashSet<DataSymbol> data) => type switch
-    {
-        FunctionType or InterfaceType => true,
-        WeakRefType w => MayNeedWord(w.Target, classes, data),
-        ClassType c => classDeclared.Where(x => x.HasBaseOrIs(c.Symbol)).Prepend(c.Symbol).Where(classes.Add)
-            .Any(k => k.Fields.Any(f => f.Mut || MayNeedWord(f.Type, classes, data))),
-        ListType l => MayNeedWord(l.Element, classes, data),
-        MapType m => MayNeedWord(m.Key, classes, data) || MayNeedWord(m.Value, classes, data),
-        UnionType u => u.Cases.Any(x => MayNeedWord(x, classes, data)),
-        DataType d when data.Add(d.Symbol) => d.Symbol.Fields.Any(f => MayNeedWord(SubstituteData(d, f.Type), classes, data)),
-        DataType d => HeldArguments(d).Any(a => MayNeedWord(a, classes, data)),
-        _ => false,
-    };
+    /// <summary>The text of an argument in an error: its name or <c>this</c>, else its place among the arguments.</summary>
+    private static string ArgumentText(Argument a, int i) => Text(a.Value) is var text && text != "..."
+        ? $"the argument `{text}`"
+        : $"the argument {(i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture)}";
 
     /// <summary>
     /// U2: <c>spawn Counter(1)</c> makes the actor's state with the arguments of its primary constructor, the call recorded as the
-    /// class's construction (K1), and gives its reference, wherever an expression stands; <c>spawn</c> of anything else is
-    /// <c>type-mismatch</c> (U14).
+    /// class's construction (K1), which cross into the actor as a message's arguments do (U12, <see cref="CrossingErrors"/>), and gives
+    /// its reference, wherever an expression stands; <c>spawn</c> of anything else is <c>type-mismatch</c> (U14).
     /// </summary>
     private Typed CheckSpawn(SpawnExpression s)
     {
@@ -411,7 +552,12 @@ public sealed partial class Checker
         spawning = s.Call;
         var state = CheckExpression(s.Call, null);
         spawning = outer;
-        return state.IsError ? Typed.Error : new Typed(new ActorType(symbol));
+        if (state.IsError || CrossingErrors(s.Call, model.CallOf(s.Call), j => symbol.Constructor[j].Field.Type, _ => false, name, _ => { }))
+        {
+            return Typed.Error; // U12: the constructor's arguments cross as a call's do (Q13 of comment 6847932993)
+        }
+
+        return new Typed(new ActorType(symbol));
     }
 
     /// <summary>U2: an actor's name called without <c>spawn</c> is <c>spawn-required</c>.</summary>
@@ -450,16 +596,10 @@ public sealed partial class Checker
 
         if (call.Kind == CallKind.Method && call.Function?.Owner is { IsActor: true } own)
         {
-            var mut = call.Function.Parameters.FirstOrDefault(p => p.Mut);
-            if (call.Function.Parameters.Select(p => p.Type).FirstOrDefault(t => !CrossesActors(t) && (mut is null || MayNeedWord(t))) is { } stays)
+            var f = call.Function;
+            if (CrossingErrors(s.Call, call, j => f.Parameters[j].Type, j => f.Parameters[j].Mut, $"{own.Name}.{f.Name}", j =>
+                Report(ErrorIds.MutInMessage, s.Line, $"`{f.Parameters[j].Name}` of `{own.Name}.{f.Name}` is a `mut` parameter, and a message, as this `send` makes, holds no place of the code that sent it (U9, U11)")))
             {
-                NotSupported(s.Line, $"{Types.A(stays)} in the message `{own.Name}.{call.Function.Name}`, which is no value or actor's reference (U12)");
-                return;
-            }
-
-            if (mut is not null)
-            {
-                Report(ErrorIds.MutInMessage, s.Line, $"`{mut.Name}` of `{own.Name}.{call.Function.Name}` is a `mut` parameter, and a message, as this `send` makes, holds no place of the code that sent it (U9, U11)");
                 return;
             }
 
@@ -493,12 +633,10 @@ public sealed partial class Checker
     /// U4, U9: a call of an actor's method through its reference: a <c>pub</c> one alone is seen (U9), else <c>not-visible</c>; it
     /// waits for its result, wherever a call stands, and is <see cref="CallKind.ActorCall"/>, or <see cref="CallKind.ActorSend"/>
     /// after <c>send</c> (U6). Its arguments cross (U12), then a <c>mut</c> parameter is <c>mut-in-message</c> (U9; Q6 of comment
-    /// 6880404917), and then its result crosses where it waits, a <c>send</c> dropping it (U6): U16's stage of the arguments reads a type
-    /// on which the language may say <c>send-needs-word</c> (<see cref="MayNeedWord"/>: one that reaches a mutable class instance, a
-    /// function value or an interface's type), which this build says <c>not supported</c> to, before a <c>mut</c> parameter, as rustc reads <c>Send</c> in its type check before its borrow check (the owner, 2026-11-14,
-    /// #519, comment 6884160133, item 6), and a <c>mut</c> parameter before any other type that crosses no actor in this build, an
-    /// immutable class instance among them, which the language lets cross with no word (U12), so that the build's limit hides no error
-    /// of the language (E1); its stage of the result follows.
+    /// 6880404917), in U16's order (<see cref="CrossingErrors"/>), as rustc reads <c>Send</c> in its type check before its borrow check
+    /// (the owner, 2026-11-14, #519, comment 6884160133, item 6); then its result crosses where it waits, a <c>send</c> dropping it (U6):
+    /// a result that does not cross with no word is <c>send-needs-word</c> at the call, since no word can stand at a result, as rustc
+    /// asks <c>Send</c> of a task's output as of its input (the owner, 2026-11-15, #519, comment 6896192351, Q4, "Rust: send-needs-word").
     /// </summary>
     private Typed CallActor(ActorType type, MemberAccess m, CallExpression c, KurzType? expected)
     {
@@ -533,23 +671,26 @@ public sealed partial class Checker
             return typed;
         }
 
-        var mut = picked.Parameters.FirstOrDefault(p => p.Mut);
-        if (picked.Parameters.Select(p => p.Type).FirstOrDefault(t => !CrossesActors(t) && (mut is null || MayNeedWord(t))) is { } stays)
+        if (CrossingErrors(c, model.CallOf(c), j => picked.Parameters[j].Type, j => picked.Parameters[j].Mut, $"{symbol.Name}.{picked.Name}", j =>
+            Report(ErrorIds.MutInMessage, m.Line, $"`{picked.Parameters[j].Name}` of `{symbol.Name}.{picked.Name}` is a `mut` parameter, and a message through a reference holds no place of its caller's (U9)")))
         {
-            NotSupported(m.Line, $"{Types.A(stays)} in the message `{symbol.Name}.{picked.Name}`, which is no value or actor's reference (U12)");
             return Typed.Error;
         }
 
-        if (mut is not null)
+        if (!send) // U6: a `send` drops the result, so nothing of it crosses, and its result is `send-result`
         {
-            Report(ErrorIds.MutInMessage, m.Line, $"`{mut.Name}` of `{symbol.Name}.{picked.Name}` is a `mut` parameter, and a message through a reference holds no place of its caller's (U9)");
-            return Typed.Error;
-        }
+            var (kind, why, limit) = CrossingOf(picked.ReturnType);
+            if (kind != ActorCrossing.Crosses)
+            {
+                Report(ErrorIds.SendNeedsWord, m.Line, $"`{symbol.Name}.{picked.Name}` gives {Types.A(picked.ReturnType)}, which reaches {why}, and no word can stand at a result to make it cross back to the caller: give a value, a `data` value or an immutable class instance (U12)");
+                return Typed.Error;
+            }
 
-        if (!send && !CrossesActors(picked.ReturnType)) // U6: a `send` drops the result, so nothing of it crosses, and its result is `send-result`
-        {
-            NotSupported(m.Line, $"{Types.A(picked.ReturnType)} in the message `{symbol.Name}.{picked.Name}`, which is no value or actor's reference (U12)");
-            return Typed.Error;
+            if (limit is not null)
+            {
+                NotSupported(m.Line, $"{limit}, crossing out of an actor as the result of `{symbol.Name}.{picked.Name}` (U12)");
+                return Typed.Error;
+            }
         }
 
         model.RecordCall(c, model.CallOf(c) with { Kind = send ? CallKind.ActorSend : CallKind.ActorCall, Target = type });
