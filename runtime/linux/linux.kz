@@ -631,9 +631,12 @@ void Faults() {
 // handler's: it sets the signal's default action back and returns, so that the instruction faults again
 // and the system ends the process, as Rust's handler does (the owner, 2026-10-29, "Guard page first, as
 // Rust"). A fault in a guard page while the thread's crash path runs, a walk of a raise that overflowed
-// among it, ends the process with the exit code 1 of the error line and no second trace; any other is a
-// stack overflow, of the top-level code, the root actor, in the thread's guard, or of a message in the
-// actor's, whose error line and trace `Overflow` writes before the process ends with the exit code 1.
+// among it, ends the process with the exit code 1 of the error line and no second trace. One in the guard
+// page of an actor's stack, where no entry into the allocator or the scheduler is under way (`inside`), is
+// that actor's crash, which the runtime's function in the overflow page takes with the error line (U19);
+// any other is a stack overflow, of the top-level code, the root actor, in the thread's guard, or of a
+// message inside the allocator or the scheduler, or where the overflow page could not be had, in the
+// actor's, whose error line and trace `Overflow` writes before the process ends with the exit code 1 (O11).
 extern "C" void OnFault(int number, void* details, void* context) {
     raw {
         // `si_addr` of `siginfo_t`
@@ -657,7 +660,7 @@ extern "C" void OnFault(int number, void* details, void* context) {
 
         if !crashing {
             crashing = true
-            if overflowPage != null && address >= stackGuardLow && address < stackGuardHigh {
+            if overflowPage != null && inside == 0 && address >= stackGuardLow && address < stackGuardHigh {
                 Locate()
                 crashing = false
                 extern "C" (byte*, long) => void handler = *Ptr<extern "C" (byte*, long) => void>(overflowPage)
@@ -686,6 +689,40 @@ pub void Overflowed(extern "C" (byte*, long) => void handler) {
             *Ptr<extern "C" (byte*, long) => void>(overflowPage) = handler
         }
     }
+}
+
+// The count of the entries under way into the allocator and the scheduler on the thread (design record,
+// section 6, "End the process"; O11): each entry raises it (`Entered`) and its exit lowers it (`Left`), a
+// count and not a flag, since the scheduler calls the allocator inside a change, and the scheduler saves
+// and clears it on its way to an actor's stack and puts it back on its way back (`Inside`), so that a fault
+// in an actor's code counts as none inside them. The handler takes an overflow in an actor's guard page as
+// that actor's crash only where the count is 0 (`OnFault`).
+thread static mut long inside = 0
+
+// An entry into the allocator or the scheduler begun: the count of the entries under way raised.
+pub void Entered() {
+    raw {
+        inside = inside + 1
+    }
+}
+
+// An entry into the allocator or the scheduler ended: the count of the entries under way lowered.
+pub void Left() {
+    raw {
+        inside = inside - 1
+    }
+}
+
+// The count of the entries under way into the allocator and the scheduler set to `count` from now on: the
+// count before, which the side of a switch puts back when the thread comes back to it.
+pub long Inside(long count) {
+    mut long before = 0
+    raw {
+        before = inside
+        inside = count
+    }
+
+    return before
 }
 
 // The error line of a stack overflow on an actor's stack, as `Overflow` writes it, into the overflow page,

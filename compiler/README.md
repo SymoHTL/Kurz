@@ -2006,7 +2006,14 @@ stack where its clause sets no other size, where a message on Linux had the main
 while messages ran on it, and a server whose actors hold many stacks at once, two mappings each, needs Linux's limit
 of mappings, `vm.max_map_count`, raised past its default of 65,530, as section 6 says; a recursion
 past a message's stack is its actor's crash on Linux, the log line naming `stack-overflow` at its
-line, while on Windows it ends the process as an overflow of the main thread's stack does, with the
+line, but inside the allocator or the scheduler it ends the process with its error line and the exit
+code 1 (O11): the allocator's entries that change a heap, the scheduler's that change its records,
+inboxes, run queue and replies, and the copy of a crossing from `CopyUse` to `CopyLeft`, the emitted
+functions that fill its copies among it, raise the count per thread of section 6 and lower it at their
+exit, and the scheduler and a parked activation save it around each switch and put it back, the
+scheduler clearing it on its way to an actor; the error line names the allocator's own line where the
+fault is in it, and the line of the program's call where it is in the scheduler, whose functions sit in
+the runtime's file; while on Windows it ends the process as an overflow of the main thread's stack does, with the
 system's `0xC00000FD` and no line of Kurz, the handler of section 2 for an actor's stack not being
 built there, and Windows gains a clock and a sleep for the pauses and the log line; on 64-bit Arm the
 switch, `naked` on Arm and the stacks build, and no run of this repository's gates runs them but the

@@ -3361,6 +3361,15 @@ pub string ExitErrorText(ExitError e) {
 // of the chain among them, waits in its inbox (section 6, "Deadlocks", layer 1; U17; the owner,
 // 2026-11-15, #519, comment 6892835500, Q6, "Own pooled stack"). An activation below another resumes
 // once the ones above it end, as a nested call returns before its caller goes on.
+//
+// The scheduler's entries that change its records, inboxes, run queue and replies, `ActorNew`, `Enqueue`,
+// `Replied` and `Wait`, and the copy of a crossing, from `CopyUse` to `CopyLeft`, the emitted functions that
+// fill the copies among it, with `CopyOpen` and `CopyAbort`, raise the target's count of the entries under
+// way at their start and lower it at each exit (`sys.Entered`, `sys.Left`), and each side of a switch to an
+// actor's stack saves the count and puts it back when the thread comes back to it, the scheduler's clearing
+// it on its way to the actor (`Run`, `Wait`, `sys.Inside`), so that a stack fault inside the scheduler or
+// the allocator ends the process and one in an actor's code is that actor's crash (design record,
+// section 6, "End the process"; O11).
 
 // The first and the last actor of the run queue.
 static mut byte* runFirst = null
@@ -3405,6 +3414,7 @@ pub void HeapLeft(byte* heap) {
 // `name`, for the log line of its crash (U24), the block `side` of its restart (U22), and its supervisor,
 // the actor whose code spawns it (`Supervisor`).
 pub byte* ActorNew(byte* heap, long size, long stack, byte* side, byte* name) {
+    sys.Entered()
     mut byte* state = std.HeapFirst(heap)
     raw {
         state = state + 96
@@ -3424,6 +3434,7 @@ pub byte* ActorNew(byte* heap, long size, long stack, byte* side, byte* name) {
         *Ptr<byte*>(state - 8) = null
     }
 
+    sys.Left()
     return state
 }
 
@@ -3520,6 +3531,7 @@ pub string ActorText(string name, byte* state) {
 // stand there and does not wait for its restart (U22). A message to an actor that ended is dropped, with
 // what crossed into it, a call's reply set `gone`.
 pub void Enqueue(byte* state, byte* message) {
+    sys.Entered()
     raw {
         *Ptr<byte*>(message) = null
         if *Ptr<long>(state - 88) == 3 {
@@ -3529,6 +3541,7 @@ pub void Enqueue(byte* state, byte* message) {
             }
 
             std.HeapReset(state - 144)
+            sys.Left()
             return
         }
 
@@ -3550,6 +3563,8 @@ pub void Enqueue(byte* state, byte* message) {
             Queue(state)
         }
     }
+
+    sys.Left()
 }
 
 // `message` at the end of the list whose first message stands at `list` and whose last at `list + 8`.
@@ -3623,6 +3638,7 @@ bool Ready(byte* state) {
 // in its loop (`Wait`). A reply is the byte set once the result stands, the activation that waits on it,
 // null for the top-level code, and the result.
 pub void Replied(byte* reply) {
+    sys.Entered()
     raw {
         *reply = 1
         byte* waiter = *Ptr<byte*>(reply + 8)
@@ -3633,6 +3649,8 @@ pub void Replied(byte* reply) {
             }
         }
     }
+
+    sys.Left()
 }
 
 // The reply `reply` of a call set to `kind` with no result: 2 where its callee crashed (U20), 3 where the
@@ -3669,6 +3687,7 @@ void Signal(byte* reply, byte kind) {
 // no `deadlock` (U23). A reply set `callee crashed` raises `callee-crashed` at the call's line, the crash of
 // the waiting actor in its turn (U20), and one set `gone` raises `actor-gone` there.
 pub void Wait(byte* reply, byte* message, string file, int line) {
+    sys.Entered()
     raw {
         *Ptr<byte*>(reply + 8) = running
         if running == null {
@@ -3697,7 +3716,9 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
             *Ptr<byte*>(header + 432) = message
             byte* heap = std.HeapUse(null)
             while *reply == 0 {
+                long entries = sys.Inside(0)
                 sys.Switch(header, threadSide)
+                sys.Inside(entries)
             }
 
             std.HeapUse(heap)
@@ -3705,6 +3726,7 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
             *Ptr<byte*>(header + 432) = null
         }
 
+        sys.Left()
         if *reply == 2 {
             Raise("callee-crashed", file, line)
         }
@@ -3795,7 +3817,9 @@ void Run(byte* state, byte* header) {
         byte* before = std.HeapUse(*Ptr<byte*>(state - 64))
         sys.StackGuard(header + 512, *Ptr<long>(header + 400))
         running = header
+        long entries = sys.Inside(0)
         sys.Switch(threadSide, header)
+        sys.Inside(entries)
         running = null
         sys.StackGuard(null, 0)
         std.HeapUse(before)
@@ -4444,6 +4468,7 @@ thread static mut byte* copyBefore = null
 // first of them, so that a crash between two of its copies ends it (U19, `Crashed`); nothing in the
 // top-level code, whose crash ends the process.
 pub void CopyOpen(byte* session) {
+    sys.Entered()
     raw {
         if running != null {
             *Ptr<byte*>(session + 72) = *Ptr<byte*>(running + 440)
@@ -4451,11 +4476,14 @@ pub void CopyOpen(byte* session) {
             *Ptr<byte*>(running + 440) = session
         }
     }
+
+    sys.Left()
 }
 
 // The session the copy of the run under way works in, and its heap, where it has one, the one the
 // allocation entry serves until the run's end (`CopyLeft`).
 pub void CopyUse(byte* session) {
+    sys.Entered()
     raw {
         copySession = session
         byte* heap = *Ptr<byte*>(session + 64)
@@ -4694,18 +4722,23 @@ pub void CopyLeft(byte* session) {
             CopyEnd(session)
         }
     }
+
+    sys.Left()
 }
 
 // A session left before its last copy, by a case propagated out of a later argument or another jump out
 // of the call: it ends as after its last copy, so that its copies point their `weak` references as a
 // whole copy does before the region lets go of them; nothing for a session that ended.
 pub void CopyAbort(byte* session) {
+    sys.Entered()
     raw {
         if *Ptr<long>(session + 48) != 0 {
             *Ptr<long>(session + 48) = 0
             CopyEnd(session)
         }
     }
+
+    sys.Left()
 }
 
 // The end of a session: each `weak` reference its copies hold pointed at the copy of its target, which then

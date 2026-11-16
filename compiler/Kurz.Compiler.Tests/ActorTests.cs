@@ -22,7 +22,8 @@ namespace Kurz.Compiler.Tests;
 /// the pool and its trim, the registers a parked message keeps, the top-level code's <c>deadlock</c>, a parked message at the end (U13),
 /// the chains the top-level code starts, and an overflow in a call of the chain. Then crashes (U19 to U24): the state after a restart,
 /// the inbox kept, memory over 10,000 crashes, an overflow restarted, a reply into a caller that crashed, children ending, the pause,
-/// the top-level code's sleep through it, <c>callee-crashed</c>, and the log line.
+/// the top-level code's sleep through it, <c>callee-crashed</c>, and the log line; a stack fault inside the allocator, the scheduler and
+/// the copy of a crossing, which ends the process, and the count of their entries back at 0.
 /// </summary>
 public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -2007,5 +2008,239 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         var off = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = "0", ["KURZ_LOG"] = "Kurz.Actor=None" });
         Assert.Equal((0, "1\n", ""), (off.Code, off.Output, off.Error));
+    }
+
+    /// <summary>The Kurz of <see cref="Burning"/>: the recursion with no end, armed by the program's <c>eprint("arm")</c> for one call.</summary>
+    private const string Burn = """
+        thread static mut bool burnNext = false
+
+        pub void BurnArm() {
+            raw {
+                burnNext = true
+            }
+        }
+
+        long Burn(long n) {
+            if n == 0 {
+                return 0
+            }
+
+            return Burn(n - 1) * 3 + n
+        }
+
+        void BurnArmed() {
+            mut bool armed = false
+            raw {
+                armed = burnNext
+                burnNext = false
+            }
+
+            if armed && Burn(1000000000) == 7 {
+                raw {
+                    burnNext = true
+                }
+            }
+        }
+
+
+        """;
+
+    /// <summary>The edit of the runtime's <c>Print</c> that runs <paramref name="call"/> where the program writes <c>arm</c> on standard error.</summary>
+    private static (string Path, string Old, string New) Armed(string call) => ("runtime/common/runtime.kz",
+        "pub void Print(int fd, string text, string file, int line) {\n", $$"""
+            pub void Print(int fd, string text, string file, int line) {
+                if fd == 2 && text.Bytes.Count == 3 {
+                    raw {
+                        if text.Pointer[0] == 97 && text.Pointer[1] == 114 && text.Pointer[2] == 109 {
+                            {{call}}
+                            return
+                        }
+                    }
+                }
+
+
+            """);
+
+    /// <summary>
+    /// The runtime with a stack fault made at the place <paramref name="at"/> of the file <paramref name="path"/>, the start of an entry into
+    /// the allocator or the scheduler, or of a function the copy of a crossing calls: after the program writes <c>arm</c> on standard error,
+    /// the first call that reaches that place recurses there without end, on whichever stack the thread then runs.
+    /// </summary>
+    private static CheckedRuntime Burning(string path, string at) => ListTests.Edited(
+        (path, at, Burn + at + "    BurnArmed()\n"), Armed((path == "std/std.kz" ? "std." : string.Empty) + "BurnArm()"));
+
+    [Fact]
+    public void A_stack_fault_inside_the_allocator_on_an_actor_s_stack_ends_the_process()
+    {
+        // O11 and the design record's section 6, "End the process": the allocation of `"x{k}"` recurses without end inside the allocator's
+        // entry on the stack of `Make`, where the count of the entries under way is 1, so that the process ends with the error line of a
+        // stack overflow and the exit code 1, and the actor neither restarts nor logs a crash
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // an actor's overflow on Windows ends the process as the system ends it (compiler/README.md)
+        }
+
+        const string text = """
+            actor Maker {
+                pub string Make(int k) {
+                    eprint("arm")
+                    return "x{k}"
+                }
+            }
+
+            m = spawn Maker()
+            print(m.Make(1))
+
+            """;
+        // the error line names the allocator's own line where the fault is, the call of `Burn` that did not fit, in the edited library
+        const string at = "pub byte* Allocate(long size) {\n    mut byte* p = null\n    sys.Entered()\n";
+        var library = Encoding.UTF8.GetString(Runtime.Files.Single(f => f.Path == "std/std.kz").Bytes).Replace(at, Burn + at, StringComparison.Ordinal);
+        var line = library[..library.IndexOf("    return Burn(n - 1) * 3 + n", StringComparison.Ordinal)].Count(c => c == '\n') + 1;
+        var run = BuildAndRun(text, Burning("std/std.kz", at), "actor-fault-allocator");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Empty(crashes);
+        Ran((run.Code, run.Output, rest), 1, [], $"error: stack-overflow at std.kz:{line}\n");
+    }
+
+    [Fact]
+    public void A_stack_fault_inside_the_scheduler_after_a_wait_on_an_actor_s_stack_ends_the_process()
+    {
+        // O11 and the design record's section 6, "End the process": `Go` parks in its wait on `Get`, whose side of the switch puts its count
+        // back when it resumes, then its `send` recurses without end inside the scheduler's `Enqueue`, where the count is 1, so that the
+        // process ends with the error line of a stack overflow and the exit code 1, and no actor restarts
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // an actor's overflow on Windows ends the process as the system ends it (compiler/README.md)
+        }
+
+        const string text = """
+            actor Sink {
+                mut int total = 0
+
+                pub void Take(int k) {
+                    total = total + k
+                }
+
+                pub int Get() => 1
+            }
+
+            actor Sender(Sink To) {
+                pub int Go() {
+                    n = To.Get()
+                    eprint("arm")
+                    send To.Take(n)
+                    return n
+                }
+            }
+
+            s = spawn Sender(spawn Sink())
+            print(s.Go())
+
+            """;
+        var run = BuildAndRun(text, Burning("runtime/common/runtime.kz", "pub void Enqueue(byte* state, byte* message) {\n    sys.Entered()\n"), "actor-fault-scheduler");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Empty(crashes);
+        Ran((run.Code, run.Output, rest), 1, [], "error: stack-overflow at program.kz:15\n");
+    }
+
+    [Fact]
+    public void A_stack_fault_inside_the_copy_of_a_crossing_on_an_actor_s_stack_ends_the_process()
+    {
+        // O11: the copy of a crossing counts as inside the scheduler from `CopyUse` to `CopyLeft`, whose work list is the thread's, so that
+        // the box's copy, which recurses without end where the copy takes its next block, ends the process with the error line of a stack
+        // overflow and the exit code 1, and no actor restarts with that work list half changed
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // an actor's overflow on Windows ends the process as the system ends it (compiler/README.md)
+        }
+
+        const string text = """
+            class Box(string Text)
+
+            actor Sink {
+                mut int seen = 0
+
+                pub void Take(Box b) {
+                    seen = seen + b.Text.Bytes.Count
+                }
+            }
+
+            actor Sender(Sink To) {
+                pub int Go() {
+                    eprint("arm")
+                    send To.Take(Box("x"))
+                    return 1
+                }
+            }
+
+            s = spawn Sender(spawn Sink())
+            print(s.Go())
+
+            """;
+        var run = BuildAndRun(text, Burning("runtime/common/runtime.kz", "pub byte* CopyNext() {\n"), "actor-fault-copy");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Empty(crashes);
+        Ran((run.Code, run.Output, rest), 1, [], "error: stack-overflow at program.kz:14\n");
+    }
+
+    [Fact]
+    public void The_count_of_the_entries_into_the_allocator_and_the_scheduler_is_0_again_at_the_end()
+    {
+        // O11: every entry lowers the count it raised and each side of a switch puts its own back, through spawns, sends, calls of a chain,
+        // a session of two copies, a list grown past the allocator's classes, two crashes and their restarts, so that the program's end,
+        // which writes the count here, finds it 0
+        const string text = """
+            class Box(string Text)
+
+            actor Store {
+                mut List<string> items = []
+
+                pub void Put(Box b, string s) {
+                    items.Add(b.Text)
+                    items.Add(s)
+                }
+
+                pub int Fail(int k) {
+                    if k > 0 {
+                        throw "no {k}"
+                    }
+
+                    return k
+                }
+
+                pub int Count() => items.Count
+            }
+
+            actor Front(Store To) {
+                pub int Pass(int k) => To.Fail(k) + 1
+
+                pub void Try(int k) {
+                    print(Pass(k))
+                }
+            }
+
+            store = spawn Store()
+            front = spawn Front(store)
+            for i in 0..<100 {
+                send store.Put(Box("b{i}"), "s{i}")
+            }
+
+            mut List<long> xs = []
+            for i in 0..<40000 {
+                xs.Add(long(i))
+            }
+
+            print(xs.Count)
+            send front.Try(1)
+            print(front.Pass(0))
+            print(store.Count())
+
+            """;
+        var counted = ListTests.Edited(("runtime/common/runtime.kz", "pub void Finish() {\n    EndActors()\n",
+            "pub void Finish() {\n    EndActors()\n    Print(2, \"entries {sys.Inside(0)}\", \"\", 0)\n"));
+        var run = BuildAndRun(text, counted, "actor-entries-counted");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Store#1 crashed: thrown \"no 1\" at program.kz:13", "Front#2 crashed: callee-crashed at program.kz:23"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["40000", "1", "0"], "entries 0\n");
     }
 }

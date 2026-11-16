@@ -276,3 +276,34 @@ pub void Sleep(long nanoseconds) {
 // (compiler/README.md, "What the emitter does not emit").
 pub void Overflowed(extern "C" (byte*, long) => void handler) {
 }
+
+// The count of the entries under way into the allocator and the scheduler on the thread, kept as on Linux
+// (design record, section 6, "End the process"; O11), which no handler reads on Windows, where an actor's
+// overflow ends the process as any overflow does.
+thread static mut long inside = 0
+
+// An entry into the allocator or the scheduler begun: the count of the entries under way raised.
+pub void Entered() {
+    raw {
+        inside = inside + 1
+    }
+}
+
+// An entry into the allocator or the scheduler ended: the count of the entries under way lowered.
+pub void Left() {
+    raw {
+        inside = inside - 1
+    }
+}
+
+// The count of the entries under way into the allocator and the scheduler set to `count` from now on: the
+// count before, which the side of a switch puts back when the thread comes back to it.
+pub long Inside(long count) {
+    mut long before = 0
+    raw {
+        before = inside
+        inside = count
+    }
+
+    return before
+}
