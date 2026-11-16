@@ -213,7 +213,7 @@ public sealed class ThrowSets
         return first;
     }
 
-    // the unit's code, and the code of every unit it reaches that is not read yet
+    // the unit's code, and the code of every unit it reaches that no read took before
     private void Read(object key, Unit unit)
     {
         var pending = new Queue<(object Key, Unit Unit)>();
@@ -238,7 +238,7 @@ public sealed class ThrowSets
 
     /// <summary>
     /// Each unit's set made of its own throws and of the sets of the units it runs, and the generic data types it builds made of its own and
-    /// of those the units it runs build, each put through each edge's type arguments, until no set grows.
+    /// of those the units it runs build, each put through each edge's type arguments, as long as a set grows.
     /// </summary>
     private void Solve()
     {
