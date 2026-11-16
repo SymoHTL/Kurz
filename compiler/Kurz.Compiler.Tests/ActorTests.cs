@@ -3082,27 +3082,29 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_block_at_the_root_reads_the_crash_and_restarts_its_child()
     {
         // U28, U30, U33: the top-level code's wait runs the block, which reads the thrown value as its case of `Reason`, the place,
-        // the chain's 32 digits and a local of the top-level code, taken by value (S7 of comment 6907441402); `restart` restarts the
-        // child, which serves the call that waits, and the log line is written at the decision (S10 of that comment)
+        // the chain's 32 hexadecimal digits (S4 of comment 6907441402) and a local of the top-level code, taken by value (S7 of that
+        // comment); `restart` restarts the child on the copy of its argument that its supervisor keeps where the policy can restart, a
+        // block among them (section 6, 2026-11-13, comment 6851105334), which serves the call that waits, and the log line is written at
+        // the decision (S10 of comment 6907441402)
         const string text = """
             data Lost(int Code)
 
-            actor Worker {
+            actor Worker(string Name) {
                 pub void Fail(int code) {
                     throw Lost(code)
                 }
 
-                pub int Ping() => 1
+                pub string Ping() => Name
             }
 
             label = "worker"
-            w = spawn Worker() on crash (c) {
+            w = spawn Worker("kept") on crash (c) {
                 match c.Reason {
                     Lost l => print("{label} lost {l.Code} at {c.Place.File}:{c.Place.Line}")
                     RuntimeError e => print("runtime {e.Detail}")
                 }
 
-                print(c.Chain.Bytes.Count)
+                print(c.Chain)
                 restart
             }
             send w.Fail(7)
@@ -3112,7 +3114,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var run = BuildAndRun(text, toolchain.Runtime, "actor-block-root-restart");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Worker#1 crashed: thrown \"Lost { Code = 7 }\" at program.kz:5"], crashes);
-        Ran((run.Code, run.Output, rest), 0, ["worker lost 7 at program.kz:5", "32", "1"], "");
+        Ran((run.Code, run.Output.Where((_, i) => i != 1).ToList(), rest), 0, ["worker lost 7 at program.kz:5", "kept"], "");
+        Assert.Matches("^[0-9a-f]{32}$", run.Output[1]);
     }
 
     [Fact]
@@ -3299,7 +3302,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void The_block_after_an_actors_name_decides_for_each_of_its_spawns()
     {
         // U27, U31: the type's block, which reads `c` and what a top-level function reads (S6 of comment 6907441402), runs as the
-        // block at the spawn does, here in the top-level code's wait
+        // block at the spawn does, here in the top-level code's wait; a block at a `spawn` of the type wins over it (2026-11-15, #519,
+        // comment 6902210646, Q3)
         const string text = """
             actor Worker on crash (c) {
                 print("type's block at {c.Place.Line}")
@@ -3315,12 +3319,18 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             w = spawn Worker()
             send w.Fail()
             print(w.Ping())
+            v = spawn Worker() on crash (c) {
+                print("spawn's block at {c.Place.Line}")
+                restart
+            }
+            send v.Fail()
+            print(v.Ping())
 
             """;
         var run = BuildAndRun(text, toolchain.Runtime, "actor-block-type");
         var (crashes, rest) = Logged(run.Error);
-        Assert.Equal(["Worker#1 crashed: thrown \"worker fails\" at program.kz:6"], crashes);
-        Ran((run.Code, run.Output, rest), 0, ["type's block at 6", "1"], "");
+        Assert.Equal(["Worker#1 crashed: thrown \"worker fails\" at program.kz:6", "Worker#2 crashed: thrown \"worker fails\" at program.kz:6"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["type's block at 6", "1", "spawn's block at 6", "1"], "");
     }
 
     [Fact]
@@ -3572,6 +3582,49 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Worker#3 crashed: thrown \"worker fails\" at program.kz:10"], crashes);
         Ran((run.Code, run.Output, rest), 0, ["1", "block", "note 0", "0"], "");
+    }
+
+    [Fact]
+    public void A_message_of_the_supervisor_that_calls_its_child_whose_block_waits_behind_it_ends_the_top_level_wait_in_deadlock()
+    {
+        // U34 (the owner, 2026-11-16, #519, comment 6926540546, "Keep: it waits"): `Go` calls its child while the child's block waits in
+        // `Boss`'s inbox behind `Go`, so that the call waits for the decision and the block for `Go`; nothing left to run can end the
+        // top-level code's wait, which ends the process with `deadlock` at its line, and the block decided nothing and wrote no line
+        const string text = """
+            actor Other {
+                pub int Ping() => 1
+            }
+
+            actor Worker {
+                pub void Fail() {
+                    throw "worker fails"
+                }
+
+                pub int Ping() => 2
+            }
+
+            actor Boss {
+                pub int Go(Other other) {
+                    kid = spawn Worker() on crash (c) {
+                        print("never")
+                        restart
+                    }
+
+                    send kid.Fail()
+                    print(other.Ping())
+                    return kid.Ping()
+                }
+            }
+
+            o = spawn Other()
+            b = spawn Boss()
+            print(b.Go(o))
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-wait-deadlock");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Empty(crashes);
+        Ran((run.Code, run.Output, rest), 1, ["1"], "error: deadlock at program.kz:28\n");
     }
 
     [Fact]
