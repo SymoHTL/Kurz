@@ -4039,7 +4039,7 @@ void Crashed(byte* state, byte* header) {
         EndChildren(state)
         byte* heap = std.HeapNew(0)
         if heap == null {
-            AllocationFailed(64)
+            AllocationFailed(0)
         }
 
         mut byte* m = *Ptr<byte*>(state - 32)

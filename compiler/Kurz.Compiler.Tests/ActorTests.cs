@@ -23,8 +23,8 @@ namespace Kurz.Compiler.Tests;
 /// the chains the top-level code starts, and an overflow in a call of the chain. Then crashes (U19 to U24): the state after a restart,
 /// the inbox kept, memory over 10,000 crashes, an overflow restarted, a reply into a caller that crashed, children ending, the pause,
 /// the top-level code's sleep through it, <c>callee-crashed</c>, and the log line; a stack fault inside the allocator, the scheduler and
-/// the copy of a crossing, which ends the process, and the count of their entries back at 0; and <c>print-failed</c> and
-/// <c>not-char-boundary</c> in a message.
+/// the copy of a crossing, which ends the process, and the count of their entries back at 0; the size a refused heap at a crash names;
+/// and <c>print-failed</c> and <c>not-char-boundary</c> in a message.
 /// </summary>
 public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -2243,6 +2243,56 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Store#1 crashed: thrown \"no 1\" at program.kz:13", "Front#2 crashed: callee-crashed at program.kz:23"], crashes);
         Ran((run.Code, run.Output, rest), 0, ["40000", "1", "0"], "entries 0\n");
+    }
+
+    [Fact]
+    public void A_heap_the_system_refuses_at_a_crash_ends_the_process_with_allocation_failed_of_the_0_bytes_asked()
+    {
+        // O11, U21: the new heap the crash of `Fail` asks for its kept inbox has a first block of no bytes, which the error line of
+        // `allocation-failed` names as the size asked for, as a refused actor's heap names the bytes of its record and state, where the
+        // system refuses that heap
+        const string text = """
+            actor Thrower {
+                pub int Fail(int k) {
+                    eprint("arm")
+                    if k > 0 {
+                        throw "no {k}"
+                    }
+
+                    return k
+                }
+            }
+
+            t = spawn Thrower()
+            print(t.Fail(1))
+
+            """;
+        var refusing = ListTests.Edited(("std/std.kz", "pub byte* HeapNew(long first) {\n    sys.Entered()\n", """
+            thread static mut bool refuseNext = false
+
+            pub void RefuseArm() {
+                raw {
+                    refuseNext = true
+                }
+            }
+
+            pub byte* HeapNew(long first) {
+                mut bool refused = false
+                raw {
+                    refused = refuseNext && first == 0
+                }
+
+                if refused {
+                    return null
+                }
+
+                sys.Entered()
+
+            """), Armed("std.RefuseArm()"));
+        var run = BuildAndRun(text, refusing, "actor-crash-heap-refused");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Empty(crashes);
+        Ran((run.Code, run.Output, rest), 1, [], "error: allocation-failed (0 bytes)\n");
     }
 
     [Fact]
