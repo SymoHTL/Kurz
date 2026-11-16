@@ -414,7 +414,10 @@ public sealed partial class Emitter
                 return;
             case FunctionType or HandleType or HasherType or CommandType or ChildProcessType:
                 {
-                    // a value no crossing reaches, as the checker refuses it inside what crosses (U12), and which a `copy` shares
+                    // a function value reaches no copy here: the checker refuses one inside what crosses or what a `copy` reaches (U12,
+                    // `CrossingOf`), and one given as the argument crosses with its lambda's environment (`CrossingEnvironment`); a handle,
+                    // a hasher, a command or a child process reaches it moved into a message or a `spawn`, whose build limit the checker
+                    // sets aside after `move` (`CrossingErrors`), and the receiver shares it by its count
                     var value = fn.Value($"load {Ir(type)}, ptr {from}");
                     Retain(value, type);
                     fn.Emit($"store {Ir(type)} {value}, ptr {into}");

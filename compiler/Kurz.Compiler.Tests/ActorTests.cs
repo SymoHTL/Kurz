@@ -352,9 +352,9 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             """)));
 
     [Fact]
-    public void A_moved_instance_is_the_one_the_receiver_keeps_and_changes()
+    public void A_moved_instance_is_copied_into_the_receivers_heap_which_keeps_and_changes_it()
     {
-        // U12: `move` hands the instance to the actor, as its copy in the actor's heap (section 13), which the actor keeps in its state past
+        // U12: `move` hands the instance to the actor, as its copy in the actor's heap (section 6), which the actor keeps in its state past
         // the message and changes there, under the allocator that makes every freed block inaccessible, after the sender's place of it was
         // let go of through the test for the empty address (comment 6895076937)
         const string program = """
@@ -397,8 +397,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // U12: a message with `move` takes the blocks of its copy in the actor's heap beside its own and gives back the moved instance
         // and its list, and one with `copy` takes the copy's blocks and gives back none, read through the counts of the allocator
-        // (comment 6895076937: `move` copies nothing on one thread, and with own heaps it copies and frees the original, section 13); a
-        // copy sent first makes the runtime's work list of copies, which the thread keeps
+        // (section 6: a `move` into a parameter copies nothing, comment 6895076937, and one into a message copies and frees the original,
+        // assumed on comment 6902210646, Q5); a copy sent first makes the runtime's work list of copies, which the thread keeps
         const string program = """
             class Cart(mut int Items, List<int> Marks)
 
@@ -615,7 +615,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // section 3, U12 (the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big unbuilt"): a round of messages whose
         // arguments are an instance with a list, strings, a list and a map, whose results are a string, a data value with a list of
-        // strings and an instance, a `move` of an instance with its list (section 13) and a lambda that captures a string, each a copy in
+        // strings and an instance, a `move` of an instance with its list (section 6) and a lambda that captures a string, each a copy in
         // the heap it crosses into; across a third round the top-level code's heap and the actor's hold as many blocks as before it
         const string program = """
             class Item(string Name, List<int> Xs)
@@ -842,6 +842,86 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(program, HeapBlocks.Value, "actor-lambda-heap"), 0, ["3 0 2"], "");
+    }
+
+    [Fact]
+    public void A_lambda_moved_into_an_actor_takes_a_copy_of_its_environment_in_the_actors_heap()
+    {
+        // U12: a `move` into a message copies the value into the receiver's heap as an argument with no word crosses (section 6, assumed on
+        // comment 6902210646, Q5), a lambda the sending function shows with its environment, so that the heap of the top-level code holds as
+        // many blocks as before the send once its lambda was let go of, and the actor's two more, as for a lambda sent with no word
+        const string program = """
+            actor Keeper {
+                mut () => int kept = () => 0
+
+                pub void Keep(() => int f) {
+                    kept = f
+                }
+
+                pub int Run() {
+                    f = kept
+                    return f()
+                }
+
+                pub long Live() => HttpServer.HeapLive()
+            }
+
+            void Give(Keeper keeper, string text) {
+                f = () => text.Bytes.Count
+                send keeper.Keep(move f)
+            }
+
+            k = spawn Keeper()
+            word = "w {k.Run()}"
+            own = HttpServer.HeapLive()
+            held = k.Live()
+            Give(k, word)
+            ran = k.Run()
+            ownLeft = HttpServer.HeapLive() - own
+            heldLeft = k.Live() - held
+            print("{ran} {ownLeft} {heldLeft}")
+
+            """;
+        Ran(BuildAndRun(program, HeapBlocks.Value, "actor-lambda-moved-heap"), 0, ["3 0 2"], "");
+    }
+
+    [Fact]
+    public void A_loop_that_moves_a_number_or_a_string_into_an_actor_takes_its_list_where_the_items_place_empties()
+    {
+        // U12: a loop whose body moves its variable takes its list, an item that crosses with no word among them (section 6, assumed on
+        // comment 6897778812, Q1); a string's place empties at its `move`, and a number's, which has no empty value, stays, the number
+        // counted once more as inline data is
+        const string program = """
+            actor Sum {
+                mut int total = 0
+                mut string text = ""
+
+                pub void Add(int n) {
+                    total = total + n
+                }
+
+                pub void Join(string t) {
+                    text = "{text}{t}"
+                }
+
+                pub string Show() => "{total} {text}"
+            }
+
+            s = spawn Sum()
+            nums = [1, 2, 3]
+            for n in nums {
+                send s.Add(move n)
+            }
+
+            names = ["a", "b"]
+            for t in names {
+                send s.Join(move t)
+            }
+
+            print(s.Show())
+
+            """;
+        Ran(BuildAndRun(program, toolchain.Runtime, "actor-loop-moves-number"), 0, ["6 ab"], "");
     }
 
     /// <summary>

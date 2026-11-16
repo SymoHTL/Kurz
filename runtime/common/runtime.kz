@@ -21,7 +21,9 @@ pub void Start(int count, byte* values) {
 
 // Called by the emitted `main` after the program's last statement: the end of the process with the
 // exit code 0 through the runtime's one exit (design record, section 6). A message still in an actor's
-// inbox does not run, and every actor's heap is freed whole (U13).
+// inbox does not run (U13), and every actor's heap is freed whole (design record, section 6, assumed: the
+// end of the root actor read as the end of every actor it stops, with section 3's freeing of the heap of
+// an actor that ends).
 pub void Finish() {
     EndActors()
     sys.Exit(0)
@@ -3377,7 +3379,8 @@ static mut byte* runFirst = null
 static mut byte* runLast = null
 
 // The count of the actors spawned, which is the number of the last one (U2), and the last one, whose
-// record names the one spawned before it, so that the end of the program reaches every actor (U13).
+// record names the one spawned before it, so that the end of the program reaches every actor (U13), whose
+// heap it frees (design record, section 6, assumed, with section 3's freeing of an ending actor's heap).
 static mut long actorCount = 0
 static mut byte* actors = null
 
@@ -3562,7 +3565,8 @@ pub byte* ActorHeap(byte* state) {
 }
 
 // The end of every actor at the end of the program (U13): its heap freed whole, as section 3 frees the
-// heap of an actor that ends, the messages queued in it with it, as tokio drops its tasks when its runtime
+// heap of an actor that ends (design record, section 6, assumed: the end of the root actor read as the end
+// of every actor it stops), the messages queued in it with it, as tokio drops its tasks when its runtime
 // shuts down, and, after a crash, the first heap, which holds its record; no message runs after it, and no
 // restart whose pause runs (U22).
 void EndActors() {
