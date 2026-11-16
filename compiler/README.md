@@ -1047,7 +1047,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   receiver's heap beyond the copy of the map's block, and runs no program code, since a key's hash is the
   one the map's type takes, built from the fields its class compares. `corpus/actors/copy-map-instance-keys.kz` sends maps
   keyed by instances that compare by identity and by content, one of whose keys the memo gives before its
-  fields are filled, and finds each copied key in the receiver's map, at a message and after `copy` at a
+  fields are filled, and finds each copied key in the receiver's map, at a message, after `move` at a
+  message, which copies the moved map into the receiver's heap by the same copy, and after `copy` at a
   plain call.
   A `move` before an argument of a call that crosses nothing copies nothing and changes no count
   (U12): a variable's value leaves its place, which is stored null, or a string of no block, the count

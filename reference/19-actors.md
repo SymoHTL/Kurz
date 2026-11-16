@@ -1293,7 +1293,7 @@ class Box(mut int N)
 class Tag(string Name, Box Owner)
 data Shelf(Tag First, Map<Tag, int> Counts)
 
-string ByBox(Map<Box, string> known, Box a, Box b) {
+int Found(Map<Box, string> known) {
     mut found = 0
     for e in known {
         if (known[e.Key] ?? "") == e.Value {
@@ -1301,8 +1301,10 @@ string ByBox(Map<Box, string> known, Box a, Box b) {
         }
     }
 
-    return "{known[a] ?? "none"} {known[b] ?? "none"}, {found} found"
+    return found
 }
+
+string ByBox(Map<Box, string> known, Box a, Box b) => "{known[a] ?? "none"} {known[b] ?? "none"}, {Found(known)} found"
 
 string ByTag(Shelf s) {
     mut found = 0
@@ -1320,6 +1322,8 @@ actor Hub {
     pub string Names(Map<Box, string> known, Box a, Box b) => ByBox(known, a, b)
 
     pub string Tags(Shelf s) => ByTag(s)
+
+    pub string Moved(Map<Box, string> known) => "{Found(known)} found"
 }
 
 one = Box(1)
@@ -1335,6 +1339,10 @@ counts[Tag("bob", box)] = 4
 h = spawn Hub()
 print(h.Names(copy names, copy one, copy two))
 print(h.Tags(copy Shelf(ann, counts)))
+mut kept = Map<Box, string>()
+kept[Box(5)] = "e"
+kept[Box(6)] = "f"
+print(h.Moved(move kept))
 print(ByBox(copy names, copy one, copy two))
 print(ByTag(copy Shelf(ann, counts)))
 ```
