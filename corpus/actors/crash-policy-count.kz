@@ -1,0 +1,9 @@
+// expect: error type-mismatch at 8
+// rules: U26
+
+actor Worker {
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash restart max 0 in 1min
+print(w.Ping())

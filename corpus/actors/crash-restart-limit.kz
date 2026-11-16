@@ -1,0 +1,19 @@
+// expect: throws restart-limit at 13
+// | 1
+// rules: U26
+
+actor Flaky {
+    pub void Fail() {
+        throw "flaky"
+    }
+
+    pub int Ping() => 1
+}
+
+f = spawn Flaky() on crash restart after 1ms max 2 in 1min
+send f.Fail()
+send f.Fail()
+print(f.Ping())
+send f.Fail()
+print(f.Ping())
+print("after")

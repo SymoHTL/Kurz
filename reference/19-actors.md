@@ -3,11 +3,11 @@
 An actor is an object with private state and an inbox, which handles one message at a time; a call
 of its method through its reference is a message (§6, "Actors"). This chapter holds the actors of
 one machine and what a program writes of them: an actor's declaration, `spawn`, the call that waits
-for its result, `send`, and what crosses into a message, and the crash of an actor, its restart by
-the default policy and its log line (U19 to U24). The scheduler, the stacks, the words of a policy and
-its block, deadlocks but the calls a waiting actor lets in (U17) and the wait of the top-level code
-that nothing can end (U18), the clauses after an actor's name but the stack's (U1) and the actors of
-other machines (§6, §7) have no rule here, and `compiler/README.md` says what the compiler builds of the rules here.
+for its result, `send`, and what crosses into a message, the crash of an actor, its restart by
+the default policy and its log line (U19 to U24), and the words of a policy (U25 to U27). The
+scheduler, the stacks, the block of a policy, deadlocks but the calls a waiting actor lets in (U17)
+and the wait of the top-level code that nothing can end (U18), the clauses after an actor's name but
+the stack's and the policy's (U1, U27) and the actors of other machines (§6, §7) have no rule here, and `compiler/README.md` says what the compiler builds of the rules here.
 
 ### U1 (decided, §6) `actor`, and its words
 
@@ -50,6 +50,12 @@ marks it)*. `stack` with no literal of bytes after it, a number with no unit or 
 among them, and `stack` written twice are `syntax` (E4) *(assumed: as §6 marks it)*. On a target where
 no actor has a stack of its own the clause builds and sets nothing (§6, the owner, 2026-11-13, #519,
 comment 6851105334, "Accept, set nothing (Recommended)").
+
+`on crash` after an actor's name takes the words of a policy as they stand after `spawn`'s arguments
+(U2), `actor Worker on crash stop { ... }`, and gives the type's default (U27) (§6, "Policy at
+`spawn`"), and a second `on crash` there is `syntax`, as a second `stack` is (E4) *(assumed: as §6
+marks it)*; `on crash` with a block after it, `on crash (c) { ... }`,
+has no rule here.
 
 Case: [actors/counter.kz](../corpus/actors/counter.kz)
 ```kurz
@@ -194,6 +200,16 @@ constructor (§6, comment 6882624606, Q26).
 
 `spawn` stands wherever an expression does, in a function, a class's method, a lambda and a field's
 default among them, as a call that waits does (U4).
+
+After the argument list stand the words of a policy, which U25 and U26 give a meaning:
+`on crash restart`, `on crash stop` or `on crash escalate`, and after `restart` its knobs,
+`after <duration>` and `max N in <duration>`, `spawn Worker(queue) on crash restart after 1s max 10 in
+1min` (§6, "Policy at `spawn`"). Each knob stands at most once, in either order, and its value is a
+number literal, with its sign where it has one, which the checker reads (U26); the policy ends the
+expression. Another word after `on crash`, a knob after `stop` or `escalate`, a knob written twice,
+`max N` without its `in` and its duration, a value that is no number literal and anything after the
+policy but the end of the expression are `syntax` (E4) *(assumed: as §6 marks it, as `stack` takes its
+literal once (U1))*. `on crash` with a block after it, `on crash (c) { ... }`, has no rule here.
 
 Case: [actors/spawn-in-function.kz](../corpus/actors/spawn-in-function.kz)
 ```kurz
@@ -1927,8 +1943,9 @@ path of §6, which switches the thread to the scheduler's stack). An exception i
 is the crash of the root actor, which ends the process with the exit code 1, the error line and the
 trace, as before (§6). `allocation-failed`, `random-failed` and a fault outside a guard page end the
 process wherever they happen (O11, M9), and on Windows an actor's stack overflow ends the process as
-the system ends it (`compiler/README.md`). The words of a policy after `spawn`, `on crash`, are
-`not supported` (U2), so that every actor has the default, `on crash restart` (§6).
+the system ends it (`compiler/README.md`). The words of a policy, `on crash`, say what the
+supervisor does with the crash (U25 to U27), and an actor whose `spawn` and type write none has the
+default, `on crash restart` (§6).
 
 Case: [actors/crash-restarts-fresh.kz](../corpus/actors/crash-restarts-fresh.kz)
 ```kurz
@@ -2160,8 +2177,7 @@ of 30 s since the last restart with no crash, as Akka's backoff supervisor waits
 clock of the runtime, the taken points of comment 6899225864). While a pause runs, a wait of the
 top-level code that finds nothing else to run sleeps until it ends, and raises no `deadlock` (U18)
 (§6, the taken points of comment 6899225864). A corpus case crashes at most three times, about
-0.7 s of pauses *(assumed: the record's `after 1ms` for a case that shows a restart needs the words of
-a policy, which are `not supported` (U19))*.
+0.7 s of pauses, unless it writes `after 1ms` (U26) *(assumed: as §6 marks it)*.
 
 Case: [actors/crash-wait-sleeps.kz](../corpus/actors/crash-wait-sleeps.kz)
 ```kurz
@@ -2203,4 +2219,190 @@ actor Shop {
 s = spawn Shop()
 send s.Buy("stock")
 print(s.Name())
+```
+
+### U25 (decided, §6) The policy at `spawn`
+
+The words after `spawn`'s argument list say what the supervisor does at the actor's crash:
+`on crash restart` restarts it (U22, U23), the default, `on crash stop` leaves it stopped, and
+`on crash escalate` makes the supervisor crash too, with the child's crash passed up whole, its id,
+its place and its text (§6, "Policy at `spawn`"; the owner, 2026-11-15, #519, comment 6902210646, Q4).
+A stopped actor's crash writes its log line (U24) (§6, Q24), a caller that waited on its crashing
+message gets `callee-crashed` (U20), and a call that comes after the stop raises `actor-gone`, as one
+to an actor that ended does (U20) (§6); its inbox goes as the inbox of an actor that ended does, so
+that a call queued in it at the crash raises `actor-gone` too *(assumed: as §6 marks it, as the
+queued messages of a child that its supervisor's crash ends are dropped (U21))*. An escalated crash
+writes no log line, and the supervisor that takes it, the first up the chain of supervisors whose
+policy restarts or stops, writes the one line (§6, Q24), naming the actor its policy handles, with the
+id, the place and the text of the first crash *(assumed: as §6 marks it)*; the supervisor's crash ends
+its other children, as any crash does (U21), and a crash passed up into an actor whose constructor
+runs at its `spawn` goes on to its spawner, since a throw there is the spawner's crash (U3) *(assumed:
+as §6 marks it)*. At the top level the root is the supervisor, so that `escalate` there ends the
+process with the child's error line, the text below it and the exit code 1 (§6, comment 6902210646,
+Q4), and with the trace of the child's stack, from its raise to its message's method *(assumed: as §6
+marks it, the trace of the stack that raised, as at a raise of the top-level code)*.
+
+Case: [actors/crash-stop.kz](../corpus/actors/crash-stop.kz)
+```kurz
+actor Flaky {
+    pub void Fail() {
+        throw "flaky"
+    }
+
+    pub int Ping() => 1
+}
+
+actor Other {
+    pub int Ping() => 2
+}
+
+f = spawn Flaky() on crash stop
+o = spawn Other()
+print(f.Ping())
+send f.Fail()
+print(o.Ping())
+print(f.Ping())
+```
+
+Case: [actors/crash-escalate-root.kz](../corpus/actors/crash-escalate-root.kz)
+```kurz
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash escalate
+print(w.Ping())
+send w.Fail()
+print(w.Ping())
+print("after")
+```
+
+Case: [actors/crash-policy-word.kz](../corpus/actors/crash-policy-word.kz)
+```kurz
+actor Worker {
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash retry
+print(w.Ping())
+```
+
+### U26 (decided, §6) The first pause and the limit
+
+After `restart`, `after <duration>` sets the first pause of the growing pause (U23), which doubles
+from it at each crash up to the cap of 30 s and comes back to it after a run of 30 s with no crash,
+and `max N in <duration>` sets a limit, where by default none holds (§6, "Policy at `spawn`"; the
+owner, 2026-10-30, "100 ms doubling to 30 s" and "No limit, as Akka"). The limit counts the crashes
+the policy restarts in a window of that duration that slides with each crash, as Erlang's
+`supervisor` keeps the times of its restarts within its period (`can_restart`), and the crash that
+finds N of them in the window passes it: the actor ends, and its supervisor crashes with
+`restart-limit` at the line of the `spawn`, which the supervisor's own policy takes in turn, at the
+top level the end of the process (§6, the owner, 2026-11-15, #519, comment 6902210646, Q4, "Erlang:
+restart-limit id") *(assumed: as §6 marks it, each crash counted at its time, before its pause, the
+log line of the crash that passes the limit written, as Erlang's supervisor reports a child's exit
+before it shuts down, and at the top level the trace of the top-level code where it waits)*. The
+duration after `after` is above 0 and at most the cap, the count after `max` an `int` of at least 1
+and the duration after `in` above 0, and a value of another type or past its bound is
+`type-mismatch` (T1), while a literal's own error stands (L10, L14) (§6) *(assumed: as §6 marks it,
+the bounds, as Akka's backoff supervisor refuses a minimum of 0 or one past its maximum)*.
+
+Case: [actors/crash-after.kz](../corpus/actors/crash-after.kz)
+```kurz
+actor Flaky {
+    mut int n = 0
+
+    pub void Fail() {
+        throw "flaky"
+    }
+
+    pub int Ping() {
+        n = n + 1
+        return n
+    }
+}
+
+f = spawn Flaky() on crash restart after 1ms
+send f.Fail()
+print(f.Ping())
+send f.Fail()
+send f.Fail()
+print(f.Ping())
+```
+
+Case: [actors/crash-restart-limit.kz](../corpus/actors/crash-restart-limit.kz)
+```kurz
+actor Flaky {
+    pub void Fail() {
+        throw "flaky"
+    }
+
+    pub int Ping() => 1
+}
+
+f = spawn Flaky() on crash restart after 1ms max 2 in 1min
+send f.Fail()
+send f.Fail()
+print(f.Ping())
+send f.Fail()
+print(f.Ping())
+print("after")
+```
+
+Case: [actors/crash-policy-knob.kz](../corpus/actors/crash-policy-knob.kz)
+```kurz
+actor Worker {
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash stop after 1ms
+print(w.Ping())
+```
+
+Case: [actors/crash-policy-count.kz](../corpus/actors/crash-policy-count.kz)
+```kurz
+actor Worker {
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash restart max 0 in 1min
+print(w.Ping())
+```
+
+### U27 (decided, §6) The type's default
+
+The words of a policy after the name of an actor that is not `per` (U1) are the type's default,
+which holds at every `spawn` of it that writes none, and a policy at `spawn` wins over it, as a call's
+`within` wins over the declaration's (§6, "Policy at `spawn`"; 2026-11-13, Q11; the owner,
+2026-11-15, #519, comment 6902210646, Q3, "Elixir: type's default"), whole, its knobs with it
+*(assumed: as §6 marks it, as a child spec's `restart` replaces the module's default)*. The same
+words after a `per` actor's name are its policy (§6, the owner, 2026-11-13, #519, comment 6847932993,
+Q15); `per` has no rule here (U1), and `compiler/README.md` says what the build does with both.
+
+Case: [actors/crash-type-default.kz](../corpus/actors/crash-type-default.kz)
+```kurz
+actor Flaky on crash stop {
+    mut int n = 0
+
+    pub void Fail() {
+        throw "flaky"
+    }
+
+    pub int Ping() {
+        n = n + 1
+        return n
+    }
+}
+
+f = spawn Flaky() on crash restart after 1ms
+print(f.Ping())
+send f.Fail()
+print(f.Ping())
+g = spawn Flaky()
+send g.Fail()
+print(f.Ping())
+print(g.Ping())
 ```

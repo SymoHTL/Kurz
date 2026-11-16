@@ -218,6 +218,18 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             "ending with `allocation-failed`), and a page of memory each, about four gibibytes",
     };
 
+    /// <summary>
+    /// U25, U26: the <c>throws</c> cases whose trace is no raise of the top-level code at the error line, each with the line of its first
+    /// frame and the name of its last: a crash escalated to the root, whose trace is the child's stack, from its raise to its message's
+    /// method, and the root's <c>restart-limit</c>, whose trace is the top-level code's where it waits, and not at the line of the
+    /// <c>spawn</c> that its error line names (assumed readings of section 6, "Policy at <c>spawn</c>").
+    /// </summary>
+    private static readonly Dictionary<string, (int First, string Last)> OwnTraces = new(StringComparer.Ordinal)
+    {
+        ["actors/crash-escalate-root.kz"] = (7, "Worker.Fail"),
+        ["actors/crash-restart-limit.kz"] = (18, "main"),
+    };
+
     public static TheoryData<string> RunnableCases()
     {
         var data = new TheoryData<string>();
@@ -327,7 +339,8 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             Assert.Equal(line + "\n", error);
         }
 
-        TraceTests.AssertTrace(trace, $"{relativePath}:{header.ErrorLine}", header.Build != BuildKind.Release);
+        var (first, last) = OwnTraces.TryGetValue(relativePath, out var own) ? own : (header.ErrorLine, "main");
+        TraceTests.AssertTrace(trace, $"{relativePath}:{first}", header.Build != BuildKind.Release, last);
         Assert.Equal(1, code);
     }
 
@@ -365,6 +378,14 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         {
             var header = Header(relativePath);
             Assert.True(header.Expectation != Expectation.Error && Emit(relativePath, header).Program is not null, $"{relativePath}: listed as not run ({why}), and the emitter does not lay it out");
+        }
+
+        // a case listed with a trace of its own is a `throws` case the run runs
+        Assert.NotEmpty(OwnTraces);
+        foreach (var (relativePath, _) in OwnTraces)
+        {
+            var header = Header(relativePath);
+            Assert.True(header.Expectation == Expectation.Throws && !NotRun.ContainsKey(relativePath) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with a trace of its own, and the run does not run it as a `throws` case");
         }
 
         // a case listed as run under the plain allocator alone is one the plain run runs

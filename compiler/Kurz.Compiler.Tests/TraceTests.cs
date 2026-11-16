@@ -52,9 +52,10 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
     /// <summary>
     /// The trace of a raise of the program's code: none on Windows; on Linux at least one frame, every frame with a line where the
     /// build has the line tables and none without, the first at <paramref name="place"/>, the error line's, where it has them, and the
-    /// last <c>main</c>, the actor's entry, or, where the trace is cut, a hundred frames and the cut line below them.
+    /// last <paramref name="last"/>, <c>main</c>, the actor's entry, where the caller names no other, or, where the trace is cut, a hundred
+    /// frames and the cut line below them.
     /// </summary>
-    internal static void AssertTrace(IReadOnlyList<string> trace, string place, bool lines)
+    internal static void AssertTrace(IReadOnlyList<string> trace, string place, bool lines, string last = "main")
     {
         if (!OperatingSystem.IsLinux())
         {
@@ -72,7 +73,7 @@ public sealed partial class TraceTests(Toolchain toolchain) : IClassFixture<Tool
         }
         else
         {
-            Assert.Equal("main", frames[^1].Match.Groups["name"].Value);
+            Assert.Equal(last, frames[^1].Match.Groups["name"].Value);
         }
 
         if (lines)

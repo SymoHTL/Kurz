@@ -1,0 +1,27 @@
+// expect: throws actor-gone at 27
+// | 1
+// | 1
+// | 2
+// rules: U27
+
+actor Flaky on crash stop {
+    mut int n = 0
+
+    pub void Fail() {
+        throw "flaky"
+    }
+
+    pub int Ping() {
+        n = n + 1
+        return n
+    }
+}
+
+f = spawn Flaky() on crash restart after 1ms
+print(f.Ping())
+send f.Fail()
+print(f.Ping())
+g = spawn Flaky()
+send g.Fail()
+print(f.Ping())
+print(g.Ping())
