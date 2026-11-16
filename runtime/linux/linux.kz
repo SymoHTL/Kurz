@@ -761,7 +761,8 @@ void Locate() {
 // guard page, that frame holds the line, the call's own; otherwise the fault came in the prologue of the
 // frame that did not fit, and the frame below it holds the line, at its return address less one. Where
 // that frame is the runtime's, a helper's or the C library's, the innermost frame outside them holds it
-// ("Caller outside runtime"). The trace starts at the frame that holds the line.
+// ("Caller outside runtime"), a frame of the scheduler among those outside where the fault came inside an
+// entry into the allocator or the scheduler (O11). The trace starts at the frame that holds the line.
 void Overflow() {
     raw {
         tracing = true
@@ -800,7 +801,9 @@ bool IsCall(long ip) {
 
 // Whether the frame at `at` holds the line of a stack overflow: a frame of the program or of the
 // standard library does, one of the runtime, of the emitted code's helpers or of the C library is
-// passed, and where the file cannot be read or names no function the first frame does. For that frame
+// passed, but for one of the runtime's common file, the scheduler's own, where an entry into the
+// allocator or the scheduler was under way at the fault (`inside`, O11), and where the file cannot be
+// read or names no function the first frame does. For that frame
 // it writes the error line, `error: stack-overflow at <file>:<n>`, or with the note that stands in
 // place of the place, the first that holds of the file's, the tables' and the frame's entry's (design
 // record, section 6).
@@ -808,7 +811,11 @@ bool Located(long at) {
     raw {
         if readable && symbols > 0 {
             long symbol = FunctionAt(at)
-            if symbol < 0 || KindOf(symbol) == 0 {
+            if symbol < 0 {
+                return false
+            }
+
+            if KindOf(symbol) == 0 && (inside == 0 || !Starts(symbol, "rt.common.")) {
                 return false
             }
         }

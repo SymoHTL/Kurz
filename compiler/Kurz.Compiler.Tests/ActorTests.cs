@@ -2067,8 +2067,23 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// the allocator or the scheduler, or of a function the copy of a crossing calls: after the program writes <c>arm</c> on standard error,
     /// the first call that reaches that place recurses there without end, on whichever stack the thread then runs.
     /// </summary>
-    private static CheckedRuntime Burning(string path, string at) => ListTests.Edited(
-        (path, at, Burn + at + "    BurnArmed()\n"), Armed((path == "std/std.kz" ? "std." : string.Empty) + "BurnArm()"));
+    private static CheckedRuntime Burning(string path, string at) => ListTests.Edited(BurnEdits(path, at));
+
+    /// <summary>The edits of <see cref="Burning"/>: <c>Burn</c> put in before <paramref name="at"/>, and <c>Print</c> armed.</summary>
+    private static (string Path, string Old, string New)[] BurnEdits(string path, string at) =>
+        [(path, at, Burn + at + "    BurnArmed()\n"), Armed((path == "std/std.kz" ? "std." : string.Empty) + "BurnArm()")];
+
+    /// <summary>The line of the call of <c>Burn</c> that does not fit, in the file <paramref name="path"/> as <see cref="Burning"/> edits it.</summary>
+    private static int BurnLine(string path, string at)
+    {
+        var text = Encoding.UTF8.GetString(Runtime.Files.Single(f => f.Path == path).Bytes);
+        foreach (var (_, old, @new) in BurnEdits(path, at).Where(e => e.Path == path))
+        {
+            text = text.Replace(old, @new, StringComparison.Ordinal);
+        }
+
+        return text[..text.IndexOf("    return Burn(n - 1) * 3 + n", StringComparison.Ordinal)].Count(c => c == '\n') + 1;
+    }
 
     [Fact]
     public void A_stack_fault_inside_the_allocator_on_an_actor_s_stack_ends_the_process()
@@ -2095,12 +2110,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             """;
         // the error line names the allocator's own line where the fault is, the call of `Burn` that did not fit, in the edited library
         const string at = "pub byte* Allocate(long size) {\n    mut byte* p = null\n    sys.Entered()\n";
-        var library = Encoding.UTF8.GetString(Runtime.Files.Single(f => f.Path == "std/std.kz").Bytes).Replace(at, Burn + at, StringComparison.Ordinal);
-        var line = library[..library.IndexOf("    return Burn(n - 1) * 3 + n", StringComparison.Ordinal)].Count(c => c == '\n') + 1;
         var run = BuildAndRun(text, Burning("std/std.kz", at), "actor-fault-allocator");
         var (crashes, rest) = Logged(run.Error);
         Assert.Empty(crashes);
-        Ran((run.Code, run.Output, rest), 1, [], $"error: stack-overflow at std.kz:{line}\n");
+        Ran((run.Code, run.Output, rest), 1, [], $"error: stack-overflow at std.kz:{BurnLine("std/std.kz", at)}\n");
     }
 
     [Fact]
@@ -2138,10 +2151,12 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(s.Go())
 
             """;
-        var run = BuildAndRun(text, Burning("runtime/common/runtime.kz", "pub void Enqueue(byte* state, byte* message) {\n    sys.Entered()\n"), "actor-fault-scheduler");
+        // the error line names the scheduler's own line where the fault is, the call of `Burn` that did not fit, in the edited runtime's file
+        const string at = "pub void Enqueue(byte* state, byte* message) {\n    sys.Entered()\n";
+        var run = BuildAndRun(text, Burning("runtime/common/runtime.kz", at), "actor-fault-scheduler");
         var (crashes, rest) = Logged(run.Error);
         Assert.Empty(crashes);
-        Ran((run.Code, run.Output, rest), 1, [], "error: stack-overflow at program.kz:15\n");
+        Ran((run.Code, run.Output, rest), 1, [], $"error: stack-overflow at runtime.kz:{BurnLine("runtime/common/runtime.kz", at)}\n");
     }
 
     [Fact]
@@ -2178,10 +2193,12 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(s.Go())
 
             """;
-        var run = BuildAndRun(text, Burning("runtime/common/runtime.kz", "pub byte* CopyNext() {\n"), "actor-fault-copy");
+        // the error line names the line of the copy's own frame in the runtime's file, as of the scheduler, the call of `Burn` that did not fit
+        const string at = "pub byte* CopyNext() {\n";
+        var run = BuildAndRun(text, Burning("runtime/common/runtime.kz", at), "actor-fault-copy");
         var (crashes, rest) = Logged(run.Error);
         Assert.Empty(crashes);
-        Ran((run.Code, run.Output, rest), 1, [], "error: stack-overflow at program.kz:14\n");
+        Ran((run.Code, run.Output, rest), 1, [], $"error: stack-overflow at runtime.kz:{BurnLine("runtime/common/runtime.kz", at)}\n");
     }
 
     [Fact]
