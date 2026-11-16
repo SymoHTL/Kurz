@@ -5004,6 +5004,8 @@ void CopyEnd(byte* session) {
         while i < slots {
             byte* held = *Ptr<byte*>(memo + i * 24)
             if held != null {
+                // the release of a class instance, a list, a map or a `data` block, which reads no table: only a `weak`
+                // reference's reads one, which no memo slot holds, and an instance's names its own class (`CopyLetGo`)
                 extern "C" (byte*, byte*) => void letGo = *Ptr<extern "C" (byte*, byte*) => void>(memo + i * 24 + 16)
                 letGo(held, null)
             }

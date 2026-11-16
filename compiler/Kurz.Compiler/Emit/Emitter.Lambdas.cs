@@ -140,11 +140,26 @@ public sealed partial class Emitter
     {
         var callee = EmitExpression(c.Callee);
         var arguments = new List<string> { $"ptr {fn.Value($"extractvalue %kz.fn {callee}, 1")}" };
+        var late = new List<(int Index, Func<string, string> Read)>(); // U12: the copies read after the call's last copy (CopiedLate)
+        string? copied = null;
         for (var i = 0; i < c.Arguments.Count; i++)
         {
             var a = c.Arguments[i].Value;
-            arguments.Add($"{Ir(type.Parameters[i])} {Convert(EmitExpression(a), TypeOf(a), type.Parameters[i], a.Line)}");
+            var parameter = type.Parameters[i];
+            if (copySessions.TryGetValue(a, out var shared))
+            {
+                var own = TypeOf(a);
+                copied = shared;
+                CopiedLate(a, held: true);
+                late.Add((arguments.Count, v => $"{Ir(parameter)} {Convert(Temp(v, own), own, parameter, a.Line)}"));
+                arguments.Add("");
+                continue;
+            }
+
+            arguments.Add($"{Ir(parameter)} {Convert(EmitExpression(a), TypeOf(a), parameter, a.Line)}");
         }
+
+        ReadLate(copied, (k, v) => arguments[late[k].Index] = late[k].Read(v));
 
         var call = $"call {Ir(type.Result)} {fn.Value($"extractvalue %kz.fn {callee}, 0")}({string.Join(", ", arguments)})";
         return Types.IsVoid(type.Result) ? Emitted(call) : fn.Value(call);

@@ -213,6 +213,53 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_weak_reference_an_argument_holds_itself_points_at_its_copy_at_a_restart_and_in_a_message_a_crash_copies()
+    {
+        // U12 with U21 and U22 (Q3, "Points at the copy"): the arguments of a `spawn`, kept in its supervisor's heap and copied into the
+        // heap of each restart, and of a message queued behind a crash, which the crash copies into that heap, are read after the last
+        // copy of their session or copied into the place the actor reads, so that a `weak Box?` and a `data` value's `weak` field, which
+        // the argument holds in its own bytes, point at the copy of the instance another argument holds, under the fenced allocator
+        const string text = """
+            class Box(mut int N)
+            data Link(weak Box? To)
+
+            actor Shelf(weak Box? W, Link L, Box B) {
+                pub void Fail() {
+                    throw "shelf fails"
+                }
+
+                pub string Own() => Show(W, L, B)
+
+                pub string Look(weak Box? w, Link l, Box b) => Show(w, l, b)
+
+                string Show(weak Box? w, Link l, Box b) {
+                    b.N = b.N + 1
+                    v = w
+                    t = l.To
+                    if v != null && t != null {
+                        return "{v.N} {t.N} {v == b} {t == b}"
+                    }
+
+                    return "gone"
+                }
+            }
+
+            box = Box(1)
+            s = spawn Shelf(copy box, copy Link(box), copy box) on crash restart after 1ms
+            print(s.Own())
+            send s.Fail()
+            print(s.Look(copy box, copy Link(box), copy box))
+            print(s.Own())
+            print(box.N)
+
+            """;
+        var run = BuildAndRun(text, ListTests.Fenced, "actor-weak-arguments");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Shelf#1 crashed: thrown \"shelf fails\" at program.kz:6"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["2 2 true true", "2 2 true true", "2 2 true true", "1"], "");
+    }
+
+    [Fact]
     public void What_crosses_is_let_go_of_once_its_message_ran()
     {
         // U12: 5,000 copies of a list of 100 instances, each with a string and a weak link to the first, and the immutable instance each
@@ -471,6 +518,57 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(program, Blocks.Value, "actor-move-freed"), 0, ["0"], "");
+    }
+
+    [Fact]
+    public void A_copy_a_call_left_before_its_last_copy_had_not_read_is_let_go_of()
+    {
+        // U12: a call of two copies, by its name and through a function value, left by the case a later argument propagates, after the
+        // first copy was made in its slot and before the call read it, lets go of that copy as of the temporary of the region it would
+        // have been; as many blocks taken back as given across a second run (copy-left-early.kz)
+        const string program = """
+            data Missing
+
+            class Box(mut int N)
+            class Holder(mut Box B)
+
+            Box | Missing Lose(Holder held) {
+                held.B = Box(2)
+                return Missing
+            }
+
+            string Pair(Box a, Box b) => "{a.N} {b.N}"
+
+            string | Missing Plain(Holder held) {
+                return Pair(copy held.B, copy Lose(held))
+            }
+
+            string | Missing Valued(Holder held) {
+                f = (Box a, Box b) => Pair(a, b)
+                return f(copy held.B, copy Lose(held))
+            }
+
+            int Missed(string | Missing r) {
+                match r {
+                    string s => return 0
+                    Missing => return 1
+                }
+            }
+
+            int All() {
+                h = Holder(Box(1))
+                return Missed(Plain(h)) + Missed(Valued(h))
+            }
+
+            mut missed = All()
+            first = HttpServer.Live()
+            missed = missed + All()
+            grown = HttpServer.Live() - first
+            print(missed)
+            print(grown)
+
+            """;
+        Ran(BuildAndRun(program, Blocks.Value, "actor-copy-left-early"), 0, ["4", "0"], "");
     }
 
     /// <summary>

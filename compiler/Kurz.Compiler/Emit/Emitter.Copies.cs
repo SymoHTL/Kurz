@@ -14,15 +14,16 @@ namespace Kurz.Compiler.Emit;
 /// unbuilt"), so that the heap of an actor holds every block its code reaches and is freed whole at the actor's end (section 3): a value
 /// arrives as a copy of its own, with a count of one, made before the message is queued, a string's block, a list's, a map's, a
 /// <c>data</c> block, an instance and the environment of a lambda among them; a value after <c>copy</c> at a call that is no crossing
-/// has every class instance it reaches copied and shares every other block by its count. The copy is made by the type's helpers: a new
-/// block for each block on the way, an instance's strong and weak counts at one; a class with derived classes copies through the copy
+/// has every block on a path to a class instance copied, the instance among them, and shares by its count only a block that reaches
+/// none. The copy is made by the type's helpers: a new block for each block on the way, an instance's strong and weak counts at one; a class with derived classes copies through the copy
 /// slot of the instance's table (K6); whether a block that reaches no instance is copied is the session's, which the runtime's
 /// <c>CopyWhole</c> reads. The copies one call makes, of its
 /// arguments, share one memo, the call's session in the caller's frame, so that two paths that reach one block, in one argument or
 /// in two, reach one copy (Q2, "Sharing kept"), and a result has a session of its own; each argument is copied where it is evaluated,
 /// left to right, and the memo holds a count of each block it maps until the call's last copy (section 6). A <c>weak</c> reference
 /// points at the copy of its target where the call's copies hold the target, else null, set at the call's last copy (Q3, "Points at
-/// the copy"); and the blocks whose items or fields wait to be copied go on the runtime's work list, so that a chain of any
+/// the copy"), so that each copy of a call of more than one is read after its last, or made in the place its callee reads (CrossInto),
+/// one that holds a <c>weak</c> reference in its own bytes among them; and the blocks whose items or fields wait to be copied go on the runtime's work list, so that a chain of any
 /// length crosses with no deeper stack than the nesting of its types (<c>runtime/common/runtime.kz</c>, "the copy of a value that
 /// crosses"). A copy runs no program code.
 /// </summary>
@@ -37,6 +38,9 @@ public sealed partial class Emitter
     // U12: the sessions of more than one copy begun in each region, which its end, or a jump out of it, ends (LetGo)
     private readonly Dictionary<List<(string Value, KurzType Type)>, List<string>> regionSessions = new(ReferenceEqualityComparer.Instance);
 
+    // U12: the slots of the copies each session of more than one copy made so far, which its call reads after its last copy (Late)
+    private readonly Dictionary<string, List<(string Slot, KurzType Type, bool Held)>> lateCopies = new(StringComparer.Ordinal);
+
     /// <summary>
     /// U12: whether a value of the type reaches a class instance through a block a copy makes anew: an instance, an interface's value and a
     /// <c>weak</c> reference, and a list, a map, a union and a <c>data</c> value that hold one, but no function value, whose environment
@@ -50,6 +54,7 @@ public sealed partial class Emitter
         ListType l => ReachesInstance(l.Element, seen),
         MapType m => ReachesInstance(m.Key, seen) || ReachesInstance(m.Value, seen),
         UnionType u => u.Cases.Any(c => ReachesInstance(c, seen)),
+        // a block family holds no generic type, which is `not supported` where it is laid out (Layout.Refusal), so its types take no arguments
         DataType d when layout.IsBlock(d) => layout.Derived(d.Symbol).Any(x => seen.Add(x.Name) && Layout.Fields(new DataType(x, [])).Any(f => ReachesInstance(f, seen))),
         DataType d => seen.Add(d.Text) && Layout.Fields(d).Any(f => ReachesInstance(f, seen)),
         _ => false,
@@ -57,34 +62,78 @@ public sealed partial class Emitter
 
     /// <summary>
     /// U12: the copy of a value, a value of its own with one count of each block it holds: the type's copy run from a slot that holds the
-    /// value into one that takes the copy, in the call's session, else in a session of its own (<see cref="CopyRun"/>), whose copies go
-    /// into the heap <paramref name="heap"/> of a crossing, every counted block among them, or, for null, after <c>copy</c> at a call
-    /// that is no crossing, into the heap the allocation entry serves, the class instances among them (Q5). A function value crosses by
-    /// <paramref name="copyInto"/>, the copy of the environment of its lambda (<see cref="CopyEnvironmentInto"/>).
+    /// value into the slot <paramref name="into"/>, in the call's session <paramref name="session"/>, else in a session of its own
+    /// (<see cref="CopyRun"/>), whose copies go into the heap <paramref name="heap"/> of a crossing, every counted block among them, or,
+    /// for null, after <c>copy</c> at a call that is no crossing, into the heap the allocation entry serves, every block on a path to a
+    /// class instance among them (Q5). A function value crosses by <paramref name="copyInto"/>, the copy of the environment of its lambda
+    /// (<see cref="CopyEnvironmentInto"/>). A session of more than one copy points the <c>weak</c> references of its copies at its last
+    /// copy, the ones the slot holds itself among them, a <c>weak T</c> and a plain <c>data</c> value or a union that holds one, so that
+    /// the slot is read after the call's last copy (<see cref="Late"/>), or is the place the callee reads.
     /// </summary>
-    private string Crossed(string value, KurzType type, string? session, string? heap, string? copyInto = null)
+    private void CrossInto(string into, string value, KurzType type, string? session, string? heap, string? copyInto = null)
     {
         var source = fn.Alloca(Ir(type), "crossing");
-        var copy = fn.Alloca(Ir(type), "copy");
         fn.Emit($"store {Ir(type)} {value}, ptr {source}");
-        fn.Emit($"call void {CopyRun()}(ptr {copy}, ptr {source}, ptr {copyInto ?? CopyInto(type)}, ptr {session ?? CopySession(1, heap)})");
+        fn.Emit($"call void {CopyRun()}(ptr {into}, ptr {source}, ptr {copyInto ?? CopyInto(type)}, ptr {session ?? CopySession(1, heap)})");
+    }
+
+    /// <summary>U12: the copy of a value in a session of its own, read at once, since its one copy ends the session (<see cref="CrossInto"/>).</summary>
+    private string Crossed(string value, KurzType type, string? heap, string? copyInto = null)
+    {
+        var copy = fn.Alloca(Ir(type), "copy");
+        CrossInto(copy, value, type, null, heap, copyInto);
         return fn.Value($"load {Ir(type)}, ptr {copy}");
     }
 
     /// <summary>
-    /// U12: the value of the argument <paramref name="e"/> after <c>copy</c> at a call that is no message, the copy of a value that
-    /// reaches a class instance, made in the call's session, a temporary of the region, and any other value as it is, which no copy
-    /// could tell apart from its source (Q6, "Rust: deep copy anywhere").
+    /// U12: the copy of a value in the session <paramref name="session"/> of a call of more than one copy, made where it is evaluated, into
+    /// a slot of its own that the call reads after its last copy, which ends the session and points the <c>weak</c> references the slot
+    /// holds itself (<see cref="CrossInto"/>); the slot is listed for the session, so that an exit before that read lets go of it where
+    /// <paramref name="held"/>, as of a temporary of the region (<see cref="EndSessions"/>).
     /// </summary>
-    private string Copied(Expression e, string value, KurzType type) =>
-        ReachesInstance(type) ? Temp(Crossed(value, type, copySessions.Remove(e, out var session) ? session : null, null), type) : value;
+    private string Late(string value, KurzType type, string session, string? heap, bool held, string? copyInto = null)
+    {
+        var slot = fn.Alloca(Ir(type), "copy");
+        CrossInto(slot, value, type, session, heap, copyInto);
+        if (!lateCopies.TryGetValue(session, out var listed))
+        {
+            lateCopies[session] = listed = [];
+        }
+
+        listed.Add((slot, type, held));
+        return slot;
+    }
+
+    /// <summary>
+    /// U12: the value of the argument <paramref name="e"/> after <c>copy</c> at a call that is no message, the copy of a value that
+    /// reaches a class instance, made in a session of its own, a temporary of the region, and any other value as it is, which no copy
+    /// could tell apart from its source (Q6, "Rust: deep copy anywhere"). An argument of a call of more than one copy is copied by its
+    /// call, which reads it after its last copy (<see cref="CopiedLate"/>).
+    /// </summary>
+    private string Copied(Expression e, string value, KurzType type) => !ReachesInstance(type)
+        ? value
+        : copySessions.ContainsKey(e)
+            ? throw new InvalidOperationException($"the argument after `copy` at line {e.Line} of a call of more than one copy, which its call reads before its last copy (U12)")
+            : Temp(Crossed(value, type, null), type);
+
+    /// <summary>
+    /// U12: the argument <paramref name="e"/> after <c>copy</c> in a call of more than one copy, evaluated where it is written and copied
+    /// there in the call's session (<see cref="Late"/>): the slot of its copy, which the call reads after its last copy.
+    /// </summary>
+    private string CopiedLate(Expression e, bool held)
+    {
+        var value = EmitUncopied(e);
+        copySessions.Remove(e, out var session);
+        return Late(value, Sub(Model.TypeOf(e).Type), session!, null, held);
+    }
 
     /// <summary>
     /// U12: the session the copies of a call share where it makes <paramref name="copies"/> of them, more than one, into the heap
     /// <paramref name="heap"/> of a crossing, else null, the one copy then working in a session of its own (<see cref="Crossed"/>): the
-    /// memo of a call is the call's, not the argument's (Q2, "Sharing kept").
+    /// memo of a call is the call's, not the argument's (Q2, "Sharing kept"). <paramref name="noExit"/> where no code that can leave runs
+    /// between its copies, as in the helpers of a restart and of a crash's messages, which open no region (<see cref="CopySession"/>).
     /// </summary>
-    private string? CallSession(int copies, string? heap) => copies > 1 ? CopySession(copies, heap) : null;
+    private string? CallSession(int copies, string? heap, bool noExit = false) => copies > 1 ? CopySession(copies, heap, noExit) : null;
 
     /// <summary>
     /// U12: the session of <paramref name="copies"/> copies begun, the runtime's eleven words in the caller's frame (<c>runtime/common/
@@ -95,9 +144,11 @@ public sealed partial class Emitter
     /// crossing, and the two words of the list of the open sessions of the activation that runs it. Such a session ends at its last
     /// copy, or, where the code leaves the region before it, at the region's end (<see cref="LetGo"/>), and a session of more than one
     /// copy is listed among the running activation's open ones, which a crash between two of its copies ends (the runtime's
-    /// <c>CopyOpen</c>; U19).
+    /// <c>CopyOpen</c>; U19). A session of more than one copy is begun in a region, whose end ends it, but where <paramref name="noExit"/>
+    /// says that nothing leaves between its copies: a call that every statement, expression body, field default and constructor's call
+    /// opens a region for, and a helper, which opens none, whose copies follow one another.
     /// </summary>
-    private string CopySession(int copies, string? heap)
+    private string CopySession(int copies, string? heap, bool noExit = false)
     {
         var session = fn.Alloca("[11 x i64]", "session", "zeroinitializer");
         fn.Emit($"store [11 x i64] [i64 0, i64 0, i64 0, i64 0, i64 0, i64 0, i64 {Number(copies)}, i64 {(copies > 1 ? 1 : 0)}, i64 0, i64 0, i64 0], ptr {session}");
@@ -111,8 +162,13 @@ public sealed partial class Emitter
             fn.Emit($"call void {RuntimeFunction("CopyOpen")}(ptr {session})");
         }
 
-        if (copies > 1 && regions.Count > 0)
+        if (copies > 1 && !noExit)
         {
+            if (regions.Count == 0)
+            {
+                throw new InvalidOperationException("a call of more than one copy outside a region, which no exit before its last copy would end (U12)");
+            }
+
             if (!regionSessions.TryGetValue(regions[^1], out var begun))
             {
                 regionSessions[regions[^1]] = begun = [];
@@ -127,7 +183,8 @@ public sealed partial class Emitter
     /// <summary>
     /// U12: at a region's end, or a jump out of it, the sessions begun in it ended where their calls' code did not reach their last
     /// copy, a case propagated out of a later argument among them, before the region lets go of the copies, so that their <c>weak</c>
-    /// references are pointed as a whole call's are and the memo's counts let go of (the runtime's <c>CopyAbort</c>).
+    /// references are pointed as a whole call's are and the memo's counts let go of (the runtime's <c>CopyAbort</c>); then the copies
+    /// the call had not read yet (<see cref="Late"/>) let go of, as the temporaries of the region they would have been.
     /// </summary>
     private void EndSessions(List<(string Value, KurzType Type)> temporaries)
     {
@@ -136,6 +193,25 @@ public sealed partial class Emitter
             foreach (var session in begun)
             {
                 fn.Emit($"call void {RuntimeFunction("CopyAbort")}(ptr {session})");
+                foreach (var (slot, type, _) in lateCopies.GetValueOrDefault(session, []).Where(l => l.Held))
+                {
+                    Release(fn.Value($"load {Ir(type)}, ptr {slot}"), type);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// U12: the copies of the session <paramref name="session"/> read once the call's last copy ended it (<see cref="Late"/>), each by
+    /// <paramref name="read"/> with its place among the copies the session listed, and the list let go of.
+    /// </summary>
+    private void ReadLate(string? session, Action<int, string> read)
+    {
+        if (session is not null && lateCopies.Remove(session, out var listed))
+        {
+            for (var i = 0; i < listed.Count; i++)
+            {
+                read(i, fn.Value($"load {Ir(listed[i].Type)}, ptr {listed[i].Slot}"));
             }
         }
     }
@@ -563,7 +639,9 @@ public sealed partial class Emitter
 
     /// <summary>
     /// D7 with U12: the copy of a block of the family, by the number of the type it holds, with one count, which the work list fills;
-    /// the constant of a type without fields stays as it is (<see cref="HeldForEver"/>).
+    /// the constant of a type without fields stays as it is (<see cref="HeldForEver"/>). The family and its types take no type arguments,
+    /// since a generic data type in a relation of inheritance or that holds its own type is <c>not supported</c> where it is laid out
+    /// (<c>Layout.Refusal</c>) and <c>Layout.Derived</c> leaves a generic one out.
     /// </summary>
     private string CopyDataBlock(DataSymbol family) => Helper($"copy.block.{Lower.Mangle(new DataType(family, []))}", "ptr", ["ptr"], () =>
     {

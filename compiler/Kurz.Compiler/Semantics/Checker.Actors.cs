@@ -320,7 +320,7 @@ public sealed partial class Checker
             switch (t)
             {
                 case FunctionType:
-                    Meet(ActorCrossing.Never, $"a function value, `{t}`, which crosses only as a lambda the sending function shows, written at the argument or bound to an immutable local variable");
+                    Meet(ActorCrossing.Never, $"a function value, `{t}`, which crosses only as a lambda the sending function shows, the argument itself or bound to an immutable local variable");
                     break;
                 case InterfaceType:
                     Meet(ActorCrossing.Never, $"a value of the interface `{t}`, which may hold a mutable class instance whatever the program puts there");
@@ -461,9 +461,10 @@ public sealed partial class Checker
     /// U12, U16: the stage of the arguments of a message or of an actor's constructor, after the own error of each argument (E1), in the
     /// order of U16: <c>send-needs-word</c> of the first argument that does not cross, at its argument, then in the order the arguments are
     /// written, the words of <c>move</c> (<see cref="MessageMove"/>: <c>move-at-call</c>, <c>move-reachable</c> and a later argument's
-    /// <c>used-after-move</c>), the build's <c>not supported</c> of a value it does not make cross (<see cref="CrossingOf"/>), and
-    /// <c>mut-in-message</c> of a <c>mut</c> parameter, which <paramref name="mutInMessage"/> reports (the owner, 2026-11-15, issue 519,
-    /// comment 6891937666, item 4); then each <c>move</c> ends what it sends. Whether it reported one.
+    /// <c>used-after-move</c>) and <c>mut-in-message</c> of a <c>mut</c> parameter, which <paramref name="mutInMessage"/> reports (the owner,
+    /// 2026-11-15, issue 519, comment 6891937666, item 4), and after every argument the build's <c>not supported</c> of the first value it
+    /// does not make cross (<see cref="CrossingOf"/>), so that the build's limit hides no error of the language (E1); then each <c>move</c>
+    /// ends what it sends. Whether it reported one.
     /// </summary>
     private bool CrossingErrors(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, bool> slotMove, string callee, Action<int> mutInMessage)
     {
@@ -507,7 +508,10 @@ public sealed partial class Checker
             {
                 return true;
             }
+        }
 
+        for (var i = 0; i < c.Arguments.Count; i++)
+        {
             if (limits[i] is { } limit && c.Arguments[i].Word != ArgumentWord.Move)
             {
                 NotSupported(c.Arguments[i].Line, $"{limit}, crossing into an actor (U12)");

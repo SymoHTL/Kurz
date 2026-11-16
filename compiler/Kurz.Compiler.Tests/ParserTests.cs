@@ -1117,13 +1117,14 @@ public sealed class ParserTests
     [InlineData("Send(copy, move)", "(call Send copy, move)")]
     [InlineData("Send((copy)(x))", "(call Send (call (paren copy) x))")]
     [InlineData("Send(copy[0])", "(call Send (index copy (int 0)))")]
+    [InlineData("Send(copy.N)", "(call Send (. copy N))")]
     [InlineData("Send(move - 1)", "(call Send (- move (int 1)))")]
     [InlineData("Send(copy ([1]))", "(call Send copy (paren (list (int 1))))")]
     [InlineData("copy = move", "(assign-or-declare copy move)")]
     public void Copy_and_move_before_an_argument_are_its_words_and_names_elsewhere(string program, string tree)
     {
         // U12: `copy` and `move`, contextual words of section 6, read before an argument as `mut` is (L12): the word where an expression
-        // follows, `copy(x)` among them, and a name with nothing after it, before `[`, `-`, `*`, `&` or `with`, which go on from a name, and
+        // follows, `copy(x)` among them, and a name with nothing after it, before `.` or another token that begins no expression, before `[`, `-`, `*`, `&` or `with`, which go on from a name, and
         // in parentheses, so that a variable named `copy` is called as `(copy)(x)` (comment 6895076937, "Taken as they follow from the
         // record")
         Assert.Equal(tree, Tree(program));

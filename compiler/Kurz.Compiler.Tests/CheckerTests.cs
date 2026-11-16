@@ -7529,7 +7529,8 @@ public sealed class CheckerTests
     public void A_mutable_instance_crosses_with_a_word_alone()
     {
         // U12: `send-needs-word` at the argument, through a reference, in a `send` and at `spawn` of a constructor's argument, the argument named
-        // in the text, and `copy` before each makes it cross (the owner, 2026-11-15, #519, comment 6896192351, Q6); a `move` is the build's
+        // in the text, by section 6's assumed point that each new compile error's text names its id, the argument and the fix in one line
+        // (E2 holds a corpus case to an error's id and line, and this is no case), and `copy` before each makes it cross (the owner, 2026-11-15, #519, comment 6896192351, Q6); a `move` is the build's
         // `not supported` (What_this_build_does_not_make_cross_is_not_supported)
         const string Box = "class Box(mut int N)\n\nactor A(Box B) {\n    pub void Take(Box b) {\n        print(b.N)\n    }\n}\n\nitem = Box(1)\n";
         Assert.Equal([(ErrorIds.SendNeedsWord, 10)], Errors(Box + "a = spawn A(item)\n"));
@@ -7555,7 +7556,7 @@ public sealed class CheckerTests
     [Fact]
     public void A_function_value_crosses_where_the_checker_sees_its_lambda()
     {
-        // U12 (the owner, 2026-11-15, #519, comment 6896192351, Q5, "By written type"): a lambda written at the argument or bound to an
+        // U12 (the owner, 2026-11-15, #519, comment 6896192351, Q5, "By written type"): a lambda that is the argument itself or bound to an
         // immutable local variable of the same function, whose captures cross, cross; a lambda that captures a mutable
         // instance, with a word or none, one bound to a `mut` variable and a parameter of a function type are `send-needs-word`
         const string Run = "class Box(mut int N)\n\nactor A {\n    pub void Run(() => int job) {\n        print(job())\n    }\n}\n\nint Two() => 2\n\na = spawn A()\nk = 1\nb = Box(1)\n";
@@ -7574,6 +7575,8 @@ public sealed class CheckerTests
         // word makes cross; an instance of a class of `std/`, whose classes the walk of the file's classes does not hold
         // (knowledge/a-class-of-std-is-no-class-of-the-file.md)
         NotSupportedAt(10, "U12", "class Box(int N)\n\nactor A {\n    pub void Take(Map<Box, int> m) {\n        print(m.Count)\n    }\n}\n\na = spawn A()\nsend a.Take(Map<Box, int>())\n");
+        // beside a later argument's `mut-in-message`, an error of the language, which the build's limit does not hide (E1, U16)
+        Assert.Equal([(ErrorIds.MutInMessage, 11)], Errors("class Box(int N)\n\nactor A {\n    pub void Take(Map<Box, int> m, mut int n) {\n        n = m.Count\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(Map<Box, int>(), mut x)\nprint(x)\n"));
         NotSupportedAt(5, "U12", "void Call(() => int f) {\n    print(f())\n}\n\nCall(copy () => 1)\n");
         NotSupportedAt(10, "U12", "interface I {\n}\n\nclass Box(int N) : I\n\nvoid Keep(I x) {\n}\n\nI y = Box(1)\nKeep(copy y)\n");
         var (diagnostics, _) = CheckSeeingStd("actor A {\n    pub void Take(HttpHeaders h) {\n        print(h.Get(\"a\") ?? \"\")\n    }\n}\n\na = spawn A()\nsend a.Take(HttpHeaders())\n");
