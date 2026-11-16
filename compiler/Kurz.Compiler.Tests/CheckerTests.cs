@@ -7285,6 +7285,12 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.MutInMessage, 16)], Errors(Take + "send a.Give(mut x, move b)\nprint(x)\n"));
         Assert.Equal([(ErrorIds.SendNeedsWord, 17)], Errors(Take + "send a.Give(mut x,\n    b)\nprint(x)\n")); // `send-needs-word` before an earlier argument's `mut-in-message`
         Assert.Equal([(ErrorIds.MutInMessage, 16)], Errors(Take + "send a.Give(mut x, copy b)\nprint(x)\n"));
+        // an argument's own `mut-at-call` (M7) stands alone, before the stage's `send-needs-word` and `mut-in-message`, a `move` or a
+        // `copy` into a `mut` parameter among them (E1, U16)
+        const string Set = "class Box(mut int N)\n\nactor A {\n    pub void Set(mut Box bx) {\n        bx.N = 2\n    }\n\n    pub void Take(Box bx) {\n        print(bx.N)\n    }\n}\n\na = spawn A()\n";
+        Assert.Equal([(ErrorIds.MutAtCall, 15)], Errors(Set + "b = Box(1)\nsend a.Set(move b)\n"));
+        Assert.Equal([(ErrorIds.MutAtCall, 15)], Errors(Set + "b = Box(1)\na.Set(copy b)\n"));
+        Assert.Equal([(ErrorIds.MutAtCall, 15)], Errors(Set + "mut b = Box(1)\nsend a.Take(mut b)\n"));
         Assert.Equal([(ErrorIds.MutInMessage, 11)], Errors("class Node(int N, weak Node? Next)\n\nactor A {\n    pub void Take(mut int n, Node d) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Node(1, null))\nprint(x)\n")); // a class that reaches itself, read once
         Assert.Equal([(ErrorIds.MutInMessage, 13)], Errors("class Box(int N)\n\ndata Tree(Box B, List<Tree> Kids)\n\nactor A {\n    pub void Take(mut int n, Tree t) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Tree(Box(1), []))\nprint(x)\n")); // a data value that reaches itself, read once
         Assert.Equal([(ErrorIds.MutInMessage, 11)], Errors("class Box(int N)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(1))\nprint(x)\n"));

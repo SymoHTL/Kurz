@@ -458,6 +458,14 @@ public sealed partial class Checker
     /// </summary>
     private bool CrossingErrors(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, bool> slotMove, string callee, Action<int> mutInMessage)
     {
+        for (var i = 0; i < c.Arguments.Count; i++)
+        {
+            if (info.Binding[i] is var bound && bound >= 0 && slotMut(bound) != c.Arguments[i].Mut)
+            {
+                return true; // E1, U16: the argument's own `mut-at-call` (M7), which the call's check reported, stands alone
+            }
+        }
+
         var limits = new string?[c.Arguments.Count];
         for (var i = 0; i < c.Arguments.Count; i++)
         {
