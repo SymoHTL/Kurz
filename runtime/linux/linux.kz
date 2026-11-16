@@ -36,6 +36,7 @@ extern "C" {
     int stat(byte* path, void* status)
     int fstat(int fd, void* status)
     int clock_gettime(int clock, void* time)
+    int nanosleep(void* asked, void* left)
     void* opendir(byte* path)
     void* readdir(void* directory)
     int closedir(void* directory)
@@ -447,6 +448,15 @@ thread static mut bool crashing = false
 thread static mut int seeking = 0
 thread static mut bool quiet = false
 
+// The page an actor's stack overflow is written into (U19): at its first word the runtime's function that
+// takes the crash (`Overflowed`), null until the runtime names it, and from 16 the error line of the
+// overflow, `captured` bytes, which the walk writes there while `capturing` holds; and whether the
+// executable's file was opened for such a walk, which opens it once.
+thread static mut byte* overflowPage = null
+thread static mut long captured = 0
+thread static mut bool capturing = false
+thread static mut bool openedOnce = false
+
 // Where the sections the trace reads lie in the file, 0 for one the file lacks: the symbols and their
 // names, the line tables and their names, the debug information and the tables it refers to; and what
 // the system added to every address of the file where it loaded the program.
@@ -647,10 +657,64 @@ extern "C" void OnFault(int number, void* details, void* context) {
 
         if !crashing {
             crashing = true
+            if overflowPage != null && address >= stackGuardLow && address < stackGuardHigh {
+                Locate()
+                crashing = false
+                extern "C" (byte*, long) => void handler = *Ptr<extern "C" (byte*, long) => void>(overflowPage)
+                handler(overflowPage + 23, captured - 8)
+            }
+
             Overflow()
         }
 
         _exit(1)
+    }
+}
+
+// The function of the runtime that takes the crash of an actor whose stack overflowed (U19), kept in the
+// overflow page, which this maps at its first call: the handler of the fault calls it, on its own stack,
+// with the error line of the overflow from its id on and with no line feed, and never returns there, the
+// thread switched to the scheduler's stack, which the system allows as the signal is not blocked while its
+// handler runs (`SA_NODEFER`, `Faults`). Where the page cannot be had, an actor's overflow ends the process.
+pub void Overflowed(extern "C" (byte*, long) => void handler) {
+    raw {
+        if overflowPage == null {
+            overflowPage = Memory(4096)
+        }
+
+        if overflowPage != null {
+            *Ptr<extern "C" (byte*, long) => void>(overflowPage) = handler
+        }
+    }
+}
+
+// The error line of a stack overflow on an actor's stack, as `Overflow` writes it, into the overflow page,
+// with no trace below it, by the walk `Overflow` makes, the executable's file opened at the first such walk
+// alone; then the walk's state set back, so that a later walk starts afresh.
+void Locate() {
+    raw {
+        capturing = true
+        captured = 0
+        tracing = true
+        quiet = true
+        if !openedOnce {
+            readable = Open()
+            openedOnce = true
+        }
+
+        seeking = 1
+        frames = 0
+        ended = false
+        failed = false
+        _Unwind_Backtrace(OnFrame, null)
+        if seeking != 0 {
+            Out("error: stack-overflow (no line: the stack could not be walked)\n")
+        }
+
+        seeking = 0
+        tracing = false
+        quiet = false
+        capturing = false
     }
 }
 
@@ -1867,9 +1931,21 @@ void FileBytes(long from, long to) {
 }
 
 // `count` bytes written on standard error in as many calls as it takes; a write the system refuses, or
-// one that takes nothing, ends the trace there (design record, section 6).
+// one that takes nothing, ends the trace there (design record, section 6). While `capturing` holds they go
+// into the overflow page instead, as far as it holds them (`Locate`).
 void TraceBytes(byte* bytes, long count) {
     raw {
+        if capturing {
+            mut long i = 0
+            while i < count && captured < 4080 {
+                overflowPage[16 + captured] = bytes[i]
+                captured = captured + 1
+                i = i + 1
+            }
+
+            return
+        }
+
         mut long done = 0
         while done < count && !failed {
             long written = Write(2, bytes + done, count - done)
@@ -2369,6 +2445,30 @@ pub bool MonotonicNow(mut long nanoseconds) {
     }
 
     return true
+}
+
+// `nanoseconds` slept, by `nanosleep`, called again for what a signal left of it (`EINTR`, 4), the timespec
+// of the asked time and of what is left of it in the page `stat` fills, from 2048 (the top-level code's wait
+// for the end of a restart's pause, U23); nothing where that page cannot be mapped.
+pub void Sleep(long nanoseconds) {
+    raw {
+        if status == null {
+            status = Memory(4096)
+        }
+
+        if status == null || nanoseconds <= 0 {
+            return
+        }
+
+        byte* asked = status + 2048
+        byte* left = status + 2064
+        *Ptr<long>(asked) = nanoseconds / 1000000000
+        *Ptr<long>(asked + 8) = nanoseconds % 1000000000
+        while nanosleep(Ptr<void>(asked), Ptr<void>(left)) != 0 && *__errno_location() == 4 {
+            *Ptr<long>(asked) = *Ptr<long>(left)
+            *Ptr<long>(asked + 8) = *Ptr<long>(left + 8)
+        }
+    }
 }
 
 // The arguments of the process from the one at `skip` on, added to `list` in their order (S13): 0, or the

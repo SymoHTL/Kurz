@@ -10,6 +10,10 @@ extern "C" in "kernel32" {
     int SetThreadStackGuarantee(uint* size)
     void* LoadLibraryExA(byte* name, void* file, uint options)
     (extern "C" (byte*, ulong) => int)? GetProcAddress(void* module, byte* name)
+    void GetSystemTimePreciseAsFileTime(long* time)
+    int QueryPerformanceCounter(long* count)
+    int QueryPerformanceFrequency(long* frequency)
+    uint SleepEx(uint milliseconds, int alertable)
 }
 
 // The start of the process: Windows raises no signal at a write to a closed pipe, whose `WriteFile`
@@ -223,4 +227,52 @@ pub void Trace() {
 // Marks the crash path as running, for the handler of a stack overflow (design record, section 6): no
 // handler is installed on Windows by this runtime, so there is nothing to mark.
 pub void Crashing() {
+}
+
+// The time of the system's clock in nanoseconds since 1970, put in `nanoseconds`, for the log line of an
+// actor's crash (U24): `GetSystemTimePreciseAsFileTime`, which counts 100 ns from 1601, as Rust's
+// `SystemTime::now` reads it on Windows; true.
+pub bool Now(mut long nanoseconds) {
+    mut long time = 0
+    raw {
+        GetSystemTimePreciseAsFileTime(&time)
+        nanoseconds = (time - 116444736000000000) * 100
+    }
+
+    return true
+}
+
+// The monotonic clock in nanoseconds, put in `nanoseconds`, which a restart's pause reads (U23):
+// `QueryPerformanceCounter` over `QueryPerformanceFrequency`, as Rust's `Instant::now` reads it on
+// Windows; false where the system refuses either.
+pub bool MonotonicNow(mut long nanoseconds) {
+    mut long count = 0
+    mut long frequency = 0
+    raw {
+        if QueryPerformanceCounter(&count) == 0 || QueryPerformanceFrequency(&frequency) == 0 || frequency <= 0 {
+            return false
+        }
+
+        nanoseconds = count / frequency * 1000000000 + count % frequency * 1000000000 / frequency
+    }
+
+    return true
+}
+
+// `nanoseconds` slept, by `SleepEx`, in milliseconds rounded up (the top-level code's wait for the end of a
+// restart's pause, U23).
+pub void Sleep(long nanoseconds) {
+    if nanoseconds <= 0 {
+        return
+    }
+
+    raw {
+        SleepEx(uint((nanoseconds + 999999) / 1000000), 0)
+    }
+}
+
+// The function of the runtime that takes the crash of an actor whose stack overflowed (U19), which no
+// handler calls on Windows: an actor's overflow ends the process there, as the system ends it
+// (compiler/README.md, "What the emitter does not emit").
+pub void Overflowed(extern "C" (byte*, long) => void handler) {
 }

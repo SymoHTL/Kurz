@@ -87,21 +87,28 @@ public sealed partial class Emitter
     private string? CallSession(int copies, string? heap) => copies > 1 ? CopySession(copies, heap) : null;
 
     /// <summary>
-    /// U12: the session of <paramref name="copies"/> copies begun, the runtime's nine words in the caller's frame (<c>runtime/common/
+    /// U12: the session of <paramref name="copies"/> copies begun, the runtime's eleven words in the caller's frame (<c>runtime/common/
     /// runtime.kz</c>, "the copy of a value that crosses"), zero from the function's start, so that the end of a region whose code did
     /// not reach the session's start finds none under way: an empty memo, no <c>weak</c> reference, the copies left to make, whether
     /// every block goes into the memo, as it does in a session of more than one copy, where a later argument may reach a block by a
-    /// path that holds no count of it, and the heap <paramref name="heap"/> of a crossing, null for a <c>copy</c> at a call that is no
-    /// crossing. Such a session ends at its last copy, or, where the code leaves the region before it, at the region's end
-    /// (<see cref="LetGo"/>).
+    /// path that holds no count of it, the heap <paramref name="heap"/> of a crossing, null for a <c>copy</c> at a call that is no
+    /// crossing, and the two words of the list of the open sessions of the activation that runs it. Such a session ends at its last
+    /// copy, or, where the code leaves the region before it, at the region's end (<see cref="LetGo"/>), and a session of more than one
+    /// copy is listed among the running activation's open ones, which a crash between two of its copies ends (the runtime's
+    /// <c>CopyOpen</c>; U19).
     /// </summary>
     private string CopySession(int copies, string? heap)
     {
-        var session = fn.Alloca("[9 x i64]", "session", "zeroinitializer");
-        fn.Emit($"store [9 x i64] [i64 0, i64 0, i64 0, i64 0, i64 0, i64 0, i64 {Number(copies)}, i64 {(copies > 1 ? 1 : 0)}, i64 0], ptr {session}");
+        var session = fn.Alloca("[11 x i64]", "session", "zeroinitializer");
+        fn.Emit($"store [11 x i64] [i64 0, i64 0, i64 0, i64 0, i64 0, i64 0, i64 {Number(copies)}, i64 {(copies > 1 ? 1 : 0)}, i64 0, i64 0, i64 0], ptr {session}");
         if (heap is not null)
         {
-            fn.Emit($"store ptr {heap}, ptr {fn.Value($"getelementptr [9 x i64], ptr {session}, i32 0, i32 8")}");
+            fn.Emit($"store ptr {heap}, ptr {fn.Value($"getelementptr [11 x i64], ptr {session}, i32 0, i32 8")}");
+        }
+
+        if (copies > 1)
+        {
+            fn.Emit($"call void {RuntimeFunction("CopyOpen")}(ptr {session})");
         }
 
         if (copies > 1 && regions.Count > 0)

@@ -592,6 +592,9 @@ public sealed class SemanticModel
     /// <summary>Whether the file holds a log call the checker read, so that the program reads <c>KURZ_LOG</c> at its start (P4).</summary>
     public bool HasLogSites => logSites.Count > 0;
 
+    /// <summary>Whether the file holds a <c>spawn</c> the checker read, whose actor's crash writes a log line, so that the program reads <c>KURZ_LOG</c> at its start (P4, U24).</summary>
+    public bool Spawns => calls.Values.Any(i => i.Kind == CallKind.ClassNew && i.Target is ClassType { Symbol.IsActor: true });
+
     /// <summary>Whether the file holds a call on <c>Stdin</c> the checker read, so that the program declares the handle of its standard input (S22).</summary>
     public bool ReadsStdin => calls.Values.Any(i => i.Kind is CallKind.StdinLines or CallKind.StdinRead or CallKind.StdinReadLine or CallKind.StdinReadAll);
 

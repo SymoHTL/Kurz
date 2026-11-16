@@ -285,6 +285,34 @@ pub void HeapFree(byte* heap) {
     }
 }
 
+// The heap emptied but for its first page, which keeps the heap's record and its first block and gives no
+// block again (chapter 19, U21): its blocks of more than 262144 bytes and its other pages freed as
+// `HeapFree` frees them, its size classes emptied. A block of the heap is then a block of a later page.
+pub void HeapReset(byte* heap) {
+    raw {
+        mut byte* at = *Ptr<byte*>(heap + 24)
+        while at != null {
+            byte* after = *Ptr<byte*>(at + 8)
+            Kept(at, *Ptr<long>(at))
+            at = after
+        }
+
+        byte* first = heap - 16
+        mut byte* page = *Ptr<byte*>(heap + 16)
+        while page != first {
+            byte* before = *Ptr<byte*>(page)
+            Pooled(page, *Ptr<long>(page + 8))
+            page = before
+        }
+
+        *Ptr<byte*>(heap) = first + *Ptr<long>(first + 8)
+        *Ptr<byte*>(heap + 8) = first + *Ptr<long>(first + 8)
+        *Ptr<byte*>(heap + 16) = first
+        *Ptr<byte*>(heap + 24) = null
+        *Ptr<byte*>(heap + 32) = null
+    }
+}
+
 // `room` bytes from the newest page of `heap`, which takes a new page where that page is too small: twice
 // the size of the one before it, up to 65536 bytes, and the smallest power of two that holds the page's
 // header and `room` where that is larger. The rest of a page left behind is not carved again. Null where
