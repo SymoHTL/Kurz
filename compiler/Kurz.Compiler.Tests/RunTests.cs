@@ -18,7 +18,10 @@ public sealed class Toolchain : IDisposable
     {
         var search = Compiler.Build.Clang.Find();
         Clang = search.Found ?? throw new InvalidOperationException(Command.Failure(search));
-        Runtime = Builder.CheckRuntime(Builder.HostTarget ?? throw new InvalidOperationException("the runtime has no directory for this system"));
+        var target = Builder.HostTarget ?? throw new InvalidOperationException("the runtime has no directory for this system");
+        Runtime = Builder.CheckRuntime(target);
+        x64 = new(() => Builder.CheckRuntime(target, Arch.X64));
+        arm64 = new(() => Builder.CheckRuntime(target, Arch.Arm64));
         Directory = System.IO.Directory.CreateTempSubdirectory("kurz-tests-").FullName;
     }
 
@@ -26,6 +29,15 @@ public sealed class Toolchain : IDisposable
 
     /// <summary>The runtime of the target of this machine, which every program the suite builds is emitted with.</summary>
     public CheckedRuntime Runtime { get; }
+
+    private readonly Lazy<CheckedRuntime> x64;
+    private readonly Lazy<CheckedRuntime> arm64;
+
+    /// <summary>
+    /// The runtime of the target of this machine for the architecture of <paramref name="cpu"/>, which a program emitted for that CPU reads
+    /// (design record, section 2, round 20, "Dir per arch"): the IR of a build for 64-bit Arm on an x86-64 machine.
+    /// </summary>
+    public CheckedRuntime For(Cpu cpu) => cpu.X86 ? x64.Value : arm64.Value;
 
     /// <summary>The directory of this run's builds, removed with the fixture.</summary>
     public string Directory { get; }
@@ -116,7 +128,7 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls, the reads of standard input and running a program. The number for Linux is the count measured in the gates image, with no margin, so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156). The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 524 : 650;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 536 : 662;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =

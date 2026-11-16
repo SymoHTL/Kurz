@@ -30,7 +30,18 @@ public sealed class RuntimeTests
                 .Select(f => new RuntimeFile(d.Item1 + Path.GetRelativePath(d.Item2, f).Replace('\\', '/'), System.IO.File.ReadAllBytes(f))))
             .OrderBy(f => f.Path, StringComparer.Ordinal)
             .ToList();
-        Assert.Equal(["runtime/common/runtime.kz", "runtime/linux/linux.kz", "runtime/windows/windows.kz", "std/std.kz"], onDisk.Select(f => f.Path));
+        Assert.Equal(
+            [
+                "runtime/common/runtime.kz",
+                "runtime/linux/arm64/arm64.kz",
+                "runtime/linux/linux.kz",
+                "runtime/linux/x86-64/x86-64.kz",
+                "runtime/windows/arm64/arm64.kz",
+                "runtime/windows/windows.kz",
+                "runtime/windows/x86-64/x86-64.kz",
+                "std/std.kz",
+            ],
+            onDisk.Select(f => f.Path));
         Assert.Equal(onDisk.Select(f => f.Path), Runtime.Files.Select(f => f.Path));
         foreach (var (disk, carried) in onDisk.Zip(Runtime.Files))
         {
@@ -42,11 +53,13 @@ public sealed class RuntimeTests
     public void The_runtime_checks_clean_for_every_target_and_common_calls_its_target()
     {
         Assert.Empty(Runtime.CheckEveryTarget());
-        foreach (var target in Enum.GetValues<Target>())
+        foreach (var (target, arch) in Enum.GetValues<Target>().SelectMany(t => Enum.GetValues<Arch>().Select(a => (t, a))))
         {
             var errors = new List<string>();
-            var checkedRuntime = Runtime.Check(target, errors);
+            var checkedRuntime = Runtime.Check(target, arch, errors);
             Assert.Empty(errors);
+            Assert.Equal($"runtime/{Runtime.Directory(target)}/{Runtime.ArchDirectory(arch)}/{Runtime.ArchDirectory(arch)}.kz", checkedRuntime.ArchPath);
+            Assert.Contains(checkedRuntime.CommonChecker.FolderCalls, f => f.Name == "Switch" && checkedRuntime.ArchTree.Statements.Contains(f.Declaration)); // common reaches the architecture's switch through sys
             Assert.NotEmpty(checkedRuntime.CommonChecker.FolderCalls); // the rule of the same functions compares something
             Assert.Contains(checkedRuntime.StdChecker.FolderCalls, f => f.Name == "Memory"); // and of std's, the allocator's memory
             Assert.Contains(checkedRuntime.CommonChecker.FolderCalls, f => f.Name == "Allocate" && checkedRuntime.Std.Statements.Contains(f.Declaration)); // common reaches std's entry
@@ -78,7 +91,13 @@ public sealed class RuntimeTests
         File("runtime/linux/a.kz", linux),
         File("runtime/windows/a.kz", windows),
         File("std/a.kz", std),
+        File("runtime/linux/x86-64/a.kz", ArchText),
+        File("runtime/linux/arm64/a.kz", ArchText),
+        File("runtime/windows/x86-64/a.kz", ArchText),
+        File("runtime/windows/arm64/a.kz", ArchText),
     ];
+
+    private const string ArchText = "pub long Here() => 0\n";
 
     private const string Common = "use sys\n\npub long Out() => sys.Write(1)\n";
 
@@ -100,8 +119,10 @@ public sealed class RuntimeTests
         var result = Runtime.CheckEveryTarget(Runtime3(Common, "pub long Write(int fd) => 0\n", "pub int Write(int fd) => 0\n"));
         Assert.Equal(
             [
-                "runtime/windows/: `common/` calls `long Write(int)` of runtime/linux/, which this directory does not give with the same parameters and result",
-                "runtime/linux/: `common/` calls `int Write(int)` of runtime/windows/, which this directory does not give with the same parameters and result",
+                "runtime/windows/x86-64/: `common/` calls `long Write(int)` of runtime/linux/x86-64/, which this directory does not give with the same parameters and result",
+                "runtime/linux/x86-64/: `common/` calls `int Write(int)` of runtime/windows/x86-64/, which this directory does not give with the same parameters and result",
+                "runtime/windows/arm64/: `common/` calls `long Write(int)` of runtime/linux/x86-64/, which this directory does not give with the same parameters and result",
+                "runtime/linux/x86-64/: `common/` calls `int Write(int)` of runtime/windows/arm64/, which this directory does not give with the same parameters and result",
             ],
             result);
 
@@ -110,7 +131,7 @@ public sealed class RuntimeTests
             "use sys\n\npub long Out() {\n    mut n = 1\n    return sys.Write(mut n)\n}\n",
             "pub long Write(mut int fd) => 0\n",
             "pub long Write(int fd) => 0\n"));
-        Assert.Contains("runtime/windows/: `common/` calls `long Write(mut int)` of runtime/linux/, which this directory does not give with the same parameters and result", mutated);
+        Assert.Contains("runtime/windows/x86-64/: `common/` calls `long Write(mut int)` of runtime/linux/x86-64/, which this directory does not give with the same parameters and result", mutated);
         Assert.Contains(mutated, e => e.StartsWith("runtime/common/a.kz:5: ", StringComparison.Ordinal) && e.EndsWith(" (in the check for windows)", StringComparison.Ordinal));
     }
 
@@ -124,8 +145,10 @@ public sealed class RuntimeTests
         var errors = Runtime.CheckEveryTarget(Runtime3(common, "pub long Write(int fd) => 0\n", "pub int Write(int fd) => 0\n", std));
         Assert.Equal(
             [
-                "runtime/windows/: `std/` calls `long Write(int)` of runtime/linux/, which this directory does not give with the same parameters and result",
-                "runtime/linux/: `std/` calls `int Write(int)` of runtime/windows/, which this directory does not give with the same parameters and result",
+                "runtime/windows/x86-64/: `std/` calls `long Write(int)` of runtime/linux/x86-64/, which this directory does not give with the same parameters and result",
+                "runtime/linux/x86-64/: `std/` calls `int Write(int)` of runtime/windows/x86-64/, which this directory does not give with the same parameters and result",
+                "runtime/windows/arm64/: `std/` calls `long Write(int)` of runtime/linux/x86-64/, which this directory does not give with the same parameters and result",
+                "runtime/linux/x86-64/: `std/` calls `int Write(int)` of runtime/windows/arm64/, which this directory does not give with the same parameters and result",
             ],
             errors);
     }
@@ -180,7 +203,9 @@ public sealed class RuntimeTests
 
     [Theory]
     [InlineData("runtime/common/b.kz", "runtime/common/: not supported: a directory of 2 files")] // two files in one directory, which section 8 makes one folder
-    [InlineData("runtime/linux/x86-64/a.kz", "runtime/linux/x86-64/a.kz: not supported: a directory inside a target's")] // the directory of an architecture, which round 20 places there
+    [InlineData("runtime/linux/x86-64/b.kz", "runtime/linux/x86-64/: not supported: a directory of 2 files")] // two files in the directory of an architecture
+    [InlineData("runtime/linux/riscv64/a.kz", "runtime/linux/riscv64/a.kz: the runtime is")] // an architecture the compiler does not know
+    [InlineData("runtime/linux/x86-64/v3/a.kz", "runtime/linux/x86-64/v3/a.kz: the runtime is")] // a directory inside an architecture's
     [InlineData("runtime/common/x86-64/a.kz", "runtime/common/x86-64/a.kz: the runtime is")] // a directory inside common/, which no round places
     [InlineData("runtime/macos/a.kz", "runtime/macos/a.kz: the runtime is")] // a target the compiler does not know
     [InlineData("runtime/a.kz", "runtime/a.kz: the runtime is")] // a file beside the directories
@@ -206,6 +231,40 @@ public sealed class RuntimeTests
         var withoutStd = Runtime3(Common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n");
         withoutStd.RemoveAt(3);
         Assert.Equal(["std/ holds 0 files: the compiler reads one file of the standard library"], Runtime.Layout(withoutStd));
+
+        var withoutArch = Runtime3(Common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n");
+        withoutArch.RemoveAll(f => f.Path == "runtime/windows/arm64/a.kz");
+        Assert.Equal(["runtime/windows/arm64/ holds 0 files: the compiler reads one file in each directory of the runtime"], Runtime.Layout(withoutArch));
+    }
+
+    [Fact]
+    public void The_architecture_s_file_is_read_into_sys_beside_the_target_s_and_every_pair_gives_what_common_calls()
+    {
+        // round 20, "Dir per arch": `sys.Here()` is the architecture's function, beside the target's `Write`
+        const string common = "use sys\n\npub long Out() => sys.Write(1) + sys.Here()\n";
+        var errors = new List<string>();
+        var checkedRuntime = Runtime.Check(Runtime3(common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n"), Target.Linux, Arch.Arm64, errors);
+        Assert.Empty(errors);
+        Assert.Equal("runtime/linux/arm64/a.kz", checkedRuntime.ArchPath);
+        Assert.Contains(checkedRuntime.CommonChecker.FolderCalls, f => f.Name == "Here" && checkedRuntime.ArchTree.Statements.Contains(f.Declaration));
+        Assert.Equal(["long Here()", "long Write(int)"], Runtime.TargetCalls(checkedRuntime)["common/"]);
+        Assert.Empty(Runtime.CheckEveryTarget(Runtime3(common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n"))); // the positive control
+
+        // one architecture's file that gives `Here` with another result is named by its pair, against the first pair, linux/x86-64
+        var files = Runtime3(common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n");
+        files[^1] = File("runtime/windows/arm64/a.kz", "pub int Here() => 0\n");
+        Assert.Contains("runtime/windows/arm64/: `common/` calls `long Here()` of runtime/linux/x86-64/, which this directory does not give with the same parameters and result", Runtime.CheckEveryTarget(files));
+        Assert.Contains("runtime/linux/x86-64/: `common/` calls `int Here()` of runtime/windows/arm64/, which this directory does not give with the same parameters and result", Runtime.CheckEveryTarget(files));
+        Assert.DoesNotContain(Runtime.CheckEveryTarget(files), e => e.StartsWith("runtime/windows/x86-64/:", StringComparison.Ordinal) || e.StartsWith("runtime/linux/arm64/:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_name_the_target_s_file_and_the_architecture_s_both_declare_is_redeclared_in_the_architecture_s()
+    {
+        var files = Runtime3(Common, "pub long Write(int fd) => 0\n", "pub long Write(int fd) => 0\n");
+        Assert.Empty(Runtime.CheckEveryTarget(files)); // the positive control
+        files[^4] = File("runtime/linux/x86-64/a.kz", "pub long Write(long fd) => 0\n");
+        Assert.Contains(Runtime.CheckEveryTarget(files), e => e.StartsWith("runtime/linux/x86-64/a.kz:1: redeclared:", StringComparison.Ordinal));
     }
 
     // ---- the checker's reading of `use sys` ------------------------------------------------------

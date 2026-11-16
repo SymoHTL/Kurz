@@ -891,7 +891,7 @@ public sealed class SearchTests(Toolchain toolchain) : IClassFixture<Toolchain>
             """;
         foreach (var (cpu, sse2) in new[] { ((Kurz.Compiler.Emit.Cpu?)null, true), (Kurz.Compiler.Emit.Cpu.ArmBaseline, false) })
         {
-            var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: true, cpu: cpu is null ? null : () => cpu);
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], cpu is null ? toolchain.Runtime : toolchain.For(cpu), testBuild: true, cpu: cpu is null ? null : () => cpu);
             Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
             var ir = compilation.Program.Ir;
             Assert.Matches(@"call i64 @""?std\.TwoWay\.", ir);

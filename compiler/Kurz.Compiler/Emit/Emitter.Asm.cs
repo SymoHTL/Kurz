@@ -537,18 +537,15 @@ public sealed partial class Emitter
 
     /// <summary>
     /// R12: a <c>naked</c> function, as Rust's compiler emits one: its <c>asm</c> as assembly at the module's level, under the function's
-    /// symbol, in Intel's dialect, a <c>const</c> written as its digits and a <c>sym</c> as the symbol it names, which
-    /// <c>llvm.compiler.used</c> keeps; the code calls it through a declaration in the C calling convention of the target, so that it gets
-    /// no prologue, no epilogue and no line table. The symbol is the function's own in its object, an ELF function with its size on Linux
-    /// and a static COFF function on Windows.
+    /// symbol, on x86-64 in Intel's dialect and on 64-bit Arm in the assembler's one syntax, a <c>const</c> written as its digits and a
+    /// <c>sym</c> as the symbol it names, which <c>llvm.compiler.used</c> keeps; the code calls it through a declaration in the C calling
+    /// convention of the target, so that it gets no prologue, no epilogue and no line table. The symbol is the function's own in its
+    /// object, an ELF function with its size on Linux and a static COFF function on Windows, as Rust's <c>naked_asm.rs</c> writes the
+    /// directives of each object format, on either architecture (the owner, 2026-11-15, #519, comment 6892812780, Q2, "Rust: AArch64 switch
+    /// now", which brings <c>naked</c> to 64-bit Arm).
     /// </summary>
     private void EmitNaked(FunctionSymbol f, FunctionDeclaration d, string name)
     {
-        if (!cpu.X86)
-        {
-            throw Unsupported(d.Line, "a `naked` function, whose assembly the compiler builds for x86-64 alone (R12)");
-        }
-
         var body = d.BlockBody?.Statements is [AsmStatement asm] ? asm : throw new InvalidOperationException($"a `naked` function whose body is no one `asm` at line {d.Line}");
         var symbol = Symbol(name);
         var text = AsmTemplate(body, raw: false, inline: false, placeholder: (o, _) =>
@@ -563,17 +560,21 @@ public sealed partial class Emitter
             return "\"" + Symbol(value) + "\"";
         });
         var lines = new List<string>();
+        string[] syntax = cpu.X86 ? [".intel_syntax noprefix"] : []; // 64-bit Arm's assembler has one syntax
+        string[] back = cpu.X86 ? [".att_syntax prefix"] : [];
+
+        // an ELF function's type after `@` on x86-64 and after `%` on 64-bit Arm, the forms each architecture's assembly writes
         if (target == Target.Windows)
         {
-            lines.AddRange([".pushsection .text,\"xr\"", $".def \"{symbol}\"", ".scl 3", ".type 32", ".endef", ".p2align 4", $"\"{symbol}\":", ".intel_syntax noprefix"]);
+            lines.AddRange([".pushsection .text,\"xr\"", $".def \"{symbol}\"", ".scl 3", ".type 32", ".endef", ".p2align 4", $"\"{symbol}\":", .. syntax]);
             lines.AddRange(text.Split('\n'));
-            lines.AddRange([".att_syntax prefix", ".popsection"]);
+            lines.AddRange([.. back, ".popsection"]);
         }
         else
         {
-            lines.AddRange([".pushsection .text", ".p2align 4", $".type \"{symbol}\",@function", $"\"{symbol}\":", ".intel_syntax noprefix"]);
+            lines.AddRange([".pushsection .text", ".p2align 4", $".type \"{symbol}\",{(cpu.X86 ? "@" : "%")}function", $"\"{symbol}\":", .. syntax]);
             lines.AddRange(text.Split('\n'));
-            lines.AddRange([".att_syntax prefix", $".size \"{symbol}\", .-\"{symbol}\"", ".popsection"]);
+            lines.AddRange([.. back, $".size \"{symbol}\", .-\"{symbol}\"", ".popsection"]);
         }
 
         foreach (var line in lines)

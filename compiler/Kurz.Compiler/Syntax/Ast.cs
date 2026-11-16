@@ -323,9 +323,10 @@ public enum TypeDeclarationKind
 
 /// <summary>
 /// A word that starts a clause after an actor's name (section 6): <c>per</c>, <c>yield</c>, <c>inbox</c>, <c>stack</c> or <c>on crash</c>,
-/// with its line. The parser keeps the word and passes over what follows it, which the checker says <c>not supported</c> to.
+/// with its line. The parser keeps the word and passes over what follows it, which the checker says <c>not supported</c> to, but for
+/// <c>stack</c>, whose <paramref name="Size"/> is the literal of bytes after it (U1).
 /// </summary>
-public sealed record ActorClause(int Line, string Word);
+public sealed record ActorClause(int Line, string Word, UnitLiteral? Size = null);
 
 /// <summary>A base class or an interface after the colon (K6, K10), with the arguments of the explicit form.</summary>
 public sealed record BaseSpecifier(int Line, TypeSyntax Type, IReadOnlyList<Argument>? Arguments);

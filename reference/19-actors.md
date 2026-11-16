@@ -4,8 +4,9 @@ An actor is an object with private state and an inbox, which handles one message
 of its method through its reference is a message (§6, "Actors"). This chapter holds the actors of
 one machine and what a program writes of them: an actor's declaration, `spawn`, the call that waits
 for its result, `send`, and what crosses into a message. The scheduler, the stacks, crashes and
-supervision, deadlocks, the clauses after an actor's name and the actors of other machines (§6, §7)
-have no rule here, and `compiler/README.md` says what the compiler builds of the rules here.
+supervision, deadlocks but the calls a waiting actor lets in (U17) and the wait of the top-level code
+that nothing can end (U18), the clauses after an actor's name but the stack's (U1) and the actors of
+other machines (§6, §7) have no rule here, and `compiler/README.md` says what the compiler builds of the rules here.
 
 ### U1 (decided, §6) `actor`, and its words
 
@@ -33,6 +34,21 @@ instance, mutable or not, lives in one actor's heap (K18), and an immutable
 `static` field of such a type is reached from every actor, so that one of an actor shares nothing
 more, as a Rust `static` that is `Sync` stands)*. How a generic
 actor's messages and a call through an interface as a message are built stand open (§14).
+
+The stack's clause is `stack` and a literal of bytes, `kb`, `mb` or `gb` (L14), `actor Parser stack 8mb
+{ ... }`: it sets the size of the stack each message of the actor runs on, which is 2 MiB without it,
+as a thread that Rust's standard library spawns has (§6, the owner, 2026-11-13, #519, comment
+6847932993, Q4, "2 MiB + clause", and the owner, 2026-11-15, #519, comment 6892812780, Q3, "Build it now"). The size
+is read as a `long`, so that a literal that is no whole number of bytes is `inexact-literal` (L14)
+and one past the largest `long` is `constant-overflow`, as a literal that does not fit the type it
+takes (L10); the runtime rounds it up to a whole page and raises it to its floor, 64 KiB, with no
+message, so that the clause sets at least what it says (§6, the owner, 2026-11-15, #519, comment 6892835500, Q7,
+"Rust/C#: round up silently") *(assumed: the floor, as §6 marks it)*, and a stack the system refuses
+ends the process with `allocation-failed`, naming the size so rounded (O11) *(assumed: the size, as §6
+marks it)*. `stack` with no literal of bytes after it, a number with no unit or with another unit
+among them, and `stack` written twice are `syntax` (E4) *(assumed: as §6 marks it)*. On a target where
+no actor has a stack of its own the clause builds and sets nothing (§6, the owner, 2026-11-13, #519,
+comment 6851105334, "Accept, set nothing (Recommended)").
 
 Case: [actors/counter.kz](../corpus/actors/counter.kz)
 ```kurz
@@ -76,6 +92,68 @@ send c.Add(1)
 print(c.Get())
 ```
 
+Case: [actors/stack-clause.kz](../corpus/actors/stack-clause.kz)
+```kurz
+actor Parser stack 8mb {
+    pub long Down(long n) {
+        if n == 0 {
+            return 0
+        }
+
+        return Down(n - 1) + 1
+    }
+}
+
+p = spawn Parser()
+print(p.Down(60000))
+```
+
+Case: [actors/stack-floor.kz](../corpus/actors/stack-floor.kz)
+```kurz
+actor Small stack 1kb {
+    pub long Down(long n) {
+        if n == 0 {
+            return 0
+        }
+
+        return Down(n - 1) + 1
+    }
+}
+
+s = spawn Small()
+print(s.Down(200))
+```
+
+Case: [actors/stack-twice.kz](../corpus/actors/stack-twice.kz)
+```kurz
+actor Parser stack 8mb stack 4mb {
+    pub int Get() => 1
+}
+
+p = spawn Parser()
+print(p.Get())
+```
+
+Case: [actors/stack-without-bytes.kz](../corpus/actors/stack-without-bytes.kz)
+```kurz
+actor Parser stack 8 {
+    pub int Get() => 1
+}
+
+p = spawn Parser()
+print(p.Get())
+```
+
+Case: [actors/stack-inexact.kz](../corpus/actors/stack-inexact.kz)
+```kurz
+actor Parser stack 0.1kb {
+    pub int Get() => 1
+}
+
+p = spawn Parser()
+print(p.Get())
+```
+
 Case: [actors/base-after-name.kz](../corpus/actors/base-after-name.kz)
 ```kurz
 class Box(int Size)
@@ -112,6 +190,41 @@ written or inferred as a generic class's construction takes them (T19, T27) *(as
 parameters read with T19's use of a generic type and U2's binding, which no answer named)*. `equal by` on an
 actor and a constructor in its body are `syntax`, since this rule gives the actor's `==` and its
 constructor (§6, comment 6882624606, Q26).
+
+`spawn` stands wherever an expression does, in a function, a class's method, a lambda and a field's
+default among them, as a call that waits does (U4).
+
+Case: [actors/spawn-in-function.kz](../corpus/actors/spawn-in-function.kz)
+```kurz
+actor Counter {
+    mut int count = 0
+
+    pub void Add(int n) {
+        count = count + n
+    }
+
+    pub int Get() => count
+}
+
+Counter Make(int start) {
+    made = spawn Counter()
+    send made.Add(start)
+    return made
+}
+
+actor Factory {
+    pub int Build() {
+        built = Make(5)
+        send built.Add(1)
+        return built.Get()
+    }
+}
+
+c = Make(2)
+print(c.Get())
+f = spawn Factory()
+print(f.Build())
+```
 
 Case: [actors/two-instances.kz](../corpus/actors/two-instances.kz)
 ```kurz
@@ -219,12 +332,102 @@ while a throw in its run at a restart is the actor's own crash under its policy 
 
 Case: [actors/constructor-arguments.kz](../corpus/actors/constructor-arguments.kz)
 
+Case: [actors/constructor-waits.kz](../corpus/actors/constructor-waits.kz)
+```kurz
+actor Config {
+    pub int Size() {
+        print("size asked")
+        return 3
+    }
+}
+
+actor Pool(Config Settings) {
+    int size = Settings.Size()
+
+    pub int Count() => size
+}
+
+s = spawn Config()
+p = spawn Pool(s)
+print("spawned")
+print(p.Count())
+```
+
 ### U4 (decided, §5, §6) A call through a reference waits
 
 A call of an actor's `pub` method through its reference, `c.Get()`, is a message, and its caller
 waits for its result (§6, "A call waits for its result by default"). The result is read as any
 call's: its success is the value, and its other cases leave the calling code or are handled, as O2
 to O5 say (§5).
+
+A call through a reference stands wherever a call does: in the top-level code, an actor's method, a
+class's method, a function, a lambda and a field's default, an actor's among them, which runs inside
+`spawn` (U3), since every call looks synchronous and the runtime parks the actor while it waits, on a
+stack of its own, so that no function is rewritten (§6, "There is no `async`/`await`", and the stack
+of an actor parked in the middle of a call). A call that waits inside a message parks that message:
+its actor takes no other message until the reply is set but the calls of its chain (U17).
+
+Case: [actors/wait-in-method.kz](../corpus/actors/wait-in-method.kz)
+```kurz
+actor Price {
+    pub int Of(int n) => n * 5
+}
+
+actor Cart(Price Prices) {
+    pub int Total(int n) {
+        return Prices.Of(n) + 1
+    }
+}
+
+p = spawn Price()
+c = spawn Cart(p)
+print(c.Total(3))
+```
+
+Case: [actors/wait-in-function.kz](../corpus/actors/wait-in-function.kz)
+```kurz
+actor Price {
+    pub int Of(int n) => n * 5
+}
+
+int Twice(Price p, int n) => p.Of(n) * 2
+
+actor Cart(Price Prices) {
+    pub int Total(int n) => Twice(Prices, n) + 1
+}
+
+prices = spawn Price()
+cart = spawn Cart(prices)
+print(cart.Total(3))
+print(Twice(prices, 1))
+```
+
+Case: [actors/wait-in-lambda.kz](../corpus/actors/wait-in-lambda.kz)
+```kurz
+actor Price {
+    pub int Of(int n) => n * 5
+}
+
+actor Cart(Price Prices) {
+    pub int Total(List<int> counts) {
+        priced = (int n) => Prices.Of(n)
+        mut total = 0
+        for n in counts {
+            total = total + priced(n)
+        }
+
+        return total
+    }
+}
+
+p = spawn Price()
+c = spawn Cart(p)
+print(c.Total([1, 2, 3]))
+of = (int n) => p.Of(n)
+print(of(4))
+```
+
+Case: [actors/constructor-waits.kz](../corpus/actors/constructor-waits.kz)
 
 Case: [actors/union-result.kz](../corpus/actors/union-result.kz)
 ```kurz
@@ -310,7 +513,11 @@ waits for (§6, "`send` makes a call fire-and-forget"). `send <call>` stands as 
 no value, so that a `send` where a value stands, `print(send c.Add(1))`, is `syntax`, as is a call
 whose success is `void` used as a value (O10). A `send` of a method that gives a result is
 the compile error `send-result`, since its result and its cases would reach nobody (§6, the owner,
-2026-11-13, #519, comment 6847932993, Q12, "send-result error (Recommended)").
+2026-11-13, #519, comment 6847932993, Q12, "send-result error (Recommended)"). `send` stands
+wherever a call does, in a function, a class's method and a lambda among them, as a call that
+waits does (U4).
+
+Case: [actors/spawn-in-function.kz](../corpus/actors/spawn-in-function.kz)
 
 Case: [actors/send-result.kz](../corpus/actors/send-result.kz)
 ```kurz
@@ -487,6 +694,25 @@ a message as any reference does (U12) (§6, the owner, 2026-11-14, #519, comment
 
 Case: [actors/own-method-direct.kz](../corpus/actors/own-method-direct.kz)
 
+Case: [actors/call-self-through-this.kz](../corpus/actors/call-self-through-this.kz)
+```kurz
+actor Counter {
+    mut int count = 0
+
+    pub int Next() {
+        me = this
+        count = count + 1
+        return me.Get() + 100
+    }
+
+    pub int Get() => count
+}
+
+c = spawn Counter()
+print(c.Next())
+print(c.Next())
+```
+
 Case: [actors/this-reference.kz](../corpus/actors/this-reference.kz)
 ```kurz
 actor Worker {
@@ -643,7 +869,10 @@ after their current message (§6, the owner, 2026-11-13, #519, comment 684793299
 Q8, "All nine leans (Recommended)"). The end of any actor stops the actors it spawned so, after
 their current message, their queued messages dropped, so that the end of the top-level code reaches
 every actor of the machine (§6, the owner, 2026-10-30, "With its supervisor", and the owner,
-2026-11-13, #519, comment 6847932993, Q16).
+2026-11-13, #519, comment 6847932993, Q16). A message parked in a wait when the top-level code ends
+is dropped with the process, as a queued one is, its lines after the wait never running, as tokio
+drops its tasks when its runtime shuts down (§6, the owner, 2026-11-15, #519, comment 6892835500, Q5, "Rust:
+dropped").
 
 No case: which message runs when the top-level code ends is the scheduler's to say where actors run
 on more than one thread, so that a case's output would hang on it.
@@ -712,6 +941,41 @@ queue keeps the order in which its items were put in; across machines only the o
 
 Case: [actors/relay.kz](../corpus/actors/relay.kz)
 
+Case: [actors/chain-send-waits.kz](../corpus/actors/chain-send-waits.kz)
+```kurz
+actor Store(Checker Check) {
+    mut int saved = 0
+
+    pub int Save(int n) {
+        saved = n
+        valid = Check.Valid(this)
+        print("saved")
+        return valid
+    }
+
+    pub int Load() {
+        print("load")
+        return saved
+    }
+
+    pub void Note() {
+        print("note")
+    }
+}
+
+actor Checker {
+    pub int Valid(Store store) {
+        send store.Note()
+        return store.Load() * 10
+    }
+}
+
+c = spawn Checker()
+s = spawn Store(c)
+print(s.Save(4))
+print(s.Load())
+```
+
 Case: [actors/send-own-method.kz](../corpus/actors/send-own-method.kz)
 
 Case: [actors/this-reference.kz](../corpus/actors/this-reference.kz)
@@ -751,3 +1015,116 @@ Case: [actors/first-error-spawn-without-arguments.kz](../corpus/actors/first-err
 Case: [actors/first-error-spawn-required.kz](../corpus/actors/first-error-spawn-required.kz)
 
 Case: [actors/first-error-mut-in-message.kz](../corpus/actors/first-error-mut-in-message.kz)
+
+### U17 (decided, §6) A waiting actor takes the calls of its chain
+
+Every call through a reference and every `send` carries a chain ID: each call that waits and each
+`send` of the top-level code starts a chain of its own, and one made inside a message carries that
+message's chain *(assumed in §6, as a chain's deadline is the one of the call at its root)*. An actor
+that waits inside a chain lets in the calls that wait and belong to the same chain, so that
+`A.Save`, waiting on `B.Check`, which calls `A.Load`, runs `A.Load` as a nested call; every other
+message waits in the inbox, a `send` of the chain among them, which runs after the message it was
+sent from (§6, "Deadlocks", layer 1; the owner, 2026-11-14, #519, comment 6880404917, Q13, "All
+eight leans (Recommended)"). Such a call runs on a stack of its own from the pool, as any message
+starts, and the parked message resumes once the calls above it end (§6, the owner,
+2026-11-15, #519, comment 6892835500, Q6, "Own pooled stack"). An actor under construction takes no
+message until its `spawn` returns, one of its chain neither *(assumed in §6)*. The chain ID is 16 bytes,
+drawn at random from a generator of its thread that the system's randomness seeds once, and a system
+that gives no randomness when a thread starts its first chain ends the program with `random-failed`,
+as a thread's first map does (M9) *(assumed in §6)*.
+
+Case: [actors/callback.kz](../corpus/actors/callback.kz)
+```kurz
+actor A(B Other) {
+    mut int saved = 0
+
+    pub int Save(int n) {
+        saved = n
+        return Other.Check(this) + 1
+    }
+
+    pub int Load() => saved
+}
+
+actor B {
+    pub int Check(A x) {
+        return x.Load() * 10
+    }
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Save(4))
+```
+
+Case: [actors/waits-one-message.kz](../corpus/actors/waits-one-message.kz)
+```kurz
+actor Clock {
+    pub int Now() => 7
+}
+
+actor Worker(Clock C) {
+    pub void Slow() {
+        print("slow starts")
+        t = C.Now()
+        print("slow ends {t}")
+    }
+
+    pub void Fast() {
+        print("fast")
+    }
+
+    pub void Last() {
+        print("last")
+    }
+}
+
+c = spawn Clock()
+w = spawn Worker(c)
+send w.Slow()
+send w.Fast()
+w.Last()
+```
+
+Case: [actors/chain-send-waits.kz](../corpus/actors/chain-send-waits.kz)
+
+Case: [actors/call-self-through-this.kz](../corpus/actors/call-self-through-this.kz)
+
+### U18 (decided, §6) A wait of the top-level code that nothing can end
+
+The top-level code's call that waits runs the actors' messages in place, on the main thread's stack,
+until its reply is set, and never parks, as tokio's `block_on` runs its runtime on the thread that
+calls it *(assumed in §6)*. A wait of it that finds nothing left to run ends the process with
+`error: deadlock at <file>:<n>`, the line of that call, and the exit code 1, so that two actors that
+call each other from different chains and wait for each other, on one thread, do not hang silently
+(§6, "Deadlocks"; the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level
+wait"). A call that waits in a function the top-level code called is the top-level code's, at its
+own line. A loop of actors the top-level code never waits on stays until the end of the program,
+where U13 drops it.
+
+Case: [actors/deadlock.kz](../corpus/actors/deadlock.kz)
+```kurz
+actor Left {
+    pub void Ask(Right other) {
+        print("left asks")
+        print("left got {other.Value()}")
+    }
+
+    pub int Value() => 1
+}
+
+actor Right {
+    pub void Ask(Left other) {
+        print("right asks")
+        print("right got {other.Value()}")
+    }
+
+    pub int Value() => 2
+}
+
+l = spawn Left()
+r = spawn Right()
+send l.Ask(r)
+send r.Ask(l)
+print(l.Value())
+```

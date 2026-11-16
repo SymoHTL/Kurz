@@ -1,0 +1,60 @@
+// The runtime's code for Linux on 64-bit Arm (design record, section 2, round 20, "Dir per arch"), read
+// into the folder `sys` beside `runtime/linux/linux.kz`: the switch of a thread to an actor's stack and
+// back under the AArch64 procedure call standard, and the first frame of an actor's stack (the owner,
+// 2026-11-15, #519, comment 6892812780, Q2, "Rust: AArch64 switch now").
+
+// The switch from the side whose save area is `from` to the side whose save area is `to` (design record,
+// section 2; section 3, `naked`, R12), as Rust's stackful coroutines switch on AArch64 (corosensei's
+// `src/arch/aarch64.rs`, not checked at source), but for where the registers go: the stack pointer at 0, the registers the
+// standard keeps across a call, x19 to x28 at 8 to 80, the frame pointer x29 at 88 and the link register
+// x30 at 96, the address the side resumes at, its x30 again, at 104, and the low halves of v8 to v15, d8 to
+// d15, at 112 to 160, are stored into the save area of the side it leaves and loaded from the other's, and
+// not pushed onto the stack (the owner, 2026-11-15, #519, comment 6892812780, Q1, "Save area at stack
+// base"); the switch then branches to the other side's address through x16, a register the standard
+// gives no call, which on a side that called the switch is where that call returns, and on a stack's
+// first frame its entry with x30 0 (`Enter`). The floating-point control register, which the standard
+// keeps too, is not saved, as nothing in Kurz changes it; nor does the switch carry unwind directives,
+// since no walk of a stack crosses it (design record, section 2, both assumed there).
+pub naked void Switch(byte* from, byte* to) {
+    asm(
+        "mov x16, sp",
+        "str x16, [x0]",
+        "stp x19, x20, [x0, #8]",
+        "stp x21, x22, [x0, #24]",
+        "stp x23, x24, [x0, #40]",
+        "stp x25, x26, [x0, #56]",
+        "stp x27, x28, [x0, #72]",
+        "stp x29, x30, [x0, #88]",
+        "str x30, [x0, #104]",
+        "stp d8, d9, [x0, #112]",
+        "stp d10, d11, [x0, #128]",
+        "stp d12, d13, [x0, #144]",
+        "stp d14, d15, [x0, #160]",
+        "ldr x16, [x1]",
+        "mov sp, x16",
+        "ldp x19, x20, [x1, #8]",
+        "ldp x21, x22, [x1, #24]",
+        "ldp x23, x24, [x1, #40]",
+        "ldp x25, x26, [x1, #56]",
+        "ldp x27, x28, [x1, #72]",
+        "ldp x29, x30, [x1, #88]",
+        "ldp d8, d9, [x1, #112]",
+        "ldp d10, d11, [x1, #128]",
+        "ldp d12, d13, [x1, #144]",
+        "ldp d14, d15, [x1, #160]",
+        "ldr x16, [x1, #104]",
+        "br x16")
+}
+
+// The save area `side` set so that the switch to it enters `entry` on a stack whose frames start at `top`,
+// a multiple of 16, as if a call from the address 0 had made it: the stack pointer `top`, x29 and x30 0 and
+// the entry as the address to resume at, so that a walk of the stack ends at the entry (design record,
+// section 2), as libgcc's unwinder ends a walk at a return address of zero.
+pub void Enter(byte* side, byte* top, extern "C" () => void entry) {
+    raw {
+        *Ptr<byte*>(side) = top
+        *Ptr<long>(side + 88) = 0
+        *Ptr<long>(side + 96) = 0
+        *Ptr<extern "C" () => void>(side + 104) = entry
+    }
+}

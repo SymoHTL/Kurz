@@ -1,0 +1,16 @@
+// expect: output
+// | 200
+// rules: U1
+
+actor Small stack 1kb {
+    pub long Down(long n) {
+        if n == 0 {
+            return 0
+        }
+
+        return Down(n - 1) + 1
+    }
+}
+
+s = spawn Small()
+print(s.Down(200))

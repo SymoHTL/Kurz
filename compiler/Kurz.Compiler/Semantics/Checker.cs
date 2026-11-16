@@ -72,6 +72,13 @@ public sealed partial class Checker
     private readonly Checker? std; // W1: the standard library's checker, whose types of the prelude every file sees
     private readonly HashSet<string> preludeSeen = new(StringComparer.Ordinal); // W1: the names of those types this file sees
 
+    /// <summary>
+    /// The checker of a second file of the folder this checker's file stands in, whose functions a call qualified by the folder's name
+    /// picks among beside this one's: the file of the build's architecture, which the folder <c>sys</c> reads beside the target's own
+    /// (design record, section 2, round 20, "Dir per arch"); null for every other folder.
+    /// </summary>
+    internal Checker? Beside { get; set; }
+
     private Checker(DiagnosticBag diagnostics, IReadOnlyCollection<string> grants, IReadOnlyDictionary<string, Checker> folders, Checker? std)
     {
         this.diagnostics = diagnostics;
@@ -382,7 +389,6 @@ public sealed partial class Checker
         FindGrowingCycles(); // T34: after the readers are known, of which it reads the calls in a loop over `T.Fields` alone
 
         frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = 1 };
-        topLevelFrame = frame; // U4
         // S13: `args`, the program's arguments without its name, which the top-level statements alone see, as a parameter of the
         // top-level code, never `unused-variable` (V13) and no name a function cannot declare (the owner, 2026-10-30, "Top-level code only")
         var arguments = new VariableSymbol("args", new ListType(Types.String), false, VariableKind.Parameter, 0);

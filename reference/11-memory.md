@@ -831,7 +831,9 @@ and the ids' names, which no answer named, as §3 marks them)*. A
 register class is read against the table of the target the build compiles for, so
 that a class that target does not have is `asm-operand`, and a case is read for x86-64 where its
 header names no target (§3, the owner, 2026-10-22); how a header names the target is open (§14), and
-no case names one. An `asm` outside a `raw` block and outside the body of a
+no case names one. On a 64-bit Arm target the templates of an `asm` are AArch64's assembly, as Rust's
+`asm!` takes them on `aarch64` (§3, the owner, 2026-11-15, #519, comment 6892812780, Q2, "Rust: AArch64 switch
+now"). An `asm` outside a `raw` block and outside the body of a
 `naked` function (R12) is the compile error `raw-required` (R10) *(assumed: the id, as §3 marks it)*.
 `asm` is a core word (L18). The cases of an `asm` in a `raw` block take the grant through their
 header (R7). Every case runs through the compiler's front end, which reads `asm("nop")` with no error
@@ -1117,7 +1119,9 @@ there). One in a package without the grant, or in a program without a project fi
 error `naked-not-allowed`, and its body, a `raw` block, raises no `raw-not-allowed` beside it *(assumed:
 the id and the one error, as §3 marks them)*.
 Its `asm` takes `sym` and `const` operands alone, its instructions return or never end, and the
-function is called by the C calling convention of its target *(assumed: as §3 marks them)*. Its `asm`
+function is called by the C calling convention of its target *(assumed: as §3 marks them)*. On a
+64-bit Arm target its `asm` is AArch64's assembly, so that the runtime's switch of stacks is written
+there as on x86-64 (§2, §3, the owner, 2026-11-15, #519, comment 6892812780, Q2, "Rust: AArch64 switch now"). Its `asm`
 may define labels by name, which R11 refuses in an inline `asm` (§3, the owner, 2026-11-13), and labels of
 only the digits 0 and 1 *(assumed: binary labels within the exemption, as §3 marks them)*. A `naked`
 function with type parameters is one no rule states, and the compiler reads none; where one is read,

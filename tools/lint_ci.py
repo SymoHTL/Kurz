@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit facts of the four workflows and of the image the gates job runs in. A one-token YAML fact that nothing compiles gets a check here:
+"""Unit facts of the five workflows and of the image the gates job runs in. A one-token YAML fact that nothing compiles gets a check here:
 - all: actions pinned by commit SHA, the hosted runner named by its versioned label (the forge
   offers no digest for a hosted image), a timeout on every job, pip with
   --require-hashes, no job or step that may fail quietly (`continue-on-error`), no step-level `if`,
@@ -37,6 +37,11 @@
   compiler/Kurz.Compiler/Build/Clang.cs), the hash in LLVM_SHA256, and the cache keyed by that
   release; the last step runs the compiler gate with no env and carries nothing but its name and
   run. The job is not a required check of the ruleset;
+- compiler-arm.yml: the facts of compiler-windows.yml, with its own job, `compiler-arm`, on the versioned
+  label of the forge's Arm runner, ubuntu-24.04-arm; LLVM's archive for Linux on Arm, checked by its
+  SHA-256 before it is unpacked into /usr/local by exactly the pinned script, the cache keyed by the
+  release and that platform; the last step runs the compiler gate's Arm call, `--arm`, which runs the
+  actors' and `naked` tests alone. The job is not a required check of the ruleset;
 - image.yml: runs on a push that changes ci/Dockerfile or the workflow itself, on any branch, so that
   a pull request can name the image its own push built, and on a manual dispatch; exactly one job,
   `image`, with no `if`; a token that reads the code and writes the packages; one checkout that
@@ -62,7 +67,7 @@ import kit  # noqa: E402
 import calls  # noqa: E402
 
 WORKFLOWS = ".github/workflows"
-FILES = ["compiler-windows.yml", "gates.yml", "image.yml", "review.yml"]
+FILES = ["compiler-arm.yml", "compiler-windows.yml", "gates.yml", "image.yml", "review.yml"]
 DOCKERFILE = "ci/Dockerfile"
 CLANG_CS = "compiler/Kurz.Compiler/Build/Clang.cs"  # the one definition of the LLVM major the compiler accepts
 PIN = re.compile(r"(?m)^\s*public const int PinnedMajor = (\d+);")
@@ -85,6 +90,20 @@ LLVM_RUN = "\n".join([
     "zstd -d -q -f --long=31 $archive -o $tar",
     "tar -xf $tar -C $llvm --strip-components 1",
     "& (Join-Path $llvm bin clang.exe) --version",
+])
+ARM_RUNNER = "ubuntu-24.04-arm"
+LLVM_ARM_RUN = "\n".join([
+    "set -eu",
+    'name="LLVM-$LLVM_VERSION-Linux-ARM64.tar.zst"',
+    'archive="$RUNNER_TEMP/llvm-archive/$name"',
+    'if [ ! -f "$archive" ]; then',
+    '  mkdir -p "$RUNNER_TEMP/llvm-archive"',
+    '  curl -fsSL -o "$archive" "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VERSION/$name"',
+    "fi",
+    'echo "$LLVM_SHA256  $archive" | sha256sum -c -',
+    'zstd -d -q -f --long=31 "$archive" -o "$RUNNER_TEMP/llvm.tar"',
+    'sudo tar -xf "$RUNNER_TEMP/llvm.tar" -C /usr/local --strip-components 1',
+    "/usr/local/bin/clang --version",
 ])
 GLOBAL_JSON = "compiler/global.json"
 IMAGE = "ghcr.io/symohtl/kurz-ci"
@@ -301,11 +320,11 @@ def read_pin(text):
     return int(match.group(1)) if match else None
 
 
-def llvm_errors(name, steps, pin):
-    """The Windows job's install of the pinned LLVM: one step that runs exactly LLVM_RUN, with nothing in
-    its env but the release, of the major the compiler pins, and its SHA-256; before it one cache of
-    the archive, keyed by that release."""
-    installs = [i for i, s in enumerate(steps) if str(s.get("run", "")).strip() == LLVM_RUN]
+def llvm_errors(name, steps, pin, script=LLVM_RUN, platform="x86_64-pc-windows-msvc"):
+    """A compiler job's install of the pinned LLVM: one step that runs exactly `script`, LLVM_RUN on
+    Windows, with nothing in its env but the release, of the major the compiler pins, and its SHA-256;
+    before it one cache of the archive, keyed by that release and the archive's `platform`."""
+    installs = [i for i, s in enumerate(steps) if str(s.get("run", "")).strip() == script]
     if len(installs) != 1:
         return [f"{name}: expected exactly one step that installs the pinned LLVM, running exactly the pinned script, found {len(installs)}"]
     i = installs[0]
@@ -323,7 +342,7 @@ def llvm_errors(name, steps, pin):
     if not re.fullmatch(r"[0-9a-f]{64}", str(env.get("LLVM_SHA256", ""))):
         errors.append(f"{name}: LLVM_SHA256 must be the archive's SHA-256, 64 hex digits")
     caches = [j for j, s in enumerate(steps) if str(s.get("uses", "")).startswith("actions/cache@")]
-    expected = {"path": LLVM_ARCHIVE, "key": f"llvm-{version}-x86_64-pc-windows-msvc"}
+    expected = {"path": LLVM_ARCHIVE, "key": f"llvm-{version}-{platform}"}
     if len(caches) != 1 or caches[0] > i or (steps[caches[0]].get("with") or {}) != expected:
         errors.append(f"{name}: expected one cache of the archive before the install, with exactly {expected}")
     return errors
@@ -348,6 +367,27 @@ def compiler_facts(text, pin):
     errors += sdk_step_errors(name, steps)
     errors += llvm_errors(name, steps, pin)
     step, _ = deciding_step(name, steps, "python tools/compiler_gate.py", "compiler", set())
+    return errors + step
+
+
+def arm_facts(text, pin):
+    """compiler-windows.yml's facts for the job on the forge's Arm runner, with its own LLVM script and its gate's Arm call."""
+    name = "compiler-arm.yml"
+    try:
+        data, on = parse(text)
+    except (yaml.YAMLError, ValueError) as e:
+        return unreadable(name, e)
+    errors = common(name, text, data, set(), runner=ARM_RUNNER) + pr_push_errors(name, on)
+    if data.get("permissions") != dict(contents="read"):
+        errors.append(f"{name}: permissions must be exactly contents: read")
+    if list(data["jobs"]) != ["compiler-arm"]:
+        errors.append(f"{name}: jobs must be exactly [compiler-arm]")
+    job = data["jobs"].get("compiler-arm") or {}
+    if "if" in job:
+        errors.append(f"{name}: the job compiler-arm may be skipped (`if`), and a skipped job reports success")
+    steps = job.get("steps") or []
+    errors += checkout_errors(name, steps) + sdk_step_errors(name, steps) + llvm_errors(name, steps, pin, LLVM_ARM_RUN, "aarch64-linux")
+    step, _ = deciding_step(name, steps, "python3 tools/compiler_gate.py --arm", "compiler", set())
     return errors + step
 
 
@@ -469,7 +509,7 @@ def lint(root):
         errors.append(f"{CLANG_CS}: cannot be read: {type(e).__name__}")
     if pin is None:
         errors.append(f"{CLANG_CS} names no PinnedMajor: the LLVM of the image and of the Windows job is held to nothing")
-    for fname, facts in (("compiler-windows.yml", lambda text: compiler_facts(text, pin)), ("gates.yml", gates_facts),
+    for fname, facts in (("compiler-arm.yml", lambda text: arm_facts(text, pin)), ("compiler-windows.yml", lambda text: compiler_facts(text, pin)), ("gates.yml", gates_facts),
                          ("image.yml", image_facts), ("review.yml", review_facts)):
         try:
             text = kit.read(os.path.join(root, WORKFLOWS, fname))
@@ -647,6 +687,20 @@ MUTATIONS = [
     ("ci/Dockerfile", "the LLVM key used unchecked", 'grep -qx "fpr:::::::::$LLVM_KEY:"', 'true', "ARG LLVM_KEY"),
     ("ci/Dockerfile", "a short hash of the SDK", "ARG DOTNET_SHA512=", "ARG DOTNET_SHA512=ab\nARG UNUSED=", "ARG DOTNET_SHA512"),
     ("ci/Dockerfile", "no major release of LLVM", "ARG LLVM_MAJOR=", "ARG LLVM_MAJOR=latest\nARG UNUSED=", "ARG LLVM_MAJOR must be a major release"),
+    ("compiler-arm.yml", "edits no longer re-run the Arm job", "ready_for_review, edited]", "ready_for_review]", "pull_request types"),
+    ("compiler-arm.yml", "a floating runner image", "runs-on: ubuntu-24.04-arm", "runs-on: ubuntu-latest", "runner image"),
+    ("compiler-arm.yml", "the job can be skipped", "  compiler-arm:\n    runs-on:", "  compiler-arm:\n    if: github.actor != 'x'\n    runs-on:",
+     "may be skipped"),
+    ("compiler-arm.yml", "a write token", "  contents: read\n", "  contents: write\n", "permissions"),
+    ("compiler-arm.yml", "a second job of its own", "\njobs:\n", "\njobs:\n" + PLAIN_JOB.replace("ubuntu-24.04", "ubuntu-24.04-arm"),
+     "jobs must be exactly [compiler-arm]"),
+    ("compiler-arm.yml", "the archive unpacked unchecked", '          echo "$LLVM_SHA256  $archive" | sha256sum -c -\n', "",
+     "installs the pinned LLVM"),
+    ("compiler-arm.yml", "an LLVM of another major than the compiler's", 'LLVM_VERSION: "23.1.4"', 'LLVM_VERSION: "22.1.8"', "pins LLVM"),
+    ("compiler-arm.yml", "a hash that is no SHA-256", 'LLVM_SHA256: "0975f753', 'LLVM_SHA256: "0975f75', "LLVM_SHA256 must be"),
+    ("compiler-arm.yml", "a cache keyed by another release", "key: llvm-23.1.4-", "key: llvm-23.1.3-", "one cache of the archive"),
+    ("compiler-arm.yml", "the gate runs without its Arm call", "run: python3 tools/compiler_gate.py --arm", "run: python3 tools/compiler_gate.py",
+     "must be the compiler step"),
     ("compiler-windows.yml", "edits no longer re-run the compiler job", "ready_for_review, edited]", "ready_for_review]", "pull_request types"),
     ("compiler-windows.yml", "a path filter", "    branches: [main]\n", "    branches: [main]\n    paths: ['compiler/**']\n", "path filter"),
     ("compiler-windows.yml", "another trigger", "    branches: [main]\n", "    branches: [main]\n  workflow_dispatch:\n", "triggers are"),
@@ -714,7 +768,7 @@ def self_test():
 def cases_in(base):
     clang_cs = kit.read(os.path.join(kit.ROOT, CLANG_CS))
     pin = read_pin(clang_cs)
-    facts = {"compiler-windows.yml": lambda text: compiler_facts(text, pin), "gates.yml": gates_facts, "image.yml": image_facts,
+    facts = {"compiler-arm.yml": lambda text: arm_facts(text, pin), "compiler-windows.yml": lambda text: compiler_facts(text, pin), "gates.yml": gates_facts, "image.yml": image_facts,
              "review.yml": review_facts}
     real = {f: kit.read(os.path.join(kit.ROOT, WORKFLOWS, f)) for f in facts}
     global_json = kit.read(os.path.join(kit.ROOT, GLOBAL_JSON))

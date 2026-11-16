@@ -1,0 +1,47 @@
+// The runtime's code for Linux on x86-64 (design record, section 2, round 20, "Dir per arch"), read into
+// the folder `sys` beside `runtime/linux/linux.kz`: the switch of a thread to an actor's stack and back
+// under the System V calling convention, and the first frame of an actor's stack.
+
+// The switch from the side whose save area is `from` to the side whose save area is `to` (design record,
+// section 2; section 3, `naked`, R12), as Rust's stackful coroutines switch (corosensei's
+// `src/arch/x86_64.rs`), but for where the registers go: the stack pointer and the registers the System V
+// convention keeps across a call, rbx, rbp and r12 to r15, are stored into the save area of the side it
+// leaves and loaded from the other's, 56 bytes, in the order rsp, rbx, rbp, r12, r13, r14, r15, and not
+// pushed onto the stack (the owner, 2026-11-15, #519, comment 6892812780, Q1, "Save area at stack base"),
+// so that the call's return address is the one word its call puts on the stack it leaves; `ret` then
+// returns into the other side, where it called the switch, or into a stack's first frame (`Enter`). The
+// control bits of MXCSR and the x87 control word, which the convention keeps too, are not saved, since
+// nothing in Kurz changes them; nor does the switch carry unwind directives, since no walk of a stack
+// crosses it (design record, section 2, both assumed there).
+pub naked void Switch(byte* from, byte* to) {
+    asm(
+        "mov qword ptr [rdi], rsp",
+        "mov qword ptr [rdi + 8], rbx",
+        "mov qword ptr [rdi + 16], rbp",
+        "mov qword ptr [rdi + 24], r12",
+        "mov qword ptr [rdi + 32], r13",
+        "mov qword ptr [rdi + 40], r14",
+        "mov qword ptr [rdi + 48], r15",
+        "mov rsp, qword ptr [rsi]",
+        "mov rbx, qword ptr [rsi + 8]",
+        "mov rbp, qword ptr [rsi + 16]",
+        "mov r12, qword ptr [rsi + 24]",
+        "mov r13, qword ptr [rsi + 32]",
+        "mov r14, qword ptr [rsi + 40]",
+        "mov r15, qword ptr [rsi + 48]",
+        "ret")
+}
+
+// The save area `side` set so that the switch to it enters `entry` on a stack whose frames start below
+// `top`, a multiple of 16, as if a call from the address 0 had made it: the return address 0 at `top - 8`,
+// where a called function finds its return address with the stack 8 bytes past a multiple of 16, the
+// entry below it for `ret` to take, and rbp 0, so that a walk of the stack ends at the entry (design
+// record, section 2), as libgcc's unwinder ends a walk at a return address of zero.
+pub void Enter(byte* side, byte* top, extern "C" () => void entry) {
+    raw {
+        *Ptr<long>(top - 8) = 0
+        *Ptr<extern "C" () => void>(top - 16) = entry
+        *Ptr<byte*>(side) = top - 16
+        *Ptr<long>(side + 16) = 0
+    }
+}

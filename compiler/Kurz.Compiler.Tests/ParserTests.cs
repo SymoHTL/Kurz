@@ -1569,7 +1569,8 @@ public sealed class ParserTests
     [Theory]
     [InlineData("actor Counter {\n}", "(actor Counter {})")]
     [InlineData("pub actor Account(int Start) {\n    pub int Get() => Start\n}", "(actor pub Account(int Start) {(function pub int Get() => Start)})")]
-    [InlineData("actor Parser stack 8mb per Id inbox drop {\n}", "(actor Parser [stack 1] [per 1] [inbox 1] {})")]
+    [InlineData("actor Parser stack 8mb per Id inbox drop {\n}", "(actor Parser [stack 1 (unit 8mb)] [per 1] [inbox 1] {})")]
+    [InlineData("actor Parser per Id stack 1.5kb {\n}", "(actor Parser [per 1] [stack 1 (unit 1.5kb)] {})")]
     [InlineData("actor Worker on crash restart {\n}", "(actor Worker [on crash 1] {})")]
     [InlineData("actor Worker yield checks {\n}", "(actor Worker [yield 1] {})")]
     [InlineData("c = spawn Counter(1)", "(assign-or-declare c (spawn (call Counter (int 1))))")]
@@ -1598,6 +1599,12 @@ public sealed class ParserTests
     [InlineData("actor Counter = 1")] // U1: a clause or the body after the name
     [InlineData("actor Counter(int Start) Start stack 8mb {\n}")] // U1: a clause starts with its word
     [InlineData("actor Store per Id : IStore {\n}")] // U1: the clauses follow the head a class has, its `:` list among it (K7)
+    [InlineData("actor Parser stack {\n}")] // U1: `stack` takes a literal of bytes (the owner, 2026-11-15, #519, comment 6892812780, Q3)
+    [InlineData("actor Parser stack 8 {\n}")]
+    [InlineData("actor Parser stack 8s {\n}")]
+    [InlineData("actor Parser stack size {\n}")]
+    [InlineData("actor Parser stack 8mb Id {\n}")] // U1: and nothing after it, as the words of the clauses it does not build follow theirs
+    [InlineData("actor Parser stack 8mb stack 4mb {\n}")] // U1: one `stack`, as C# refuses a modifier written twice (assumed)
     public void A_form_of_actors_without_its_parts_is_syntax(string program)
     {
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors(program));

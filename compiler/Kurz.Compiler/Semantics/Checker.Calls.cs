@@ -308,10 +308,16 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>A call of a function of a folder a `use` brought in (F10), qualified by the folder's name, `sys.Write(...)`, as the design record's section 2 states it (the owner, 2026-10-23, "Rust's sys"); a function of the folder that is not `pub` is not visible here (F9).</summary>
+    /// <summary>
+    /// A call of a function of a folder a `use` brought in (F10), qualified by the folder's name, `sys.Write(...)`, as the design record's
+    /// section 2 states it (the owner, 2026-10-23, "Rust's sys"), among the functions of the folder's file and of the file read beside it,
+    /// the architecture's in <c>sys</c> (round 20, "Dir per arch"); a function of the folder that is not `pub` is not visible here (F9).
+    /// </summary>
     private Typed CheckFolderCall(Checker folder, string name, MemberAccess m, CallExpression c, KurzType? expected)
     {
-        var all = folder.functions.TryGetValue(m.Member, out var list) ? list : [];
+        var all = (folder.functions.TryGetValue(m.Member, out var list) ? list : [])
+            .Concat(folder.Beside is { } beside && beside.functions.TryGetValue(m.Member, out var besideList) ? besideList : [])
+            .ToList();
         var visible = all.Where(f => f.Declaration is { } d && d.Modifiers.HasFlag(Modifiers.Pub)).ToList();
         if (visible.Count == 0)
         {

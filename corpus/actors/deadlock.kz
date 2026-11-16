@@ -1,0 +1,28 @@
+// expect: throws deadlock at 28
+// | left asks
+// | right asks
+// rules: U18
+
+actor Left {
+    pub void Ask(Right other) {
+        print("left asks")
+        print("left got {other.Value()}")
+    }
+
+    pub int Value() => 1
+}
+
+actor Right {
+    pub void Ask(Left other) {
+        print("right asks")
+        print("right got {other.Value()}")
+    }
+
+    pub int Value() => 2
+}
+
+l = spawn Left()
+r = spawn Right()
+send l.Ask(r)
+send r.Ask(l)
+print(l.Value())

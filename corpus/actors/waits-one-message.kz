@@ -1,0 +1,32 @@
+// expect: output
+// | slow starts
+// | slow ends 7
+// | fast
+// | last
+// rules: U17
+
+actor Clock {
+    pub int Now() => 7
+}
+
+actor Worker(Clock C) {
+    pub void Slow() {
+        print("slow starts")
+        t = C.Now()
+        print("slow ends {t}")
+    }
+
+    pub void Fast() {
+        print("fast")
+    }
+
+    pub void Last() {
+        print("last")
+    }
+}
+
+c = spawn Clock()
+w = spawn Worker(c)
+send w.Slow()
+send w.Fast()
+w.Last()

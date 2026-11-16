@@ -34,6 +34,12 @@ public static partial class Builder
     /// <summary>The baseline CPU of the machine that builds, which a build that names no CPU is for (section 2): x86-64's, or 64-bit Arm's.</summary>
     public static Cpu HostCpu => RuntimeInformation.OSArchitecture == Architecture.Arm64 ? Cpu.ArmBaseline : Cpu.Baseline;
 
+    /// <summary>
+    /// The architecture of the machine that builds, whose directory of the runtime a build reads into <c>sys</c> (section 2, round 20,
+    /// "Dir per arch"): 64-bit Arm on such a machine, x86-64 on every other, as <see cref="HostCpu"/> reads it.
+    /// </summary>
+    public static Arch HostArch => RuntimeInformation.OSArchitecture == Architecture.Arm64 ? Arch.Arm64 : Arch.X64;
+
     /// <summary>The target of a machine of this architecture and system, as <see cref="HostTarget"/> reads it.</summary>
     internal static Target? TargetFor(Architecture architecture, bool windows, bool linux) =>
         architecture is not (Architecture.X64 or Architecture.Arm64) ? null
@@ -45,13 +51,16 @@ public static partial class Builder
     /// The runtime checked for <paramref name="target"/>. A runtime the checker refuses is a defect of the compiler, which the suite's
     /// check of every target holds, so it is thrown and not reported against the program.
     /// </summary>
-    public static CheckedRuntime CheckRuntime(Target target)
+    public static CheckedRuntime CheckRuntime(Target target) => CheckRuntime(target, HostArch);
+
+    /// <summary>The runtime checked for <paramref name="target"/> on <paramref name="arch"/>, as above.</summary>
+    public static CheckedRuntime CheckRuntime(Target target, Arch arch)
     {
         var errors = new List<string>();
-        var runtime = Runtime.Check(target, errors);
+        var runtime = Runtime.Check(target, arch, errors);
         return errors.Count == 0
             ? runtime
-            : throw new InvalidOperationException($"the runtime for {Runtime.Directory(target)} does not check:\n{string.Join('\n', errors)}");
+            : throw new InvalidOperationException($"the runtime for {Runtime.Directory(target)}/{Runtime.ArchDirectory(arch)} does not check:\n{string.Join('\n', errors)}");
     }
 
     /// <summary>

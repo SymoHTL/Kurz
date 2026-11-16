@@ -62,7 +62,10 @@ The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
   ([knowledge/the-gates-job-runs-in-its-image.md](knowledge/the-gates-job-runs-in-its-image.md)).
   The same gate runs on Windows in the workflow `compiler-windows`, which installs the pinned
   release on every run and which the ruleset does not require: a red Windows run holds no merge
-  (HAZARD #30). Gate: `compiler-tests`, in every gates run.
+  (HAZARD #30). The workflow `compiler-arm` runs the gate's tests of the actors' stacks and of `naked`
+  on the forge's hosted Arm runner, `py -3 tools/compiler_gate.py --arm`, installing the pinned release
+  as the Windows job does, and is not required either (HAZARD #30). Gate: `compiler-tests`, in every
+  gates run.
 - `py -3 tools/lint_reference.py --sync` rewrites every sample in `reference/` from its corpus
   file. Change the `.kz` file, then sync: a sample edited by hand is red until it is overwritten.
   Gate: `reference`.
@@ -84,10 +87,11 @@ The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
   [knowledge/the-gates-job-runs-in-its-image.md](knowledge/the-gates-job-runs-in-its-image.md).
   The other jobs run on hosted runners named by their versioned labels: the forge offers no
   digest for a hosted image. Of those images the tools use python3, node (for the CLI), gh (every
-  forge call) and git, of the Windows image zstd and tar, which unpack LLVM's archive there, and of
+  forge call) and git, of the Windows image zstd and tar, which unpack LLVM's archive there, of the Arm
+  image curl, zstd, tar and sudo, which fetch it and unpack it into `/usr/local` there, and of
   the gates image python3, git and the point release of the pinned LLVM major, which the
   distribution's and LLVM's packages give on the day the image is built, and the .NET runtime that
-  `actions/setup-dotnet` installs in the Windows job beside the SDK `compiler/global.json` pins,
+  `actions/setup-dotnet` installs in the Windows and Arm jobs beside the SDK `compiler/global.json` pins,
   10.0.15 on 2026-11-10, the day that patch was released
   ([knowledge/a-test-of-dotnets-own-text-breaks-on-a-runtime-patch.md](knowledge/a-test-of-dotnets-own-text-breaks-on-a-runtime-patch.md)):
   none of them pinned to a version, HAZARD (#15). The runtime stays open because `kurz` is a .NET 10
@@ -386,7 +390,9 @@ Gate: review rule "rules for sessions".
   request 181 made possible (the line `sortby-change-fenced` holds it), and the place of an `asm`
   output into a path of fields of a block, found where its operand stood and held across the place of
   another output and across a later operand whose call gave the variable another block, with pull
-  request 520 (the line `asm-places-fenced` holds it)
+  request 520 (the line `asm-places-fenced` holds it), and a field passed to a `mut` parameter and read
+  before a call that assigns it through the instance, a direct call or a call of the chain that a call
+  that waits lets in, found on 2026-11-15 (the line `actor-waits-fenced` holds it)
   ([knowledge/a-borrow-outlives-its-source.md](knowledge/a-borrow-outlives-its-source.md)). Each
   such construct has a line in a fenced program of `ListTests`, and a refusal counts every form that
   changes a place. Gate: `compiler-tests`
@@ -711,7 +717,7 @@ Gate: review rule "rules for sessions".
 | | the author and committer address a push publishes (#12) |
 | | a title or description edited after the review (#13) |
 | | a merge by the button, which skips what only the merge tool does (#14) |
-| | the hosted images' python3, node, gh and git, the Windows image's zstd and tar, the Windows job's .NET runtime, and the gates image's python3, git and LLVM point release, pinned to no version (#15) |
+| | the hosted images' python3, node, gh and git, the Windows image's zstd and tar, the Arm image's curl, zstd, tar and sudo, the Windows and Arm jobs' .NET runtime, and the gates image's python3, git and LLVM point release, pinned to no version (#15) |
 | | the gates job judging a pull request with the pull request's own gates (#16) |
 | | a review that stopped at the pass cap posting `success` (#17) |
 | | the evidence digest, which a recomputed hash passes (#18) |

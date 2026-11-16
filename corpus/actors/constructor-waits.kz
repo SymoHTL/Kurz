@@ -1,0 +1,23 @@
+// expect: output
+// | size asked
+// | spawned
+// | 3
+// rules: U3, U4
+
+actor Config {
+    pub int Size() {
+        print("size asked")
+        return 3
+    }
+}
+
+actor Pool(Config Settings) {
+    int size = Settings.Size()
+
+    pub int Count() => size
+}
+
+s = spawn Config()
+p = spawn Pool(s)
+print("spawned")
+print(p.Count())

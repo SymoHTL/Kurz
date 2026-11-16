@@ -1,0 +1,24 @@
+// expect: output
+// | 41
+// rules: U17
+
+actor A(B Other) {
+    mut int saved = 0
+
+    pub int Save(int n) {
+        saved = n
+        return Other.Check(this) + 1
+    }
+
+    pub int Load() => saved
+}
+
+actor B {
+    pub int Check(A x) {
+        return x.Load() * 10
+    }
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Save(4))

@@ -12,9 +12,6 @@ namespace Kurz.Compiler.Semantics;
 /// </summary>
 public sealed partial class Checker
 {
-    /// <summary>U4: the frame of the top-level statements, the one place a call through an actor's reference waits.</summary>
-    private Frame? topLevelFrame;
-
     /// <summary>U6: the call after the <c>send</c> being checked, which no one waits for.</summary>
     private CallExpression? sending;
 
@@ -46,6 +43,7 @@ public sealed partial class Checker
             return;
         }
 
+        CheckStackClause(d);
         DeclareClass(d);
         foreach (var member in d.Members ?? [])
         {
@@ -73,6 +71,25 @@ public sealed partial class Checker
     }
 
     /// <summary>
+    /// U1: the literal of bytes of the <c>stack</c> clause, read as a <c>long</c> (L14), whose error, <c>inexact-literal</c> or a size
+    /// past a <c>long</c>, it reports; whether it reported one. The size is a lower bound the runtime rounds up to its page and raises to
+    /// its floor with no message (section 6, the owner, 2026-11-15, #519, comment 6892835500, Q7, "Rust/C#: round up silently"), so no
+    /// size the literal can hold is an error of its own.
+    /// </summary>
+    private bool CheckStackClause(TypeDeclaration d)
+    {
+        foreach (var clause in d.Clauses ?? [])
+        {
+            if (clause.Size is { } size && Types.IsError(CheckExpression(size, Types.Long).Type))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// The first part of an actor's declaration that the build does not read beyond a class's, with its line and what it is; null where
     /// there is none: a clause, a modifier, type parameters, a type after its name and a <c>static</c> member (U1), and a modifier of a
     /// method but <c>pub</c> (U9). A type after the name is named here as an interface, since <see cref="RefuseUnreadActors"/>
@@ -81,7 +98,7 @@ public sealed partial class Checker
     /// </summary>
     private static (int Line, string Construct)? UnreadActorPart(TypeDeclaration d)
     {
-        if (d.Clauses is [var clause, ..])
+        if ((d.Clauses ?? []).FirstOrDefault(c => c.Word != "stack") is { } clause)
         {
             return (clause.Line, $"the clause `{clause.Word}` after an actor's name (U1)");
         }
@@ -171,6 +188,11 @@ public sealed partial class Checker
                 Report(ErrorIds.Syntax, b.Line, $"`{type}` after the name of the actor `{d.Name}`, which names interfaces alone and has no base, is text no rule gives a meaning (U1, E4)");
                 return true;
             }
+        }
+
+        if (CheckStackClause(d))
+        {
+            return true;
         }
 
         if (d.EqualBy.Count > 0)
@@ -351,29 +373,15 @@ public sealed partial class Checker
     };
 
     /// <summary>
-    /// U4, U6: a call through an actor's reference may wait in the top-level statements alone, and <c>send</c> and <c>spawn</c> stand there
-    /// and in an actor's methods, never in a lambda, a function, a class's method or a default.
-    /// </summary>
-    private bool InTopLevel() => ReferenceEquals(frame, topLevelFrame);
-
-    private bool InActorMethod() => frame is { Class.IsActor: true, Initializing: null }; // a lambda's frame has no class, and a static member of an actor is refused (U1)
-
-    /// <summary>
     /// U2: <c>spawn Counter(1)</c> makes the actor's state with the arguments of its primary constructor, the call recorded as the
-    /// class's construction (K1), and gives its reference; <c>spawn</c> of anything else is <c>type-mismatch</c> (U14).
+    /// class's construction (K1), and gives its reference, wherever an expression stands; <c>spawn</c> of anything else is
+    /// <c>type-mismatch</c> (U14).
     /// </summary>
     private Typed CheckSpawn(SpawnExpression s)
     {
         if (s.OnCrashLine != 0)
         {
             NotSupported(s.OnCrashLine, "`on crash` after `spawn` (U2)");
-            CheckArgumentsLoosely(s.Call);
-            return Typed.Error;
-        }
-
-        if (!InTopLevel() && !InActorMethod())
-        {
-            NotSupported(s.Line, "`spawn` outside the top-level statements and an actor's methods (U2)");
             CheckArgumentsLoosely(s.Call);
             return Typed.Error;
         }
@@ -420,21 +428,15 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// U6: <c>send c.Add(1)</c>, a call of an actor's <c>pub</c> method through its reference, or of its own method inside it (U11),
-    /// recorded as <see cref="CallKind.ActorSend"/>; a method with a result is <c>send-result</c>, a <c>void</c> with cases beside it among
+    /// U6: <c>send c.Add(1)</c>, wherever a statement stands, a call of an actor's <c>pub</c> method through its reference, or of its own
+    /// method inside it, a lambda in its methods among it, through the lambda's <c>this</c> (U11), recorded as
+    /// <see cref="CallKind.ActorSend"/>; a method with a result is <c>send-result</c>, a <c>void</c> with cases beside it among
     /// them (U7), and anything else after <c>send</c> is <c>syntax</c> (U14). A message to its own method takes what one through a
     /// reference takes: its arguments cross (U12), and then a <c>mut</c> parameter is <c>mut-in-message</c> (U11, assumed: U11's reading of
     /// Q6 of comment 6880404917, which answers it of a call through a reference, U9), in U16's order (<see cref="CallActor"/>).
     /// </summary>
     private void CheckSend(SendStatement s)
     {
-        if (!InTopLevel() && !InActorMethod())
-        {
-            NotSupported(s.Line, "`send` outside the top-level statements and an actor's methods (U6)");
-            CheckLoosely(s.Call);
-            return;
-        }
-
         var outer = sending;
         sending = s.Call;
         var typed = CheckWhole(s.Call, () => CallResult(s.Call, null)); // U6: every case of the result, which nobody receives
@@ -489,7 +491,7 @@ public sealed partial class Checker
 
     /// <summary>
     /// U4, U9: a call of an actor's method through its reference: a <c>pub</c> one alone is seen (U9), else <c>not-visible</c>; it
-    /// waits for its result, in the top-level statements alone, and is <see cref="CallKind.ActorCall"/>, or <see cref="CallKind.ActorSend"/>
+    /// waits for its result, wherever a call stands, and is <see cref="CallKind.ActorCall"/>, or <see cref="CallKind.ActorSend"/>
     /// after <c>send</c> (U6). Its arguments cross (U12), then a <c>mut</c> parameter is <c>mut-in-message</c> (U9; Q6 of comment
     /// 6880404917), and then its result crosses where it waits, a <c>send</c> dropping it (U6): U16's stage of the arguments reads a type
     /// on which the language may say <c>send-needs-word</c> (<see cref="MayNeedWord"/>: one that reaches a mutable class instance, a
@@ -521,13 +523,6 @@ public sealed partial class Checker
         if (seen.Count == 0)
         {
             Report(ErrorIds.NotVisible, m.Line, $"`{m.Member}` of the actor `{symbol.Name}` is private to it: a method takes messages with `pub` (U9, F9)");
-            CheckArgumentsLoosely(c);
-            return Typed.Error;
-        }
-
-        if (!send && !InTopLevel())
-        {
-            NotSupported(m.Line, "a call through an actor's reference, which waits for its result, outside the top-level statements (U4)");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }

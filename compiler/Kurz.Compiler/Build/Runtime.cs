@@ -11,13 +11,24 @@ public enum Target
     Windows,
 }
 
+/// <summary>
+/// The architectures the directory of a target has a directory for, <c>runtime/linux/x86-64/</c> and <c>runtime/linux/arm64/</c> (design
+/// record, section 2, round 20, "Dir per arch"): x86-64 and 64-bit Arm, the machines a build is for (<see cref="Builder.HostArch"/>).
+/// </summary>
+public enum Arch
+{
+    X64,
+    Arm64,
+}
+
 /// <summary>A file of the runtime or of the standard library: its path from the top of the repository, <c>runtime/common/runtime.kz</c>, and its bytes.</summary>
 public sealed record RuntimeFile(string Path, byte[] Bytes);
 
 /// <summary>
-/// The runtime checked for one target: <c>runtime/common/</c>, which reads the target's directory as the folder <c>sys</c> and the standard
-/// library as the folder <c>std</c>, with its checker, the target's directory with its own, and <c>std/</c>, which reads the target's
-/// directory as the folder <c>sys</c>, with its own, each with the path of its file.
+/// The runtime checked for one target and architecture: <c>runtime/common/</c>, which reads the target's directory as the folder <c>sys</c>
+/// and the standard library as the folder <c>std</c>, with its checker, the target's directory with its own, and <c>std/</c>, which reads
+/// the target's directory as the folder <c>sys</c>, with its own, each with the path of its file; and the directory of the architecture
+/// inside the target's, which <c>sys</c> reads beside the target's own file (round 20, "Dir per arch"), with its checker.
 /// </summary>
 public sealed record CheckedRuntime(
     Target Target,
@@ -29,7 +40,11 @@ public sealed record CheckedRuntime(
     Checker SysChecker,
     string StdPath,
     ProgramSyntax Std,
-    Checker StdChecker);
+    Checker StdChecker,
+    Arch Arch,
+    string ArchPath,
+    ProgramSyntax ArchTree,
+    Checker ArchChecker);
 
 /// <summary>
 /// The runtime a built program links, written in Kurz, one per target (design record, section 2, round 17): the files under
@@ -45,9 +60,13 @@ public sealed record CheckedRuntime(
 /// 2026-10-24, "As built"). Every folder is checked granted <c>raw</c> and <c>native</c> (R7, R16);
 /// <see cref="CheckEveryTarget"/> checks every target in turn, so that the code of no target is checked only in a build for it (the
 /// record's reading of round 20).
-/// The compiler reads one file in each of the four directories and no directory inside them: a folder of several files, which section 8
-/// makes one namespace, the directory of an architecture inside a target's, where round 20 places that code, and a directory inside
-/// <c>std/</c> are <c>not supported</c> by <see cref="Layout"/>.
+/// The directory of each architecture inside a target's, <c>runtime/linux/x86-64/</c>, holds the code of that target on that architecture,
+/// which a build compiles with <c>common/</c> and the target's own file, read into the folder <c>sys</c> beside it, the build's architecture
+/// alone (round 20, "Dir per arch"); <see cref="CheckEveryTarget"/> checks every target on every architecture, and a function that
+/// <c>common/</c> or <c>std/</c> calls is one that the target's file and the architecture's give together, on every pair alike (the record's
+/// assumption there).
+/// The compiler reads one file in each directory and no directory inside the directory of an architecture or of <c>std/</c>: a folder of
+/// several files, which section 8 makes one namespace, and a directory inside <c>std/</c> are <c>not supported</c> by <see cref="Layout"/>.
 /// </summary>
 public static class Runtime
 {
@@ -68,10 +87,18 @@ public static class Runtime
         _ => throw new ArgumentOutOfRangeException(nameof(target), target, "no directory of the runtime"),
     };
 
+    /// <summary>The name of the architecture's directory inside a target's.</summary>
+    public static string ArchDirectory(Arch arch) => arch switch
+    {
+        Arch.X64 => "x86-64",
+        Arch.Arm64 => "arm64",
+        _ => throw new ArgumentOutOfRangeException(nameof(arch), arch, "no directory of the runtime"),
+    };
+
     /// <summary>
-    /// What is wrong with the files' places: a file outside <c>common/</c>, the targets' directories and <c>std/</c> and a directory of no
-    /// file, and what the compiler does not read there, a directory inside a target's or inside <c>std/</c> and a directory of more than one
-    /// file.
+    /// What is wrong with the files' places: a file outside <c>common/</c>, the targets' directories, the directories of their
+    /// architectures and <c>std/</c>, and a directory of no file, and what the compiler does not read there, a directory inside
+    /// <c>std/</c> and a directory of more than one file.
     /// </summary>
     public static IReadOnlyList<string> Layout(IReadOnlyList<RuntimeFile> files)
     {
@@ -93,19 +120,16 @@ public static class Runtime
             }
 
             var known = parts.Length >= 3 && parts[0] == "runtime" && folders.Contains(parts[1]) && parts[^1].EndsWith(".kz", StringComparison.Ordinal);
-            if (known && parts.Length == 4 && parts[1] != "common")
-            {
-                errors.Add($"{file.Path}: not supported: a directory inside a target's, where round 20 places the code of an architecture (design record, section 2): the compiler reads one file in each directory of the runtime");
-            }
-            else if (!known || parts.Length != 3)
+            var archFile = known && parts.Length == 4 && parts[1] != "common" && Enum.GetValues<Arch>().Select(ArchDirectory).Contains(parts[2]);
+            if (!archFile && (!known || parts.Length != 3))
             {
                 errors.Add(parts[0] == "std"
                     ? $"{file.Path}: the standard library is `std/<file>.kz`"
-                    : $"{file.Path}: the runtime is `runtime/common/<file>.kz` and `runtime/<target>/<file>.kz`, a target being one of {string.Join(", ", folders.Skip(1))}, and the standard library `std/<file>.kz`");
+                    : $"{file.Path}: the runtime is `runtime/common/<file>.kz`, `runtime/<target>/<file>.kz` and `runtime/<target>/<architecture>/<file>.kz`, a target being one of {string.Join(", ", folders.Skip(1))} and an architecture one of {string.Join(", ", Enum.GetValues<Arch>().Select(ArchDirectory))}, and the standard library `std/<file>.kz`");
             }
         }
 
-        foreach (var folder in folders)
+        foreach (var folder in folders.Concat(Enum.GetValues<Target>().SelectMany(t => Enum.GetValues<Arch>().Select(a => $"{Directory(t)}/{ArchDirectory(a)}"))))
         {
             var count = InDirectory(files, $"{Prefix}{folder}/").Count;
             if (count == 0)
@@ -131,25 +155,49 @@ public static class Runtime
         return errors;
     }
 
-    /// <summary>The runtime checked for <paramref name="target"/>; every diagnostic is added to <paramref name="errors"/> as a line that names its file.</summary>
-    public static CheckedRuntime Check(Target target, List<string> errors) => Check(Files, target, errors);
+    /// <summary>
+    /// The runtime checked for <paramref name="target"/> on the architecture of the machine that builds; every diagnostic is added to
+    /// <paramref name="errors"/> as a line that names its file.
+    /// </summary>
+    public static CheckedRuntime Check(Target target, List<string> errors) => Check(Files, target, Builder.HostArch, errors);
 
-    /// <summary>As above, over the files given; a directory that does not hold one file is read as empty, and <see cref="Layout"/> names it.</summary>
-    internal static CheckedRuntime Check(IReadOnlyList<RuntimeFile> files, Target target, List<string> errors)
+    /// <summary>The runtime checked for <paramref name="target"/> on <paramref name="arch"/>, as above.</summary>
+    public static CheckedRuntime Check(Target target, Arch arch, List<string> errors) => Check(Files, target, arch, errors);
+
+    /// <summary>As above, over the files given, on the architecture of the machine that builds.</summary>
+    internal static CheckedRuntime Check(IReadOnlyList<RuntimeFile> files, Target target, List<string> errors) => Check(files, target, Builder.HostArch, errors);
+
+    /// <summary>
+    /// As above, over the files given; a directory that does not hold one file is read as empty, and <see cref="Layout"/> names it. The
+    /// architecture's file is read into the folder <c>sys</c> beside the target's (round 20, "Dir per arch"): a qualified call of <c>sys</c>
+    /// picks among the functions of both, and a name both declare is <c>redeclared</c> at its line in the architecture's file (V9), as two
+    /// files of one folder are one namespace (section 8).
+    /// </summary>
+    internal static CheckedRuntime Check(IReadOnlyList<RuntimeFile> files, Target target, Arch arch, List<string> errors)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(errors);
         errors.AddRange(Layout(files));
+        var (archPath, archTree, archChecker) = CheckFolder(files, $"{Prefix}{Directory(target)}/{ArchDirectory(arch)}/", new Dictionary<string, Checker>(), errors);
         var (sysPath, sys, sysChecker) = CheckFolder(files, $"{Prefix}{Directory(target)}/", new Dictionary<string, Checker>(), errors);
+        var targetNames = sys.Statements.OfType<FunctionDeclaration>().Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var twice in archTree.Statements.OfType<FunctionDeclaration>().Where(f => targetNames.Contains(f.Name)))
+        {
+            errors.Add(Line(archPath, Diagnostic.Error(ErrorIds.Redeclared, twice.Line, $"the name `{twice.Name}` is declared already in {sysPath}, which the folder `sys` reads beside this file (V9)")));
+        }
+
+        sysChecker.Beside = archChecker;
         var (stdPath, std, stdChecker) = CheckFolder(files, StdDirectory, new Dictionary<string, Checker> { ["sys"] = sysChecker }, errors);
         var (commonPath, common, commonChecker) = CheckFolder(files, $"{Prefix}common/", new Dictionary<string, Checker> { ["sys"] = sysChecker, ["std"] = stdChecker }, errors);
-        return new CheckedRuntime(target, commonPath, common, commonChecker, sysPath, sys, sysChecker, stdPath, std, stdChecker);
+        return new CheckedRuntime(target, commonPath, common, commonChecker, sysPath, sys, sysChecker, stdPath, std, stdChecker, arch, archPath, archTree, archChecker);
     }
 
     /// <summary>
-    /// The runtime checked for every target, with the rule that every target's directory gives the functions <c>common/</c> and <c>std/</c>
-    /// call with the same parameters and the same result: what is wrong, one line each, or nothing. A line of <c>common/</c> or <c>std/</c>
-    /// that the check for every target reports stands once; one that only the check for some targets reports names them.
+    /// The runtime checked for every target on every architecture, with the rule that every target's directory, its file and the
+    /// architecture's read as one set, gives the functions <c>common/</c> and <c>std/</c> call with the same parameters and the same result:
+    /// what is wrong, one line each, or nothing. A line of <c>common/</c> or <c>std/</c> that the check for every pair reports stands once;
+    /// one that only the check for some pairs reports names them, a target by its name alone where the check for each of its
+    /// architectures reports it.
     /// </summary>
     public static IReadOnlyList<string> CheckEveryTarget() => CheckEveryTarget(Files);
 
@@ -163,27 +211,29 @@ public static class Runtime
             return layout;
         }
 
-        var called = new Dictionary<Target, Dictionary<string, SortedSet<string>>>();
-        var reported = new Dictionary<Target, List<string>>();
-        foreach (var target in Enum.GetValues<Target>())
+        var pairs = Enum.GetValues<Target>().SelectMany(t => Enum.GetValues<Arch>().Select(a => (Target: t, Arch: a))).ToList();
+        var called = new Dictionary<(Target, Arch), Dictionary<string, SortedSet<string>>>();
+        var reported = new Dictionary<(Target, Arch), List<string>>();
+        foreach (var pair in pairs)
         {
-            reported[target] = [];
-            called[target] = TargetCalls(Check(files, target, reported[target]));
+            reported[pair] = [];
+            called[pair] = TargetCalls(Check(files, pair.Target, pair.Arch, reported[pair]));
         }
 
         foreach (var line in reported.Values.SelectMany(l => l).Distinct(StringComparer.Ordinal))
         {
-            var targets = reported.Where(r => r.Value.Contains(line, StringComparer.Ordinal)).Select(r => Directory(r.Key)).ToList();
+            var pairsOf = reported.Where(r => r.Value.Contains(line, StringComparer.Ordinal)).Select(r => r.Key).ToList();
+            var where = pairsOf.GroupBy(p => p.Item1).SelectMany(g => g.Count() == Enum.GetValues<Arch>().Length ? new[] { Directory(g.Key) } : g.Select(PairDirectory).ToArray()).ToList(); // a target's name where each of its architectures reports the line
             var shared = line.StartsWith($"{Prefix}common/", StringComparison.Ordinal) || line.StartsWith(StdDirectory, StringComparison.Ordinal);
-            errors.Add(targets.Count == reported.Count || !shared
+            errors.Add(pairsOf.Count == reported.Count || !shared
                 ? line
-                : $"{line} (in the check for {string.Join(" and ", targets)})");
+                : $"{line} (in the check for {string.Join(" and ", where)})");
         }
 
-        var first = Enum.GetValues<Target>()[0];
-        foreach (var (target, callers) in called)
+        var first = pairs[0];
+        foreach (var (pair, callers) in called)
         {
-            if (target == first)
+            if (pair == first)
             {
                 continue;
             }
@@ -192,12 +242,12 @@ public static class Runtime
             {
                 foreach (var missing in called[first][caller].Except(callers[caller]))
                 {
-                    errors.Add($"{Prefix}{Directory(target)}/: `{caller}` calls `{missing}` of {Prefix}{Directory(first)}/, which this directory does not give with the same parameters and result");
+                    errors.Add($"{Prefix}{PairDirectory(pair)}/: `{caller}` calls `{missing}` of {Prefix}{PairDirectory(first)}/, which this directory does not give with the same parameters and result");
                 }
 
                 foreach (var missing in callers[caller].Except(called[first][caller]))
                 {
-                    errors.Add($"{Prefix}{Directory(first)}/: `{caller}` calls `{missing}` of {Prefix}{Directory(target)}/, which this directory does not give with the same parameters and result");
+                    errors.Add($"{Prefix}{PairDirectory(first)}/: `{caller}` calls `{missing}` of {Prefix}{PairDirectory(pair)}/, which this directory does not give with the same parameters and result");
                 }
             }
         }
@@ -205,13 +255,16 @@ public static class Runtime
         return errors;
     }
 
+    // a target's directory with the architecture's, `linux/x86-64`, as a line of the rule of the same functions names the two files' set
+    private static string PairDirectory((Target Target, Arch Arch) pair) => $"{Directory(pair.Target)}/{ArchDirectory(pair.Arch)}";
+
     /// <summary>
-    /// The functions of the target's directory that <c>common/</c> and <c>std/</c> call, by their signatures, keyed by the caller's
-    /// directory: the calls of <c>common/</c> into <c>std/</c> are no calls of the target's.
+    /// The functions of the target's directory, its file and the architecture's, that <c>common/</c> and <c>std/</c> call, by their
+    /// signatures, keyed by the caller's directory: the calls of <c>common/</c> into <c>std/</c> are no calls of the target's.
     /// </summary>
     internal static Dictionary<string, SortedSet<string>> TargetCalls(CheckedRuntime checkedRuntime)
     {
-        var given = new HashSet<FunctionDeclaration>(checkedRuntime.Sys.Statements.OfType<FunctionDeclaration>(), ReferenceEqualityComparer.Instance);
+        var given = new HashSet<FunctionDeclaration>(checkedRuntime.Sys.Statements.Concat(checkedRuntime.ArchTree.Statements).OfType<FunctionDeclaration>(), ReferenceEqualityComparer.Instance);
         bool Given(FunctionSymbol f) => f.Declaration is { } d && given.Contains(d);
         return new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal)
         {
