@@ -1678,6 +1678,85 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_crash_between_two_copied_arguments_ends_their_session()
+    {
+        // U19 and the sketch's risk "A crash between two copied arguments": `Boom` crashes the sender after the first argument of `Take`
+        // crossed, while the session of the call's two copies is open, whose memo the crash ends with it, so that 10,000 such crashes
+        // grow the resident memory by less than 2 MiB, where a memo of 1,536 bytes kept per crash adds 15; the copy of the first argument
+        // stays in the sink's heap, about 32 bytes a crash (compiler/README.md)
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // no `/proc/self/status` reads the resident memory on Windows
+        }
+
+        const string program = """
+            long | IoError Resident() {
+                bytes = File.ReadAll("/proc/self/status")
+                text = string.FromUtf8(bytes) else {
+                    InvalidUtf8 => ""
+                }
+
+                for line in text.Split('\n') {
+                    if line.StartsWith("VmRSS:") {
+                        return long.Parse(line.Replace("VmRSS:", "").Replace("kB", "").Trim()) else {
+                            ParseError => -1
+                        }
+                    }
+                }
+
+                return -1
+            }
+
+            actor Sink {
+                pub void Take(string a, string b) {
+                    print(a)
+                }
+            }
+
+            string Boom(string s) {
+                throw "boom {s}"
+            }
+
+            actor Sender(Sink Into) {
+                pub void Send(string s) {
+                    send Into.Take("x{s}", Boom(s))
+                }
+
+                pub int Ping() => 1
+            }
+
+            sender = spawn Sender(spawn Sink())
+            mut total = 0
+            for i in 0..<1000 {
+                send sender.Send("{i}")
+                total = total + sender.Ping()
+            }
+
+            before = Resident() else {
+                IoError e => -1
+            }
+
+            for i in 0..<10000 {
+                send sender.Send("{i}")
+                total = total + sender.Ping()
+            }
+
+            after = Resident() else {
+                IoError e => -1
+            }
+
+            print(total)
+            print(after - before)
+
+            """;
+        var run = BuildAndRun(program, StoodIn(print: false), "actor-crash-session");
+        Assert.Equal((0, 11000), (run.Code, Logged(run.Error).Crashes.Count));
+        Assert.Equal("11000", run.Output[0]);
+        var grown = long.Parse(run.Output[1], System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(grown < 2048, $"10,000 crashes between two copied arguments grow the resident memory by {grown} KiB");
+    }
+
+    [Fact]
     public void An_overflow_inside_an_actor_restarts_it_on_Linux()
     {
         // U19: the handler of the fault takes an overflow in the guard page of an actor's stack as the actor's crash, twice, and the
