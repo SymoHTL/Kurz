@@ -1680,7 +1680,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_crash_between_two_copied_arguments_ends_their_session()
     {
-        // U19 and the sketch's risk "A crash between two copied arguments": `Boom` crashes the sender after the first argument of `Take`
+        // U19, a crash between two copied arguments: `Boom` crashes the sender after the first argument of `Take`
         // crossed, while the session of the call's two copies is open; the box went into the session's memo, of the thread's own heap,
         // as every block of a session of two copies goes, and the crash ends the session with it, so that 10,000 such crashes grow the
         // resident memory by less than 2 MiB, where a memo of 1,536 bytes kept per crash adds 15; the copy of the box and its text stays

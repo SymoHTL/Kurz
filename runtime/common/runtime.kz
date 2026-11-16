@@ -4441,8 +4441,8 @@ thread static mut long copyWorkCount = 0
 thread static mut byte* copyBefore = null
 
 // The session `session` of more than one copy listed among the open sessions of the running activation, the
-// first of them, so that a crash between two of its copies ends it (U19, `Crashed`; the sketch's risk "A
-// crash between two copied arguments"); nothing in the top-level code, whose crash ends the process.
+// first of them, so that a crash between two of its copies ends it (U19, `Crashed`); nothing in the
+// top-level code, whose crash ends the process.
 pub void CopyOpen(byte* session) {
     raw {
         if running != null {
