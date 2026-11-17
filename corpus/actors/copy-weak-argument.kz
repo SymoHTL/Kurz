@@ -1,0 +1,25 @@
+// expect: output
+// | 2 2 true true
+// | 1
+// rules: U12
+
+class Box(mut int N)
+data Link(weak Box? To)
+
+actor Shelf {
+    pub string Look(weak Box? w, Link l, Box b) {
+        b.N = 2
+        v = w
+        t = l.To
+        if v != null && t != null {
+            return "{v.N} {t.N} {v == b} {t == b}"
+        }
+
+        return "gone"
+    }
+}
+
+box = Box(1)
+s = spawn Shelf()
+print(s.Look(copy box, copy Link(box), copy box))
+print(box.N)

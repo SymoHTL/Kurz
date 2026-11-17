@@ -131,12 +131,14 @@ public sealed partial class Emitter
             var source = fn.Alloca(Ir(types[i]), "kept");
             fn.Emit($"store {arguments[i]}, ptr {source}");
             var value = fn.Value($"load {Ir(types[i])}, ptr {source}");
+            var place = fn.Value($"getelementptr {side}, ptr {block}, i32 0, i32 8, i32 {Number(i)}");
             if (Counted(types[i]))
             {
-                value = Crossed(value, types[i], session, heap, copiesInto[i]);
+                CrossInto(place, value, types[i], session, heap, copiesInto[i]); // U12: into the place the restart reads, which the session's end points
+                continue;
             }
 
-            fn.Emit($"store {Ir(types[i])} {value}, ptr {fn.Value($"getelementptr {side}, ptr {block}, i32 0, i32 8, i32 {Number(i)}")}");
+            fn.Emit($"store {Ir(types[i])} {value}, ptr {place}");
         }
 
         return block;
@@ -155,12 +157,27 @@ public sealed partial class Emitter
             var side = SideType(types);
             var table = fn.Value($"load ptr, ptr {fn.Value("getelementptr { ptr, ptr }, ptr %a1, i32 0, i32 1")}");
             var heap = fn.Value($"call ptr {StdFunction("HeapCurrent")}()");
-            var session = CallSession(types.Count(Counted), heap);
+            var session = CallSession(types.Count(Counted), heap, noExit: true);
             var values = new List<string>();
+            var copies = new string?[types.Count];
             for (var i = 0; i < types.Count; i++)
             {
                 var value = fn.Value($"load {Ir(types[i])}, ptr {fn.Value($"getelementptr {side}, ptr {table}, i32 0, i32 8, i32 {Number(i)}")}");
-                values.Add(Counted(types[i]) ? Crossed(value, types[i], session, heap, copiesInto[i]) : value);
+                if (Counted(types[i]))
+                {
+                    copies[i] = fn.Alloca(Ir(types[i]), "copy");
+                    CrossInto(copies[i]!, value, types[i], session, heap, copiesInto[i]);
+                }
+
+                values.Add(value);
+            }
+
+            for (var i = 0; i < types.Count; i++)
+            {
+                if (copies[i] is { } copy)
+                {
+                    values[i] = fn.Value($"load {Ir(types[i])}, ptr {copy}"); // U12: read after the last copy, which points its `weak` references
+                }
             }
 
             var block = layout.ClassBlock(symbol);
@@ -291,7 +308,7 @@ public sealed partial class Emitter
     {
         var value = fn.Value($"load {Ir(type)}, ptr %a0");
         var block = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr %a1, i64 {IrSize(Ir(type))})");
-        fn.Emit($"store {Ir(type)} {(Counted(type) ? Crossed(value, type, null, "%a1") : value)}, ptr {block}");
+        fn.Emit($"store {Ir(type)} {(Counted(type) ? Crossed(value, type, "%a1") : value)}, ptr {block}");
         fn.Return($"ptr {block}");
     });
 
@@ -507,7 +524,7 @@ public sealed partial class Emitter
             {
                 // U12: a result that holds a block crosses back into the caller's heap as a copy of its own, and the method's lets go
                 var heap = fn.Value($"load ptr, ptr {fn.Value($"getelementptr {Reply(f.ReturnType)}, ptr {reply}, i32 0, i32 2")}");
-                var crossed = Crossed(result, f.ReturnType, null, heap); // in a session of its own, not the call's
+                var crossed = Crossed(result, f.ReturnType, heap); // in a session of its own, not the call's
                 Release(result, f.ReturnType);
                 result = crossed;
             }
@@ -557,14 +574,15 @@ public sealed partial class Emitter
             fn.Emit($"store {type} {fn.Value($"load {type}, ptr {MessageField(message, "%a0", index)}")}, ptr {MessageField(message, moved, index)}");
         }
 
-        var session = CallSession(f.Parameters.Count(p => Counted(p.Type)), "%a1");
+        var session = CallSession(f.Parameters.Count(p => Counted(p.Type)), "%a1", noExit: true);
         for (var i = 0; i < f.Parameters.Count; i++)
         {
             var type = f.Parameters[i].Type;
             var value = fn.Value($"load {Ir(type)}, ptr {MessageField(message, "%a0", 5 + i)}");
             if (Counted(type))
             {
-                value = Crossed(value, type, session, "%a1", copiesInto[i]);
+                CrossInto(MessageField(message, moved, 5 + i), value, type, session, "%a1", copiesInto[i]); // U12: into the place the method reads
+                continue;
             }
 
             fn.Emit($"store {Ir(type)} {value}, ptr {MessageField(message, moved, 5 + i)}");

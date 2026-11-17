@@ -182,6 +182,29 @@ print(Point(1) == Point(2))
 print(Point(1).Loud)
 ```
 
+Case: [actors/immutable-instance.kz](../corpus/actors/immutable-instance.kz)
+```kurz
+class Order(string Customer, int Items)
+
+actor Shop {
+    mut List<Order> orders = []
+
+    pub void Place(Order o) {
+        orders.Add(o)
+    }
+
+    pub Order First() => orders[0]
+}
+
+order = Order("Ann", 3)
+s = spawn Shop()
+s.Place(order)
+f = s.First()
+print("{f.Customer} {f.Items}")
+// `Order` has no `mut` field and no `weak` one, so it compares by content (K4), and the copy of its copy equals it
+print(f == order)
+```
+
 ### K13 (decided, §4) Equality across inheritance
 
 What D15 says for `data` holds for classes: instances of different classes are never equal,
