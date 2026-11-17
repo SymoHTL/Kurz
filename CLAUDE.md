@@ -395,7 +395,8 @@ Gate: review rule "rules for sessions".
   that waits lets in, found on 2026-11-15 (the line `actor-waits-fenced` holds it), and a message whose
   arguments were written into its callee's heap taken before an argument that waits, while the callee
   crashed or ended and its heap was freed or emptied, found on 2026-11-16 in pull request 554 (the lines
-  `actor-crash-wait-fenced` and `actor-crash-wait-first-fenced` hold it)
+  `actor-crash-wait-fenced` and `actor-crash-wait-first-fenced` hold it, and `actor-end-wait-fenced` an end
+  that frees the first page too)
   ([knowledge/a-borrow-outlives-its-source.md](knowledge/a-borrow-outlives-its-source.md)). Each
   such construct has a line in a fenced program of `ListTests`, and a refusal counts every form that
   changes a place. Gate: `compiler-tests`
