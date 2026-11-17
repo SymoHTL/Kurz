@@ -1,0 +1,27 @@
+// expect: output
+// | false
+// | true
+// | 2147483647
+// | -2147483648
+// | 0
+// | 1
+// | 7
+// allow: raw
+// rules: R19
+
+mut bool flag = false
+mut int count = 2147483647
+mut long cell = 7
+mut long* slot = &cell
+done = AtomicBool.FromPtr(&flag)
+total = AtomicInt.FromPtr(&count)
+head = AtomicPtr<long>.FromPtr(&slot)
+raw {
+    print(done.Swap(true, Ordering.AcqRel))
+    print(done.Load(Ordering.Acquire))
+    print(total.FetchAdd(1, Ordering.Relaxed))
+    print(total.Load(Ordering.Relaxed))
+    print(long(head.FetchOr(1, Ordering.SeqCst)) - long(&cell))
+    print(long(head.FetchAnd(-2, Ordering.SeqCst)) - long(&cell))
+    print(*head.Load(Ordering.SeqCst))
+}

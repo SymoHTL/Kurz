@@ -1,0 +1,17 @@
+// expect: output
+// | 3
+// | 4
+// allow: raw
+// rules: R19
+
+// an order held in a variable is read when the call runs
+void Bump(AtomicLong cell, Ordering order) {
+    raw {
+        print(cell.FetchAdd(1, order))
+    }
+}
+
+mut long word = 3
+counter = AtomicLong.FromPtr(&word)
+Bump(counter, Ordering.Relaxed)
+Bump(counter, Ordering.SeqCst)

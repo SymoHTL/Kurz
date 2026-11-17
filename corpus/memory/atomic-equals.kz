@@ -1,0 +1,8 @@
+// expect: error type-mismatch at 8
+// allow: raw
+// rules: R19
+
+mut long word = 5
+first = AtomicLong.FromPtr(&word)
+second = AtomicLong.FromPtr(&word)
+print(first == second)

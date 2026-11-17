@@ -1,0 +1,7 @@
+// expect: error raw-required at 7
+// allow: raw
+// rules: R19
+
+mut long word = 5
+counter = AtomicLong.FromPtr(&word)
+print(counter.Load(Ordering.SeqCst))
