@@ -2426,7 +2426,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // `Parent`, whose crash frees its heap whole and its slot of the table, which `fresh`, the next actor spawned, takes again; `old`
         // compares, hashes as a key and prints by its number, which reads no record (section 6, assumed there), and a call through it finds
         // no actor in the slot and raises `actor-gone` at its line, where a reference without its number would reach `fresh` and print 2;
-        // under the allocator that makes every freed block inaccessible, so that a read of the freed record ends the run
+        // under the allocator that makes every freed block inaccessible
         const string text = """
             actor Child(int N) {
                 pub int Get() => N
@@ -2537,8 +2537,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // section 6 (comment 6919351399; U13, U25): `Parent`'s crash under `stop` ends it and its children; `Child(1)`, idle, and `Parent`
         // free their heaps at once, the new heap `Parent`'s fall made among them, and `Child(2)`, which stands in the run queue with
         // `Tick(2)`, dropped, frees its first page when the scheduler takes it off at the next wait (section 6, assumed there), so that the
-        // heaps drop by 2 and then by 1; under the allocator that makes every freed block inaccessible, so that a record freed while the
-        // run queue holds it ends the run where the scheduler reads it
+        // heaps drop by 2 and then by 1, where a record freed while the run queue holds it would be freed again when the scheduler takes it
+        // off; under the allocator that makes every freed block inaccessible
         const string text = """
             actor Child(int N) {
                 pub void Tick(int t) {
@@ -2600,7 +2600,9 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // U13, U19, U24, section 6 (comment 6919351399): `Parent`'s crash under `stop` ends it, which frees its record, while `Child` waits
         // in `Work` for `S.Get()`, so that `Child` ends after its current message with no supervisor (the runtime's `EndChildren`, section 6,
         // assumed there); its crash after the wait is taken by its own end, and its log line written, reading nothing of the freed
-        // supervisor; under the allocator that makes every freed block inaccessible
+        // supervisor; under the allocator that makes every freed block inaccessible, and with the word of the heap of a record its end
+        // frees at once written 16 before the free, since the pages of a freed heap stay mapped in the allocator's pool, which the fence
+        // does not reach, so that a read of the freed supervisor's heap ends the run
         const string text = """
             actor Slow {
                 pub int Get() => 7
@@ -2645,7 +2647,9 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(s.Get())
 
             """;
-        var run = BuildAndRun(text, ListTests.Fenced, "actor-orphan-crash");
+        var poisoned = ListTests.Edited([.. ListTests.Fence, ("runtime/common/runtime.kz", "        if !Queued(state) {\n            std.HeapFree(state - 144)\n",
+            "        if !Queued(state) {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 144)\n")]);
+        var run = BuildAndRun(text, poisoned, "actor-orphan-crash");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Parent#3 crashed: thrown \"parent\" at program.kz:26", "Child#4 crashed: thrown \"child 7\" at program.kz:12"], crashes);
         Ran((run.Code, run.Output, rest), 0, ["0", "7"], "");
