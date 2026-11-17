@@ -390,7 +390,7 @@ public sealed partial class Checker
             }
 
             // Q1 (b): the variable of a loop ends with the list the loop takes, which a list held outside the function keeps
-            // `move-reachable`, as for an item that joins a region (assumed: Q1 read for an item that crosses with no word)
+            // `move-reachable`, as for an item that joins a region (the owner, 2026-11-17, #561, comment 6945857315, Q1)
             if (variable is not null && model.LoopOf(variable) is { } loop)
             {
                 if (model.HasType(loop.Collection) && model.TypeOf(loop.Collection).Type is ListType && RootOf(loop.Collection) is { Outside: true } held)

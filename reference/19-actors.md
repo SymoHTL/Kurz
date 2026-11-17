@@ -1038,7 +1038,7 @@ line of the `move`, and a list held outside the function, a field of `this` or a
 written `move`, stays `move-reachable` (§6, the owner, 2026-11-15, #519, comment 6897778812, Q1,
 "Rust: loop takes list"). A loop whose body moves a variable whose value crosses with no word, a
 number or a string among them, takes its list too, as Rust's `for n in nums` takes a `Vec<i32>`
-*(assumed, §6: Q1 read for an item that crosses with no word)*. A parameter written `move` takes an argument written `move`, or one
+(§6, the owner, 2026-11-17, #561, comment 6945857315, Q1, "The loop takes the list"). A parameter written `move` takes an argument written `move`, or one
 written `copy`, since its copy is new, as a parameter written `sending` takes any value in a region
 of its own in Swift (SE-0430); no word before such an argument is `send-needs-word` at a message,
 which U16 reads first, and `move-at-call` at a plain call (§6, the owner, 2026-11-15, #519, comment
@@ -2567,8 +2567,11 @@ finds N of them in the window passes it: the actor ends, and its supervisor cras
 top level the end of the process (§6, the owner, 2026-11-15, #519, comment 6902210646, Q4, "Erlang:
 restart-limit id") *(assumed: as §6 marks it, each crash counted at its time, before its pause, the
 log line of the crash that passes the limit written, as Erlang's supervisor reports a child's exit
-before it shuts down, and at the top level the trace of the top-level code where it waits)*. Where `restart-limit`
-stands for a `per` actor, which is never spawned, is open (§14). The
+before it shuts down, and at the top level the trace of the top-level code where it waits)*. A `per` actor,
+which is never spawned, that passes the limit ends, and the next call of its key starts a fresh one,
+its constructor run again, with no `restart-limit` and no limit across those starts (§6, the owner, 2026-11-17, #561, comment 6945857315,
+Q2, "Key restarts fresh on next call", as Akka's sharding does) *(assumed, §6: the calls queued in it at
+that crash raise `actor-gone`, and that crash writes its log line as any crash does)*. The
 duration after `after` is above 0 and at most the cap, the count after `max` an `int` of at least 1
 and the duration after `in` above 0, and a value of another type or past its bound is
 `type-mismatch` (T1), while a literal's own error stands (L10, L14) (§6; `after` past the cap, the
