@@ -861,7 +861,10 @@ public sealed partial class Emitter
 
         if (from is FunctionType ff && to is FunctionType tf && !Types.SameMoves(ff, tf))
         {
-            // U12: the function would borrow an argument its caller hands over as the callee's (Q4 of comment 6657251688)
+            // U12: the function would borrow an argument its caller hands over as the callee's (Q4 of comment 6657251688); a nullable
+            // function type or a union that holds one reaches this check through its case: a function value given for `((move Cart) =>
+            // void)?` is converted into that case below (`Convert` of the value for the case), and a nullable one through
+            // `ConvertUnion`, which converts each case
             throw Unsupported(line, "a function value whose parameter is not written `move` where its type writes `move`, which the build does not wrap (U12, F11)");
         }
 

@@ -148,6 +148,8 @@ public sealed partial class Checker
             return PlainCallMoves(c, info, $"`{CalleeText(c.Callee)}`");
         }
 
+        // a call that typed clean has its callee recorded, a call of a function value as `CallKind.Value`, which `PlainCallMoves` reads by
+        // the words of its type (`MoveSlot`), so that what stands here is a call typed with no recorded callee
         if (c.Arguments.FirstOrDefault(a => a.Word == ArgumentWord.Move) is { } moved)
         {
             Report(ErrorIds.MoveAtCall, moved.Line, $"`move` stands before an argument of `{CalleeText(c.Callee)}`, whose parameter is not written `move` (U12)");

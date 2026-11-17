@@ -417,6 +417,31 @@ match c {
 }
 ```
 
+The case below prints a value of a generic type derived from the type its parameter names (A3, A5, O7).
+
+Case: [outcomes/throw-in-text-of-instantiation.kz](../corpus/outcomes/throw-in-text-of-instantiation.kz)
+```kurz
+data Plain(int N)
+
+data Sub<U>(U X) : Plain
+
+data TextFailed
+
+class Loud(int N) {
+    pub string Text() {
+        throw TextFailed
+    }
+}
+
+void Show(Plain p) {
+    print(p)
+}
+
+print("before")
+Show(Sub<Loud>(1, Loud(2)))
+print("after")
+```
+
 ### D7 (decided, §4) How `data` inheritance is written
 
 `data Admin(int Level) : User` declares a `data` type that inherits from `User`. Its constructor

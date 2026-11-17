@@ -958,7 +958,7 @@ reached through a field or an item being read by its written type (§6, Q5), the
 cost read for a word at the argument as for that function value, as rustc reads `Send` through a
 struct's fields and a closure's through its captures)*. A reference that crosses names the same
 actor, so that `==` holds across a crossing (§6, the owner, 2026-11-14, #519, comment 6880404917,
-Q10). The deep copy of `copy` stops at a function value it reaches, which the receiver gets as it
+Q10). The deep copy of `copy` adds nothing at a function value it reaches, which the receiver gets as it
 would with no word, copied into its heap with the values it captures where the call crosses (§6,
 the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big unbuilt"), there only
 the argument itself, a lambda the sending function shows, since one reached through a field or an
@@ -966,8 +966,8 @@ item does not cross (§6, Q5), an instance it captures arriving as the copy that
 reaching the same instance arrives as, in the memo of the call (§6) *(assumed, §6: the memo read
 for what a lambda captures)*, and shared by its count with them where the call crosses nothing, at
 any function value the copy reaches, `copy f` of one whose captures cross among them, and at an actor's reference, which the receiver gets naming the same
-actor, as a reference that crosses names it *(assumed, §6: the stop at a function value, Q24's cost read for a word at the argument, as rustc reads a closure's
-`Send` through its captures; the stop at an actor's reference, as Rust's clone of a channel's
+actor, as a reference that crosses names it *(assumed, §6: nothing added at a function value, Q24's cost read for a word at the argument, as rustc reads a closure's
+`Send` through its captures; nothing added at an actor's reference, as Rust's clone of a channel's
 `Sender` is another sender to the same channel, `impl<T> Clone for Sender<T>`,
 `library/std/src/sync/mpsc.rs` of Rust 1.100.0, line 646)*. `copy` before a value that crosses
 with no word, an immutable class instance or a number among them, stands and does what it does
@@ -1022,10 +1022,9 @@ points comment 6895076937 takes as following from §6, which the answers left st
 hash of each key of a map whose keys reach a class instance, by the fields its class compares,
 `equal by`'s among them (§6, the owner, 2026-11-16, #519, comment 6923513534), which runs no program
 code, since a class declares no `Equals` or `GetHashCode` (K5). Each actor
-having its own heap, a crossing copies every counted block it reaches into the receiver's heap,
-small or big, and §6's share of a big value by pointer stays decided and unbuilt, which no program
-can tell from a copy (§6, the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big
-unbuilt"); a `copy` at a call that crosses nothing copies every block on a path to a class
+having its own heap, a crossing, a `move` among them, gives the receiver a value in its heap that no
+program can tell from a copy, a big one shared by pointer under §6's share of a big value (§6, the
+owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big unbuilt"); a `copy` at a call that crosses nothing copies every block on a path to a class
 instance, the instance among them, and shares by its count only a block that reaches none
 *(assumed, §6: the answer read for a call inside one heap)*. The copy of a map whose keys reach a
 class instance, where it crosses or stands after `copy`, hashes each key again as it is copied, by
@@ -1044,24 +1043,40 @@ expression follows, so that `f(copy)` passes a variable named `copy` and `f(copy
 field *(assumed, §6: as a name before what goes on from a name is read, which the answers did not
 give)*.
 
-A `move` ends every path into the value it sends: the checker tracks, in each function, every
+A `move` of a value that needs a word to cross ends every path into the value it sends, a value
+that crosses with no word ending the variable it names alone (§6, the owner, 2026-11-15, #519,
+comment 6897778812, Q2): the checker tracks, in each function, every
 variable that reaches into the value, all of them dead after the `move`, and refuses the `move`
 with `move-reachable` where the value may be reached from outside the function (§6, the owner,
 2026-11-03, issue 156, comment 6603205575). A function's values form regions, as in Swift's
 SE-0414: a parameter written `move` starts a region of its own, and every other parameter, `this`
 with its fields, the captured variables and the statics form one region outside the function
-*(assumed, §6: the point of comment 6897444564 that the answers left standing)*. A call merges the regions of all its arguments, written `mut` or not, and its result's, as
+*(assumed, §6: the point of comment 6897444564 that the answers left standing)*. The top-level code
+is read as a function whose variables are its own, since F16 keeps them from the top-level
+functions, so that they are no statics, and `move` before a value that names no place,
+`f(move Cart(1))`, stands and ends nothing, the call taking the value it made *(assumed, §6: the
+readings of the top-level code and of a value with no place, which no answer named)*. A call merges the regions of all its arguments, written `mut` or not, and its result's, as
 SE-0414 does, since `F(a, b)` can store `b` in a `mut` field of `a`, and an argument that crosses
 with no word merges nothing (§6, 2026-11-15, Q2) *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. A lambda joins the regions of what it
 captures, so that `f = () => m.N; send a.T(move m); f()` is `used-after-move` at `f()`, and a
 `move` of a captured variable inside a lambda is `move-reachable` *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. A `match` binding joins its
 subject's region, as a field read does, and each arm is a branch *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. `p with { A = q }` is read
-as a call that takes `p` and `q`, its result joining both regions *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. Branches unite what they
+as a call that takes `p` and `q`, its result joining both regions *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. An `else` binding joins the region of the call it
+takes a case of, as a `match` binding joins its subject's; an arm that ends in a block gives the
+region of the block's last expression, as rustc reads a block's tail; an operator's value joins its
+operands' regions; an actor's call and a `spawn` give a region of their own, since what they give
+crossed; an assignment to a field or an item joins the value's region with the instance's or the
+list's, a field of `this` with the region outside the function; the instance a method is called on
+joins the regions of its call, as an argument does; a field read of a value the function made, a
+construction or a call that keeps nothing, stays in that value's own region; and a value a round of
+a loop makes is new in each round, what earlier rounds made there keeping their own regions
+*(assumed, §6: the checker's readings, which no answer named, comment 6897444564 giving a `match`
+binding, a call and a field read)*. Branches unite what they
 moved: after an `if`, a `match`, `&&` or `||`, a use is `used-after-move` where any path moved the
 value, and the error names every `move` line that reaches the use *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. In a loop, a `move x` in a
 body that does not assign `x` again before the round ends is `used-after-move` at that `move`,
 moved there in an earlier round; an assignment makes a variable live again, and a variable
-declared in the body is new each round *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. `move p.A` and `move xs[0]` stand and end `p` or `xs`
+declared in the body, and the variables the loop's head declares, are new each round *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. `move p.A` and `move xs[0]` stand and end `p` or `xs`
 with its whole region, as Swift's regions do, which track no single field, and not as Rust's
 partial move; a `move` of a field of `this`, of a static or of a parameter not written `move` is
 `move-reachable`, and so is the `move` of a variable that aliases one of them *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. A use is any
@@ -1073,7 +1088,9 @@ A `for` loop whose body moves its variable takes its list, as Rust's `for c in c
 it owns: the list is dead after the loop, a use of it there being `used-after-move`, naming the
 line of the `move`, and a list held outside the function, a field of `this` or a parameter not
 written `move`, stays `move-reachable` (§6, the owner, 2026-11-15, #519, comment 6897778812, Q1,
-"Rust: loop takes list"). A parameter written `move` takes an argument written `move`, or one
+"Rust: loop takes list"). A loop whose body moves a variable whose value crosses with no word, a
+number or a string among them, takes its list too, as Rust's `for n in nums` takes a `Vec<i32>`
+(§6, the owner, 2026-11-17, #561, comment 6945857315, Q1, "The loop takes the list"). A parameter written `move` takes an argument written `move`, or one
 written `copy`, since its copy is new, as a parameter written `sending` takes any value in a region
 of its own in Swift (SE-0430); no word before such an argument is `send-needs-word` at a message,
 which U16 reads first, and `move-at-call` at a plain call (§6, the owner, 2026-11-15, #519, comment
@@ -1084,18 +1101,24 @@ is `move-at-call`, before what its caller holds too, the call's word checked fir
 2026-11-05, issue 156, comment 6657251688, Q3) *(assumed, §6: the readings of comment 6666386552 and
 of comment 6668638888)*, at a call outside a statement of a `parallel` block, inside which `move`
 hands the instance to the statement (§6, "Parallel work") *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. A lambda's parameter whose type is
-not written takes `move` from the function type the lambda is given for, a lambda whose parameter
-is written without `move` fits such a type and holds the parameter as its caller's, and one written
+not written takes `move` from the function type the lambda is given for, a lambda whose parameter's
+type is written without `move` fits such a type and holds the parameter as its caller's, and one written
 `move` where that type has none is `type-mismatch` (§6, the owner, 2026-11-05, issue 156, comment
-6657251688, Q4). A parameter takes one of `mut` and `move`, `move` standing before its type, a type
+6657251688, Q4). A parameter takes one of `mut` and `move`, both of them, in either order, being `syntax`, `move`
+standing before its type, a type
 named `move` before a name is read as the word, and a parameter of a C function's type (R17) takes no
 `move`, which is `syntax`, since C code keeps no count *(assumed, §6: as `mut` and `move` are words
 before an argument, which the round did not ask)*. On one thread a `move` into a parameter copies
-nothing and changes no count: the moved place's count becomes the parameter's, and a variable moved on
+nothing, and of a value whose place the `move` empties, a counted block, changes no count: the
+moved place's count becomes the parameter's, and a variable moved on
 some paths alone is let go of through a null test at its end, as rustc keeps a drop flag (§6, the
-owner, 2026-11-15, #519, comment 6895076937) *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. A `move` into a message
-or a `spawn` copies the value into the receiver's heap and lets go of the original, which frees it
-*(assumed, §6: the point of comment 6895076937 that the answers left standing)*.
+owner, 2026-11-15, #519, comment 6895076937) *(assumed, §6: the point of comment 6897444564 that the answers left standing)*; a value whose place a `move` leaves as it was, inline data,
+a fat class reference or a function value, is counted once more *(assumed, §6: the build's reading,
+which no answer named)*. A `move` into a message or a `spawn` copies the value into the receiver's
+heap and lets go of the original, which frees it, and into a `spawn` whose policy can restart the
+supervisor keeps a second copy (U22) *(assumed, §6: on comment 6902210646, Q5, "Copy all, share big
+unbuilt", which narrows to a parameter comment 6895076937, whose answer gave the moved count to
+"the message's or the parameter's" place)*.
 
 Case: [actors/relay.kz](../corpus/actors/relay.kz)
 
@@ -1895,6 +1918,23 @@ void Give(Shop to, Cart cart) {
 Give(spawn Shop(), Cart(1))
 ```
 
+Case: [actors/used-after-move-capture.kz](../corpus/actors/used-after-move-capture.kz)
+```kurz
+class Cart(mut int N)
+
+actor Shop {
+    pub void Take(Cart c) {
+        print(c.N)
+    }
+}
+
+s = spawn Shop()
+m = Cart(1)
+f = () => m.N
+send s.Take(move m)
+print(f())
+```
+
 ### U13 (decided, §6) The end of the program drops what is queued
 
 When the top-level code ends, a message that runs in an actor it spawned runs to its end, and the
@@ -2070,12 +2110,14 @@ stage of its arguments an argument's own error comes first, a `type-mismatch` am
 `Send` (E0277) in its type check and its borrow check skips a body with a type error (§6, the
 owner, 2026-11-14, #519, comment 6884160133, item 6, option (a), "Rust's order"). `move-reachable`
 of an argument written with `move` (§6, U12) comes after `send-needs-word` too, and so do
-`move-at-call` of an argument (§6, the owner, 2026-11-15, #519, comment 6897778812, Q3) and
-`used-after-move` of an argument after a `move` in the same call *(assumed, §6: that place, which the
-round of comment 6897444564 did not ask)*, and between them and `mut-in-message` the error of the
-argument written first comes first, as rustc's borrow check,
-whose errors both are, sorts its errors by their place (§6, the owner, 2026-11-15, issue 519,
-comment 6891937666, item 4, option (a), "Rust: by argument order"). `mut-in-message` stands at the
+`move-at-call` of an argument, the word that fits a parameter written `move` being §6's (the owner,
+2026-11-15, #519, comment 6897778812, Q3), and `used-after-move` of an argument after a `move` in
+the same call *(assumed, §6: those two places, which the round of comment 6897444564 did not
+ask)*, and the four, `move-reachable`, `move-at-call`, `used-after-move` and `mut-in-message`,
+stand by argument order in that stage, the error of the argument written first coming first, as
+rustc's borrow check sorts its errors by their place (§6, the owner, 2026-11-15, issue 519,
+comment 6891937666, item 4, option (a), "Rust: by argument order", which named `move-reachable` and
+`mut-in-message`). `mut-in-message` stands at the
 first argument the call writes that fills a `mut` parameter, and on one argument the two never meet,
 an argument written with `move` that fills a `mut` parameter being `mut-at-call` (M7), its own error
 *(assumed: as §6 marks it)*. An argument's own error
@@ -2646,7 +2688,11 @@ supervisor crashes with `restart-limit` at the line of the `spawn`, which the su
 takes in turn, at the top level the end of the process (§6, the owner, 2026-11-15, #519, comment 6902210646, Q4, "Erlang:
 restart-limit id") *(assumed: as §6 marks it, each crash counted at its time, before its pause, the
 log line of the crash that passes the limit written, as Erlang's supervisor reports a child's exit
-before it shuts down, and at the top level the trace of the top-level code where it waits)*. The
+before it shuts down, and at the top level the trace of the top-level code where it waits)*. A `per` actor,
+which is never spawned, that passes the limit ends, and the next call of its key starts a fresh one,
+its constructor run again, with no `restart-limit` and no limit across those starts (§6, the owner, 2026-11-17, #561, comment 6945857315,
+Q2, "Key restarts fresh on next call", as Akka's sharding does) *(assumed, §6: the calls queued in it at
+that crash raise `actor-gone`, and that crash writes its log line as any crash does)*. The
 duration after `after` is above 0 and at most the cap, the count after `max` an `int` of at least 1
 and the duration after `in` above 0, and a value of another type or past its bound is
 `type-mismatch` (T1), while a literal's own error stands (L10, L14) (§6; `after` past the cap, the
