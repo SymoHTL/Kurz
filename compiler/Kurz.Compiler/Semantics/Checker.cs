@@ -71,6 +71,7 @@ public sealed partial class Checker
     private readonly List<FunctionSymbol> folderCalls = []; // design record, section 2: the functions of another folder the file's qualified calls picked
     private readonly Checker? std; // W1: the standard library's checker, whose types of the prelude every file sees
     private readonly IReadOnlyDictionary<TypeDeclaration, IReadOnlyList<KurzType>>? reasons; // U30: the `Reason` of each block's child the reading before found, null at the first reading
+    private readonly bool quietBlocks; // U30: a reading that drops what the blocks of `on crash` report, read for the sets of one whose errors stand in blocks alone
     private readonly HashSet<string> preludeSeen = new(StringComparer.Ordinal); // W1: the names of those types this file sees
 
     /// <summary>
@@ -80,7 +81,7 @@ public sealed partial class Checker
     /// </summary>
     internal Checker? Beside { get; set; }
 
-    private Checker(DiagnosticBag diagnostics, IReadOnlyCollection<string> grants, IReadOnlyDictionary<string, Checker> folders, Checker? std, IReadOnlyDictionary<TypeDeclaration, IReadOnlyList<KurzType>>? reasons = null)
+    private Checker(DiagnosticBag diagnostics, IReadOnlyCollection<string> grants, IReadOnlyDictionary<string, Checker> folders, Checker? std, IReadOnlyDictionary<TypeDeclaration, IReadOnlyList<KurzType>>? reasons = null, bool quietBlocks = false)
     {
         this.diagnostics = diagnostics;
         allowRaw = grants.Contains("raw");
@@ -88,6 +89,7 @@ public sealed partial class Checker
         this.folders = folders;
         this.std = std;
         this.reasons = reasons;
+        this.quietBlocks = quietBlocks;
     }
 
     /// <summary>
@@ -152,23 +154,32 @@ public sealed partial class Checker
         }
 
         // U30: a program with a block of `on crash` is read again with the `Reason` of each block's child that the reading before found,
-        // until the `Reason`s found are the ones the reading read (CheckCrashBlock)
+        // until the `Reason`s found are the ones the reading read (CheckCrashBlock); a reading whose errors stand in blocks alone is read so
+        // too, since a block's error can come from a `Reason` that has not settled: its sets are those of a reading that drops what the
+        // blocks report, without the bodies of the blocks that reported errors, and what is reported is the reading's where they settle
         IReadOnlyDictionary<TypeDeclaration, IReadOnlyList<KurzType>>? reasons = null;
         for (var reading = 0; ; reading++)
         {
             var bag = new DiagnosticBag();
             var checker = new Checker(bag, grants, folders, std, reasons);
             checker.Run(program);
-            if (checker.crashBlocks.Count > 0 && std is not null && !bag.HasErrors && !bag.HasNotSupported)
+            if (checker.crashBlocks.Count > 0 && std is not null && !bag.HasNotSupported && bag.Items.All(d => !d.IsError || checker.blockErrors.Contains(d)))
             {
-                var sets = new ThrowSets(checker, std, blocks: reading > 0);
+                var read = checker; // the reading whose symbols the sets and the Reasons it read are of
+                if (bag.HasErrors)
+                {
+                    read = new Checker(new DiagnosticBag(), grants, folders, std, reasons, quietBlocks: true);
+                    read.Run(program);
+                }
+
+                var sets = new ThrowSets(read, std, blocks: reading > 0, skipped: checker.erringBlocks);
                 var found = new Dictionary<TypeDeclaration, IReadOnlyList<KurzType>>(ReferenceEqualityComparer.Instance);
-                foreach (var (_, child, _) in checker.crashBlocks)
+                foreach (var (_, child, _) in read.crashBlocks)
                 {
                     found[child.Declaration] = sets.ReasonOf(child);
                 }
 
-                var changed = checker.crashBlocks.FirstOrDefault(b => !SameTypes(b.Read, found[b.Child.Declaration]));
+                var changed = read.crashBlocks.FirstOrDefault(b => !SameTypes(b.Read, found[b.Child.Declaration]));
                 if (reading == 0 || changed.Policy is not null)
                 {
                     if (reading < CrashReadings)
@@ -177,7 +188,7 @@ public sealed partial class Checker
                         continue;
                     }
 
-                    bag.NotSupported(changed.Policy!.Line, $"a block of `on crash` whose child's `Reason` grows by what the blocks of the program read, read {CrashReadings} times (U30)");
+                    bag.NotSupported(changed.Policy!.Line, $"a block of `on crash` whose child's `Reason` grows by what the blocks of the program read, read {CrashReadings + 1} times (U30)");
                 }
             }
 
@@ -196,7 +207,11 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>U30: the readings of a program with a block of <c>on crash</c> before its <c>Reason</c>s count as not found (<see cref="Check(ProgramSyntax, DiagnosticBag)"/>).</summary>
+    /// <summary>
+    /// U30: the readings after the first of a program with a block of <c>on crash</c>, after which a <c>Reason</c> that still grows counts as
+    /// not found: the program is read at most this count and one more times, the first among them, besides the reading of one whose errors
+    /// stand in blocks alone made only for its sets (<see cref="Check(ProgramSyntax, DiagnosticBag)"/>).
+    /// </summary>
     private const int CrashReadings = 4;
 
     /// <summary>Whether the two lists hold the same types, in any order.</summary>

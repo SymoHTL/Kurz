@@ -1,6 +1,6 @@
 // expect: throws actor-gone at 18
 // | stopped at 7
-// rules: U29
+// rules: U29, U30
 
 actor Worker {
     pub void Fail() {

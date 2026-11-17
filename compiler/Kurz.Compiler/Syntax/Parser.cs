@@ -29,7 +29,7 @@ public sealed class Parser
     private bool noLambda; // the value of an operand of `asm`, where `=>` splits the operand (R11) and starts no lambda
     private int statementDepth; // the statements being parsed around the cursor: 1 at the top level of a file, more inside a block of code (R12, R16)
     private bool deciding; // U29: inside the block of `on crash (c) { ... }`, outside a lambda in it, where `restart`, `stop` and `escalate` are statements
-    private int headers; // the conditions, collections and subjects being parsed before their blocks, where a name before `{` is no `attempt` (section 6)
+    private int headers; // the conditions, collections and subjects being parsed before their blocks, where a name before `{` is no `attempt`, outside brackets and braces (U28; assumed: section 6, comment 6847932993, Q10; Unheaded)
     private readonly List<(int Index, Token Original)> tokenEdits = new(); // tokens a speculative parse rewrote (`>>`): undone with the rewind
 
     private Parser(SourceText source, IEnumerable<Token> tokens, DiagnosticBag diagnostics)
@@ -646,6 +646,25 @@ public sealed class Parser
         }
     }
 
+    /// <summary>
+    /// What <paramref name="parse"/> reads between brackets or braces of an expression, where no <c>{</c> can open the block of a header
+    /// around it, so that <c>attempt { ... }</c> and <c>retry { ... }</c> are the form there again, as Rust reads a struct literal inside
+    /// parentheses, brackets and braces of a condition (U28; assumed: section 6, comment 6847932993, Q10).
+    /// </summary>
+    private T Unheaded<T>(Func<T> parse)
+    {
+        var saved = headers;
+        headers = 0;
+        try
+        {
+            return parse();
+        }
+        finally
+        {
+            headers = saved;
+        }
+    }
+
     private bool EndsStatement() => At(TokenKind.Newline) || At(TokenKind.EndOfFile) || At(TokenKind.RightBrace) || At(TokenKind.Semicolon);
 
     /// <summary>
@@ -1153,8 +1172,10 @@ public sealed class Parser
         return new MatchStatement(keyword.Line, subject, ParseArms(keyword.Line, "`match`"));
     }
 
-    /// <summary>The arms of a <c>match</c> or of a postfix <c>else</c>, one per line between braces.</summary>
-    private List<MatchArm> ParseArms(int line, string what)
+    /// <summary>The arms of a <c>match</c> or of a postfix <c>else</c>, one per line between braces, which a header's reading does not reach (<see cref="Unheaded"/>).</summary>
+    private List<MatchArm> ParseArms(int line, string what) => Unheaded(() => ParseArmsBetweenBraces(line, what));
+
+    private List<MatchArm> ParseArmsBetweenBraces(int line, string what)
     {
         if (At(TokenKind.LeftBrace) && index > 0 && tokens[index - 1].Kind == TokenKind.Newline)
         {
@@ -1917,7 +1938,7 @@ public sealed class Parser
         deciding = true;
         try
         {
-            var block = ParseBlock();
+            var block = Unheaded(ParseBlock); // a block at a `spawn` in a header, as a lambda's (ParseLambdaBody)
             return new CrashPolicy(line, "block", Block: new LambdaExpression(open.Line, [new Parameter(name.Line, false, null, name.Text, null)], null, block));
         }
         finally
@@ -2357,7 +2378,7 @@ public sealed class Parser
                 var conditional = Match(TokenKind.Question);
                 var open = Advance();
                 suppressNewlines++;
-                var indexValue = ParseExpression();
+                var indexValue = Unheaded(ParseExpression);
                 suppressNewlines--;
                 Expect(TokenKind.RightBracket, "`]`");
                 expression = new IndexExpression(open.Line, expression, indexValue, conditional);
@@ -2445,7 +2466,7 @@ public sealed class Parser
                     }
                 }
 
-                arguments.Add(new Argument(start.Line, name, word, ParseExpression()));
+                arguments.Add(new Argument(start.Line, name, word, Unheaded(ParseExpression)));
             }
             while (Match(TokenKind.Comma));
         }
@@ -2487,7 +2508,9 @@ public sealed class Parser
                 if (token.Text is "attempt" or "retry" && At(TokenKind.LeftBrace) && headers == 0)
                 {
                     // section 6: `attempt { ... }` and `retry { ... }`, its block, which the checker says `not supported` to; the words stay
-                    // names elsewhere, and before the block of an `if`, a `while`, a `for` or a `match`
+                    // names elsewhere, and before the block of an `if`, a `while`, a `for` or a `match` outside brackets and braces, so that a
+                    // variable of either name stands in a condition (U28; assumed: section 6, comment 6847932993, Q10, as Rust reads a struct
+                    // literal in a condition)
                     return new AttemptExpression(token.Line, token.Text, ParseBlock());
                 }
 
@@ -2542,7 +2565,7 @@ public sealed class Parser
 
                 Advance();
                 suppressNewlines++;
-                var inner = ParseExpression();
+                var inner = Unheaded(ParseExpression);
                 suppressNewlines--;
                 Expect(TokenKind.RightParen, "`)`");
                 return new ParenthesizedExpression(token.Line, inner);
@@ -2560,7 +2583,7 @@ public sealed class Parser
                 var items = new List<Expression>();
                 while (!At(TokenKind.RightBracket))
                 {
-                    items.Add(ParseExpression());
+                    items.Add(Unheaded(ParseExpression));
                     if (!Match(TokenKind.Comma))
                     {
                         break;
