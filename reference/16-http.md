@@ -264,8 +264,8 @@ the method's parameter is written, while `client.Send`, the client's method, is 
 written `move` and of a value held as its caller's is `move-at-call`, and not `move-reachable`,
 the call's word checked first, at a call outside a statement of a `parallel` block (§6) *(assumed, §6: those readings)*. A lambda given for the handler whose parameter is written without
 `move` fits the type and sends nothing of its request: its check holds the parameter as its
-caller's, so that a send or a `move` of it is section 6's `move-reachable` (§6) *(assumed, §6:
-that error for it)*. A lambda's parameter
+caller's, so that a send of it, or a `move` before a parameter written `move`, is section 6's
+`move-reachable` (§6) *(assumed, §6: that error for it)*. A lambda's parameter
 whose type is not written takes `move` from the type, and a lambda whose parameter is written with
 `move` fits no type without it, with `type-mismatch` (§6, the owner, 2026-11-05, issue 156, comment
 6657251688, Q4). A named function, or a value of a function type whose parameter is written
