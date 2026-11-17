@@ -95,7 +95,10 @@ where any argument can wait
 (`SemanticModel.CanWait`, read from the checker's `Calls`), the message is built in a heap of its own and
 copied into the callee's heap when it is queued, as Erlang copies a message at its send; a crash of the
 caller before the queueing frees that heap. The fenced programs `actor-crash-wait-fenced` and
-`actor-crash-wait-first-fenced` of `ListTests` hold the crash, and `ActorTests` the end of the callee.
+`actor-crash-wait-first-fenced` of `ListTests` hold the crash, and `actor-end-wait-fenced` the end of the
+callee, which frees its heap whole, its first page with it, since the table of slots and generations of
+section 6 (2026-11-16, comment 6919351399): the copy then goes into the caller's heap, as the runtime's
+`ActorHeap` gives it for a reference that finds no actor, and the queueing raises `actor-gone`.
 
 **Why:** a borrow is a claim about every path from the read to the last use, and the claim was
 checked only for the paths the author thought of. A program that frees nothing never shows the

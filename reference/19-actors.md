@@ -202,6 +202,19 @@ parameters read with T19's use of a generic type and U2's binding, which no answ
 actor and a constructor in its body are `syntax`, since this rule gives the actor's `==` and its
 constructor (§6, comment 6882624606, Q26).
 
+A reference holds the index of its actor's slot in a table of the process and the actor's number,
+which is the slot's generation: an actor that ends clears its number from its slot, a later `spawn`
+takes the slot again and writes its own number there, larger than every number before it, and a call
+or a `send` through a reference whose number its slot no longer holds raises `actor-gone` (U20, U6)
+(§6, the owner, 2026-11-16, #519, comment 6919351399, "Erlang: id + generation") *(assumed: the
+generation is the number this rule counts, so that the end raises the slot's generation by the larger
+number of the next actor that takes it, as §6 marks it)*. `==`, `!=`, a reference's hash as a map's key
+and its text read its number alone, so that a reference whose actor ended compares, hashes and prints
+as it did before the end *(assumed: §6, since no other actor of the process has that number)*. A
+`spawn` past the largest `long` ends the process with `allocation-failed`, naming the bytes of the
+actor's record and its state, as a string past the largest `int` does (T15) *(assumed: §6, so that no
+two actors of a process have one number)*.
+
 `spawn` stands wherever an expression does, in a function, a class's method, a lambda and a field's
 default among them, as a call that waits does (U4).
 
@@ -563,6 +576,38 @@ print(d.Total())
 
 Case: [actors/constructor-arguments.kz](../corpus/actors/constructor-arguments.kz)
 
+Case: [actors/send-gone.kz](../corpus/actors/send-gone.kz)
+```kurz
+actor Child {
+    pub void Note(int n) {
+        print(n)
+    }
+}
+
+actor Parent {
+    mut Child? kid = null
+
+    pub void Make() {
+        kid = spawn Child()
+    }
+
+    pub Child? Kid() => kid
+
+    pub void Boom() {
+        throw "parent fails"
+    }
+}
+
+p = spawn Parent()
+p.Make()
+kid = p.Kid()
+send p.Boom()
+print(p.Kid() == null)
+if kid != null {
+    send kid.Note(1)
+}
+```
+
 ### U6 (decided, §6) `send`
 
 `send` before a call of an actor's method, `send c.Add(1)`, makes the call a message that nobody
@@ -573,6 +618,11 @@ the compile error `send-result`, since its result and its cases would reach nobo
 2026-11-13, #519, comment 6847932993, Q12, "send-result error (Recommended)"). `send` stands
 as a statement wherever a call does, in a function, a class's method and a lambda among them, as a call that
 waits does (U4).
+
+A `send` through a reference whose actor ended, a child whose supervisor crashed (U21) or one whose
+policy stopped it (U25), raises `actor-gone` at the `send`'s line, as a call does (U20), the sending
+actor's own crash in its turn and at the top-level code the end of the process (§6, the owner,
+2026-11-16, #519, comment 6923513534, "Raise actor-gone").
 
 Case: [actors/spawn-in-function.kz](../corpus/actors/spawn-in-function.kz)
 
@@ -629,6 +679,8 @@ c = spawn Counter()
 x = send c.Get()
 print(x)
 ```
+
+Case: [actors/send-gone.kz](../corpus/actors/send-gone.kz)
 
 ### U7 (assumed, §6) A `void` with cases gives a result
 
@@ -1896,7 +1948,10 @@ after their current message (§6, the owner, 2026-11-13, #519, comment 684793299
 Q8, "All nine leans (Recommended)"). The end of any actor stops the actors it spawned so, after
 their current message, their queued messages dropped, so that the end of the top-level code reaches
 every actor of the machine (§6, the owner, 2026-10-30, "With its supervisor", and the owner,
-2026-11-13, #519, comment 6847932993, Q16). A message parked in a wait when the top-level code ends
+2026-11-13, #519, comment 6847932993, Q16). An end stops them from the last slot of the table down
+(U2), so that the callers that wait on them wake with `actor-gone` in that order *(assumed: §6, as the
+actors the build kept before the table were ended newest first, which this order keeps where no slot
+was taken again)*. A message parked in a wait when the top-level code ends
 is no current message that holds that end, and is dropped with the process, as a queued one is, its lines after the wait never running, as tokio
 drops its tasks when its runtime shuts down (§6, the owner, 2026-11-15, #519, comment 6892835500, Q5, "Rust:
 dropped").
@@ -2328,7 +2383,10 @@ process (§6, "The exception kills the caller as well"). A call whose caller cra
 runs on another thread than its caller, runs to its end, and its result goes nowhere (§6); on one
 thread a caller that waits crashes only through a call of its own chain, which its callee waits on, so that the callee then crashes with `callee-crashed` too.
 A call that waits on an actor that ended, a child whose supervisor crashed (U21), raises
-`actor-gone` there (§6).
+`actor-gone` there (§6). An actor that ends frees its memory at once, and the slot its reference holds
+then holds no actor of that number (U2), so that a call through the reference reaches no later actor of
+that slot and raises `actor-gone` (§6, the owner, 2026-11-16, #519, comment 6919351399, "Erlang: id +
+generation"), as a `send` does (U6).
 
 Case: [actors/crash-waiter.kz](../corpus/actors/crash-waiter.kz)
 ```kurz
@@ -2448,6 +2506,8 @@ print(b.Sum([10, 20, 30], s.Get()))
 
 Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
 
+Case: [actors/send-gone.kz](../corpus/actors/send-gone.kz)
+
 ### U22 (decided, §6) The supervisor restarts the actor
 
 The default policy, `on crash restart`, runs the actor's constructor again, after the pause of U23,
@@ -2498,6 +2558,8 @@ print(w.Start())
 Case: [actors/crash-restarts-fresh.kz](../corpus/actors/crash-restarts-fresh.kz)
 
 Case: [actors/crash-children-end.kz](../corpus/actors/crash-children-end.kz)
+
+Case: [actors/send-gone.kz](../corpus/actors/send-gone.kz)
 
 ### U23 (decided, §6) The pause before a restart grows
 
@@ -2556,8 +2618,8 @@ The words after `spawn`'s argument list say what the supervisor does at the acto
 `on crash escalate` makes the supervisor crash too, with the child's crash passed up whole, its id,
 its place and its text (§6, "Policy at `spawn`"; the owner, 2026-11-15, #519, comment 6902210646, Q4).
 A stopped actor's crash writes its log line (U24) (§6, Q24), a caller that waited on its crashing
-message gets `callee-crashed` (U20), and a call that comes after the stop raises `actor-gone`, as one
-to an actor that ended does (U20) (§6); its inbox goes as the inbox of an actor that ended does, so
+message gets `callee-crashed` (U20), and a call or a `send` that comes after the stop raises `actor-gone`, as one
+to an actor that ended does (U20, U6) (§6; a `send`: the owner, 2026-11-16, #519, comment 6923513534); its inbox goes as the inbox of an actor that ended does, so
 that a call queued in it at the crash raises `actor-gone` too (§6, the owner, 2026-11-16, #519,
 comment 6919351399, "actor-gone"). An escalated crash
 writes no log line, and the supervisor that takes it, the first up the chain of supervisors whose

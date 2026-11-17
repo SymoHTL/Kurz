@@ -21,6 +21,7 @@ internal sealed class IrModule
         globals.AppendLine("%kz.str = type { ptr, i64 }");
         globals.AppendLine("%kz.fn = type { ptr, ptr }");
         globals.AppendLine("%kz.dec = type { i64, i64 }");
+        globals.AppendLine("%kz.actor = type { i64, i64 }");
     }
 
     /// <summary>The global that holds the UTF-8 bytes of a string literal, as <c>ptr</c>, with their count.</summary>

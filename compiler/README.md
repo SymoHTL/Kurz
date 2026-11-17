@@ -979,8 +979,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `Vector128` field's 16 among it: the name of its type and two words the emitted code holds (U2),
   whether it runs, waits for its restart, ends after its current message or ended (U19, U22), the
   block of its restart, which its supervisor's heap holds, null where it does not restart (U22), its
-  supervisor, null for the top-level code (U13), its heap, the actor spawned before it, by which the runtime's
-  `EndActors` reaches every actor, the size of the stack its messages run on, 2 MiB or what its
+  supervisor, null for the top-level code (U13), its heap, the index of its slot in the runtime's
+  table of the process (below), the size of the stack its messages run on, 2 MiB or what its
   `stack` clause sets (U1), the actor's number, the first and the last
   message of its inbox, the actor after it in the run queue, and the activation at the top of its
   stacks, the one that runs or waits, none while it is idle, which nothing marks while its
@@ -988,10 +988,20 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   default reads neither `this` nor its methods (K7), while the life of the record marks it, so that a
   crash passed up into an actor whose constructor runs at its `spawn` goes on to its spawner (U25, U3). The number
   counts the actors of every type from 1, in the order `ActorNew` makes them (U2). The reference is
-  the address of the state, which nothing counts, an actor living to the end of the process: `==` of
-  two references compares the two addresses, `this` as a value inside an actor is the address of its
-  own state (U2, U10), and the runtime's `ActorText` makes the text of a reference, the name of the
-  actor's type, `#` and its number, `Counter#1` (U2). The constructor and the defaults of
+  two words, 16 bytes, the index of the actor's slot in the runtime's table of the process and the
+  actor's number, which nothing counts (section 6, the owner, 2026-11-16, comment 6919351399, "Erlang:
+  id + generation"; the two words assumed there): a slot holds the address of the state and the
+  number, the end of an actor clears the number from its slot and frees its heap whole, its first page
+  with it, the next `spawn` takes the slot freed last again, and a call or a `send` through a reference
+  whose number its slot no longer holds finds no actor and raises `actor-gone` at its line (the
+  runtime's `Lookup`, `ActorHeap` and `Enqueue`; U6, U20); the table's pages double from 64 slots and
+  never move, their directory in the thread's own heap (assumed in section 6). `==` of two references
+  compares their numbers, a reference's hash as a map's key is its number's, `this` as a value inside
+  an actor is the reference its record holds (U2, U10), and the runtime's `ActorText` makes the text of
+  a reference from its number, the name of the actor's type, `#` and its number, `Counter#1`, all three
+  as before the end of an actor that ended (U2; assumed in section 6). A `spawn` past the largest `long`
+  ends the process with `allocation-failed`, naming the bytes of the actor's record and its state (U2;
+  assumed in section 6). The constructor and the defaults of
   the body run inside `spawn`, so that what they print comes before what the spawner prints after it
   (U3). A call through a reference, a `send` and a `send` of the actor's own method (U11) make a
   message, one block of the receiver's heap, as actix packs a message and the sender of its reply into one
@@ -2026,7 +2036,7 @@ heap of its own (`MessageHeapNew`) and at its queueing copied by that copy into 
 then, its own heap freed, as Erlang builds a message in the sender's heap and copies it into the
 receiver's at its send: the wait lets the actor crash, which frees or empties the heap taken before it,
 that the arguments and the message would have gone into (U21), or end (U13), and where it ended the copy
-is dropped as any message to an ended actor; the crash of the actor whose code builds it frees that heap
+goes into its caller's heap and its queueing raises `actor-gone` (`ActorHeap`; U6, U20); the crash of the actor whose code builds it frees that heap
 with its own. Where no argument can wait, the message is built in its actor's heap. The words of a policy after
 `spawn` and after a type's name, the type's default, which a `spawn`'s own wins over (U25 to U27), are
 built: the emitted `spawn` gives the runtime its policy in the block of its restart, which a `stop`
@@ -2065,10 +2075,7 @@ models, AVR and WebAssembly, for which the build has no target; and, on Windows,
 overflow, which ends the process as the system ends it whatever the policy (U19); a crash at the root, the top-level code, still ends
 the process with its error line, its trace and the exit code 1. A call whose caller crashed runs to its end and its result goes nowhere, which on
 one thread no program reaches but through the crash path, a caller that waits crashing only through
-a call of its own chain; an actor that ended keeps its first page to the end of the process, so that
-a call that still reaches it raises `actor-gone` and a `send` that still reaches it is dropped with no
-error, where section 6 frees the page at the end through a table of slots and generations (2026-11-16),
-under which a `send` raises `actor-gone` too, which is not built; and the copies a crashed message made of the
+a call of its own chain; and the copies a crashed message made of the
 arguments of a call it had not sent yet, in the callee's heap where no argument could wait, and the heap of a `spawn` whose arguments it was still
 evaluating, stay in their heaps until those are freed. A message has 2 MiB of
 stack where its clause sets no other size, where a message on Linux had the main thread's 8 MiB
@@ -2099,10 +2106,16 @@ actor that spawned it (the owner, 2026-10-30), at the root the top-level code, w
 process, and no actor stops but a child of a supervisor that crashed, one whose policy stops it at its
 crash and one whose crash passes its limit (U25, U26). Every actor's blocks come from
 its own heap (section 3, "The runtime"), and the end of the top-level code frees every actor's heap
-whole before the process exits (`EndActors`), as the end of an actor frees its heap (U13, and the
-record's section 6, assumed: the end of the root actor read as the end of every actor it stops, whose
-heap section 3 frees whole); a crossing copies every counted block it reaches, so that no actor holds
-a count of a block of another's heap, a reference to an actor naming its state alone (U12). Of
+whole before the process exits, the table and the run queue walked (`EndActors`; U13, and the record's
+section 6, assumed: the end of the root actor read as the end of every actor it stops, whose heap section 3
+frees whole), as the end of an
+actor frees its heap whole at once, its first page and its slot with it, or, where it stands in the run
+queue, when the scheduler takes it off (`EndActor`, `RunOne`; U13; section 6, assumed there); the end
+ends the actor's children from the last slot of the table down, and a child that waits in its current
+message keeps no word of the supervisor whose end freed it, its crash after the wait taken by its own
+end (`EndChildren`; section 6, assumed there); a crossing
+copies every counted block it reaches, so that no actor holds a count of a block of another's heap, a
+reference to an actor naming its slot and its number (U12). Of
 the heaps two things are not built: the share of a big value by pointer outside every heap, which
 section 6 decides, every big value crossing as a copy, and the sweep of section 13, every block
 being freed at its last count (the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share

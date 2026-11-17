@@ -1,0 +1,32 @@
+// expect: throws actor-gone at 31
+// | true
+// rules: U5, U6, U21, U22
+
+actor Child {
+    pub void Note(int n) {
+        print(n)
+    }
+}
+
+actor Parent {
+    mut Child? kid = null
+
+    pub void Make() {
+        kid = spawn Child()
+    }
+
+    pub Child? Kid() => kid
+
+    pub void Boom() {
+        throw "parent fails"
+    }
+}
+
+p = spawn Parent()
+p.Make()
+kid = p.Kid()
+send p.Boom()
+print(p.Kid() == null)
+if kid != null {
+    send kid.Note(1)
+}
