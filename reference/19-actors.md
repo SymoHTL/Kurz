@@ -3237,7 +3237,15 @@ reads `TOKIO_WORKER_THREADS` as a whole number and refuses an empty one; a conta
 its whole cores, rounded down and at least 1, as Rust's `available_parallelism` counts it; and a bad
 `KURZ_THREADS` ends the process before its first statement with the line `error: threads-variable
 (<the value>)` on standard error and the exit code 1, as a bad `KURZ_LOG` ends it with `log-filter`
-(P5) *(assumed in §6)*. The main thread runs the top-level code alone, and
+(P5) *(assumed in §6)*. A worker thread that the system refuses at its start ends the program with an
+error line and an id of its own and the exit code 1, as tokio's `Builder::build` returns an
+`io::Error` (§6, the owner, 2026-11-17, #572, comment 6961064484, Q2, "Error line + exit 1
+(Recommended)"), so that a program on a machine at its thread limit does not start, where it could
+have run on fewer (§6, the cost of that answer). The id is `thread-refused`, its start is the moment
+the scheduler starts its worker threads, at the program's first `spawn` or first form that splits its
+work, the threads that did start ending with the process, and its line is `error: thread-refused
+(<the count of worker threads asked>)` on standard error, with no place and no trace *(assumed in
+§6)*. The main thread runs the top-level code alone, and
 sleeps while it waits (U18; §6, Q3). A message parked in a wait goes on on the thread that parked it,
 and an actor between messages moves to any thread (§6, the owner, 2026-11-17, #519, comment
 6946657505, Q2, "Stays on its thread (Recommended)"). A message that runs on another thread when the
@@ -3246,7 +3254,8 @@ the process ends after it; a supervisor that is running acts on its child's cras
 ends or waits (U22) *(assumed in §6)*.
 
 No case: a case is a single file with no `project.kz` (chapter 0) and gives its program no
-environment, as `log-filter`'s place in chapter 12 says, the thread that runs a message shows in
+environment, as `log-filter`'s place in chapter 12 says, and cannot make its system refuse a worker
+thread, as `thread-refused`'s place there says, the thread that runs a message shows in
 no output, and the two outcomes a program can see, a message that runs on another thread when the
 top-level code ends and the moment a running supervisor acts on a crash, depend on the timing between
 threads, which a case's output cannot fix.
