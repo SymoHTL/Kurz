@@ -515,7 +515,7 @@ public sealed partial class Checker
                             DeclareChecked(tp.Binding, type, false, VariableKind.Binding, arm.Line, tp);
                             if (subject is not null)
                             {
-                                BindRegion(model.DeclarationOf(tp), subject, tp); // U12: a binding joins the region of the call it takes a case of (comment 6897444564)
+                                BindRegion(model.DeclarationOf(tp), subject, tp); // U12 (assumed): a binding joins the region of the call it takes a case of, as comment 6897444564 has a `match` binding join its subject's
                             }
                         }
 

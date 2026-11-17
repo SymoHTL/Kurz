@@ -1159,6 +1159,18 @@ public sealed class ParserTests
     }
 
     [Theory]
+    [InlineData("void Take(mut move Cart c) {\n}")]
+    [InlineData("void Take(mut move c) {\n}")]
+    [InlineData("void Take(move mut Cart c) {\n}")]
+    [InlineData("Run((mut move c) => print(c))")]
+    public void A_parameter_written_both_mut_and_move_is_syntax(string program)
+    {
+        // U12: a parameter takes one of `mut` and `move`, so that both, in either order, are `syntax` at the parameter, `move` before a name
+        // being the word (assumed, section 6, as a C function's parameter written `move` is `syntax`)
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors(program));
+    }
+
+    [Theory]
     [InlineData("b = a with { Name = \"Bea\" }", "(assign-or-declare b (with a Name = (string \"Bea\")))")]
     [InlineData("value = Find(id) else {\n    NotFound => 0\n}", "(assign-or-declare value (else (call Find id) [((type NotFound) => (int 0))]))")]
     [InlineData("value = Find(id) else {\n    NotFound => return Missing(id)\n}", "(assign-or-declare value (else (call Find id) [((type NotFound) => (return (call Missing id)))]))")]

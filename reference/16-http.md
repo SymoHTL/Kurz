@@ -261,8 +261,8 @@ call in front of an argument whose parameter is not written `move`, as `mut-at-c
 Q8). At a send to an actor, `move` at an argument is the send's word, however
 the method's parameter is written, while `client.Send`, the client's method, is a call and no send
 (§12), and a `move` at a call that is both in front of a parameter not
-written `move` and of a value held as its caller's is `move-at-call`, the call's word checked
-first, at a call outside a statement of a `parallel` block (§6) *(assumed, §6: those readings)*. A lambda given for the handler whose parameter is written without
+written `move` and of a value held as its caller's is `move-at-call`, and not `move-reachable`,
+the call's word checked first, at a call outside a statement of a `parallel` block (§6) *(assumed, §6: those readings)*. A lambda given for the handler whose parameter is written without
 `move` fits the type and sends nothing of its request: its check holds the parameter as its
 caller's, so that a send or a `move` of it is section 6's `move-reachable` (§6) *(assumed, §6:
 that error for it)*. A lambda's parameter
@@ -455,13 +455,11 @@ those readings)*. An
 `HttpBody` for an upload is made from a stream, a file or a series of chunks (§12, the owner,
 2026-11-05, issue 156, comment 6668914650, Q11), and the makers' names and forms stand open in §14.
 
-No case: the compiler says `not supported` to an `HttpRequest` that crosses or follows `copy` (§6),
-so that no case can expect `copy-server-request`, and a
-send to another actor needs two actors, which the compiler does not build, as it builds no HTTP
-server or client of §12, which the move of a request, the halves of the stream, the first read's
-`100 Continue` and its compare-and-swap on a flag of five states, the pair's shared state, the rate
-between reads, the count of a body without a declared length, the two bodies of a client's call
-and the makers of an `HttpBody` need. The id
+No case: the compiler builds no HTTP server or client of §12, which the move of a request, the
+halves of the stream, the first read's `100 Continue` and its compare-and-swap on a flag of five
+states, the pair's shared state, the rate between reads, the count of a body without a declared
+length, the two bodies of a client's call and the makers of an `HttpBody` need, so that no case can
+expect `copy-server-request`. The id
 `copy-server-request` stands in this rule, and not in [12-errors.md](12-errors.md), since no case can
 expect it (§12, the owner, 2026-11-03, issue 156, comment 6603359338); `move-at-call` and
 `move-reachable` have their rows there, since cases of U12 expect them (§6).

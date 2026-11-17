@@ -416,6 +416,7 @@ public sealed class SemanticModel
     private readonly HashSet<Expression> moves = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<VariableSymbol> movedVariables = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<ForInStatement> takingLoops = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<LoopName, ForInStatement> secondNames = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypePattern, KurzType> patterns = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FunctionDeclaration, FunctionSymbol> functions = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<ExternFunction, FunctionSymbol> cFunctions = new(ReferenceEqualityComparer.Instance);
@@ -563,6 +564,14 @@ public sealed class SemanticModel
 
     /// <summary>U12: whether the loop's body moves its variable, so that the loop takes its list (the owner, 2026-11-15, #519, comment 6897778812, Q1 (b)).</summary>
     public bool TakesItsList(ForInStatement loop) => takingLoops.Contains(loop);
+
+    /// <summary>The loop that declares the variable, by its first name or by its second (C6), or null for a variable no loop declares.</summary>
+    public ForInStatement? LoopOf(VariableSymbol variable) => variable.Kind != VariableKind.Loop ? null : DeclaringNode(variable) switch
+    {
+        ForInStatement f => f,
+        LoopName second => secondNames.GetValueOrDefault(second),
+        _ => null,
+    };
 
     /// <summary>The arguments written after <c>move</c> that the check passed, for a reader of the model.</summary>
     public IReadOnlyCollection<Expression> Moves => moves;
@@ -726,12 +735,14 @@ public sealed class SemanticModel
         if (variable is not null)
         {
             movedVariables.Add(variable);
-            if (variable.Kind == VariableKind.Loop && DeclaringNode(variable) is ForInStatement loop)
+            if (LoopOf(variable) is { } loop)
             {
                 takingLoops.Add(loop);
             }
         }
     }
+
+    internal void RecordSecondName(ForInStatement loop) => secondNames[loop.Second!] = loop;
 
     internal void RecordPattern(TypePattern pattern, KurzType type) => patterns[pattern] = type;
 

@@ -3418,8 +3418,9 @@ public sealed partial class Emitter
         var wide = fn.Value($"sext i32 {i} to i64");
         var item = fn.Value($"load {Ir(type.Element)}, ptr {fn.Value($"getelementptr {Ir(type.Element)}, ptr {items}, i64 {wide}")}");
         loops.Push((exit, next, regions.Count, scopes.Count));
-        if (Model.TakesItsList(f))
+        if (Model.TakesItsList(f) && EmptyValue(type.Element) is not null)
         {
+            // U12: the item's place empties at its `move`; an item whose place has no empty value is counted once more (MovedValue)
             if (type.Element is WeakRefType)
             {
                 throw Unsupported(f.Line, "a loop over a list of `weak` references that takes its list (U12, R3)");
