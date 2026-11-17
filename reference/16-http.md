@@ -265,8 +265,8 @@ written `move` and of a value held as its caller's is `move-at-call`, and not `m
 the call's word checked first, at a call outside a statement of a `parallel` block (§6) *(assumed, §6: those readings)*. A lambda given for the handler whose parameter is written without
 `move` fits the type and sends nothing of its request: its check holds the parameter as its
 caller's, so that a `move` of it, into a message or before a parameter written `move`, is section 6's
-`move-reachable` (§6) *(assumed, §6: that error for it)*, a send of it with `copy` or with no word
-taking `copy-server-request` and `send-needs-word`, as any send of an `HttpRequest` does (§12). A lambda's parameter
+`move-reachable` (§6) *(assumed, §6: that error for it)*, a send of it with `copy` taking `copy-server-request`,
+and one with no word `send-needs-word`, as any send of an `HttpRequest` does (§12). A lambda's parameter
 whose type is not written takes `move` from the type, and a lambda whose parameter is written with
 `move` fits no type without it, with `type-mismatch` (§6, the owner, 2026-11-05, issue 156, comment
 6657251688, Q4). A named function, or a value of a function type whose parameter is written

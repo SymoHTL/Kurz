@@ -7561,10 +7561,11 @@ public sealed class CheckerTests
         // each of the two errors names the loop that took the list by its line, 10 and 5, beside the line of the `move`, 11 and 6
         Assert.Contains("line 10", Assert.Single(Check(Say + "names = [\"a\", \"b\"]\nfor s in names {\n    Say(move s)\n}\nprint(names)\n").Diagnostics.Items).Message, StringComparison.Ordinal);
         Assert.Contains("line 5", Assert.Single(Check("void Two(move string s, int n) {\n}\n\nnames = [\"a\"]\nfor s in names {\n    Two(move s, names.Count)\n    break\n}\n").Diagnostics.Items).Message, StringComparison.Ordinal);
-        // two loops over the list on two branches both reach the read after them, which names both loops by their lines, 11 and 15
+        // two loops over the list on two branches both reach the read after them, which names both loops by their lines, 11 and 15: the
+        // plural and the two lines are held, not the words around them
         const string Branches = "names = [\"a\", \"b\"]\nif names.Count > 1 {\n    for s in names {\n        Say(move s)\n    }\n} else {\n    for s in names {\n        Say(move s)\n    }\n}\nprint(names)\n";
         Assert.Equal([(ErrorIds.UsedAfterMove, 19)], Errors(Say + Branches));
-        Assert.Contains("loops at line 11 and line 15", Assert.Single(Check(Say + Branches).Diagnostics.Items).Message, StringComparison.Ordinal);
+        Assert.Matches(@"\bloops\b\D*\b11\b\D*\b15\b", Assert.Single(Check(Say + Branches).Diagnostics.Items).Message);
         Assert.Equal([(ErrorIds.MoveReachable, 11)], Errors(Say + "void All(List<string> names) {\n    for s in names {\n        Say(move s)\n    }\n}\n\nAll([\"a\"])\n"));
         NotSupportedAt(10, "U12", Say + "for n in 0..<2 {\n    Num(move n)\n}\n");
         NotSupportedAt(12, "U12", Say + "mut m = Map<string, string>()\nm[\"a\"] = \"b\"\nfor k, v in m {\n    Say(move k)\n}\n");
@@ -7629,6 +7630,11 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.MutInMessage, 62)], Errors(MoveShop + "void Give(Shop to, Cart p) {\n    mut x = 1\n    send to.GiveMut(mut x, move p)\n    print(x)\n}\n\nGive(shop, Cart(1))\n"));
         Assert.Equal([(ErrorIds.MoveAtCall, 61)], Errors(MoveShop + "mut x = 1\nsend shop.Count(1, mut x)\nprint(x)\n"));
         Assert.Equal([(ErrorIds.SendNeedsWord, 62)], Errors(MoveShop + "mut x = 1\nsend shop.GiveMut(mut x,\n    Cart(1))\nprint(x)\n"));
+
+        // an argument written `mut` whose variable a `move` ended on the line before, filling a `mut` parameter of a message, has
+        // `used-after-move` and then `mut-in-message`, both at its line (section 6, U16, assumed: the checker's reading, which no answer named)
+        const string Ended = "class Cart(mut int Items)\n\nvoid Take(move Cart c) {\n    print(c.Items)\n}\n\nactor Counter {\n    pub int Bump(mut Cart c) {\n        c.Items = c.Items + 1\n        return c.Items\n    }\n}\n\n";
+        Assert.Equal([(ErrorIds.UsedAfterMove, 17), (ErrorIds.MutInMessage, 17)], Errors(Ended + "k = spawn Counter()\nmut cart = Cart(1)\nTake(move cart)\nprint(k.Bump(mut cart))\n"));
 
         // on one argument the checker reads `used-after-move` first, then `move-at-call`, then `move-reachable`, and the call has the one
         // error (section 6, U16, assumed: the checker's reading, which no answer named); `move-at-call` before `move-reachable` is the row
