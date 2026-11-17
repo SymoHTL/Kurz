@@ -133,6 +133,13 @@ Each line names a trap; its evidence is in the entry it links.
   request 426; [knowledge/the-pull-request-shows-the-old-head-after-a-push.md](knowledge/the-pull-request-shows-the-old-head-after-a-push.md)).
   HAZARD (#432): the merge tool refuses the old head only when it is given the pushed commit, or
   when that head is behind `main`.
+- A compiler gate that ends with "no answer within N s" and names no test, on a head that passed
+  before or passes when run again: the suite grew into the gate's budget, not a hang of the change.
+  On 2026-11-17 two Windows runs met the 900 s the gate had, and the `gates` job took 23 min 44 s of
+  its 25 ([knowledge/a-suite-grows-into-its-timeout.md](knowledge/a-suite-grows-into-its-timeout.md)).
+  The budget, with what each job that runs the gate spends outside it, ends before that job's
+  `timeout-minutes`. Gate: `self-tests` (the compiler gate's case of the budget and its red proofs);
+  that a job's share still covers what it spends outside the gate is a `judgment step`.
 - A run of a program that comes back at its limit with "an orphan holds its output": a child the
   program left running held its streams after the program ended, a forked server whose `kill` an
   error skipped among them. A run of the suite waited on such a child for 80 minutes on 2026-11-05

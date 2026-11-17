@@ -12,10 +12,10 @@ together, and reports `dotnet test: no answer within N s` with no test named. It
 of the three jobs that run the gate held 25 minutes.
 
 - The Windows job `compiler-windows` ran its step in 8 to 15 minutes in the night of 2026-11-16
-  to 17, while the same tests took about 5 minutes in the dev container on Linux. Two runs met the
-  gate's limit: 43985873704 (pull request 561's head `70d53e1f`, which had passed in run
-  43983648390) and 43999911148 (pull request 562's head `7b9ad8be`). Both were green when the failed
-  job was run again, the first with its step at 864 s.
+  to 17, on the heads of pull requests 556 to 562. Two runs met the gate's limit: 43985873704 (pull
+  request 561's head `70d53e1f`, which had passed in run 43983648390) and 43999911148 (pull request
+  562's head `7b9ad8be`). Both were green when the failed job was run again, the first with its step
+  at 864 s.
 - The `gates` job, the required check, took 14 to 17 minutes on the same heads, but 23 min 44 s in
   run 43999911205: 641 s in the replay of the red proofs, 743 s in the compiler gate, the rest in the
   container and the other gates. A job cut off at its own limit ends with no table of the gates at
@@ -37,7 +37,8 @@ cut off and the gate prints nothing of what it saw.
   `timeout-minutes` of a job that would cut the gate off. The self-test case "the budget of the tests
   and of the version, with what a job spends outside the gate, ends before the limit of every job
   that runs it" holds `TIMEOUT + VERSION_TIMEOUT` plus each job's share in `JOBS` within that job's
-  `timeout-minutes`, for `compiler-windows.yml`, `compiler-arm.yml` and `gates.yml`.
+  `timeout-minutes`, for `compiler-windows.yml`, `compiler-arm.yml` and `gates.yml`; a workflow that
+  is gone or names no limit counts as a limit of 0, so the case is red.
 - A share in `JOBS` is a measured time with room, not a bound anything enforces: the replay of the
   red proofs grows with the ledger. When a job's run nears its limit, measure the steps again (the
   `=== gate:` lines of the gates log carry their start times) and raise the share and the limit in a

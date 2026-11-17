@@ -222,7 +222,8 @@ def self_test():
     cases.append(("the floor is at least 1000 tests", FLOOR >= 1000, FLOOR))
     limits = {}
     for name in JOBS:
-        found = re.search(r"^\s+timeout-minutes:\s*(\d+)\s*$", open(os.path.join(kit.ROOT, ".github", "workflows", name), encoding="utf-8").read(), re.M)
+        path = os.path.join(kit.ROOT, ".github", "workflows", name)  # a workflow that is gone has no limit: red, not a crash
+        found = re.search(r"^\s+timeout-minutes:\s*(\d+)\s*$", open(path, encoding="utf-8").read(), re.M) if os.path.exists(path) else None
         limits[name] = int(found.group(1)) * 60 if found else 0
     cases.append(("the budget of the tests and of the version, with what a job spends outside the gate, ends before the limit of every job that runs it",
                   len(limits) == 3 and all(TIMEOUT + VERSION_TIMEOUT + JOBS[name] <= limit for name, limit in limits.items()), (TIMEOUT, VERSION_TIMEOUT, JOBS, limits)))
