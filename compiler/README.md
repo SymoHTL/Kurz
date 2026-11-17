@@ -1950,7 +1950,7 @@ each member is one LLVM instruction on the word it points to, aligned to the wor
 `CompareExchange` and `CompareExchangeWeak` a `cmpxchg` and a `cmpxchg weak`, whose pair gives the
 union's case, and `Fence` a `fence`; a `bool`'s word is a byte that holds 0 or 1, as Rust's
 `AtomicBool` holds a `u8`. An order written at the call is the instruction's own, `Relaxed` LLVM's
-`monotonic`; any other is read when the call runs, by a `switch` over the five values of `Ordering`
+`monotonic`; any other is read when the call runs, by a `switch` over the five values of `MemoryOrder`
 to the instruction for each, as Rust's `match` on the order chooses among its intrinsics, and a
 choice Rust refuses raises `invalid-ordering-at-run-time` at the call's line (`Emit/Emitter.Atomics.cs`;
 `EmitterTests` pins the instructions and the choice). A view crossing into an actor is

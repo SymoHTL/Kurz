@@ -4028,16 +4028,16 @@ public sealed class CheckerTests
 
     /// <summary>A compare-exchange of <c>a</c> with the orders given, its result matched, in lines 11 to 14 inside a <c>raw</c> block.</summary>
     private static string Exchange(string success, string failure) =>
-        Atomics($"raw {{\n    match a.CompareExchange(5, 6, Ordering.{success}, Ordering.{failure}) {{\n        long found => print(found)\n        NotExchanged<long> missed => print(missed.Value)\n    }}\n}}");
+        Atomics($"raw {{\n    match a.CompareExchange(5, 6, MemoryOrder.{success}, MemoryOrder.{failure}) {{\n        long found => print(found)\n        NotExchanged<long> missed => print(missed.Value)\n    }}\n}}");
 
     [Theory]
-    [InlineData("raw {\n    print(a.Load(Ordering.Release))\n}", 11)]
-    [InlineData("raw {\n    print(a.Load(Ordering.AcqRel))\n}", 11)]
-    [InlineData("raw {\n    a.Store(1, Ordering.Acquire)\n}", 11)]
-    [InlineData("raw {\n    a.Store(1, Ordering.AcqRel)\n}", 11)]
-    [InlineData("raw {\n    Fence(Ordering.Relaxed)\n}", 11)]
-    [InlineData("raw {\n    print(a.Load((Ordering.AcqRel)))\n}", 11)] // in parentheses, still written at the call
-    [InlineData("raw {\n    print(1)\n    c.Store(true, order: Ordering.Acquire)\n}", 12)]
+    [InlineData("raw {\n    print(a.Load(MemoryOrder.Release))\n}", 11)]
+    [InlineData("raw {\n    print(a.Load(MemoryOrder.AcqRel))\n}", 11)]
+    [InlineData("raw {\n    a.Store(1, MemoryOrder.Acquire)\n}", 11)]
+    [InlineData("raw {\n    a.Store(1, MemoryOrder.AcqRel)\n}", 11)]
+    [InlineData("raw {\n    Fence(MemoryOrder.Relaxed)\n}", 11)]
+    [InlineData("raw {\n    print(a.Load((MemoryOrder.AcqRel)))\n}", 11)] // in parentheses, still written at the call
+    [InlineData("raw {\n    print(1)\n    c.Store(true, order: MemoryOrder.Acquire)\n}", 12)]
     public void An_order_rusts_lint_refuses_written_at_an_atomic_call_is_invalid_ordering_at_its_argument(string program, int line)
     {
         // section 6, 2026-11-17, comment 6946657505, Q1, and the default assumed there: Rust's lint `invalid_atomic_ordering` refuses
@@ -4058,14 +4058,14 @@ public sealed class CheckerTests
     public void An_atomic_order_rust_takes_or_one_held_in_a_variable_is_no_compile_error()
     {
         // the order in a variable is read when the call runs (the emitter's choice among the instruction's forms)
-        Clean(Atomics("o = Ordering.Release\nraw {\n    print(a.Load(o))\n    print(a.Load(Ordering.Acquire))\n    a.Store(1, Ordering.Release)\n    Fence(Ordering.Acquire)\n    print(a.Swap(2, Ordering.AcqRel))\n}"), "raw");
+        Clean(Atomics("o = MemoryOrder.Release\nraw {\n    print(a.Load(o))\n    print(a.Load(MemoryOrder.Acquire))\n    a.Store(1, MemoryOrder.Release)\n    Fence(MemoryOrder.Acquire)\n    print(a.Swap(2, MemoryOrder.AcqRel))\n}"), "raw");
     }
 
     [Theory]
-    [InlineData("raw {\n    print(c.FetchAdd(true, Ordering.SeqCst))\n}")] // no `fetch_add` on Rust's `AtomicBool`
-    [InlineData("raw {\n    print(c.FetchSub(true, Ordering.SeqCst))\n}")]
-    [InlineData("raw {\n    print(p.FetchAdd(1, Ordering.SeqCst))\n}")] // Rust's `AtomicPtr` adds through `fetch_ptr_add`, no member of the answer
-    [InlineData("raw {\n    print(a.FetchMax(1, Ordering.SeqCst))\n}")] // a member of Rust's the answer did not list
+    [InlineData("raw {\n    print(c.FetchAdd(true, MemoryOrder.SeqCst))\n}")] // no `fetch_add` on Rust's `AtomicBool`
+    [InlineData("raw {\n    print(c.FetchSub(true, MemoryOrder.SeqCst))\n}")]
+    [InlineData("raw {\n    print(p.FetchAdd(1, MemoryOrder.SeqCst))\n}")] // Rust's `AtomicPtr` adds through `fetch_ptr_add`, no member of the answer
+    [InlineData("raw {\n    print(a.FetchMax(1, MemoryOrder.SeqCst))\n}")] // a member of Rust's the answer did not list
     [InlineData("print(AtomicLong.New(1))")]
     public void A_member_an_atomic_type_does_not_have_is_unknown_name_at_its_line(string program)
     {
@@ -4077,28 +4077,28 @@ public sealed class CheckerTests
     public void The_members_rust_gives_each_atomic_type_are_read_with_their_word_types()
     {
         // the positive control of the members' test: `FetchAnd`, `FetchOr` and `FetchXor` on all four, an `AtomicPtr`'s taking a `long`
-        Clean(Atomics("raw {\n    print(c.FetchXor(true, Ordering.SeqCst))\n    print(n.FetchSub(1, Ordering.SeqCst))\n    print(long(p.FetchOr(1, Ordering.SeqCst)))\n"
-            + "    print(n.FetchAnd(3, Ordering.SeqCst))\n    print(a.FetchXor(3, Ordering.SeqCst))\n    print(*p.Swap(&w, Ordering.SeqCst))\n}"), "raw");
-        Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors(Atomics("raw {\n    print(long(p.FetchOr(&w, Ordering.SeqCst)))\n}"), "raw"));
+        Clean(Atomics("raw {\n    print(c.FetchXor(true, MemoryOrder.SeqCst))\n    print(n.FetchSub(1, MemoryOrder.SeqCst))\n    print(long(p.FetchOr(1, MemoryOrder.SeqCst)))\n"
+            + "    print(n.FetchAnd(3, MemoryOrder.SeqCst))\n    print(a.FetchXor(3, MemoryOrder.SeqCst))\n    print(*p.Swap(&w, MemoryOrder.SeqCst))\n}"), "raw");
+        Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors(Atomics("raw {\n    print(long(p.FetchOr(&w, MemoryOrder.SeqCst)))\n}"), "raw"));
     }
 
     [Fact]
     public void A_member_of_an_atomic_type_and_fence_stand_in_a_raw_block_and_from_ptr_anywhere()
     {
         // lines 5 to 8 make the views outside a `raw` block, the positive control (R19, as `Ptr<T>(x)` of R14)
-        Assert.Equal([(ErrorIds.RawRequired, 10), (ErrorIds.RawRequired, 11)], Errors(Atomics("print(a.Load(Ordering.SeqCst))\nFence(Ordering.SeqCst)\nraw {\n    print(a.Swap(1, Ordering.SeqCst))\n}"), "raw"));
+        Assert.Equal([(ErrorIds.RawRequired, 10), (ErrorIds.RawRequired, 11)], Errors(Atomics("print(a.Load(MemoryOrder.SeqCst))\nFence(MemoryOrder.SeqCst)\nraw {\n    print(a.Swap(1, MemoryOrder.SeqCst))\n}"), "raw"));
     }
 
     [Fact]
     public void From_ptr_of_an_atomic_type_takes_a_pointer_to_its_word()
     {
-        Assert.Equal([(ErrorIds.TypeMismatch, 11), (ErrorIds.TypeMismatch, 12)], Errors(Atomics("raw {\n    print(AtomicInt.FromPtr(&w).Load(Ordering.SeqCst))\n    print(*AtomicPtr<int>.FromPtr(&slot).Load(Ordering.SeqCst))\n}"), "raw"));
-        Assert.Equal([(ErrorIds.TypeMismatch, 16)], Errors(Atomics("void Take(AtomicPtr<int> x) {\n    raw {\n        print(*x.Load(Ordering.SeqCst))\n    }\n}\n\nTake(p)"), "raw")); // AtomicPtr<long> is no AtomicPtr<int>
-        Clean(Atomics("raw {\n    print(AtomicLong.FromPtr(&w).Load(Ordering.SeqCst))\n    print(*AtomicPtr<long>.FromPtr(&slot).Load(Ordering.SeqCst))\n}"), "raw");
+        Assert.Equal([(ErrorIds.TypeMismatch, 11), (ErrorIds.TypeMismatch, 12)], Errors(Atomics("raw {\n    print(AtomicInt.FromPtr(&w).Load(MemoryOrder.SeqCst))\n    print(*AtomicPtr<int>.FromPtr(&slot).Load(MemoryOrder.SeqCst))\n}"), "raw"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 16)], Errors(Atomics("void Take(AtomicPtr<int> x) {\n    raw {\n        print(*x.Load(MemoryOrder.SeqCst))\n    }\n}\n\nTake(p)"), "raw")); // AtomicPtr<long> is no AtomicPtr<int>
+        Clean(Atomics("raw {\n    print(AtomicLong.FromPtr(&w).Load(MemoryOrder.SeqCst))\n    print(*AtomicPtr<long>.FromPtr(&slot).Load(MemoryOrder.SeqCst))\n}"), "raw");
     }
 
     [Theory]
-    [InlineData("enum Ordering { Less, Equal, Greater }\nprint(1)")]
+    [InlineData("enum MemoryOrder { Weak, Strong }\nprint(1)")]
     [InlineData("data NotExchanged(int X)\nprint(1)")]
     [InlineData("void Fence() {\n    print(1)\n}\n\nprint(2)")]
     [InlineData("data AtomicPtr(int X)\nprint(1)")]
@@ -4106,12 +4106,20 @@ public sealed class CheckerTests
     public void A_files_own_declaration_of_a_name_of_the_atomic_types_is_redeclared(string program) =>
         Assert.Equal([(ErrorIds.Redeclared, 1)], Errors(program));
 
+    [Fact]
+    public void A_program_may_declare_its_own_ordering_beside_the_atomic_types_memory_order()
+    {
+        // section 6, 2026-11-17, comment 6948910734, Q7: the order's type is `MemoryOrder`, which leaves `Ordering` free for a
+        // comparison's result, as Rust's `std::cmp::Ordering`
+        Clean("enum Ordering { Less, Equal, Greater }\nmut long w = 1\na = AtomicLong.FromPtr(&w)\nraw {\n    print(a.Load(MemoryOrder.SeqCst))\n}\n\nprint(Ordering.Less == Ordering.Equal)", "raw");
+    }
+
     [Theory]
     [InlineData("void Take(AtomicPtr x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.CannotInfer, 1)]
     [InlineData("void Take(AtomicLong<int> x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.Syntax, 1)]
     [InlineData("void Take(AtomicPtr<long, int> x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.Syntax, 1)]
     [InlineData("void Take(AtomicPtr<string> x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.CountedPointee, 1)]
-    [InlineData("mut long w = 1\nmut long* s = &w\nraw {\n    print(*AtomicPtr.FromPtr(&s).Load(Ordering.SeqCst))\n}", ErrorIds.CannotInfer, 4)]
+    [InlineData("mut long w = 1\nmut long* s = &w\nraw {\n    print(*AtomicPtr.FromPtr(&s).Load(MemoryOrder.SeqCst))\n}", ErrorIds.CannotInfer, 4)]
     [InlineData("print(AtomicLong.FromPtr)", ErrorIds.UnknownName, 1)]
     [InlineData("print(AtomicLong)", ErrorIds.Syntax, 1)]
     [InlineData("print(Fence)", ErrorIds.Syntax, 1)]

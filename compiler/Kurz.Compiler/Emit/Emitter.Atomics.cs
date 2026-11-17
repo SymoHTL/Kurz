@@ -10,14 +10,14 @@ namespace Kurz.Compiler.Emit;
 /// <c>Store</c> are LLVM's <c>load atomic</c> and <c>store atomic</c>, <c>Swap</c> and the <c>Fetch</c> members its
 /// <c>atomicrmw</c>, <c>CompareExchange</c> and <c>CompareExchangeWeak</c> its <c>cmpxchg</c> and <c>cmpxchg weak</c>, and
 /// <c>Fence</c> its <c>fence</c>, each aligned to its word's size, a <c>bool</c>'s word a byte that holds 0 or 1, as Rust's
-/// <c>AtomicBool</c> holds a <c>u8</c>. An order known when the program is built, a value of <c>Ordering</c> written at the call, is
+/// <c>AtomicBool</c> holds a <c>u8</c>. An order known when the program is built, a value of <c>MemoryOrder</c> written at the call, is
 /// the instruction's own; any other is read when the call runs, by a choice among the instruction's forms for each order, as Rust's
 /// <c>match</c> on the order chooses among its intrinsics, and an order Rust refuses there ends as Rust's panic does, with the
 /// exception <c>invalid-ordering-at-run-time</c> at the call's line.
 /// </summary>
 public sealed partial class Emitter
 {
-    /// <summary>LLVM's names of the values of <c>Ordering</c>, by their places: <c>Relaxed</c> is LLVM's <c>monotonic</c>.</summary>
+    /// <summary>LLVM's names of the values of <c>MemoryOrder</c>, by their places: <c>Relaxed</c> is LLVM's <c>monotonic</c>.</summary>
     private static readonly string[] AtomicOrderings = ["monotonic", "release", "acquire", "acq_rel", "seq_cst"];
 
     /// <summary>R19: <c>AtomicLong.FromPtr(p)</c>, the pointer itself, which the view holds.</summary>
@@ -138,7 +138,7 @@ public sealed partial class Emitter
 
     /// <summary>
     /// The operation for its orders: each known one taken as it is, each other read from its value by a <c>switch</c> over the five
-    /// values of <c>Ordering</c>, so that the operation is emitted once for each choice; a choice Rust refuses for the operation
+    /// values of <c>MemoryOrder</c>, so that the operation is emitted once for each choice; a choice Rust refuses for the operation
     /// (<see cref="AtomicOrders"/>) raises <c>invalid-ordering-at-run-time</c> at <paramref name="line"/>. The result, of the IR type
     /// <paramref name="result"/>, null where the operation gives none.
     /// </summary>
@@ -199,11 +199,11 @@ public sealed partial class Emitter
             }
 
             fn.Block(none);
-            fn.Unreachable(); // a value of `Ordering` is one of its five, stored as its place (D18)
+            fn.Unreachable(); // a value of `MemoryOrder` is one of its five, stored as its place (D18)
         }
     }
 
-    /// <summary>The names of the values of <c>Ordering</c>, by their places, as the built-in declaration writes them (R19).</summary>
+    /// <summary>The names of the values of <c>MemoryOrder</c>, by their places, as the built-in declaration writes them (R19).</summary>
     private static readonly string[] OrderNames = ["Relaxed", "Release", "Acquire", "AcqRel", "SeqCst"];
 
     private static string OrderName(int index) => OrderNames[index];

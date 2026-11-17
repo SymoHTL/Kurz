@@ -8,11 +8,11 @@
 mut long word = 8
 cell = AtomicLong.FromPtr(&word)
 raw {
-    match cell.CompareExchange(8, 20, Ordering.AcqRel, Ordering.Acquire) {
+    match cell.CompareExchange(8, 20, MemoryOrder.AcqRel, MemoryOrder.Acquire) {
         long found => print("stored over {found}")
         NotExchanged<long> missed => print("found {missed.Value}")
     }
-    match cell.CompareExchangeWeak(8, 30, Ordering.SeqCst, Ordering.Relaxed) {
+    match cell.CompareExchangeWeak(8, 30, MemoryOrder.SeqCst, MemoryOrder.Relaxed) {
         long found => print("stored over {found}")
         NotExchanged<long> missed => print("found {missed.Value}")
     }

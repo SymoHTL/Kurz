@@ -5,5 +5,5 @@
 mut bool flag = false
 done = AtomicBool.FromPtr(&flag)
 raw {
-    print(done.FetchAdd(true, Ordering.SeqCst))
+    print(done.FetchAdd(true, MemoryOrder.SeqCst))
 }

@@ -5,6 +5,6 @@
 mut long word = 5
 counter = AtomicLong.FromPtr(&word)
 raw {
-    print(counter.Load(Ordering.SeqCst))
-    print(counter.Load(Ordering.Release))
+    print(counter.Load(MemoryOrder.SeqCst))
+    print(counter.Load(MemoryOrder.Release))
 }

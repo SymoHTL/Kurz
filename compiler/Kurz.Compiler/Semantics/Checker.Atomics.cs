@@ -6,9 +6,9 @@ namespace Kurz.Compiler.Semantics;
 /// R19: the atomic types behind <c>raw</c>, Rust's <c>core::sync::atomic</c> in Kurz's names (design record, section 6, the owner,
 /// 2026-11-17, #519, comment 6946657505, answer 1, "Rust's set"): <c>AtomicBool</c>, <c>AtomicInt</c>, <c>AtomicLong</c> and
 /// <c>AtomicPtr&lt;T&gt;</c>, each a view of a word through a pointer that <c>FromPtr</c> makes, as Rust's <c>from_ptr</c> does, with
-/// Rust's members, each order an <c>Ordering</c>, and <c>Fence</c>. A member and <c>Fence</c> stand in a <c>raw</c> block, as a read
+/// Rust's members, each order an <c>MemoryOrder</c>, and <c>Fence</c>. A member and <c>Fence</c> stand in a <c>raw</c> block, as a read
 /// through a pointer does (R10); <c>FromPtr</c> reads nothing, as <c>Ptr&lt;T&gt;(x)</c> (R14). An order written as a value of
-/// <c>Ordering</c> at the call that Rust's lint <c>invalid_atomic_ordering</c> refuses is <c>invalid-ordering</c>; any other order is
+/// <c>MemoryOrder</c> at the call that Rust's lint <c>invalid_atomic_ordering</c> refuses is <c>invalid-ordering</c>; any other order is
 /// read when the call runs (the emitter's).
 /// </summary>
 public sealed partial class Checker
@@ -123,11 +123,11 @@ public sealed partial class Checker
         return typed;
     }
 
-    /// <summary>The enum <c>Ordering</c> every file sees (R19).</summary>
-    private EnumType OrderingType => new(enums["Ordering"]);
+    /// <summary>The enum <c>MemoryOrder</c> every file sees (R19).</summary>
+    private EnumType OrderingType => new(enums["MemoryOrder"]);
 
     /// <summary>
-    /// R19: a member called on a view, with Rust's parameters, its orders an <c>Ordering</c>: <c>Load</c>, <c>Store</c>, <c>Swap</c>,
+    /// R19: a member called on a view, with Rust's parameters, its orders an <c>MemoryOrder</c>: <c>Load</c>, <c>Store</c>, <c>Swap</c>,
     /// <c>CompareExchange</c> and <c>CompareExchangeWeak</c>, which give the value found, or the case <c>NotExchanged</c> with it where
     /// nothing was stored (O1, as Rust's <c>Result&lt;T, T&gt;</c>), on every atomic type, <c>FetchAdd</c> and <c>FetchSub</c> on
     /// <c>AtomicInt</c> and <c>AtomicLong</c>, and <c>FetchAnd</c>, <c>FetchOr</c> and <c>FetchXor</c> on all four, an
@@ -200,7 +200,7 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// R19: an order written as a value of <c>Ordering</c> at the call, <c>Ordering.Release</c>, that Rust's lint
+    /// R19: an order written as a value of <c>MemoryOrder</c> at the call, <c>MemoryOrder.Release</c>, that Rust's lint
     /// <c>invalid_atomic_ordering</c> refuses there is <c>invalid-ordering</c> at its argument: <c>Release</c> or <c>AcqRel</c> for a
     /// <c>Load</c>, <c>Acquire</c> or <c>AcqRel</c> for a <c>Store</c>, <c>Release</c> or <c>AcqRel</c> for the failure of a
     /// compare-exchange, and <c>Relaxed</c> for a <c>Fence</c>.
@@ -211,8 +211,8 @@ public sealed partial class Checker
         {
             var slot = picked.Slots[picked.Binding[i]].Name;
             var value = c.Arguments[i].Value;
-            if (Unwrap(value) is not MemberAccess { Target: NameExpression { Name: "Ordering" } } || model.TypeOf(value) is not { Type: EnumType e, Constant: EnumConstant written }
-                || !ReferenceEquals(e.Symbol, enums["Ordering"]))
+            if (Unwrap(value) is not MemberAccess { Target: NameExpression { Name: "MemoryOrder" } } || model.TypeOf(value) is not { Type: EnumType e, Constant: EnumConstant written }
+                || !ReferenceEquals(e.Symbol, enums["MemoryOrder"]))
             {
                 continue;
             }
@@ -220,7 +220,7 @@ public sealed partial class Checker
             var name = e.Symbol.Values[written.Index];
             if (AtomicOrders.Refused(member, slot, name) is { } why)
             {
-                Report(ErrorIds.InvalidOrdering, c.Arguments[i].Line, $"{why}, as Rust's lint `invalid_atomic_ordering` refuses it, and `Ordering.{name}` stands here (R19)");
+                Report(ErrorIds.InvalidOrdering, c.Arguments[i].Line, $"{why}, as Rust's lint `invalid_atomic_ordering` refuses it, and `MemoryOrder.{name}` stands here (R19)");
             }
         }
     }

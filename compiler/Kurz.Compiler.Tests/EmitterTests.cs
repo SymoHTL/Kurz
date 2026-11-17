@@ -1344,11 +1344,11 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // 70009 mark the program's own instructions among the runtime's
         const string text = "mut long w = 5\nmut int i = 1\nmut bool b = false\nmut long* slot = &w\na = AtomicLong.FromPtr(&w)\nn = AtomicInt.FromPtr(&i)\n"
             + "c = AtomicBool.FromPtr(&b)\np = AtomicPtr<long>.FromPtr(&slot)\nraw {\n"
-            + "    a.Store(70001, Ordering.Release)\n    print(a.Swap(70002, Ordering.AcqRel))\n    print(a.FetchAdd(70003, Ordering.Acquire))\n"
-            + "    print(a.FetchSub(70004, Ordering.SeqCst))\n    print(n.FetchAnd(70005, Ordering.Relaxed))\n    print(long(p.FetchOr(70006, Ordering.Relaxed)) - long(&w))\n"
-            + "    print(a.FetchXor(70007, Ordering.Relaxed))\n"
-            + "    match a.CompareExchangeWeak(70008, 70009, Ordering.AcqRel, Ordering.Acquire) {\n        long found => print(found)\n        NotExchanged<long> missed => print(missed.Value)\n    }\n"
-            + "    print(c.Swap(true, Ordering.SeqCst))\n    print(a.Load(Ordering.Relaxed))\n    Fence(Ordering.Acquire)\n}\n";
+            + "    a.Store(70001, MemoryOrder.Release)\n    print(a.Swap(70002, MemoryOrder.AcqRel))\n    print(a.FetchAdd(70003, MemoryOrder.Acquire))\n"
+            + "    print(a.FetchSub(70004, MemoryOrder.SeqCst))\n    print(n.FetchAnd(70005, MemoryOrder.Relaxed))\n    print(long(p.FetchOr(70006, MemoryOrder.Relaxed)) - long(&w))\n"
+            + "    print(a.FetchXor(70007, MemoryOrder.Relaxed))\n"
+            + "    match a.CompareExchangeWeak(70008, 70009, MemoryOrder.AcqRel, MemoryOrder.Acquire) {\n        long found => print(found)\n        NotExchanged<long> missed => print(missed.Value)\n    }\n"
+            + "    print(c.Swap(true, MemoryOrder.SeqCst))\n    print(a.Load(MemoryOrder.Relaxed))\n    Fence(MemoryOrder.Acquire)\n}\n";
         var program = Emit(text, "raw");
         var lines = AtomicLines(program);
         var shown = string.Join("\n", lines);
@@ -1379,10 +1379,10 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void An_atomic_order_held_in_a_value_is_chosen_when_the_call_runs_and_one_rust_refuses_raises_at_the_call()
     {
-        // R19: a `switch` over the five values of `Ordering`, each to the instruction of its order, as Rust's `match` on the order;
+        // R19: a `switch` over the five values of `MemoryOrder`, each to the instruction of its order, as Rust's `match` on the order;
         // `Release` and `AcqRel`, which a load does not take, raise `invalid-ordering-at-run-time` at the call's line
-        const string text = "long Read(AtomicLong a, Ordering order) {\n    mut long v = 0\n    raw {\n        v = a.Load(order)\n    }\n\n    return v\n}\n\n"
-            + "mut long w = 70001\nview = AtomicLong.FromPtr(&w)\nprint(Read(view, Ordering.Relaxed))\nprint(Read(view, Ordering.Acquire))\nprint(Read(view, Ordering.SeqCst))\nprint(Read(view, Ordering.AcqRel))\n";
+        const string text = "long Read(AtomicLong a, MemoryOrder order) {\n    mut long v = 0\n    raw {\n        v = a.Load(order)\n    }\n\n    return v\n}\n\n"
+            + "mut long w = 70001\nview = AtomicLong.FromPtr(&w)\nprint(Read(view, MemoryOrder.Relaxed))\nprint(Read(view, MemoryOrder.Acquire))\nprint(Read(view, MemoryOrder.SeqCst))\nprint(Read(view, MemoryOrder.AcqRel))\n";
         var program = Emit(text, "raw");
         foreach (var order in new[] { "monotonic", "acquire", "seq_cst" })
         {
@@ -1398,8 +1398,8 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // R19: an order no call writes, held as a constant by a copy of a function (T35), is no compile error; the copy that holds
         // one Rust refuses for a load raises `invalid-ordering-at-run-time` at the call's line, as Rust's `match` on the order panics
-        const string text = "long Read<const Ordering O>(AtomicLong a) {\n    mut long v = 0\n    raw {\n        v = a.Load(O)\n    }\n\n    return v\n}\n\n"
-            + "mut long w = 70001\nview = AtomicLong.FromPtr(&w)\nprint(Read<Ordering.Acquire>(view))\nprint(Read<Ordering.Release>(view))\n";
+        const string text = "long Read<const MemoryOrder O>(AtomicLong a) {\n    mut long v = 0\n    raw {\n        v = a.Load(O)\n    }\n\n    return v\n}\n\n"
+            + "mut long w = 70001\nview = AtomicLong.FromPtr(&w)\nprint(Read<MemoryOrder.Acquire>(view))\nprint(Read<MemoryOrder.Release>(view))\n";
         Ran(BuildAndRun(text, "atomic-order-copy", "raw"), 1, ["70001"], "error: invalid-ordering-at-run-time at program.kz:4\n");
     }
 }

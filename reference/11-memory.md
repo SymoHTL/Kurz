@@ -1959,14 +1959,17 @@ print(c.Parts[0].Area())
 
 The words that threads share are reached through Rust's atomic types of `core::sync::atomic` in
 Kurz's names, `AtomicBool`, `AtomicInt`, `AtomicLong` and `AtomicPtr<T>`, a word of `bool`, `int`,
-`long` or `T*`, each operation with an order of the `enum` `Ordering`, `Relaxed`, `Release`,
+`long` or `T*`, each operation with an order of the `enum` `MemoryOrder`, `Relaxed`, `Release`,
 `Acquire`, `AcqRel` and `SeqCst`, as Rust's `Ordering`, beside `Fence(order)`, as Rust's `fence`, and
 a value of an atomic type is a view of a word through a pointer, as Rust's `AtomicUsize::from_ptr`
-gives one (§6, the owner, 2026-11-17, #519, comment 6946657505, Q1, "Rust's set (Recommended)"). A
-view is made by `FromPtr` alone, `AtomicLong.FromPtr(p)` of a `long*`, `AtomicPtr<T>.FromPtr(p)` of a
+gives one (§6, the owner, 2026-11-17, #519, comment 6946657505, Q1, "Rust's set (Recommended)"), the
+type of the orders named as C++'s `std::memory_order` (§6, the owner, 2026-11-17, #519, comment
+6948910734, Q7, "MemoryOrder (Recommended)"). A view is made by `FromPtr` alone, with no `New`, as
+C++'s `std::atomic_ref` is: `AtomicLong.FromPtr(p)` of a `long*`, `AtomicPtr<T>.FromPtr(p)` of a
 `T**`, `T` a type a pointer points to (R10), and the word it reads is a plain value of the program's
-memory, aligned to its size, as Rust's `from_ptr` requires; `FromPtr` reads nothing, so it needs no
-`raw` block, as `Ptr<T>(x)` needs none (R14) *(assumed in §6)*.
+memory (§6, the owner, 2026-11-17, #519, comment 6948910734, Q6, "View only (Recommended)"),
+aligned to its size, as Rust's `from_ptr` requires; `FromPtr` reads nothing, so it needs no `raw`
+block, as `Ptr<T>(x)` needs none (R14) *(assumed in §6)*.
 
 The members are Rust's where Rust gives them to the type, with Rust's parameters (§6, Q1): `Load(order)`,
 `Store(val, order)`, `Swap(val, order)`, `CompareExchange(current, new, success, failure)` and
@@ -1981,16 +1984,16 @@ word holds `current`, as Rust's may fail spuriously *(assumed in §6)*. A member
 `raw` block, and anywhere else are `raw-required`, as a read through a pointer is (R10)
 *(assumed in §6)*.
 
-An order written at the call as a value of `Ordering`, `Ordering.Release`, that Rust's lint
+An order written at the call as a value of `MemoryOrder`, `MemoryOrder.Release`, that Rust's lint
 `invalid_atomic_ordering` refuses is the compile error `invalid-ordering` at its argument: `Release`
 or `AcqRel` for a `Load`, `Acquire` or `AcqRel` for a `Store`, `Release` or `AcqRel` for the failure
 order of a compare-exchange, and `Relaxed` for `Fence`; any other order is read when the call runs,
 and one that Rust refuses there ends the program with `invalid-ordering-at-run-time` at the call's
 line, as Rust's `load` panics on it *(assumed in §6)*. A file's own declaration of a type or a
-function named `AtomicBool`, `AtomicInt`, `AtomicLong`, `AtomicPtr`, `Fence`, `Ordering` or
-`NotExchanged` is `redeclared`, as R18's names are; a view has no text (`no-text`), and `==` does not
-take it (`type-mismatch`), as Rust's atomic types implement neither `Display` nor `PartialEq`
-*(assumed in §6)*.
+function named `AtomicBool`, `AtomicInt`, `AtomicLong`, `AtomicPtr`, `Fence`, `MemoryOrder` or
+`NotExchanged` is `redeclared`, as R18's names are, and `Ordering` stays free for a program's own
+type (§6, Q7); a view has no text (`no-text`), and `==` does not take it (`type-mismatch`), as Rust's
+atomic types implement neither `Display` nor `PartialEq` *(assumed in §6)*.
 
 Case: [memory/atomic-long.kz](../corpus/memory/atomic-long.kz)
 ```kurz
@@ -1998,15 +2001,15 @@ Case: [memory/atomic-long.kz](../corpus/memory/atomic-long.kz)
 mut long word = 5
 counter = AtomicLong.FromPtr(&word)
 raw {
-    print(counter.Load(Ordering.SeqCst))
-    counter.Store(7, Ordering.Release)
-    print(counter.Swap(9, Ordering.AcqRel))
-    print(counter.FetchAdd(3, Ordering.Relaxed))
-    print(counter.FetchSub(2, Ordering.Acquire))
-    print(counter.FetchAnd(6, Ordering.SeqCst))
-    print(counter.FetchOr(1, Ordering.SeqCst))
-    print(counter.FetchXor(15, Ordering.SeqCst))
-    Fence(Ordering.SeqCst)
+    print(counter.Load(MemoryOrder.SeqCst))
+    counter.Store(7, MemoryOrder.Release)
+    print(counter.Swap(9, MemoryOrder.AcqRel))
+    print(counter.FetchAdd(3, MemoryOrder.Relaxed))
+    print(counter.FetchSub(2, MemoryOrder.Acquire))
+    print(counter.FetchAnd(6, MemoryOrder.SeqCst))
+    print(counter.FetchOr(1, MemoryOrder.SeqCst))
+    print(counter.FetchXor(15, MemoryOrder.SeqCst))
+    Fence(MemoryOrder.SeqCst)
 }
 print(word)
 ```
@@ -2021,13 +2024,13 @@ done = AtomicBool.FromPtr(&flag)
 total = AtomicInt.FromPtr(&count)
 head = AtomicPtr<long>.FromPtr(&slot)
 raw {
-    print(done.Swap(true, Ordering.AcqRel))
-    print(done.Load(Ordering.Acquire))
-    print(total.FetchAdd(1, Ordering.Relaxed))
-    print(total.Load(Ordering.Relaxed))
-    print(long(head.FetchOr(1, Ordering.SeqCst)) - long(&cell))
-    print(long(head.FetchAnd(-2, Ordering.SeqCst)) - long(&cell))
-    print(*head.Load(Ordering.SeqCst))
+    print(done.Swap(true, MemoryOrder.AcqRel))
+    print(done.Load(MemoryOrder.Acquire))
+    print(total.FetchAdd(1, MemoryOrder.Relaxed))
+    print(total.Load(MemoryOrder.Relaxed))
+    print(long(head.FetchOr(1, MemoryOrder.SeqCst)) - long(&cell))
+    print(long(head.FetchAnd(-2, MemoryOrder.SeqCst)) - long(&cell))
+    print(*head.Load(MemoryOrder.SeqCst))
 }
 ```
 
@@ -2036,11 +2039,11 @@ Case: [memory/atomic-compare-exchange.kz](../corpus/memory/atomic-compare-exchan
 mut long word = 8
 cell = AtomicLong.FromPtr(&word)
 raw {
-    match cell.CompareExchange(8, 20, Ordering.AcqRel, Ordering.Acquire) {
+    match cell.CompareExchange(8, 20, MemoryOrder.AcqRel, MemoryOrder.Acquire) {
         long found => print("stored over {found}")
         NotExchanged<long> missed => print("found {missed.Value}")
     }
-    match cell.CompareExchangeWeak(8, 30, Ordering.SeqCst, Ordering.Relaxed) {
+    match cell.CompareExchangeWeak(8, 30, MemoryOrder.SeqCst, MemoryOrder.Relaxed) {
         long found => print("stored over {found}")
         NotExchanged<long> missed => print("found {missed.Value}")
     }
@@ -2051,7 +2054,7 @@ print(word)
 Case: [memory/atomic-order-variable.kz](../corpus/memory/atomic-order-variable.kz)
 ```kurz
 // an order held in a variable is read when the call runs
-void Bump(AtomicLong cell, Ordering order) {
+void Bump(AtomicLong cell, MemoryOrder order) {
     raw {
         print(cell.FetchAdd(1, order))
     }
@@ -2059,17 +2062,17 @@ void Bump(AtomicLong cell, Ordering order) {
 
 mut long word = 3
 counter = AtomicLong.FromPtr(&word)
-Bump(counter, Ordering.Relaxed)
-Bump(counter, Ordering.SeqCst)
+Bump(counter, MemoryOrder.Relaxed)
+Bump(counter, MemoryOrder.SeqCst)
 ```
 
 Case: [memory/atomic-order-at-run-time.kz](../corpus/memory/atomic-order-at-run-time.kz)
 ```kurz
 mut long word = 5
 counter = AtomicLong.FromPtr(&word)
-Ordering order = Ordering.Release
+MemoryOrder order = MemoryOrder.Release
 raw {
-    print(counter.Load(Ordering.Relaxed))
+    print(counter.Load(MemoryOrder.Relaxed))
     print(counter.Load(order))
 }
 ```
@@ -2079,8 +2082,8 @@ Case: [memory/atomic-invalid-ordering.kz](../corpus/memory/atomic-invalid-orderi
 mut long word = 5
 counter = AtomicLong.FromPtr(&word)
 raw {
-    print(counter.Load(Ordering.SeqCst))
-    print(counter.Load(Ordering.Release))
+    print(counter.Load(MemoryOrder.SeqCst))
+    print(counter.Load(MemoryOrder.Release))
 }
 ```
 
@@ -2088,7 +2091,7 @@ Case: [memory/atomic-outside-raw.kz](../corpus/memory/atomic-outside-raw.kz)
 ```kurz
 mut long word = 5
 counter = AtomicLong.FromPtr(&word)
-print(counter.Load(Ordering.SeqCst))
+print(counter.Load(MemoryOrder.SeqCst))
 ```
 
 Case: [memory/atomic-no-member.kz](../corpus/memory/atomic-no-member.kz)
@@ -2096,13 +2099,13 @@ Case: [memory/atomic-no-member.kz](../corpus/memory/atomic-no-member.kz)
 mut bool flag = false
 done = AtomicBool.FromPtr(&flag)
 raw {
-    print(done.FetchAdd(true, Ordering.SeqCst))
+    print(done.FetchAdd(true, MemoryOrder.SeqCst))
 }
 ```
 
 Case: [memory/atomic-redeclared.kz](../corpus/memory/atomic-redeclared.kz)
 ```kurz
-enum Ordering { Less, Equal, Greater }
+enum MemoryOrder { Weak, Strong }
 
 print(1)
 ```

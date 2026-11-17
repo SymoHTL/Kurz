@@ -1953,7 +1953,7 @@ public sealed partial class Checker
         : $"the name `{name}` is declared already (V9)";
 
     /// <summary>The rule that declares each type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
-    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6", ["ParseKind"] = "X7", ["ParseError"] = "X7", ["HexKind"] = "H7", ["HexError"] = "H7", ["TypeKind"] = "T33", ["Stdio"] = "S17", ["ExitStatus"] = "S18", ["ProcessOutput"] = "S18", ["ExitError"] = "S18", ["Ordering"] = "R19", ["NotExchanged"] = "R19" };
+    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6", ["ParseKind"] = "X7", ["ParseError"] = "X7", ["HexKind"] = "H7", ["HexError"] = "H7", ["TypeKind"] = "T33", ["Stdio"] = "S17", ["ExitStatus"] = "S18", ["ProcessOutput"] = "S18", ["ExitError"] = "S18", ["MemoryOrder"] = "R19", ["NotExchanged"] = "R19" };
 
     /// <summary>
     /// The types every file sees without declaring them: <c>InvalidUtf8</c>, the case of <c>string.FromUtf8</c> that is not a string
@@ -1969,9 +1969,9 @@ public sealed partial class Checker
     /// type's <c>Parse</c> that is no number (X7), and <c>HexError</c> with its <c>HexKind</c>, the case of <c>Hex.Decode</c> that gives no
     /// bytes (H7; section 12, the owner, 2026-10-31, "Without input"), and <c>TypeKind</c>, the kind of a type that generic code reads
     /// (T33; section 4, assumed with the owner's answer "Kinds + parts" of 2026-11-01), a value for each built-in type named as the
-    /// type and one for each other kind, and <c>Ordering</c>, Rust's five orders of an atomic operation, with <c>NotExchanged</c>, the
+    /// type and one for each other kind, and <c>MemoryOrder</c>, Rust's five orders of an atomic operation, named as C++'s <c>std::memory_order</c>, with <c>NotExchanged</c>, the
     /// case of a compare-exchange that stored nothing, which carries the value the word held (R19; section 6, the owner, 2026-11-17,
-    /// #519, comment 6946657505, answer 1, "Rust's set", the case and its name assumed there).
+    /// #519, comment 6946657505, answer 1, "Rust's set", the case and its name assumed there; the order's name, comment 6948910734, Q7).
     /// </summary>
     private static readonly ProgramSyntax BuiltInTypes = BuiltIn(
         SourceText.FromString(
@@ -2002,7 +2002,7 @@ public sealed partial class Checker
                 SByte, Byte, Short, UShort, Int, UInt, Long, ULong, Float, Double, Decimal, Bool, String, Char, Duration, Timestamp,
                 LongDuration, LongTimestamp, Instant, List, Map, Nullable, Data, Enum, Union, Class, Interface, Function, Pointer
             }
-            enum Ordering { Relaxed, Release, Acquire, AcqRel, SeqCst }
+            enum MemoryOrder { Relaxed, Release, Acquire, AcqRel, SeqCst }
             data NotExchanged<T>(T Value)
             """));
 

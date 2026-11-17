@@ -4,4 +4,4 @@
 
 mut long word = 5
 counter = AtomicLong.FromPtr(&word)
-print(counter.Load(Ordering.SeqCst))
+print(counter.Load(MemoryOrder.SeqCst))
