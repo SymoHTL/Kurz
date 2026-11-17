@@ -4,8 +4,9 @@ An actor is an object with private state and an inbox, which handles one message
 of its method through its reference is a message (§6, "Actors"). This chapter holds the actors of
 one machine and what a program writes of them: an actor's declaration, `spawn`, the call that waits
 for its result, `send`, and what crosses into a message, the crash of an actor, its restart by
-the default policy and its log line (U19 to U24), the words of a policy (U25 to U27) and the block
-of a policy (U28 to U34). The scheduler, the stacks, deadlocks but the calls a waiting actor lets in (U17)
+the default policy and its log line (U19 to U24), the words of a policy (U25 to U27), the block of a policy (U28
+to U34) and the threads that run the actors (U35). The scheduler but its threads, the stacks, deadlocks but the
+calls a waiting actor lets in (U17)
 and the wait of the top-level code that nothing can end (U18), the clauses after an actor's name but
 the stack's and the policy's (U1, U27) and the actors of other machines (§6, §7) have no rule here, and `compiler/README.md` says what the compiler builds of the rules here.
 
@@ -2280,9 +2281,11 @@ print(b.Get(2))
 
 ### U18 (decided, §6) A wait of the top-level code that nothing can end
 
-The top-level code's call that waits runs the scheduler in place on the main thread's stack, each
-message on a stack of its own (U1, U17), until its reply is set, and never parks, as tokio's `block_on` runs its runtime on the thread that
-calls it *(assumed in §6)*. A wait of it that finds nothing left to run ends the process with
+The top-level code's call that waits sleeps on the main thread until its reply is set, while the
+worker threads run the actors' messages, each on a stack of its own (U1, U17, U35), as tokio's
+`block_on` waits on the thread that calls it beside its runtime's workers (§6, the owner,
+2026-11-17, #519, comment 6946657505, Q3, "tokio block_on (Recommended)"). A wait of it that finds nothing
+left to run, on any thread *(assumed in §6)*, ends the process with
 `error: deadlock at <file>:<n>`, the line of that call, and the exit code 1, so that two actors that
 call each other from different chains and wait for each other, on one thread, do not hang silently
 (§6, "Deadlocks"; the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level
@@ -3153,3 +3156,24 @@ none at `escalate` (U25) (§6, assumed there, as Erlang's supervisor reports a c
 acts on it).
 
 Case: [actors/block-order.kz](../corpus/actors/block-order.kz)
+
+### U35 (decided, §6, §8) Threads
+
+The actors' messages run on the scheduler's worker threads, as many as the cores the process may use,
+a container's CPU quota counted, where neither the line `threads = 4` of a `deploy` block in
+`project.kz` nor the environment variable `KURZ_THREADS`, read at the start, sets their count, and
+`KURZ_THREADS` wins over the line (§6, §8, the owner, 2026-11-17, #519, comment 6946657505, Q4,
+"Both" and "threads = N line (Recommended)"), the line standing in a `deploy` block *(assumed in
+§6)*. A value of the line that is not a whole number above 0 is the compile error `threads-line`,
+and one of `KURZ_THREADS` ends the start with an error line and the id `threads-variable` *(assumed
+in §6: both ids, and the end of the start)*. The main thread runs the top-level code alone, and
+sleeps while it waits (U18; §6, Q3). A message parked in a wait goes on on the thread that parked it,
+and an actor between messages moves to any thread (§6, the owner, 2026-11-17, #519, comment
+6946657505, Q2, "Stays on its thread (Recommended)"). A message that runs on another thread when the
+top-level code ends runs to its end or its wait, a wait then dropped as a parked message is (U13), and
+the process ends after it; a supervisor that is running acts on its child's crash once its own message
+ends or waits (U22) *(assumed in §6)*.
+
+No case: a case is a single file with no `project.kz` (chapter 0) and gives its program no
+environment, as `log-filter`'s place in chapter 12 says, and the thread that runs a message shows in
+no output.

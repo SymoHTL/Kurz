@@ -1,0 +1,7 @@
+// expect: error redeclared at 5
+// allow: raw
+// rules: R19
+
+enum MemoryOrder { Weak, Strong }
+
+print(1)

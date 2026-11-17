@@ -1,0 +1,9 @@
+// expect: error unknown-name at 8
+// allow: raw
+// rules: R19
+
+mut bool flag = false
+done = AtomicBool.FromPtr(&flag)
+raw {
+    print(done.FetchAdd(true, MemoryOrder.SeqCst))
+}
