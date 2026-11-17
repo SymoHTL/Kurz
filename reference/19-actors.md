@@ -1053,7 +1053,7 @@ points comment 6895076937 takes as following from §6, which the answers left st
 hash of each key of a map whose keys reach a class instance, by the fields its class compares,
 `equal by`'s among them (§6, the owner, 2026-11-16, #519, comment 6923513534), which runs no program
 code, since a class declares no `Equals` or `GetHashCode` (K5). Each actor
-having its own heap, a crossing, a `move` among them, gives the receiver a value that no program
+having its own heap, a crossing gives the receiver a value that no program
 can tell from a copy in its heap, a big one shared by pointer under §6's share of a big value, which
 stays decided and unbuilt (§6, the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share
 big unbuilt"); a `copy` at a call that crosses nothing copies every block on a path to a class
@@ -1087,10 +1087,12 @@ with its fields, the captured variables and the statics form one region outside 
 *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. The top-level code
 is read as a function whose variables are its own, since F16 keeps them from the top-level
 functions, so that they are no statics, and `move` before a value that names no place,
-`f(move Cart(1))`, stands where the word fits the parameter, and ends nothing, the call taking the value it made *(assumed, §6: the
-readings of the top-level code and of a value with no place, which no answer named)*. A call merges the regions of all its arguments, written `mut` or not, and its result's, as
-SE-0414 does, since `F(a, b)` can store `b` in a `mut` field of `a`, and an argument that crosses
-with no word merges nothing (§6, 2026-11-15, Q2) *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. A lambda joins the regions of what it
+`f(move Cart(1))`, stands where the word fits the parameter (§6, comment 6897778812, Q3; comment 6657251688, Q3), and ends nothing, the call taking the value it made *(assumed, §6: the
+readings of the top-level code and of a value with no place, which no answer named)*. A call merges the regions of all its arguments not written `copy` or `move`, written `mut` or not,
+and its result's, as SE-0414 does, since `F(a, b)` can store `b` in a `mut` field of `a`, and an argument that crosses
+with no word merges nothing (§6, 2026-11-15, Q2) *(assumed, §6: the point of comment 6897444564 that the answers left standing,
+and for an argument written `copy` or `move`, whose copy is new and whose `move` ends its region at the call, the checker's
+reading, which no answer named)*. A lambda joins the regions of what it
 captures, so that `f = () => m.N; send a.T(move m); f()` is `used-after-move` at `f()`, and a
 `move` of a captured variable inside a lambda is `move-reachable` *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. A `match` binding joins its
 subject's region, as a field read does, and each arm is a branch *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. `p with { A = q }` is read
@@ -1150,8 +1152,8 @@ owner, 2026-11-15, #519, comment 6895076937) *(assumed, §6: the point of commen
 a fat class reference or a function value, has each counted block it holds counted once more
 *(assumed, §6: the build's reading, which no answer named)*. A `move` into a message or a `spawn`
 copies the value into the receiver's heap, as an argument with no word crosses, a big value shared
-by pointer under §6's share of a big value, which no program tells from a copy, and lets go of the
-original, which frees it, and into a `spawn` whose policy can restart the supervisor keeps a second
+by pointer under §6's share of a big value, which stays decided and unbuilt and which no program
+tells from a copy, and lets go of the original, which frees what was copied, and into a `spawn` whose policy can restart the supervisor keeps a second
 copy (U22) *(assumed, §6: on comment 6902210646, Q5, "Copy all, share big unbuilt", the answer given
 after comment 6895076937, which gave the moved count to "the message's or the parameter's" place and
 which Q5 narrows to a parameter)*.
@@ -2156,7 +2158,7 @@ comment 6891937666, item 4, option (a), "Rust: by argument order", which named `
 `mut-in-message`); on one argument the checker reads `used-after-move` first, then `move-at-call`,
 then `move-reachable`, the call having the one error *(assumed, §6: the checker's reading, which no
 answer named)*. `mut-in-message` stands at the
-first argument the call writes that fills a `mut` parameter, and on one argument the two never meet,
+first argument the call writes that fills a `mut` parameter, and on one argument `mut-in-message` and an error of `move` never meet,
 an argument written with `move` that fills a `mut` parameter being `mut-at-call` (M7), its own error
 *(assumed: as §6 marks it)*. An argument's own error
 stands alone before U14's `cannot-infer` of `spawn`'s type arguments, which is said only where every
@@ -2328,7 +2330,7 @@ print(l.Value())
 ### U19 (decided, §6) A crash kills the actor it happens in
 
 An exception raised in a message, a `throw`, a check of the run-time table (chapter 12) and
-`print-failed` among them, and on Linux a stack overflow in the actor's own stack, is the crash of
+`print-failed` among them, and on Linux and on Windows a stack overflow in the actor's own stack, is the crash of
 the actor whose message raised it: no line of the actor's code runs after it and none of its frames
 is unwound, as BEAM ends a process, and its supervisor, the actor whose code spawned it or the
 top-level code, handles it (U22) (§6, "An exception kills only the actor it happens in"; the crash
@@ -2710,7 +2712,7 @@ passes the limit ends, and the next call of its key starts a fresh one,
 its constructor run again, with no `restart-limit` and no limit across those starts (§6, the owner, 2026-11-17, #561, comment 6945857315,
 Q2, "Key restarts fresh on next call", as Akka's sharding does) *(assumed, §6: below the limit the
 runtime restarts the `per` actor in place as its policy says, its window counted from its fresh start;
-the calls queued in it at that crash raise `actor-gone`, and that crash writes its log line as any
+the calls queued in it at the crash that passes the limit raise `actor-gone`, and that crash writes its log line as any
 crash does)*. The
 duration after `after` is above 0 and at most the cap, the count after `max` an `int` of at least 1
 and the duration after `in` above 0, and a value of another type or past its bound is
