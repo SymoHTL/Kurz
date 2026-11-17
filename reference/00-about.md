@@ -67,7 +67,13 @@ line where it has one and before its `// rules:` line, names the one system it r
 the fix of T10 of the reading of issue 39, comment 6926929175)*.
 A case whose output follows one thread's order carries the line `// threads: 1`, with which the runner
 runs it on one thread (U35; §6, the owner, 2026-11-17, #519, comment 6946657505, Q5, "// threads: 1
-header (Recommended)"), and `compiler/README.md` says whether a runner reads it.
+header (Recommended)"), the line standing after the case's `// system:` line where it has one and
+before its `// rules:` line, and taking `1` alone, any other value a header the lint refuses *(assumed,
+§6: the place, as the `// system:` line's, and the one value, since a count of more threads fixes no
+order)*. The header grammar of `tools/lint_reference.py` and of the compiler's runner does not take the
+line: the lint refuses a header that holds it as a line it does not know, so no case carries it,
+chapter 19's cases whose output follows one thread's order among them, and the compiler's runner runs
+every case on the one thread the compiler's build runs.
 
 The ids of both kinds are listed in chapter 12. The compiler's test suite parses each file and checks the errors of its
 front end, `syntax`, `semicolon`, `reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, or the absence of any diagnostic, against the header,

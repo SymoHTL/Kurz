@@ -2284,10 +2284,11 @@ print(b.Get(2))
 The top-level code's call that waits sleeps on the main thread until its reply is set, while the
 worker threads run the actors' messages, each on a stack of its own (U1, U17, U35), as tokio's
 `block_on` waits on the thread that calls it beside its runtime's workers (§6, the owner,
-2026-11-17, #519, comment 6946657505, Q3, "tokio block_on (Recommended)"). A wait of it that finds nothing
-left to run, on any thread *(assumed in §6)*, ends the process with
+2026-11-17, #519, comment 6946657505, Q3, "tokio block_on (Recommended)"). A wait of it that finds no
+actor left to run on any thread, no timer pending and nothing registered with the poller *(assumed in
+§6)*, ends the process with
 `error: deadlock at <file>:<n>`, the line of that call, and the exit code 1, so that two actors that
-call each other from different chains and wait for each other, on one thread, do not hang silently
+call each other from different chains and wait for each other do not hang silently
 (§6, "Deadlocks"; the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level
 wait"). A call that waits in a function the top-level code called is the top-level code's, at its
 own line. A loop of actors the top-level code never waits on stays until the end of the program,
@@ -3025,6 +3026,32 @@ send w.Divide(0)
 print(w.Half(4))
 ```
 
+Case: [actors/block-reason-atomic-order.kz](../corpus/actors/block-reason-atomic-order.kz)
+```kurz
+actor Reader {
+    pub void Show(MemoryOrder order) {
+        mut long word = 5
+        cell = AtomicLong.FromPtr(&word)
+        raw {
+            print(cell.Load(order))
+        }
+    }
+
+    pub int Half(int n) => n / 2
+}
+
+r = spawn Reader() on crash (c) {
+    match c.Reason {
+        RuntimeError e => print("{e.Kind} at {c.Place.Line}")
+    }
+
+    restart
+}
+send r.Show(MemoryOrder.Release)
+send r.Show(MemoryOrder.Acquire)
+print(r.Half(4))
+```
+
 ### U31 (assumed, §6) What the block reads
 
 A block at a `spawn` in an actor's code reads and assigns the fields of that actor, the supervisor,
@@ -3166,7 +3193,13 @@ a container's CPU quota counted, where neither the line `threads = 4` of a `depl
 "Both" and "threads = N line (Recommended)"), the line standing in a `deploy` block *(assumed in
 §6)*. A value of the line that is not a whole number above 0 is the compile error `threads-line`,
 and one of `KURZ_THREADS` ends the start with an error line and the id `threads-variable` *(assumed
-in §6: both ids, and the end of the start)*. The main thread runs the top-level code alone, and
+in §6: both ids, and the end of the start)*. A whole number is written in digits alone and is no
+greater than 2147483647, the greatest `int`, so that an empty `KURZ_THREADS` is a bad value, as tokio
+reads `TOKIO_WORKER_THREADS` as a whole number and refuses an empty one; a container's CPU quota counts
+its whole cores, rounded down and at least 1, as Rust's `available_parallelism` counts it; and a bad
+`KURZ_THREADS` ends the process before its first statement with the line `error: threads-variable
+(<the value>)` on standard error and the exit code 1, as a bad `KURZ_LOG` ends it with `log-filter`
+(P5) *(assumed in §6)*. The main thread runs the top-level code alone, and
 sleeps while it waits (U18; §6, Q3). A message parked in a wait goes on on the thread that parked it,
 and an actor between messages moves to any thread (§6, the owner, 2026-11-17, #519, comment
 6946657505, Q2, "Stays on its thread (Recommended)"). A message that runs on another thread when the
@@ -3175,5 +3208,7 @@ the process ends after it; a supervisor that is running acts on its child's cras
 ends or waits (U22) *(assumed in §6)*.
 
 No case: a case is a single file with no `project.kz` (chapter 0) and gives its program no
-environment, as `log-filter`'s place in chapter 12 says, and the thread that runs a message shows in
-no output.
+environment, as `log-filter`'s place in chapter 12 says, the thread that runs a message shows in
+no output, and the two outcomes a program can see, a message that runs on another thread when the
+top-level code ends and the moment a running supervisor acts on a crash, depend on the timing between
+threads, which a case's output cannot fix.
