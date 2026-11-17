@@ -576,6 +576,38 @@ print(d.Total())
 
 Case: [actors/constructor-arguments.kz](../corpus/actors/constructor-arguments.kz)
 
+Case: [actors/send-gone.kz](../corpus/actors/send-gone.kz)
+```kurz
+actor Child {
+    pub void Note(int n) {
+        print(n)
+    }
+}
+
+actor Parent {
+    mut Child? kid = null
+
+    pub void Make() {
+        kid = spawn Child()
+    }
+
+    pub Child? Kid() => kid
+
+    pub void Boom() {
+        throw "parent fails"
+    }
+}
+
+p = spawn Parent()
+p.Make()
+kid = p.Kid()
+send p.Boom()
+print(p.Kid() == null)
+if kid != null {
+    send kid.Note(1)
+}
+```
+
 ### U6 (decided, §6) `send`
 
 `send` before a call of an actor's method, `send c.Add(1)`, makes the call a message that nobody
@@ -649,36 +681,6 @@ print(x)
 ```
 
 Case: [actors/send-gone.kz](../corpus/actors/send-gone.kz)
-```kurz
-actor Child {
-    pub void Note(int n) {
-        print(n)
-    }
-}
-
-actor Parent {
-    mut Child? kid = null
-
-    pub void Make() {
-        kid = spawn Child()
-    }
-
-    pub Child? Kid() => kid
-
-    pub void Boom() {
-        throw "parent fails"
-    }
-}
-
-p = spawn Parent()
-p.Make()
-kid = p.Kid()
-send p.Boom()
-print(p.Kid() == null)
-if kid != null {
-    send kid.Note(1)
-}
-```
 
 ### U7 (assumed, §6) A `void` with cases gives a result
 
@@ -2507,6 +2509,8 @@ print(w.Start())
 Case: [actors/crash-restarts-fresh.kz](../corpus/actors/crash-restarts-fresh.kz)
 
 Case: [actors/crash-children-end.kz](../corpus/actors/crash-children-end.kz)
+
+Case: [actors/send-gone.kz](../corpus/actors/send-gone.kz)
 
 ### U23 (decided, §6) The pause before a restart grows
 

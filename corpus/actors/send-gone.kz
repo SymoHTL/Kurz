@@ -1,6 +1,6 @@
 // expect: throws actor-gone at 31
 // | true
-// rules: U6, U21
+// rules: U5, U6, U21, U22
 
 actor Child {
     pub void Note(int n) {
