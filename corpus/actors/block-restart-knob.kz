@@ -1,0 +1,11 @@
+// expect: error syntax at 9
+// rules: U29
+
+actor Worker {
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash (c) {
+    restart after 1s
+}
+print(w.Ping())

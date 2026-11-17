@@ -126,7 +126,8 @@ public static class SyntaxCopy
                 WithExpression w => w with { Target = Expression(w.Target), Assignments = w.Assignments.Select(a => a with { Value = Expression(a.Value) }).ToList() },
                 ElseExpression el => el with { Call = Expression(el.Call), Arms = el.Arms.Select(Arm).ToList() },
                 ParenthesizedExpression p => p with { Inner = Expression(p.Inner) },
-                SpawnExpression s => s with { Call = (CallExpression)Expression(s.Call) },
+                SpawnExpression s => s with { Call = (CallExpression)Expression(s.Call), Policy = s.Policy is { Block: { } block } p ? p with { Block = (LambdaExpression)Expression(block) } : s.Policy },
+                AttemptExpression a => a with { Body = Block(a.Body) },
                 _ => throw new InvalidOperationException($"the expression `{e.GetType().Name}` has no copy"),
             };
         }
@@ -159,6 +160,7 @@ public static class SyntaxCopy
             Assignment a => a with { Target = Expression(a.Target), Value = Expression(a.Value) },
             ExpressionStatement e => e with { Expression = Expression(e.Expression) },
             SendStatement e => e with { Call = (CallExpression)Expression(e.Call) },
+            DecisionStatement d => d with { },
             IfStatement i => i with { Condition = Expression(i.Condition), Then = Block(i.Then), Else = i.Else is null ? null : Statement(i.Else) },
             WhileStatement w => w with { Condition = Expression(w.Condition), Body = Block(w.Body) },
             ForInStatement f => f with { Collection = Expression(f.Collection), Body = Block(f.Body), Second = f.Second is null ? null : f.Second with { } },

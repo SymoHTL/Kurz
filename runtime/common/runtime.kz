@@ -3336,7 +3336,8 @@ pub string ExitErrorText(ExitError e) {
 // stands in front of its bytes, a multiple of 16 so that the state keeps the alignment of the allocator's
 // block, as Rust's `ArcInner` pads its counts to what it holds: the name of the actor's type, two words the
 // emitted code holds (U2), whether the actor runs (0), waits for its restart (1), ends after its current
-// message (2), ended (3) (U19, U22) or has its constructor run at its `spawn` (4) (U3, U25), the block of its
+// message (2), ended (3) (U19, U22), has its constructor run at its `spawn` (4) (U3, U25) or waits for the
+// decision of the block of its policy (5) (U28), the block of its
 // restart, which its supervisor's heap holds (U22), a block that names no function to run where its policy
 // is `escalate`, null where it does not restart (U25), its supervisor, null for the top-level code (U13), the actor's heap
 // (design record, section 3), the actor spawned before it, the size of the actor's stack its clause asked
@@ -3604,8 +3605,8 @@ pub string ActorText(string name, byte* state) {
 // (layer 1; section 6, "One-shot reply slot"), and every other message to the end of the inbox, as
 // tokio's `mpsc` channel pushes a value at the tail of its list, so that an inbox keeps the order in
 // which its messages were sent (U5, U15); the actor goes to the end of the run queue where it does not
-// stand there and does not wait for its restart (U22). A message to an actor that ended is dropped, with
-// what crossed into it, a call's reply set `gone`.
+// stand there and waits neither for its restart (U22) nor for the decision of its block (U34). A message to
+// an actor that ended is dropped, with what crossed into it, a call's reply set `gone`.
 pub void Enqueue(byte* state, byte* message) {
     sys.Entered()
     raw {
@@ -3635,7 +3636,8 @@ pub void Enqueue(byte* state, byte* message) {
             Append(state - 32, message)
         }
 
-        if *Ptr<long>(state - 88) != 1 && !Queued(state) {
+        long life = *Ptr<long>(state - 88)
+        if life != 1 && life != 5 && !Queued(state) {
             Queue(state)
         }
     }
@@ -3731,7 +3733,8 @@ pub void Replied(byte* reply) {
 
 // The reply `reply` of a call set to `kind` with no result: 2 where its callee crashed (U20), 3 where the
 // actor that was to answer ended; the activation that waits on it woken as `Replied` wakes it, where its
-// actor neither waits for its restart nor ended, as C#'s `TaskCompletionSource` is set faulted.
+// actor neither waits for its restart or for the decision of its block nor ended, as C#'s
+// `TaskCompletionSource` is set faulted.
 void Signal(byte* reply, byte kind) {
     raw {
         *reply = kind
@@ -3739,7 +3742,7 @@ void Signal(byte* reply, byte kind) {
         if waiter != null {
             byte* state = *Ptr<byte*>(waiter + 320)
             long life = *Ptr<long>(state - 88)
-            if life != 1 && life != 3 && *Ptr<byte*>(state - 8) == waiter && !Queued(state) {
+            if life != 1 && life != 3 && life != 5 && *Ptr<byte*>(state - 8) == waiter && !Queued(state) {
                 Queue(state)
             }
         }
@@ -3760,15 +3763,19 @@ void Signal(byte* reply, byte kind) {
 // header names the message `message` it waits on, so that its actor's crash unhooks the reply from it (U20).
 // While a restart's pause runs, the top-level code restarts each actor whose pause ended, before the
 // messages of the run queue, and where that queue is empty it sleeps until the first pause ends, and raises
-// no `deadlock` (U23). A reply set `callee crashed` raises `callee-crashed` at the call's line, the crash of
-// the waiting actor in its turn (U20), and one set `gone` raises `actor-gone` there.
+// no `deadlock` (U23). The top-level code runs the block of a child it spawned, which a crash of that child
+// left pending, before each of these (`RootBlock`; U33). A reply set `callee crashed` raises `callee-crashed`
+// at the call's line, the crash of the waiting actor in its turn (U20), and one set `gone` raises
+// `actor-gone` there.
 pub void Wait(byte* reply, byte* message, string file, int line) {
     sys.Entered()
     raw {
         *Ptr<byte*>(reply + 8) = running
         if running == null {
             while *reply == 0 {
-                if paused != null {
+                if rootBlocks != null && *Ptr<byte*>(rootBlocks) != null {
+                    RootBlock()
+                } else if paused != null {
                     long now = PauseClock()
                     long due = *Ptr<long>(*Ptr<byte*>(paused - 80) + 32)
                     if now >= due {
@@ -3817,7 +3824,7 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
 // its top activation's side list, which starts an activation above that one; its top activation, whose
 // reply is set; or, where it is idle, the first message of its inbox; an actor with none of them is
 // passed over, a message sent to it while it waits staying in its inbox, and so is an actor that waits for
-// its restart or ended (U22).
+// its restart or for the decision of its block, or ended (U22, U34).
 void RunOne() {
     raw {
         byte* state = runFirst
@@ -3828,7 +3835,7 @@ void RunOne() {
 
         *Ptr<byte*>(state - 16) = null
         long life = *Ptr<long>(state - 88)
-        if life == 1 || life == 3 {
+        if life == 1 || life == 3 || life == 5 {
             return
         }
 
@@ -3994,10 +4001,13 @@ static mut byte* paused = null
 // The crash of the actor whose message runs, at a raise inside it (U19): its id, its place and, where
 // `hasText` holds, the text that stands below the error line, a thrown value's or the position of a cut,
 // stored in the activation's header, and the thread switched to the scheduler's stack, which never comes
-// back here (`Run` reads the crash). Nothing in the top-level code, whose raise ends the process, nor where
-// the actor's policy, and its supervisors' on the way up, escalate the crash to the top-level code, which
-// ends the process with this error line and the trace of this stack (U25; design record, section 6, the
-// trace from the stack of the actor that raised).
+// back here (`Run` reads the crash), but where the block of a supervisor escalates the crash to the
+// top-level code, which ends the process on this stack with the error line of the crash and the trace of
+// this stack (`Escalate`; U34). Nothing in the top-level code, whose raise ends the process, but the log
+// line of the child whose block runs in its wait, written first, as for a `stop` (U32; assumed: S10 of issue
+// 519, comment 6907441402); nor where the actor's policy, and its supervisors' on the way up, escalate the
+// crash to the top-level code, which ends the process with this error line and the trace of this stack (U25;
+// design record, section 6, the trace from the stack of the actor that raised).
 void CrashActor(string id, string file, int line, bool hasText, string text) {
     long idCount = long(id.Bytes.Count)
     long fileCount = long(file.Bytes.Count)
@@ -4005,6 +4015,10 @@ void CrashActor(string id, string file, int line, bool hasText, string text) {
     raw {
         byte* header = running
         if header == null {
+            if rootRunning != null && *Ptr<long>(rootRunning + 160) == 0 {
+                BlockLogged(rootRunning)
+            }
+
             return
         }
 
@@ -4026,6 +4040,8 @@ void CrashActor(string id, string file, int line, bool hasText, string text) {
         *Ptr<long>(header + 504) = textCount
         sys.Switch(header, threadSide)
     }
+
+    EndsEscalated()
 }
 
 // The crash of the actor whose message overflowed its stack (U19), which the target's handler of the fault
@@ -4050,7 +4066,9 @@ extern "C" void ActorOverflow(byte* line, long count) {
 
 // The crash of the actor whose reference is `state` in its activation `header`, on the scheduler's stack
 // (U19): its id, its place and the text below its error line, as the header holds them (`CrashActor`),
-// taken by the policies above it (`Fell`).
+// taken by the policies above it (`Fell`), with the value a `throw` named (`Thrown`) and, but for a stack
+// overflow, whose switch left from the stack of the fault's handler, the stack that raised, which a block
+// keeps for the trace of a crash it escalates to the top-level code (U34).
 void Crashed(byte* state, byte* header) {
     mut bool hasText = false
     mut byte* id = null
@@ -4069,6 +4087,14 @@ void Crashed(byte* state, byte* header) {
         line = *Ptr<long>(header + 488)
         text = *Ptr<byte*>(header + 496)
         count = *Ptr<long>(header + 504)
+        if !hasText {
+            thrownNumber = 0
+        }
+
+        raising = null
+        if fileCount > 0 {
+            raising = header
+        }
     }
 
     Fell(state, header, hasText, id, idCount, file, fileCount, line, text, count)
@@ -4085,7 +4111,23 @@ void Crashed(byte* state, byte* header) {
 // writing none, and restarts after its pause (U22, U23), or ends where its policy is `stop`, where it was to
 // end after its current message or where its supervisor crashed (U25); where its crash passes the limit of
 // its `max N in`, it ends, and its supervisor crashes with `restart-limit` at the line of its `spawn` (U26).
+// Where the actor that takes the crash runs and its policy is a block, the crash, the thrown value among it,
+// is copied into that heap, the actor waits for the block's decision, its stack that raised kept, and the
+// block runs as a message of its supervisor, or in the wait of the top-level code (`Pending`; U28, U33).
 void Fell(byte* state, byte* header, bool hasText, byte* id, long idCount, byte* file, long fileCount, long line, byte* from, long count) {
+    mut long number = 0
+    mut byte* slot = null
+    mut byte* copy = null
+    mut byte* kept = null
+    raw {
+        number = thrownNumber
+        slot = thrownSlot
+        copy = thrownCopy
+        kept = raising
+        thrownNumber = 0
+        raising = null
+    }
+
     byte* taker = Taker(state)
     if taker == null {
         Ends(hasText, id, idCount, file, fileCount, line, from, count)
@@ -4099,6 +4141,22 @@ void Fell(byte* state, byte* header, bool hasText, byte* id, long idCount, byte*
             above = *Ptr<byte*>(parent - 64)
         }
 
+        byte* policy = *Ptr<byte*>(taker - 80)
+        if life == 0 && policy != null && *Ptr<byte*>(policy + 56) != null {
+            byte* message = Pending(taker, above, kept, header, hasText, id, idCount, file, fileCount, line, from, count, number, slot, copy)
+            Fall(state, header, kept)
+            mut byte* up = state
+            while up != taker {
+                up = *Ptr<byte*>(up - 72)
+                Fall(up, *Ptr<byte*>(up - 8), null)
+            }
+
+            *Ptr<long>(taker - 88) = 5
+            Post(parent, message)
+            return
+        }
+
+        byte* what = Copied(id, idCount, above)
         mut byte* text = null
         if count > 0 {
             text = AllocateIn(above, count)
@@ -4109,15 +4167,19 @@ void Fell(byte* state, byte* header, bool hasText, byte* id, long idCount, byte*
             }
         }
 
-        Fall(state, header)
+        Fall(state, header, null)
         mut byte* at = state
         while at != taker {
             byte* up = *Ptr<byte*>(at - 72)
-            Fall(up, *Ptr<byte*>(up - 8))
+            Fall(up, *Ptr<byte*>(up - 8), null)
             at = up
         }
 
-        Logged(taker, id, idCount, file, fileCount, line, hasText, text, count)
+        Logged(taker, what, idCount, file, fileCount, line, hasText, text, count)
+        if what != null {
+            std.Free(what, idCount)
+        }
+
         if text != null {
             std.Free(text, count)
         }
@@ -4200,8 +4262,12 @@ void Ends(bool hasText, byte* id, long idCount, byte* file, long fileCount, long
 // building are freed (`MessageHeapNew`). The calls of the top activation's side list go to the front of
 // the inbox, which is kept, the crashing message dropped (U21), and the actor's children end after their
 // current message (U13). The inbox's messages are copied into a new heap, each by the function its call
-// site's table names, and the actor's heap is freed whole but for its first block (`Emptied`).
-void Fall(byte* state, byte* header) {
+// site's table names, and the actor's heap is freed whole but for its first block (`Emptied`). The stack of
+// the activation `kept`, the one that raised, stays out of the pool while a block decides (U34). A block that
+// runs in an activation of the actor, whose throw is the actor's crash, writes the log line of its child as
+// a `stop` does (U32; assumed: S10 of comment 6907441402), and a block that waits in the inbox is dropped,
+// with no line, its child ended with the actor's other children (U34; assumed: S11 of that comment).
+void Fall(byte* state, byte* header, byte* kept) {
     raw {
         *Ptr<long>(state - 88) = 1
         mut byte* sideFirst = null
@@ -4226,13 +4292,25 @@ void Fall(byte* state, byte* header) {
                 *Ptr<byte*>(*Ptr<byte*>(at + 432) + 16) = null
             }
 
-            byte* reply = *Ptr<byte*>(*Ptr<byte*>(at + 328) + 16)
+            byte* taken = *Ptr<byte*>(at + 328)
+            byte* reply = *Ptr<byte*>(taken + 16)
             if reply != null {
                 Signal(reply, 2)
             }
 
+            if *Ptr<byte*>(taken + 8) == blockTable {
+                if *Ptr<long>(taken + 160) == 0 {
+                    BlockLogged(taken)
+                }
+
+                BlockLeft(taken)
+            }
+
             byte* below = *Ptr<byte*>(at + 368)
-            Give(at)
+            if at != kept {
+                Give(at)
+            }
+
             at = below
         }
 
@@ -4267,6 +4345,12 @@ void Fall(byte* state, byte* header) {
         *Ptr<byte*>(state - 24) = null
         while m != null {
             byte* next = *Ptr<byte*>(m)
+            if *Ptr<byte*>(m + 8) == blockTable {
+                BlockLeft(m)
+                m = next
+                continue
+            }
+
             extern "C" (byte*, byte*) => byte* copy = *Ptr<extern "C" (byte*, byte*) => byte*>(*Ptr<byte*>(m + 8) + 8)
             byte* moved = copy(m, heap)
             byte* reply = *Ptr<byte*>(moved + 16)
@@ -4366,8 +4450,9 @@ void Emptied(byte* state) {
 }
 
 // The end of the actor whose reference is `state`, which has no activation (U13): it waits for no restart,
-// each message of its inbox is dropped, a call's reply set `gone`, its children end, and its heap is freed
-// whole but for its first block, which names an actor that ended for the calls that still reach it.
+// each message of its inbox is dropped, a call's reply set `gone`, and a block that waits there with its
+// child's stack (U34), its children end, and its heap is freed whole but for its first block, which names an
+// actor that ended for the calls that still reach it.
 void EndActor(byte* state) {
     raw {
         if *Ptr<long>(state - 88) == 1 {
@@ -4381,6 +4466,10 @@ void EndActor(byte* state) {
             byte* reply = *Ptr<byte*>(m + 16)
             if reply != null {
                 Signal(reply, 3)
+            }
+
+            if *Ptr<byte*>(m + 8) == blockTable {
+                BlockLeft(m)
             }
 
             m = *Ptr<byte*>(m)
@@ -4557,8 +4646,354 @@ void Logged(byte* state, byte* id, long idCount, byte* file, long fileCount, lon
     LogLine(4, "Kurz.Actor", "{name}#{number} crashed: {what}", fields, now)
 }
 
-// The `count` bytes at `bytes` as a string of its own.
-string TextAt(byte* bytes, long count) {
+// ---- the block of `on crash` (chapter 19, U28 to U34) ---------------------------------------------------
+
+// A block that decides, `on crash (c) { ... }`, runs as a message of the supervisor, after its current
+// message and before its queued ones, and at a `spawn` of the top-level code in the top-level code's wait
+// (design record, section 6, Q2 of comment 6902210646; the owner, 2026-11-16, #519, comment 6919351399,
+// "Root's wait runs it"), as Akka's `Failed` system message reaches the supervisor before its mailbox. The
+// emitted `throw` names the value it throws first (`Thrown`), which the crash's copy brings into the
+// supervisor's heap, and the block's decision is a word the emitted `restart`, `stop` and `escalate` set
+// (`Decide`).
+
+// The value of the `throw` that runs: the number of its type in the program, one more, 0 for none, the
+// slot that holds it and the emitted function that copies it into a heap, read where the crash is taken
+// (`Fell`), and the stack that raised, which a block keeps (`Crashed`).
+thread static mut long thrownNumber = 0
+thread static mut byte* thrownSlot = null
+thread static mut byte* thrownCopy = null
+thread static mut byte* raising = null
+
+// The decision of the block that runs: 1 `restart`, 2 `stop`, 3 `escalate`.
+thread static mut long decision = 0
+
+// The blocks the top-level code's wait runs, in the order of the crashes, a list as an inbox is (`Append`),
+// in the thread's own heap, null until the first; the one that runs there, null where none does; and the
+// block whose escalation ends the process on the stack its child raised on (`Escalate`).
+thread static mut byte* rootBlocks = null
+thread static mut byte* rootRunning = null
+thread static mut byte* escalated = null
+
+// The table of every block's message: the function that runs it, and no copy, since a block that waits in
+// the inbox of an actor that crashes is dropped (`BlockLeft`), in the thread's own heap, made at the first
+// block.
+static mut byte* blockTable = null
+
+// The value a `throw` throws, of the type numbered `number` in the program, in the slot `slot`, and the
+// function `copy` that copies it into a heap (U30), which the emitted code names before `Throw` where a block
+// of the program reads a `Reason` with that type.
+pub void Thrown(long number, byte* slot, byte* copy) {
+    raw {
+        thrownNumber = number + 1
+        thrownSlot = slot
+        thrownCopy = copy
+    }
+}
+
+// The decision of the block that runs, `word`: 1 `restart`, 2 `stop`, 3 `escalate` (U29).
+pub void Decide(long word) {
+    raw {
+        decision = word
+    }
+}
+
+// The message of the block of the policy of the actor whose reference is `taker`, made in the heap `above`
+// of its supervisor (U28): the message after it, the blocks' table, no reply, a chain of its own, as a
+// restart's message has (U34; assumed: S11 of comment 6907441402), the actor, its stack that raised, `kept`,
+// null for none, then a copy of the crash's id, the file, a constant of the emitted code, and a copy of the
+// text, with their counts, its line and whether the text stands below the error line, the chain of the activation `header` that crashed, the number of the
+// thrown value's type, one more, 0 for none, the copy of that value, made by `copy` from `slot`, and that
+// copy's function, and whether the block escalated the crash (`Escalate`), 168 bytes.
+byte* Pending(byte* taker, byte* above, byte* kept, byte* header, bool hasText, byte* id, long idCount, byte* file, long fileCount, long line, byte* from, long count, long number, byte* slot, byte* copy) {
+    raw {
+        byte* message = AllocateIn(above, 168)
+        *Ptr<byte*>(message) = null
+        *Ptr<byte*>(message + 8) = BlockTable()
+        *Ptr<byte*>(message + 16) = null
+        NewChain(message + 24)
+        *Ptr<byte*>(message + 40) = taker
+        *Ptr<byte*>(message + 48) = kept
+        *Ptr<byte*>(message + 56) = Copied(id, idCount, above)
+        *Ptr<long>(message + 64) = idCount
+        *Ptr<byte*>(message + 72) = file
+        *Ptr<long>(message + 80) = fileCount
+        *Ptr<long>(message + 88) = line
+        *Ptr<long>(message + 96) = 0
+        if hasText {
+            *Ptr<long>(message + 96) = 1
+        }
+
+        *Ptr<byte*>(message + 104) = Copied(from, count, above)
+        *Ptr<long>(message + 112) = count
+        *Ptr<long>(message + 120) = 0
+        *Ptr<long>(message + 128) = 0
+        if header != null {
+            *Ptr<long>(message + 120) = *Ptr<long>(header + 344)
+            *Ptr<long>(message + 128) = *Ptr<long>(header + 352)
+        }
+
+        *Ptr<long>(message + 136) = number
+        *Ptr<byte*>(message + 144) = null
+        *Ptr<byte*>(message + 152) = copy
+        *Ptr<long>(message + 160) = 0
+        if number != 0 {
+            extern "C" (byte*, byte*) => byte* made = *Ptr<extern "C" (byte*, byte*) => byte*>(message + 152)
+            mut byte* into = above
+            if into == null {
+                into = RootHeap()
+            }
+
+            *Ptr<byte*>(message + 144) = made(slot, into)
+        }
+
+        return message
+    }
+}
+
+// The `count` bytes at `bytes` copied into the heap `heap`, null for none.
+byte* Copied(byte* bytes, long count, byte* heap) {
+    raw {
+        if count == 0 {
+            return null
+        }
+
+        byte* p = AllocateIn(heap, count)
+        mut long i = 0
+        while i < count {
+            p[i] = bytes[i]
+            i = i + 1
+        }
+
+        return p
+    }
+}
+
+// The heap of the top-level code, the thread's own, which a copy of a crash crosses into where the
+// top-level code's wait runs the block.
+byte* RootHeap() {
+    byte* before = std.HeapUse(null)
+    byte* own = std.HeapCurrent()
+    std.HeapUse(before)
+    return own
+}
+
+// The message `message` of a block to the supervisor whose reference is `parent`: at the front of its
+// inbox, after the blocks already there, so that it runs after the current message and before the queued
+// ones in the order of the crashes, and the supervisor at the end of the run queue where it can run it
+// (U28, U34); for the top-level code, null, at the end of the blocks its wait runs (U33).
+void Post(byte* parent, byte* message) {
+    raw {
+        if parent == null {
+            if rootBlocks == null {
+                rootBlocks = AllocateOwn(16)
+                *Ptr<byte*>(rootBlocks) = null
+                *Ptr<byte*>(rootBlocks + 8) = null
+            }
+
+            Append(rootBlocks, message)
+            return
+        }
+
+        mut byte* before = null
+        mut byte* at = *Ptr<byte*>(parent - 32)
+        while at != null && *Ptr<byte*>(at + 8) == blockTable {
+            before = at
+            at = *Ptr<byte*>(at)
+        }
+
+        *Ptr<byte*>(message) = at
+        if before == null {
+            *Ptr<byte*>(parent - 32) = message
+        } else {
+            *Ptr<byte*>(before) = message
+        }
+
+        if at == null {
+            *Ptr<byte*>(parent - 24) = message
+        }
+
+        long life = *Ptr<long>(parent - 88)
+        if life != 1 && life != 3 && life != 5 && !Queued(parent) {
+            Queue(parent)
+        }
+    }
+}
+
+// The table of the blocks' messages, made at the first.
+byte* BlockTable() {
+    raw {
+        if blockTable == null {
+            blockTable = AllocateOwn(16)
+            *Ptr<extern "C" (byte*, byte*) => void>(blockTable) = BlockRun
+            *Ptr<byte*>(blockTable + 8) = null
+        }
+
+        return blockTable
+    }
+}
+
+// The run of the block's message `message` in an activation of the supervisor whose reference is `state`
+// (`RunBlock`).
+extern "C" void BlockRun(byte* state, byte* message) {
+    RunBlock(message)
+}
+
+// The run of the block's message `message`, in an activation of the supervisor or in the top-level code's
+// wait: the emitted function of the block, which the restart's block of the child names, builds `c` and runs
+// the block, and the decision it set is acted on (`Decided`).
+void RunBlock(byte* message) {
+    raw {
+        byte* child = *Ptr<byte*>(message + 40)
+        byte* side = *Ptr<byte*>(child - 80)
+        extern "C" (byte*, byte*) => void entry = *Ptr<extern "C" (byte*, byte*) => void>(*Ptr<byte*>(side + 56))
+        decision = 0
+        entry(side, message)
+        Decided(child, message, decision)
+    }
+}
+
+// The first block the top-level code's wait runs, taken off its list and run on the top-level code's
+// stack (U33).
+void RootBlock() {
+    raw {
+        byte* message = Taken(rootBlocks)
+        byte* before = rootRunning
+        rootRunning = message
+        RunBlock(message)
+        rootRunning = before
+    }
+}
+
+// The decision `word` of the block of the message `message` acted on for the actor whose reference is
+// `child`, as the words of a policy act (U29): `restart` restarts it after its pause and `stop` ends it,
+// each after the crash's log line, written at the decision (U34; assumed: S10 of comment 6907441402), the
+// stack it raised on given back to the pool and the message freed; `escalate` crashes the supervisor
+// (`Escalate`).
+void Decided(byte* child, byte* message, long word) {
+    raw {
+        if word == 3 {
+            Escalate(message)
+        }
+
+        BlockLogged(message)
+        BlockLeft(message)
+        long idCount = *Ptr<long>(message + 64)
+        long count = *Ptr<long>(message + 112)
+        if idCount > 0 {
+            std.Free(*Ptr<byte*>(message + 56), idCount)
+        }
+
+        if count > 0 {
+            std.Free(*Ptr<byte*>(message + 104), count)
+        }
+
+        std.Free(message, 168)
+        if word == 1 {
+            *Ptr<long>(child - 88) = 1
+            Pause(child)
+        } else {
+            EndActor(child)
+        }
+    }
+}
+
+// The escalation of the crash of the block's message `message` (U25, U29): the crash of the supervisor
+// whose activation runs the block, with the child's id, place, text and thrown value, as the child's crash
+// would have passed up under `escalate`; where the top-level code takes it, the block running in its wait
+// among it, the process ends with the child's error line and the trace of the stack the child raised on,
+// switched back to (`EndsEscalated`), or of this one where none is kept (U34; design record, section 6, the trace
+// from the stack of the actor that raised).
+void Escalate(byte* message) {
+    raw {
+        *Ptr<long>(message + 160) = 1
+        byte* header = running
+        byte* kept = *Ptr<byte*>(message + 48)
+        if header == null || Taker(*Ptr<byte*>(header + 320)) == null {
+            escalated = message
+            if kept == null {
+                EndsEscalated()
+            }
+
+            mut byte* from = header
+            if from == null {
+                from = threadSide
+            }
+
+            sys.StackGuard(kept + 512, *Ptr<long>(kept + 400))
+            sys.Switch(from, kept)
+        }
+
+        BlockLeft(message)
+        thrownNumber = *Ptr<long>(message + 136)
+        thrownSlot = *Ptr<byte*>(message + 144)
+        thrownCopy = *Ptr<byte*>(message + 152)
+        *Ptr<long>(header + 448) = 1
+        if *Ptr<long>(message + 96) != 0 {
+            *Ptr<long>(header + 448) = 2
+        }
+
+        *Ptr<byte*>(header + 456) = *Ptr<byte*>(message + 56)
+        *Ptr<long>(header + 464) = *Ptr<long>(message + 64)
+        *Ptr<byte*>(header + 472) = *Ptr<byte*>(message + 72)
+        *Ptr<long>(header + 480) = *Ptr<long>(message + 80)
+        *Ptr<long>(header + 488) = *Ptr<long>(message + 88)
+        *Ptr<byte*>(header + 496) = *Ptr<byte*>(message + 104)
+        *Ptr<long>(header + 504) = *Ptr<long>(message + 112)
+        sys.Switch(header, threadSide)
+    }
+}
+
+// The end of the process at a crash that a block escalated to the top-level code (U34): the error line of
+// the crash, as the copy in the block's message holds it, the trace of the stack this runs on, and the exit
+// code 1 (`Ends`).
+void EndsEscalated() {
+    raw {
+        byte* m = escalated
+        Ends(*Ptr<long>(m + 96) != 0, *Ptr<byte*>(m + 56), *Ptr<long>(m + 64), *Ptr<byte*>(m + 72), *Ptr<long>(m + 80), *Ptr<long>(m + 88), *Ptr<byte*>(m + 104), *Ptr<long>(m + 112))
+    }
+}
+
+// The log line of the crash that the block's message `message` decides on, for its child (U24).
+void BlockLogged(byte* message) {
+    raw {
+        Logged(*Ptr<byte*>(message + 40), *Ptr<byte*>(message + 56), *Ptr<long>(message + 64), *Ptr<byte*>(message + 72), *Ptr<long>(message + 80), *Ptr<long>(message + 88), *Ptr<long>(message + 96) != 0, *Ptr<byte*>(message + 104), *Ptr<long>(message + 112))
+    }
+}
+
+// The stack the child of the block's message `message` raised on given back to the pool, once, where the
+// message keeps one (U34).
+void BlockLeft(byte* message) {
+    raw {
+        byte* kept = *Ptr<byte*>(message + 48)
+        if kept != null {
+            *Ptr<byte*>(message + 48) = null
+            Give(kept)
+        }
+    }
+}
+
+// The chain ID of 16 bytes at `at` as the block reads it (U30): 32 lowercase hexadecimal digits, a byte's two
+// in the order of the bytes, as OpenTelemetry writes a trace-id (assumed: S4 of comment 6907441402).
+pub string ChainText(byte* at) {
+    mut string text = ""
+    raw {
+        byte* p = string.Allocate(32)
+        mut long i = 0
+        while i < 16 {
+            int b = int(at[i])
+            p[i * 2] = std.HexDigit(b >> 4)
+            p[i * 2 + 1] = std.HexDigit(b & 15)
+            i = i + 1
+        }
+
+        text = string.FromRaw(p, 32)
+    }
+
+    return text
+}
+
+// The `count` bytes at `bytes` as a string of its own, which the emitted block of `on crash` reads too (U30).
+pub string TextAt(byte* bytes, long count) {
     mut string text = ""
     if count == 0 {
         return text

@@ -144,19 +144,25 @@ public sealed record ParenthesizedExpression(int Line, Expression Inner) : Expre
 
 /// <summary>
 /// <c>spawn Counter(1)</c> (U2): an actor made by its name and the arguments of its constructor, which <paramref name="Call"/> holds.
-/// <paramref name="Policy"/> is the policy written after the call, <c>on crash stop</c> (U25); <paramref name="OnCrashLine"/> is the
-/// line of an <c>on crash</c> block written there, <c>on crash (c) { ... }</c>, whose words the parser passes over and the checker says
-/// <c>not supported</c> to; 0 without one.
+/// <paramref name="Policy"/> is the policy written after the call, <c>on crash stop</c> or the block <c>on crash (c) { ... }</c> (U25,
+/// U28), null without one.
 /// </summary>
-public sealed record SpawnExpression(int Line, CallExpression Call, int OnCrashLine = 0, CrashPolicy? Policy = null) : Expression(Line);
+public sealed record SpawnExpression(int Line, CallExpression Call, CrashPolicy? Policy = null) : Expression(Line);
 
 /// <summary>
-/// The words of a policy after <c>on crash</c> (section 6, U25, U26): <paramref name="Word"/> is <c>restart</c>, <c>stop</c> or
-/// <c>escalate</c>; after <c>restart</c>, <paramref name="After"/> is the literal after <c>after</c>, the first pause, and
-/// <paramref name="Max"/> and <paramref name="Within"/> the literals of <c>max N in &lt;duration&gt;</c>, the limit, each null where it
-/// is not written.
+/// <c>attempt { ... }</c> or <c>retry { ... }</c> (<see cref="Word"/>), the block that runs a piece of code with its crash kept to it (section 6);
+/// the checker says <c>not supported</c> to it.
 /// </summary>
-public sealed record CrashPolicy(int Line, string Word, Expression? After = null, Expression? Max = null, Expression? Within = null);
+public sealed record AttemptExpression(int Line, string Word, Block Body) : Expression(Line);
+
+/// <summary>
+/// The words of a policy after <c>on crash</c> (section 6, U25, U26, U28): <paramref name="Word"/> is <c>restart</c>, <c>stop</c> or
+/// <c>escalate</c>, or <c>block</c> for the block that decides, <c>on crash (c) { ... }</c>, which <paramref name="Block"/> holds as a
+/// lambda of its one parameter, the crash, whose body decides; after <c>restart</c>, <paramref name="After"/> is the literal after
+/// <c>after</c>, the first pause, and <paramref name="Max"/> and <paramref name="Within"/> the literals of <c>max N in &lt;duration&gt;</c>,
+/// the limit, each null where it is not written.
+/// </summary>
+public sealed record CrashPolicy(int Line, string Word, Expression? After = null, Expression? Max = null, Expression? Within = null, LambdaExpression? Block = null);
 
 // ---- match -------------------------------------------------------------------------------------
 
@@ -239,6 +245,12 @@ public sealed record UseStatement(int Line, string Target) : Statement(Line);
 
 /// <summary><c>send c.Add(1)</c> (U6): a call of an actor's method that does not wait, which <paramref name="Call"/> holds.</summary>
 public sealed record SendStatement(int Line, CallExpression Call) : Statement(Line);
+
+/// <summary>
+/// <c>restart</c>, <c>stop</c> or <c>escalate</c> as a statement of the block <c>on crash (c) { ... }</c> (U29): the decision the block
+/// gives, <paramref name="Word"/>, which ends its path as <c>return</c> ends a function's.
+/// </summary>
+public sealed record DecisionStatement(int Line, string Word) : Statement(Line);
 
 /// <summary>
 /// An <c>asm</c> statement (R11): its templates, each a string literal whose <c>{name}</c> names an operand and is no
@@ -353,8 +365,8 @@ public enum TypeDeclarationKind
 /// <summary>
 /// A word that starts a clause after an actor's name (section 6): <c>per</c>, <c>yield</c>, <c>inbox</c>, <c>stack</c> or <c>on crash</c>,
 /// with its line. The parser keeps the word and passes over what follows it, which the checker says <c>not supported</c> to, but for
-/// <c>stack</c>, whose <paramref name="Size"/> is the literal of bytes after it (U1), and for an <c>on crash</c> with the words of a
-/// policy, the type's default, which <paramref name="Policy"/> holds (U27).
+/// <c>stack</c>, whose <paramref name="Size"/> is the literal of bytes after it (U1), and for an <c>on crash</c>, whose words of a
+/// policy or block, the type's default, <paramref name="Policy"/> holds (U27, U28).
 /// </summary>
 public sealed record ActorClause(int Line, string Word, UnitLiteral? Size = null, CrashPolicy? Policy = null);
 

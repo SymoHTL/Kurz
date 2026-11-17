@@ -1626,7 +1626,7 @@ public sealed class ParserTests
     [InlineData("actor Worker on crash stop stack 8mb {\n}", "(actor Worker [on crash 1 stop] [stack 1 (unit 8mb)] {})")]
     [InlineData("actor Worker stack 8mb on crash restart max 3 in 1min after 5ms {\n}", "(actor Worker [stack 1 (unit 8mb)] [on crash 1 restart after (unit 5ms) max (int 3) in (unit 1min)] {})")]
     [InlineData("actor Worker per Id on crash escalate {\n}", "(actor Worker [per 1] [on crash 1 escalate] {})")]
-    [InlineData("actor Worker on crash (c) {\n    restart\n} {\n    pub int Get() => 1\n}", "(actor Worker [on crash 1] {(function pub int Get() => (int 1))})")]
+    [InlineData("actor Worker on crash (c) {\n    restart\n} {\n    pub int Get() => 1\n}", "(actor Worker [on crash 1 block (lambda (c) {(decide restart)})] {(function pub int Get() => (int 1))})")]
     [InlineData("actor Worker yield checks {\n}", "(actor Worker [yield 1] {})")]
     [InlineData("c = spawn Counter(1)", "(assign-or-declare c (spawn (call Counter (int 1))))")]
     [InlineData("c = spawn Pair<int>(1)", "(assign-or-declare c (spawn (call Pair<int> (int 1))))")]
@@ -1636,12 +1636,14 @@ public sealed class ParserTests
     [InlineData("c = spawn Worker() on crash restart max -1 in 2 after 0.5", "(assign-or-declare c (spawn (call Worker) [on crash 1 restart after (real 0.5) max (- (int 1)) in (int 2)]))")]
     [InlineData("f(spawn Worker() on crash stop, 2)", "(call f (spawn (call Worker) [on crash 1 stop]), (int 2))")]
     [InlineData("f([spawn Worker() on crash escalate])", "(call f (list (spawn (call Worker) [on crash 1 escalate])))")]
-    [InlineData("f(spawn Worker() on crash (c) {\n    print(c)\n}, 2)", "(call f (spawn (call Worker) [on crash 1]), (int 2))")]
+    [InlineData("f(spawn Worker() on crash (c) {\n    print(c)\n    stop\n}, 2)", "(call f (spawn (call Worker) [on crash 1 block (lambda (c) {(call print c) (decide stop)})]), (int 2))")]
+    [InlineData("w = spawn Worker() on crash (crash) {\n    if crash.Place.Line > 2 {\n        escalate\n    }\n\n    restart\n}", "(assign-or-declare w (spawn (call Worker) [on crash 1 block (lambda (crash) {(if (> (. (. crash Place) Line) (int 2)) {(decide escalate)}) (decide restart)})]))")]
     [InlineData("send c.Add(1)", "(send (call (. c Add) (int 1)))")]
     [InlineData("send Add(1)", "(send (call Add (int 1)))")]
     [InlineData("actor.Count = 1", "(assign (. actor Count) (int 1))")]
     public void The_forms_of_actors_parse(string program, string tree)
     {
+        // U28: the block of a policy, its one parameter and its body, at `spawn` and after an actor's name, its decisions statements (U29)
         // U1: `actor` before a name declares an actor, the clauses after its name kept by their first word and its line, an `on crash` with
         // the words of a policy among them (U27); U2: `spawn` before a name, its type arguments where it writes them (U14, T19), makes one and
         // binds as C#'s `new`; U25, U26: the words of a policy after it, the knobs in either order, each value a number literal with its sign,
@@ -1683,6 +1685,47 @@ public sealed class ParserTests
     public void A_form_of_actors_without_its_parts_is_syntax(string program)
     {
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors(program));
+    }
+
+    [Theory]
+    [InlineData("restart = 1\nprint(restart, stop)", "(assign-or-declare restart (int 1)) (call print restart, stop)")]
+    [InlineData("w = spawn Worker() on crash (c) {\n    stop = 1\n    print(stop)\n    escalate\n}", "(assign-or-declare w (spawn (call Worker) [on crash 1 block (lambda (c) {(assign-or-declare stop (int 1)) (call print stop) (decide escalate)})]))")]
+    [InlineData("w = spawn Worker() on crash (c) {\n    f(() => restart)\n    g(() => {\n        stop\n    })\n    restart\n}", "(assign-or-declare w (spawn (call Worker) [on crash 1 block (lambda (c) {(call f (lambda () restart)) (call g (lambda () {stop})) (decide restart)})]))")]
+    [InlineData("w = spawn Worker() on crash (c) {\n    v = spawn Worker() on crash (d) {\n        stop\n    }\n    escalate\n}", "(assign-or-declare w (spawn (call Worker) [on crash 1 block (lambda (c) {(assign-or-declare v (spawn (call Worker) [on crash 2 block (lambda (d) {(decide stop)})])) (decide escalate)})]))")]
+    public void A_decision_is_a_statement_of_the_block_alone(string program, string tree)
+    {
+        // U29: `restart`, `stop` and `escalate` are statements in the block of `on crash` and names elsewhere, a lambda inside the block
+        // among it, and before `=` in the block, as `send` is a name there (U6); a block inside a block holds its own decisions
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("c = spawn Worker() on crash ()", 1)] // U28: one name in the parentheses
+    [InlineData("c = spawn Worker() on crash (c, d) {\n    stop\n}", 1)]
+    [InlineData("c = spawn Worker() on crash (Crashed c) {\n    stop\n}", 1)] // U29: and no type (assumed: S3)
+    [InlineData("c = spawn Worker() on crash (c)", 1)] // U28: the block after the parameter
+    [InlineData("c = spawn Worker() on crash (c) stop", 1)]
+    [InlineData("c = spawn Worker() on crash (c) {\n    stop\n}.Get()", 3)] // U25: the block ends the expression
+    [InlineData("c = spawn Worker() on crash (c) {\n    restart after 1ms\n}", 2)] // U29: `restart` takes no knobs (assumed: S3)
+    [InlineData("c = spawn Worker() on crash (c) {\n    stop now\n}", 2)] // a decision ends its statement
+    [InlineData("c = spawn Worker() on crash (c) {\n    return\n}", 2)] // U29: the block decides, with no `return` (assumed: S3)
+    public void A_block_of_a_policy_without_its_parts_is_syntax(string program, int line)
+    {
+        Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
+    }
+
+    [Theory]
+    [InlineData("x = attempt {\n    f()\n}", "(assign-or-declare x (attempt {(call f)}))")]
+    [InlineData("x = retry {\n    f()\n}", "(assign-or-declare x (retry {(call f)}))")]
+    [InlineData("attempt = 1", "(assign-or-declare attempt (int 1))")]
+    [InlineData("if attempt {\n    f()\n}", "(if attempt {(call f)})")]
+    [InlineData("while retry {\n    f()\n}", "(while retry {(call f)})")]
+    [InlineData("if g(() => attempt {\n    f()\n}) {\n}", "(if (call g (lambda () (attempt {(call f)}))) {})")]
+    public void An_attempt_is_its_block_and_a_name_before_the_block_of_a_header(string program, string tree)
+    {
+        // section 6: `attempt { ... }` and `retry { ... }` parse, for the checker to refuse; before the block of an `if`, a `while`, a `for`
+        // or a `match` the word is a name, as a struct literal is no condition in Rust, and a lambda's body is no header
+        Assert.Equal(tree, Tree(program));
     }
 
     [Fact]

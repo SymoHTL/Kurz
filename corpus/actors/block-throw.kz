@@ -1,0 +1,25 @@
+// expect: throws actor-gone at 25
+// rules: U32
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+actor Boss {
+    pub Worker Go() {
+        kid = spawn Worker() on crash (c) {
+            throw "block fails"
+        }
+
+        send kid.Fail()
+        return kid
+    }
+}
+
+b = spawn Boss()
+w = b.Go()
+print(w.Ping())

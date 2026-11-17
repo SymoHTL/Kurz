@@ -1,0 +1,31 @@
+// expect: output
+// | lost 7
+// | DivideByZero
+// | 2
+// rules: U30
+
+data Lost(int Code)
+
+actor Worker {
+    pub void Lose() {
+        throw Lost(7)
+    }
+
+    pub void Divide(int n) {
+        print(10 / n)
+    }
+
+    pub int Half(int n) => n / 2
+}
+
+w = spawn Worker() on crash (c) {
+    match c.Reason {
+        Lost l => print("lost {l.Code}")
+        RuntimeError e => print(e.Kind)
+    }
+
+    restart
+}
+send w.Lose()
+send w.Divide(0)
+print(w.Half(4))

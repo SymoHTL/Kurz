@@ -1,0 +1,17 @@
+// expect: error missing-return at 12
+// rules: U29
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash (c) {
+    if c.Place.Line > 1 {
+        restart
+    }
+}
+print(w.Ping())

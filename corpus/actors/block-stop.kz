@@ -1,0 +1,18 @@
+// expect: throws actor-gone at 18
+// | stopped at 7
+// rules: U29
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash (c) {
+    print("stopped at {c.Place.Line}")
+    stop
+}
+send w.Fail()
+print(w.Ping())
