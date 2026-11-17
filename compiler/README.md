@@ -2083,7 +2083,9 @@ while messages ran on it, and a server whose actors hold many stacks at once, tw
 of mappings, `vm.max_map_count`, raised past its default of 65,530, as section 6 says; a recursion
 past a message's stack is its actor's crash on Linux, the log line naming `stack-overflow` at its
 line, but inside the allocator or the scheduler it ends the process with its error line and the exit
-code 1 (O11), as a check of the runtime's own code there does in a test build (chapter 12): the
+code 1 (O11), as a check of the runtime's own code does in a test build, there or outside them, its
+site raising the count below before it raises (`RaiseOwn`; chapter 12), where a check of the standard
+library's code outside them is its actor's crash (section 6, assumed there): the
 allocator's entries that change a heap, the scheduler's that change its records, inboxes, run queue
 and replies, the list of the heaps of messages among them, and the copy of a crossing from `CopyUse` to `CopyLeft`, the emitted
 functions that fill its copies among it, raise the count per thread of section 6 and lower it at their
@@ -2674,9 +2676,9 @@ what each throws itself with the sets of the units it runs, through the type arg
 pick, every override of a method and, through an interface, every implementer's; the constructors, the defaults and the base a
 construction runs; the fields of a `data` body that a construction or a `with` computes; the method a property's read calls; every
 lambda whose type fits a call of a function value, and every function of the C calling convention that a name gives as a value of
-the C function type a call names (R17); the test of `Where` and the key of `SortBy`, which they call (M9, X8), where another
-built-in call that takes a lambda, `Add` or `Insert` among them, keeps it, which brings what the lambda builds and nothing it
-throws; the `Text()` that `print`, `eprint`, an interpolation's hole and `string.Join` call, through the fields, items and cases of
+the C function type a call names (R17); a function value a built-in call takes, which it calls, as `Where` calls its test and
+`SortBy` its key (M9, X8), but for `Add` and `Insert`, which keep it (M9, X11) and bring what the lambda builds and nothing it
+throws, so that a kind of built-in call no arm of the walk names counts as calling it; the `Text()` that `print`, `eprint`, an interpolation's hole and `string.Join` call, through the fields, items and cases of
 the type, each instantiation of one generic type among them, and of a generic `data` type derived from it through each
 instantiation of it that the program builds (the owner, 2026-11-16); the construction of an actor it spawns; and
 the code of an actor it spawns under `escalate` or a block, with the block's body, which runs as a message of the
@@ -2685,7 +2687,10 @@ fixed point joins the generic `data` types each unit constructs with those of th
 with those of the lambdas it makes, as Rust collects a closure's instance in the instance of the function that makes it, and the
 program builds those that the sets of its roots, the top-level code and the `pub` functions, a generic one and each actor's `pub`
 methods among them, which alone take messages (U9), hold with every type argument named, the text of each instantiation found read
-and the roots solved again until they grow no more. A set holds every type a run can throw, and can hold more: every override of
+and the roots solved again until they grow no more. A set holds every type a run can throw, but for two lists of `pub`
+functions, which can miss what a call raises (section 5): that of one that reads its type and that no call copies, which names
+nothing its text throws (Q2), and a package's, which names nothing a caller's instantiation throws ("Keep the program view").
+A set can hold more: every override of
 the method a call names and every implementer through an interface, every lambda and every function of the C calling convention
 whose type fits a call of a value, the text of every derived type without type parameters, built or not, and, in the list of a
 `pub` function, what the children it spawns under `escalate` or a block can pass up (section 5, the owner, 2026-11-17, #560, comment 6945856976, Q1); an instantiation the

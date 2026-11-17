@@ -2367,7 +2367,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: true);
-        var executable = toolchain.Build(compilation.Program!, "actor-pause-sleeps");
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, "actor-pause-sleeps");
         var watch = System.Diagnostics.Stopwatch.StartNew();
         var run = Toolchain.Run(executable, "0");
         watch.Stop();
@@ -3563,13 +3564,18 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         """;
 
+    /// <summary>The line of <see cref="Check"/> whose product passes the range of a <c>long</c>, the place of its check.</summary>
+    private const string CheckLine = "    if armed && n * 4611686018427387904 == 7 {";
+
     [Fact]
     public void A_check_of_the_runtime_s_own_code_inside_the_scheduler_on_an_actor_s_stack_ends_the_process()
     {
         // chapter 12 and O11: in a test build a check of the runtime's own code that fires inside `Enqueue`, where the count of the entries
         // under way is 1, on the stack of `Go`, ends the process with its error line and the exit code 1, as a stack fault there does,
-        // and is no crash of `Sender` that restarts it with the scheduler's lists half changed; the error line's place is not held, since
-        // chapter 12 gives it as the line of the innermost frame outside the runtime, where this build writes the check's own line
+        // and is no crash of `Sender` that restarts it with the scheduler's lists half changed; the error line names the scheduler's own
+        // line where the check is, the product in `CheckArmed`, in the edited runtime's common file, which a check names by its path in the
+        // repository, since O11 reads the runtime of the rule of the innermost frame outside it as its primitives, and not the allocator
+        // or the scheduler, whose own line it gives for a fault there, as the tests of a stack fault inside the scheduler hold it
         const string text = """
             actor Sink {
                 mut int total = 0
@@ -3596,7 +3602,65 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var run = BuildAndRun(text, ListTests.Edited(edits), "actor-check-scheduler");
         var (crashes, rest) = Logged(run.Error);
         Assert.Empty(crashes);
+        Ran((run.Code, run.Output, rest), 1, [], $"error: overflow at runtime/common/runtime.kz:{LineOf("runtime/common/runtime.kz", edits, CheckLine)}\n");
+    }
+
+    [Fact]
+    public void A_check_of_the_runtime_s_own_code_where_no_entry_is_under_way_on_an_actor_s_stack_ends_the_process()
+    {
+        // chapter 12, U19: in a test build a check of the runtime's own code that fires in a primitive, `Print`, where the count of the
+        // entries under way is 0, on the stack of `Go`, ends the process with its error line and the exit code 1, as one inside the
+        // scheduler does, and is no crash of `Sender` that restarts it (design record, section 6, "End the process", against the crash of
+        // the actor alone; the site of such a check asking for that end with no count, assumed there); the place is not held: chapter 12
+        // gives a primitive's check the line of the innermost frame outside the runtime, where `Raise` writes the check's own line for
+        // every check of the runtime's code, the one inside the scheduler among them, where that line is the place O11 gives
+        const string text = """
+            actor Sender {
+                pub int Go() {
+                    eprint("arm")
+                    print("x")
+                    return 1
+                }
+            }
+
+            s = spawn Sender()
+            print(s.Go())
+
+            """;
+        const string at = "pub void Print(int fd, string text, string file, int line) {\n";
+        (string Path, string Old, string New)[] edits = [("runtime/common/runtime.kz", at, Check + at + "    CheckArmed()\n"), Armed("CheckArm()")];
+        var run = BuildAndRun(text, ListTests.Edited(edits), "actor-check-primitive");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Empty(crashes);
         Assert.True(run.Code == 1 && run.Output.Count == 0 && rest.StartsWith("error: overflow at ", StringComparison.Ordinal) && rest.Count(c => c == '\n') == 1, $"exit code {run.Code}, printed [{string.Join(", ", run.Output)}], standard error: {rest}");
+    }
+
+    [Fact]
+    public void A_check_of_the_standard_library_s_code_where_no_entry_is_under_way_is_its_actor_s_crash()
+    {
+        // O11 reads the runtime as its primitives and not a collection, the standard library's Kurz code above them, so a check of that
+        // code in a test build, in `Find`, where the count of the entries under way is 0, is no check of the runtime's own code: it is
+        // the crash of `Sender`, at the check's own line, as a check of the program's code is, whose wait of the top-level code gets
+        // `callee-crashed` (U20), as Rust's standard library panics in the thread that called it (design record, section 6, assumed there)
+        const string text = """
+            actor Sender {
+                pub int Go() {
+                    eprint("arm")
+                    print("abc".Contains("b"))
+                    return 1
+                }
+            }
+
+            s = spawn Sender()
+            print(s.Go())
+
+            """;
+        const string at = "pub long Find(byte* hay, long n, byte* needle, long m) {\n";
+        (string Path, string Old, string New)[] edits = [("std/std.kz", at, Check + at + "    CheckArmed()\n"), Armed("std.CheckArm()")];
+        var run = BuildAndRun(text, ListTests.Edited(edits), "actor-check-std");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal([$"Sender#1 crashed: overflow at std/std.kz:{LineOf("std/std.kz", edits, CheckLine)}"], crashes);
+        Ran((run.Code, run.Output, rest), 1, [], "error: callee-crashed at program.kz:10\n");
     }
 
     [Fact]
