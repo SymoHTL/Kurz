@@ -280,7 +280,7 @@ public sealed partial class Emitter
             var kept = fn.Label("kept");
             fn.CondBranch(fn.Value($"call i1 {StdFunction("MapLongLookup")}(ptr %a0)"), rehash, kept);
             fn.Block(rehash);
-            fn.Emit($"call void {Helper($"rehash.{Lower.Mangle(type)}", "void", ["ptr"], () => RehashBody(type))}(ptr %a0)");
+            fn.Emit($"call void {Rehash(type)}(ptr %a0)");
             fn.Return($"ptr {fn.Value($"call ptr {FindEntry(type)}(ptr %a0, {Ir(type.Key)} %a1, i64 {KeyHash("%a0", "%a1", type.Key)})")}");
             fn.Block(kept);
         }
@@ -360,7 +360,15 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// The helper that rehashes the map's block, <c>%a0</c>, in place onto SipHash-1-3, which <c>MapLongLookup</c> marked it as on,
+    /// The helper that places every entry of the map's block <c>%a0</c> again under its key's hash, in place (<see cref="RehashBody"/>):
+    /// a lookup's past the bound, onto SipHash-1-3, and a copy's of a map whose keys reach a class instance, under the hash the copy took
+    /// from its source with its keys, once the run filled every key it copied (<see cref="FillMap"/>).
+    /// </summary>
+    private string Rehash(MapType type) => Helper($"rehash.{Lower.Mangle(type)}", "void", ["ptr"], () => RehashBody(type));
+
+    /// <summary>
+    /// The body of <see cref="Rehash"/>, which rehashes the map's block, <c>%a0</c>, in place under the hash it is on: onto SipHash-1-3,
+    /// which <c>MapLongLookup</c> marked it as on, or, for a copy, under its source's (<see cref="FillMap"/>),
     /// as hashbrown's <c>rehash_in_place</c> does, so that every value that holds the block finds its entries: every entry marked as not
     /// yet placed (<c>MapRehashMark</c>), then, for each slot that holds such an entry, its key's hash under the block's keys, as
     /// hashbrown's <c>rehash_in_place</c> calls its hasher for the slot, written into the entry where the map keeps the hash

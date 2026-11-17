@@ -1,7 +1,7 @@
 // expect: output
 // | Ann 3
 // | true
-// rules: U12
+// rules: K4, U12
 
 class Order(string Customer, int Items)
 
@@ -20,4 +20,5 @@ s = spawn Shop()
 s.Place(order)
 f = s.First()
 print("{f.Customer} {f.Items}")
+// `Order` has no `mut` field and no `weak` one, so it compares by content (K4), and the copy of its copy equals it
 print(f == order)

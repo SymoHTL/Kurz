@@ -5304,8 +5304,9 @@ extern "C" void ActorStart() {
 // program code. A crossing copies every counted block the value reaches into the heap of the actor it
 // crosses into, or of the caller its result goes to (design record, section 6; the owner, 2026-11-15,
 // #519, comment 6902210646, Q5, "Copy all, share big unbuilt"); a value after `copy` at a call that is
-// no crossing has every class instance it reaches copied into the heap the allocation entry serves, and
-// shares every other block by its count. The copies one call makes of its arguments share one memo, so
+// no crossing has every block on a path to a class instance copied into the heap the allocation entry
+// serves, the instance among them, and shares by its count only a block that reaches none (`CopyWhole`).
+// The copies one call makes of its arguments share one memo, so
 // that a block two paths of the call reach arrives as one block (Q2, "Sharing kept"), and a result has a
 // memo of its own: the session of the call, eleven words in the caller's frame, the memo, its slots and its
 // count, the `weak` references the copies hold, their room and their count, the copies the call has left
@@ -5321,13 +5322,20 @@ extern "C" void ActorStart() {
 // runs of a call, a later argument's call that waits among them. The work list of the blocks whose items
 // or fields wait to be copied is the thread's, three words each, the block, its copy and the function that
 // fills the copy, emptied by every run, so that the copy never recurses, as a release works its lists off
-// (the owner, 2026-11-01, "Iterative, never crashes"). The memo, the work list and the room of the `weak`
-// references are blocks of the thread's own heap (`AllocateOwn`), and a run of a crossing has the
+// (the owner, 2026-11-01, "Iterative, never crashes"). The copies of the maps whose keys reach a class
+// instance wait on a list of their own, the thread's too, two words each, the copy and the function that
+// places its entries again under their keys' new hashes, which a run empties once its work list is empty,
+// when every key the copy holds is filled (`CopyAfter`; U12, the owner, 2026-11-16, #519, comment
+// 6923513534, "Rehash each key (Recommended)"). The memo, the work list, that list and the room of the
+// `weak` references are blocks of the thread's own heap (`AllocateOwn`), and a run of a crossing has the
 // allocation entry serve the session's heap until its end, the heap it served before then served again.
 thread static mut byte* copySession = null
 thread static mut byte* copyWork = null
 thread static mut long copyWorkRoom = 0
 thread static mut long copyWorkCount = 0
+thread static mut byte* copyAfter = null
+thread static mut long copyAfterRoom = 0
+thread static mut long copyAfterCount = 0
 thread static mut byte* copyBefore = null
 
 // The session `session` of more than one copy listed among the open sessions of the running activation, the
@@ -5548,6 +5556,36 @@ pub byte* CopyNext() {
     return entry
 }
 
+// The copy at `copy` of a map whose keys reach a class instance put on the list of the copies the run
+// places again, with `place`, the function that places its entries under their keys' new hashes: the run
+// calls it once its work list is empty, since a key's hash reads the fields of the instances it reaches,
+// which a copy the memo gave can still wait to be filled while the map is filled.
+pub void CopyAfter(byte* copy, byte* place) {
+    raw {
+        mut long grown = 0
+        copyAfter = CopyRoom(copyAfter, copyAfterRoom, copyAfterCount, 16, mut grown)
+        copyAfterRoom = grown
+        byte* entry = copyAfter + copyAfterCount * 16
+        *Ptr<byte*>(entry) = copy
+        *Ptr<byte*>(entry + 8) = place
+        copyAfterCount = copyAfterCount + 1
+    }
+}
+
+// The entry taken off the end of the list of the copies the run places again, its two words, which the
+// caller reads before it places the copy, or null where the list is empty.
+pub byte* CopyAfterNext() {
+    mut byte* entry = null
+    raw {
+        if copyAfterCount > 0 {
+            copyAfterCount = copyAfterCount - 1
+            entry = copyAfter + copyAfterCount * 16
+        }
+    }
+
+    return entry
+}
+
 // The `weak` reference at `slot` of a copy, which still points at `target`, its target in the value
 // copied, kept for the session's end with one more weak count of the target, which `release` lets go of
 // then; `wide` where the slot is the pair of an address and a table.
@@ -5667,6 +5705,8 @@ void CopyEnd(byte* session) {
         while i < slots {
             byte* held = *Ptr<byte*>(memo + i * 24)
             if held != null {
+                // the release of a class instance, a list, a map or a `data` block, which reads no table: only a `weak`
+                // reference's reads one, which no memo slot holds, and an instance's names its own class (`CopyLetGo`)
                 extern "C" (byte*, byte*) => void letGo = *Ptr<extern "C" (byte*, byte*) => void>(memo + i * 24 + 16)
                 letGo(held, null)
             }

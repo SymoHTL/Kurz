@@ -4723,9 +4723,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(actorWaits, fenced, "actor-waits-fenced"), 0, ["6", "6", "6", "6", "[7, 8, 9, 10]"], "");
-        // U12 (the owner, 2026-11-15, #519, comment 6896192351, Q2, Q3): a field's list copied as it crosses, before a later argument's call
-        // that waits lets in a call of its chain that replaces the field, so that the copy reads no block the replacement freed; the copy
-        // keeps the instance two items hold as one, and the weak link of another item points at it; and a field's instance given as a
+        // U12 (the owner, 2026-11-15, #519, comment 6896192351, Q2, Q3): a field's list copied as it crosses, beside a later argument's call
+        // that waits and lets in a call of its chain that replaces the field, a read the statement holds to its end, so that the
+        // replacement frees nothing the statement reads, before the copy or after it (the order is what
+        // `corpus/actors/copy-left-to-right.kz` shows); the copy keeps the instance two items hold as one, and the weak link of another item points at it; and a field's instance given as a
         // result, copied before the method's count of it is let go of, which the field keeps for the next call, and a result's weak link to
         // an instance the result does not hold, null on arrival as the copy holds no copy of its target (Q3); and two arguments of one
         // message that reach one instance, between which a call that waits lets in a call of the chain whose result crosses in a session of

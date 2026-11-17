@@ -1,7 +1,6 @@
 // expect: output
 // | 3
-// | a
-// rules: U12
+// rules: U12, U15
 
 actor Counter {
     mut int count = 0
@@ -26,6 +25,3 @@ b = spawn Counter()
 h = spawn Hub()
 h.Tell([a, b, a])
 print(a.Get() + b.Get())
-mut names = Map<Counter, string>()
-names[a] = "a"
-print(names[a] ?? "none")

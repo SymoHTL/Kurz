@@ -1,0 +1,24 @@
+// expect: output
+// | 2 2 true true
+// | 2 2 true true
+// | 1
+// rules: U12
+
+class Box(mut int N)
+data Link(weak Box? To)
+
+string Look(Box a, Link l, Box b) {
+    b.N = 2
+    t = l.To
+    if t != null {
+        return "{a.N} {t.N} {a == b} {t == b}"
+    }
+
+    return "gone"
+}
+
+box = Box(1)
+print(Look(copy box, copy Link(box), copy box))
+f = (Box a, Link l, Box b) => Look(a, l, b)
+print(f(copy box, copy Link(box), copy box))
+print(box.N)

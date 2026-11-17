@@ -1466,6 +1466,23 @@ int AreaOf<T: Shape>(T item) => item.Area()
 print(AreaOf(5))
 ```
 
+Case: [actors/generic-reference.kz](../corpus/actors/generic-reference.kz)
+```kurz
+actor Counter {
+    mut int count = 0
+
+    pub int Bump() {
+        count = count + 1
+        return count
+    }
+}
+
+T Same<T>(T x) => x
+
+c = spawn Counter()
+print(Same(c).Bump())
+```
+
 ### T27 (decided, §4) How type arguments are inferred
 
 A type argument that a call does not write is inferred from the arguments: a type parameter takes
