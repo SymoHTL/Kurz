@@ -1160,7 +1160,9 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     [Fact]
     public void The_reason_of_an_actor_holds_what_the_block_of_its_spawn_throws_and_what_it_can_escalate()
     {
-        // U28, U32: a block can pass the child's crash up whole with `escalate`, and its throw is the crash of the actor whose code spawns
+        // U28, U32: a block can pass the child's crash up whole with `escalate`, and its throw is the crash of the actor whose code spawns;
+        // U30 counts "the code of each actor they spawn under `escalate` or a block, whose crash can pass up to the child", every block,
+        // since any block can `escalate`
         Assert.Equal(["EBlocked", "EInBlock", "RuntimeError"], Names(Program.Value.Sets.ReasonOf(Actor("Deciding"))));
         Assert.Equal(["EBlocked", "RuntimeError"], Names(Program.Value.Sets.ReasonOf(Actor("Blocked"))));
     }
@@ -1263,7 +1265,8 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     public void The_runtime_s_error_type_has_a_kind_for_each_run_time_row_of_the_error_table()
     {
         // section 5, assumed there: one kind for each run-time id of the reference's chapter 12 but `thrown`, a `throw` of the program,
-        // in the order of the table, each id in Pascal case
+        // in the order of the table, each id in Pascal case, and after them `invalid-argument` (S13), which the chapter names outside its
+        // table and an actor's read of the command line raises (U30; assumed: its place after the table's)
         var lines = File.ReadAllLines(Path.Combine(CorpusTests.Root, "reference", "12-errors.md"));
         var start = Array.IndexOf(lines, "## Run-time errors");
         Assert.True(start >= 0, "the table of run-time errors has no heading");
@@ -1275,9 +1278,9 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
             .ToList();
         Assert.Contains("thrown", ids); // the positive control of the one id left out
         Assert.True(ids.Count >= 15, $"only {ids.Count} run-time rows read");
-        var kinds = ids.Where(id => id != "thrown")
-            .Select(id => string.Concat(id.Split('-').Select(word => char.ToUpperInvariant(word[0]) + word[1..])))
-            .ToList();
+        Assert.DoesNotContain("invalid-argument", ids); // the chapter names it outside its table
+        ids = [.. ids.Where(id => id != "thrown"), "invalid-argument"];
+        var kinds = ids.Select(id => string.Concat(id.Split('-').Select(word => char.ToUpperInvariant(word[0]) + word[1..]))).ToList();
 
         var error = CorpusTests.StdChecker.Value.Model.DataTypes.Single(d => d.Name == "RuntimeError");
         Assert.Equal(["Kind", "Detail"], error.Fields.Select(f => f.Name));
@@ -1285,12 +1288,12 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         Assert.True(Types.Same(Types.String, error.Fields[1].Type), $"the detail is {error.Fields[1].Type}");
         Assert.Equal(kinds, kind.Symbol.Declaration.Values.Select(v => v.Name));
 
-        // U30: std's `RuntimeErrorOf`, which the emitted block of `on crash` makes the runtime's error with, names each id of the table
-        // with its kind, in the order of the table
+        // U30: std's `RuntimeErrorOf`, which the emitted block of `on crash` makes the runtime's error with, names each id of the table,
+        // and `invalid-argument`, with its kind, in that order
         var std = File.ReadAllText(Path.Combine(CorpusTests.Root, "std", "std.kz"));
         var of = std[std.IndexOf("pub RuntimeError RuntimeErrorOf(", StringComparison.Ordinal)..];
         of = of[..of.IndexOf("\n}\n", StringComparison.Ordinal)];
         var arms = Regex.Matches(of, "\"([a-z-]+)\" => RuntimeKind\\.([A-Za-z]+)").Select(m => (m.Groups[1].Value, m.Groups[2].Value)).ToList();
-        Assert.Equal(ids.Where(id => id != "thrown").Zip(kinds).ToList(), arms);
+        Assert.Equal(ids.Zip(kinds).ToList(), arms);
     }
 }

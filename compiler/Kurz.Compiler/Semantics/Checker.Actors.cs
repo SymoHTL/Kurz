@@ -32,6 +32,11 @@ public sealed partial class Checker
     /// <summary>U28, U30: each block of <c>on crash</c> the checker read, with the actor whose crash it decides and the <c>Reason</c> it read of it.</summary>
     private readonly List<(CrashPolicy Policy, ClassSymbol Child, IReadOnlyList<KurzType> Read)> crashBlocks = [];
 
+    /// <summary>U30: the errors the blocks of <c>on crash</c> reported at a reading after the first, and the blocks that reported them.</summary>
+    private readonly HashSet<Diagnostic> blockErrors = new(ReferenceEqualityComparer.Instance);
+
+    private readonly HashSet<CrashPolicy> erringBlocks = new(ReferenceEqualityComparer.Instance);
+
     /// <summary>
     /// U1: an actor the checker reads is declared as a class is, its body read by the class's code; an actor with a part the build does
     /// not read, or with <c>equal by</c> or a constructor in its body, which no rule gives a meaning (U2), joins the types the checker does
@@ -303,7 +308,8 @@ public sealed partial class Checker
     /// U12: how a value of the type crosses, with why where it does not cross with no word, the build's limit it reaches, null where
     /// it reaches none, and the first pointer or view of an atomic type it reaches, null where it reaches none, which no word makes cross,
     /// <c>pointer-crosses</c> (the owner, 2026-11-17, #572, comment 6961064484, Q1, "Refuse with an id (Recommended)"). A type is read
-    /// through the items of a list, the keys and values of a map, the cases of a union, the fields of a data value and of a class, a class derived from it among them (K6), and the target of a <c>weak</c> reference, which crosses where
+    /// through the items of a list, the keys and values of a map, the cases of a union, the fields of a data value and of a class, a class derived from it among them (K6), a class's fields as declared, since no class takes type arguments
+    /// (a generic class is <c>not supported</c>, T19), and the target of a <c>weak</c> reference, which crosses where
     /// its target does (the owner, 2026-11-15, #519, comment 6896192351, Q3, "Points at the copy"), as Rust's <c>Send</c> is structural:
     /// a <c>mut</c> field needs a word, and an interface's type and a function type are read by their written type and never cross
     /// (comment 6892275110, item 2; comment 6896192351, Q5, "By written type"). A value of a type parameter, a handle of section 12, a
@@ -441,9 +447,11 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// U12: the first handle of section 12, hasher, command or child process that a value of the type holds, read as
-    /// <see cref="CrossingOf"/> reads a type, through a class of <c>std/</c>'s fields too, <c>HttpRequest</c>'s body among them; null where it
-    /// holds none. The build copies none of them: its copy keeps the sender's block and counts it once more (<c>Emit/Emitter.Copies.cs</c>),
+    /// U12: the first handle of section 12, hasher, command or child process that a value of the type holds, or the first value of a type
+    /// parameter, read on the function's text, which the copy of its function for such a type argument makes one of them, read as
+    /// <see cref="CrossingOf"/> reads a type, through a class of <c>std/</c>'s fields too, <c>HttpRequest</c>'s body among them, a class's
+    /// fields as declared, since no class takes type arguments (a generic class is <c>not supported</c>, T19); null where it holds none.
+    /// The build copies none of them: its copy keeps the sender's block and counts it once more (<c>Emit/Emitter.Copies.cs</c>),
     /// so that the receiver would hold a count of a block of the sender's heap, which the sender's restart or end frees, and the build's
     /// <c>not supported</c> stands for such a value after <c>move</c> as with no word (<see cref="CrossingErrors"/>).
     /// </summary>
@@ -462,6 +470,7 @@ public sealed partial class Checker
             DataType d when data.Add(d.Symbol) => First(d.Symbol.Fields.Select(f => SubstituteData(d, f.Type))),
             DataType d => First(HeldArguments(d)),
             ClassType c when classes.Add(c.Symbol) => First(classDeclared.Where(x => x.HasBaseOrIs(c.Symbol)).Prepend(c.Symbol).SelectMany(k => k.Fields).Select(f => f.Type)),
+            TypeParameterType => $"a value of the type parameter `{t}`",
             _ => null,
         };
         return Find(type);
@@ -555,8 +564,9 @@ public sealed partial class Checker
         for (var i = 0; i < c.Arguments.Count; i++)
         {
             // the build's limit; after `move` it stands only for a handle, a hasher, a command or a child process, which the copy would
-            // share by its count, a block of the sender's heap that the sender's restart or end frees (`SharedByCount`), and is set
-            // aside for the rest, which the move's copy brings whole into the receiver's heap or which holds no counted block
+            // share by its count, a block of the sender's heap that the sender's restart or end frees (`SharedByCount`), and for a value
+            // of a type parameter, which the copy of its function for such a type argument makes one of them, and is set aside for the
+            // rest, which the move's copy brings whole into the receiver's heap or which holds no counted block
             if (limits[i] is { } limit)
             {
                 NotSupported(c.Arguments[i].Line, c.Arguments[i].Word == ArgumentWord.Move
@@ -631,11 +641,12 @@ public sealed partial class Checker
     /// U28 to U31: the block of a policy, <c>on crash (c) { ... }</c>, of the actor <paramref name="child"/>, read as the body of a lambda of
     /// its one parameter, the crash, a <c>Crashed</c> of <c>std/</c> whose <c>Reason</c> is the child's (section 5): where it stands at
     /// <c>spawn</c>, it takes the variables around it by value and reads the fields of the actor whose code spawns, as a lambda there does
-    /// (F15, K7), and after a type's name it reads what a top-level function reads (F16; assumed: S6 and S7 of issue 519,
-    /// comment 6907441402); each path of it ends with a decision or a <c>throw</c>, and one that ends with neither is <c>missing-return</c>,
+    /// (F15, K7; assumed: S7 of issue 519, comment 6907441402), and after a type's name it reads what a top-level function reads (F16;
+    /// assumed: S6 of that comment); each path of it ends with a decision or a <c>throw</c>, and one that ends with neither is <c>missing-return</c>,
     /// as for a lambda whose path ends with no value (F3; the owner, 2026-11-16, comment 6919351399, "missing-return error"). Whether it
     /// reported an error. The <c>Reason</c> read is the one the reading before found (<see cref="Check(ProgramSyntax, DiagnosticBag)"/>):
-    /// at the first reading it is the runtime's error type alone and what the block reports is dropped. A <c>Reason</c> with a type the
+    /// at the first reading it is the runtime's error type alone and what the block reports is dropped, as it is at a reading made only for
+    /// the sets of one whose errors stand in blocks alone. A <c>Reason</c> with a type the
     /// crossing copy does not copy (U12) is <c>not supported</c>, as the copy that brings it into the supervisor's heap is not built.
     /// </summary>
     private bool CheckCrashBlock(CrashPolicy policy, ClassSymbol child)
@@ -682,10 +693,16 @@ public sealed partial class Checker
         ReportUnused(frame.Scope);
         var block = frame;
         frame = outer;
-        var reported = Pop(commit: reasons is not null).Count > 0;
+        var popped = Pop(commit: reasons is not null && !quietBlocks);
+        if (reasons is not null && !quietBlocks && popped.Any(d => d.IsError))
+        {
+            blockErrors.UnionWith(popped.Where(d => d.IsError));
+            erringBlocks.Add(policy);
+        }
+
         model.RecordLambda(l, new LambdaInfo([parameter], block.Captures.ToList(), new FunctionType([type], Types.Void)));
         model.RecordCrashReason(type.TypeArguments[0]);
-        return reported && reasons is not null;
+        return popped.Count > 0 && reasons is not null && !quietBlocks;
     }
 
     /// <summary>
@@ -706,8 +723,8 @@ public sealed partial class Checker
 
     /// <summary>
     /// U30: the types of a <c>Reason</c> the reading before found, with the symbols of this reading: a type of the file, of the built-in
-    /// types among them, by the symbol this reading made of its declaration, and a type of <c>std/</c>, whose checker both readings share, as
-    /// it is.
+    /// types among them, an actor's reference by its actor's class, which the file's classes hold, by the symbol this reading made of its
+    /// declaration, and a type of <c>std/</c>, whose checker both readings share, as it is.
     /// </summary>
     private List<KurzType> Translated(IReadOnlyList<KurzType> types) => types.Select(Translated).ToList();
 
@@ -715,6 +732,7 @@ public sealed partial class Checker
     {
         DataType d => new DataType(dataTypes.TryGetValue(d.Symbol.Name, out var s) && ReferenceEquals(s.Declaration, d.Symbol.Declaration) ? s : d.Symbol, d.TypeArguments.Select(Translated).ToList()),
         ClassType c => new ClassType(classes.TryGetValue(c.Symbol.Name, out var s) && ReferenceEquals(s.Declaration, c.Symbol.Declaration) ? s : c.Symbol),
+        ActorType a => new ActorType(classes.TryGetValue(a.Symbol.Name, out var s) && ReferenceEquals(s.Declaration, a.Symbol.Declaration) ? s : a.Symbol),
         EnumType e => new EnumType(enums.TryGetValue(e.Symbol.Name, out var s) && ReferenceEquals(s.Declaration, e.Symbol.Declaration) ? s : e.Symbol),
         FlagsType f => new FlagsType(flagsTypes.TryGetValue(f.Symbol.Name, out var s) && ReferenceEquals(s.Declaration, f.Symbol.Declaration) ? s : f.Symbol),
         InterfaceType i => new InterfaceType(interfaces.TryGetValue(i.Symbol.Name, out var s) && ReferenceEquals(s.Declaration, i.Symbol.Declaration) ? s : i.Symbol),

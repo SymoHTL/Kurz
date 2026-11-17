@@ -9,8 +9,8 @@ metadata:
 
 A call of more than one copy keeps one memo for all its copies (U12), and the memo holds a count of
 each block it maps until the call's last copy, so that no block made meanwhile takes the address of
-one it maps (section 6 of the design record). Pull request 550 proved that count red with mutation
-M16: the count taken off, none let go of.
+one it maps (section 6 of the design record). Pull request 550, before its merge on 2026-11-16, proved
+that count red with mutation M16: the count taken off, none let go of.
 
 Its case was `Pair(copy h.B, copy Swap(h))`, where `Swap` replaces `h.B` before the second copy. The
 mutation stayed NOT RED. The argument `h.B` is a field read, "which a statement holds to its end
@@ -19,7 +19,8 @@ field frees nothing the statement reads (the rule "A value the emitter borrows n
 source unchanged" of `CLAUDE.md`). The block stayed alive through the statement's own hold, no new
 block could take its address, and the memo's count changed nothing a run could see.
 
-The case `corpus/actors/copy-memo-keeps-block.kz` now reaches the block through its holder alone:
+Pull request 550 changed the case `corpus/actors/copy-memo-keeps-block.kz` before its merge, so that it
+reaches the block through its holder alone:
 `Pair(copy h, copy Swap(h))`. Nothing in the statement holds `h.B`, so `Swap` frees it while the
 call's session is open, while only the memo's count keeps its address from a block made meanwhile,
 and M16 turned the case red. The whole batch, M13 to M18, ran again, each mutation red.

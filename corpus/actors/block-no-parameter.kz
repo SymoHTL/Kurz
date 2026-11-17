@@ -1,0 +1,11 @@
+// expect: error syntax at 8
+// rules: U28
+
+actor Worker {
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash {
+    stop
+}
+print(w.Ping())

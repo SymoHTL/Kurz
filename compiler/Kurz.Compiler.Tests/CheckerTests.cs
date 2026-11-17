@@ -7626,6 +7626,10 @@ public sealed class CheckerTests
         // each of the two errors names the loop that took the list by its line, 10 and 5, beside the line of the `move`, 11 and 6
         Assert.Contains("line 10", Assert.Single(Check(Say + "names = [\"a\", \"b\"]\nfor s in names {\n    Say(move s)\n}\nprint(names)\n").Diagnostics.Items).Message, StringComparison.Ordinal);
         Assert.Contains("line 5", Assert.Single(Check("void Two(move string s, int n) {\n}\n\nnames = [\"a\"]\nfor s in names {\n    Two(move s, names.Count)\n    break\n}\n").Diagnostics.Items).Message, StringComparison.Ordinal);
+        // two loops over the list on two branches both reach the read after them, which names both loops by their lines, 11 and 15
+        const string Branches = "names = [\"a\", \"b\"]\nif names.Count > 1 {\n    for s in names {\n        Say(move s)\n    }\n} else {\n    for s in names {\n        Say(move s)\n    }\n}\nprint(names)\n";
+        Assert.Equal([(ErrorIds.UsedAfterMove, 19)], Errors(Say + Branches));
+        Assert.Contains("loops at line 11 and line 15", Assert.Single(Check(Say + Branches).Diagnostics.Items).Message, StringComparison.Ordinal);
         Assert.Equal([(ErrorIds.MoveReachable, 11)], Errors(Say + "void All(List<string> names) {\n    for s in names {\n        Say(move s)\n    }\n}\n\nAll([\"a\"])\n"));
         NotSupportedAt(10, "U12", Say + "for n in 0..<2 {\n    Num(move n)\n}\n");
         NotSupportedAt(12, "U12", Say + "mut m = Map<string, string>()\nm[\"a\"] = \"b\"\nfor k, v in m {\n    Say(move k)\n}\n");
@@ -7821,15 +7825,50 @@ public sealed class CheckerTests
     public void A_reason_that_grows_by_what_the_blocks_read_is_not_supported()
     {
         // U30: a block that throws its own `c`, whose child is the actor that spawns it, adds a `Crashed` of the `Reason` it reads to that
-        // `Reason` at each reading, which settles at none; the program is read four times and the block is `not supported`
+        // `Reason` at each reading, which settles at none; the program is read five times, the first and four more, and the block is `not
+        // supported`, its message naming the five
         var (diagnostics, _) = CheckSeeingStd("actor A {\n    pub void Go() {\n        a = spawn A() on crash (c) {\n            throw c\n        }\n\n        send a.Go()\n    }\n}\n\nsend spawn A().Go()\n");
         var only = Assert.Single(diagnostics.Items);
         Assert.False(only.IsError);
         Assert.Equal(3, only.Line);
         Assert.EndsWith("(U30)", only.Message);
+        Assert.Matches(@"\b5\b", only.Message);
 
         // the positive control: a block that throws a value of its own settles at the second reading
         Assert.Empty(ErrorsSeeingStd("data Again(int N)\n\nactor A {\n    pub void Go() {\n        a = spawn A() on crash (c) {\n            throw Again(1)\n        }\n\n        send a.Go()\n    }\n}\n\nsend spawn A().Go()\n"));
+    }
+
+    [Fact]
+    public void A_reason_that_holds_an_actors_reference_settles_and_its_arm_matches_it()
+    {
+        // U30: a child that throws a reference to an actor has that actor's type in its `Reason`, the same type at every reading, so that
+        // the readings settle and the block's arm of the type matches it (the reading of 558's round at the cap, `Translated`)
+        const string Throwing = "actor Other {\n    pub int Ping() => 1\n}\n\nactor Worker {\n    pub void Fail() {\n        o = spawn Other()\n        throw o\n    }\n}\n\n";
+        Assert.Empty(ErrorsSeeingStd(Throwing + "w = spawn Worker() on crash (c) {\n    stop\n}\nsend w.Fail()\n"));
+        Assert.Empty(ErrorsSeeingStd(Throwing + "w = spawn Worker() on crash (c) {\n    match c.Reason {\n        Other o => print(o.Ping())\n        RuntimeError e => print(e.Kind)\n    }\n\n    stop\n}\nsend w.Fail()\n"));
+    }
+
+    /// <summary>A child, <c>Mid</c>, whose block of the crash of its own child throws an <c>EInner</c> (U32), and the line the program after it starts at, 19.</summary>
+    private const string Middle = "data EInner(int Code)\n\nactor Grand {\n    pub void Fail() {\n        throw \"grand fails\"\n    }\n}\n\nactor Mid {\n    pub void Go() {\n        g = spawn Grand() on crash (c) {\n            throw EInner(3)\n        }\n\n        send g.Fail()\n    }\n}\n\n";
+
+    [Fact]
+    public void A_block_whose_errors_stand_on_a_reason_not_yet_settled_is_read_again_until_it_settles()
+    {
+        // U30, U32: `Mid`'s `Reason` gains `EInner` from the body of its block, which the first reading leaves out, so the second reading
+        // reads the top-level block's arm `EInner e` against a `Reason` without it; a reading whose errors stand in blocks alone is read
+        // again, and what is reported is the reading's where the `Reason`s settle: none here
+        Assert.Empty(ErrorsSeeingStd(Middle + "m = spawn Mid() on crash (c) {\n    match c.Reason {\n        EInner e => print(e.Code)\n        string s => print(s)\n        RuntimeError e => print(e.Kind)\n    }\n\n    stop\n}\nsend m.Go()\n"));
+
+        // an error of a block that stands where the `Reason`s settle is reported at its line: a `Mid` whose block throws nothing has no
+        // `EInner` in its `Reason`
+        var quiet = Middle.Replace("throw EInner(3)", "stop", StringComparison.Ordinal);
+        Assert.Equal([(ErrorIds.TypeMismatch, 21)], ErrorsSeeingStd(quiet + "m = spawn Mid() on crash (c) {\n    match c.Reason {\n        EInner e => print(e.Code)\n        string s => print(s)\n        RuntimeError e => print(e.Kind)\n    }\n\n    stop\n}\nsend m.Go()\n"));
+
+        // a block whose body holds an error is read again without its body in the sets, which read no part of it, and its error is reported
+        Assert.Equal([(ErrorIds.UnknownName, 12)], ErrorsSeeingStd(Thrower + "w = spawn Worker() on crash (c) {\n    throw Nothing(1)\n}\nprint(w.Get())\n"));
+
+        // an error outside the blocks ends the readings as it did, and is reported at its line
+        Assert.Contains((ErrorIds.TypeMismatch, 29), ErrorsSeeingStd(Middle + "m = spawn Mid() on crash (c) {\n    match c.Reason {\n        EInner e => print(e.Code)\n        string s => print(s)\n        RuntimeError e => print(e.Kind)\n    }\n\n    stop\n}\nsend m.Go()\nint k = \"no\"\n"));
     }
 
     [Theory]
@@ -7902,8 +7941,8 @@ public sealed class CheckerTests
     {
         // U12: `send-needs-word` at the argument, through a reference, in a `send` and at `spawn` of a constructor's argument, the argument named
         // in the text, by section 6's assumed point that each new compile error's text names its id, the argument and the fix in one line
-        // (E2 holds a corpus case to an error's id and line, and this is no case), and `copy` before each makes it cross (the owner, 2026-11-15, #519, comment 6896192351, Q6); a `move` is the build's
-        // `not supported` (What_this_build_does_not_make_cross_is_not_supported)
+        // (E2 holds a corpus case to an error's id and line, and this is no case), and `copy` before each makes it cross (the owner, 2026-11-15, #519, comment 6896192351, Q6), and `move` before each makes it cross too
+        // (`corpus/actors/move-mutable.kz`), `move-reachable` and `move-at-call` where it cannot
         const string Box = "class Box(mut int N)\n\nactor A(Box B) {\n    pub void Take(Box b) {\n        print(b.N)\n    }\n}\n\nitem = Box(1)\n";
         Assert.Equal([(ErrorIds.SendNeedsWord, 10)], Errors(Box + "a = spawn A(item)\n"));
         Assert.Equal([(ErrorIds.SendNeedsWord, 11)], Errors(Box + "a = spawn A(copy item)\na.Take(item)\n"));
@@ -7997,15 +8036,27 @@ public sealed class CheckerTests
         Assert.EndsWith("(U12)", refused.Message, StringComparison.Ordinal);
         Assert.Empty(CheckSeeingStd(Give.Replace("@", "HttpHeaders", StringComparison.Ordinal)).Diagnostics.Items);
 
-        // the walk reads a list's items, a map's values, a union's cases, a `?` among them, a data value's fields, a type argument a data
-        // value met before holds, a class of the file's fields and a weak reference's target, in a list, since no parameter is written `weak`
+        // the walk reads a list's items, a map's keys and values, a union's cases, a `?` among them, a data value's fields, a type argument
+        // a data value met before holds, a class of the file's fields and a weak reference's target, in a list, since no parameter is
+        // written `weak`
         NotSupportedAt(8, "U12", Give.Replace("@", "List<File>", StringComparison.Ordinal));
         NotSupportedAt(8, "U12", Give.Replace("@", "Map<string, Sha256>", StringComparison.Ordinal));
+        NotSupportedAt(8, "U12", Give.Replace("@", "Map<Keeper, int>", StringComparison.Ordinal) + "\nclass Keeper(mut File F)\n"); // a key compared by identity (K4)
         NotSupportedAt(8, "U12", Give.Replace("@", "File?", StringComparison.Ordinal));
         NotSupportedAt(8, "U12", Give.Replace("@", "Holder", StringComparison.Ordinal) + "\ndata Holder(File F)\n");
         NotSupportedAt(8, "U12", Give.Replace("@", "Wrap<Wrap<File>>", StringComparison.Ordinal) + "\ndata Wrap<T>(T A)\n");
         NotSupportedAt(8, "U12", Give.Replace("@", "Keeper", StringComparison.Ordinal) + "\nclass Keeper(File F)\n");
         NotSupportedAt(8, "U12", Give.Replace("@", "List<weak Keeper?>", StringComparison.Ordinal) + "\nclass Keeper(File F)\n");
+
+        // a value of a type parameter, read on its function's text, is the limit after `move` too, since the copy of the function for a
+        // `Sha256` or a `File` would share the sender's block (probed: the sender's crash and restart, then the receiver's call of the
+        // lambda, ended with exit 139 under the fenced allocator): captured by a lambda of a message, held in a list a lambda captures,
+        // and captured by a lambda among a `spawn`'s arguments; a lambda that captures no such value crosses
+        const string Generic = "actor A {\n    pub void Run(() => int f) {\n        print(f())\n    }\n}\n\nint One<T>(T x) => 1\n\n";
+        NotSupportedAt(10, "U12", Generic + "void Give<T>(A a, move T x) {\n    send a.Run(move () => One(x))\n}\n");
+        NotSupportedAt(11, "U12", Generic + "void Give<T>(A a, move T x) {\n    xs = [x]\n    send a.Run(move () => xs.Count)\n}\n");
+        NotSupportedAt(13, "U12", Generic + "actor B(() => int F) {\n}\n\nvoid Start<T>(move T x) {\n    b = spawn B(move () => One(x))\n    print(b)\n}\n");
+        Clean(Generic + "void Give<T>(A a, T x) {\n    n = One(x)\n    send a.Run(move () => n)\n}\n");
     }
 
     [Fact]

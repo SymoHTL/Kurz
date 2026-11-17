@@ -1,7 +1,7 @@
 // expect: output
 // | type's block at 13
 // | 1
-// rules: U31
+// rules: U27, U30, U31
 
 string Note(int line) => "type's block at {line}"
 

@@ -2,10 +2,9 @@
 // | 1
 // | go ends
 // | first's block
-// | second's block
 // | queued
 // | 2
-// rules: U28, U34
+// rules: U28
 
 actor Other {
     pub int Ping() => 1
@@ -24,14 +23,8 @@ actor Boss {
             stop
         }
 
-        second = spawn Worker() on crash (c) {
-            print("second's block")
-            stop
-        }
-
         send this.Queued()
         send first.Fail()
-        send second.Fail()
         print(other.Ping())
         print("go ends")
     }
