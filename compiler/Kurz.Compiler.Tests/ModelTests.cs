@@ -11,11 +11,12 @@ namespace Kurz.Compiler.Tests;
 /// word, whose wakes, takes and ends of a hold say whether a thread holds the actor and whether an entry of it stands in the run queue,
 /// and the reply of a call that waits, which its callee and the crash of its waiter each take by one atomic swap. Each move of a model
 /// is one atomic operation of the runtime, or one plain read or write that no other thread races, and names the function of
-/// <c>runtime/common/runtime.kz</c> it transcribes, with the text of the atomic operation it is there; a test holds every name and
-/// every such text to that file, a guard against a model that says what the runtime no longer does. The explorer runs every
+/// <c>runtime/common/runtime.kz</c> it transcribes, with the text of the atomic operation it is there and the texts of the masks of
+/// the state word's bits it decides by; a test holds every name and every such text to that file, a guard against a model that says
+/// what the runtime no longer does, so that a change of one of those lines, which one thread cannot show, turns it red. The explorer runs every
 /// interleaving of two or three threads, each state once, and finds no lost wake (a message queued or a reply set always leads to the
 /// actor or the waiter running), no two owners of a reply, no two threads holding one actor, no message while its constructor runs
-/// (U3), and no owner of a reply that reads or writes the waiter's frame once it is gone; and it finds each of these broken in a model
+/// (U3) or before its restart (U22), and no owner of a reply that reads or writes the waiter's frame once it is gone; and it finds each of these broken in a model
 /// broken so, the cases of <see cref="Break"/>. Its moves are sequentially consistent: the orders of the runtime's atomic operations,
 /// acquire and release, are the IR's to show (<c>EmitterTests</c>), not the explorer's.
 /// </summary>
@@ -53,14 +54,17 @@ public sealed class ModelTests
 
         /// <summary>The crash gives the waiter's stack back at once where the callee took the reply first.</summary>
         CrashLeavesAtOnce,
+
+        /// <summary>A restart holds the actor by its compare-exchange whether a take holds it or not.</summary>
+        RestartHoldsNothing,
     }
 
     /// <summary>
     /// One atomic move of a strand: the runtime's function it transcribes, the text of that function it is, its atomic operation where it
-    /// is one, null where the function's name alone is held, whether it can be made in a state, and what it does, which sets the strand's
-    /// place.
+    /// is one, null where the function's name alone is held, whether it can be made in a state, what it does, which sets the strand's
+    /// place, and the texts of that function that decide what it does, the masks of the state word's bits among them.
     /// </summary>
-    private sealed record Move(string Function, string? Text, Func<int[], bool> Can, Action<int[]> Make);
+    private sealed record Move(string Function, string? Text, Func<int[], bool> Can, Action<int[]> Make, string[]? Rules = null);
 
     /// <summary>A thread of a model: its name, the word of the state that holds its place, -1 once it ended, and its moves by place.</summary>
     private sealed record Strand(string Name, int Place, Move[] Moves);
@@ -139,10 +143,11 @@ public sealed class ModelTests
     // threads that hold it, whether its constructor ended, whether a message started while it ran; then the reply's: whether the
     // message names the reply, whether the message is queued, whether the reply names its waiter, the reply's word, the owners of the
     // reply, whether the waiter's frame is gone, whether the waiter parked, returned or crashed, and whether an owner of the reply read
-    // or wrote the frame once it was gone. Each strand's words follow: its place, the word it read, what `Ready` gave, a register.
+    // or wrote the frame once it was gone; and the actor's life, 1 while it waits for its restart. Each strand's words follow: its
+    // place, the word it read, what `Ready` gave, a register.
     private const int Word = 0, Entries = 1, Mail = 2, Holders = 3, Built = 4, Early = 5;
     private const int Hook = 6, Published = 7, Waiter = 8, Answer = 9, Owners = 10, Gone = 11, Parked = 12, Returned = 13, Crashed = 14;
-    private const int Touched = 15, Shared = 16, Own = 4;
+    private const int Touched = 15, Life = 16, Shared = 17, Own = 4;
 
     /// <summary>A first state: the shared words zero but those given, each strand at its place 0 but those given.</summary>
     private static int[] Start(int strands, params (int Word, int Value)[] set)
@@ -160,12 +165,14 @@ public sealed class ModelTests
     private static int At(int n) => Shared + n * Own;
 
     /// <summary>
-    /// <c>Enqueue</c>'s append of a message to the inbox, one move, as a queue of many senders appends; then the wake: one atomic
-    /// <c>or</c> of QUEUED, and where the mark was clear the entry put in the run queue (<c>Wake</c>, <c>Queue</c>).
+    /// <c>Enqueue</c>'s append of a message to the inbox, one move, as a queue of many senders appends, with its read of the actor's life;
+    /// then, where the actor does not wait for its restart, the wake: one atomic <c>or</c> of QUEUED, and where the mark was clear the
+    /// entry put in the run queue (<c>Wake</c>, <c>Queue</c>).
     /// </summary>
     private static Strand Sender(string name, int at) => new(name, at,
     [
-        new("Enqueue", "Append(state - 32, message)", _ => true, s => { s[Mail]++; s[at] = 1; }),
+        new("Enqueue", "Append(state - 32, message)", _ => true, s => { s[Mail]++; s[at] = s[Life] != 0 ? -1 : 1; },
+            ["if life != 1 && life != 5 {"]),
         .. Woken(at, 1, -1),
     ]);
 
@@ -177,7 +184,7 @@ public sealed class ModelTests
             var before = s[Word];
             s[Word] |= Queued;
             s[at] = (before & Queued) == 0 ? from + 1 : then;
-        }),
+        }, ["if (before & 2) == 0 {"]),
         new("Queue", "runLast = state", _ => true, s => { s[Entries]++; s[at] = then; }),
     ];
 
@@ -212,7 +219,7 @@ public sealed class ModelTests
                 s[Word] = (seen & ~Queued) | Running;
                 s[Holders]++;
                 s[at] = held;
-            }),
+            }, ["held = (seen & 9) != 0", "mut int wanted = (seen & ~2) | 1", "wanted = (seen & ~2) | 4"]),
         ];
     }
 
@@ -239,33 +246,64 @@ public sealed class ModelTests
             s[Word] = (seen & ~(Running | Notified)) | (queue ? Queued : 0);
             s[Holders]--;
             s[at] = queue ? from + 2 : then(s);
-        }),
+        }, ["queue = (seen & 2) == 0 && ((seen & 4) != 0 || ready)", "mut int wanted = seen & ~5", "wanted = wanted | 2"]),
         new("Queue", "runLast = state", _ => true, s => { s[Entries]++; s[at] = then(s); }),
     ];
 
     /// <summary>
     /// A thread of the scheduler: the take of an entry and the hold (<c>RunOne</c>, <c>Claimed</c>), the first message of the inbox
-    /// started where it holds the actor (<c>RunOne</c>), <c>Ready</c> read after the switch back, and the end of the hold
-    /// (<c>LetGo</c>); then another entry. One that starts at the place 4 holds the actor already, its message ran.
+    /// started where it holds the actor and the actor does not wait for its restart (<c>RunOne</c>), <c>Ready</c> read after the switch
+    /// back, and the end of the hold (<c>LetGo</c>); then another entry. One that starts at the place 4 holds the actor already, its
+    /// message ran.
     /// </summary>
     private static Strand Runner(string name, int at, Break broken) => new(name, at,
     [
         .. Taken(at, 0, 3, broken),
         new("RunOne", "Start(state, Taken(state - 32), null)", _ => true, s =>
         {
-            if (s[Mail] > 0)
+            if (s[Mail] > 0 && s[Life] == 0)
             {
                 s[Mail]--;
-                s[Early] |= s[Built] == 0 ? 1 : 0;
+                s[Early] |= s[Built] == 0 || s[Life] != 0 ? 1 : 0;
                 s[at] = 4;
                 return;
             }
 
             s[at + 2] = 0;
             s[at] = 5;
-        }),
+        }, ["if life == 1 || life == 3 || life == 5 {"]),
         new("Ready", "return *Ptr<byte*>(state - 32) != null", _ => true, s => { s[at + 2] = s[Mail] > 0 ? 1 : 0; s[at] = 5; }),
         .. LetGone(at, 5, _ => 0, broken),
+    ]);
+
+    /// <summary>
+    /// The restart of the actor, whose pause ended while it waits for its restart (<c>Restart</c>): the hold outside the run queue
+    /// (<c>HeldAlone</c>: a load, then a compare-exchange that sets RUNNING from a word in which no thread holds it, made again on what it
+    /// found, and waiting while a take holds it), the life set to 0, the restart's message run, <c>Ready</c> read after the switch back,
+    /// and the end of the hold (<c>LetGo</c>).
+    /// </summary>
+    private static Strand Restarter(int at, Break broken) => new("restarter", at,
+    [
+        new("Restart", "HeldAlone(state)", _ => true, s => { s[at] = 1; }),
+        new("HeldAlone", "word.Load(MemoryOrder.Acquire)", _ => true, s => { s[at + 1] = s[Word]; s[at] = 2; }),
+        new("HeldAlone", "Exchanged(word, seen, seen | 1)",
+            s => broken == Break.RestartHoldsNothing || (s[at + 1] & Running) == 0 || s[Word] != s[at + 1], s =>
+            {
+                var seen = s[at + 1];
+                if (s[Word] != seen)
+                {
+                    s[at + 1] = s[Word];
+                    return;
+                }
+
+                s[Word] = seen | Running;
+                s[Holders]++;
+                s[at] = 3;
+            }, ["if (seen & 1) == 0 {"]),
+        new("Restart", "*Ptr<int>(state - 88) = 0", _ => true, s => { s[Life] = 0; s[at] = 4; }),
+        new("Restart", "Start(state, message, null)", _ => true, s => { s[at] = 5; }),
+        new("Ready", "return *Ptr<byte*>(state - 32) != null", _ => true, s => { s[at + 2] = s[Mail] > 0 ? 1 : 0; s[at] = 6; }),
+        .. LetGone(at, 6, _ => -1, broken),
     ]);
 
     /// <summary>
@@ -288,14 +326,14 @@ public sealed class ModelTests
             s[Word] = (seen & ~(Building | Notified)) | (queue ? Queued : 0);
             s[Built] = 1;
             s[at] = queue ? 2 : -1;
-        }),
+        }, ["queue = (seen & 6) == 4", "mut int wanted = seen & ~12", "wanted = wanted | 2"]),
         new("Queue", "runLast = state", _ => true, s => { s[Entries]++; s[at] = -1; }),
     ]);
 
     /// <summary>What every state of a model keeps.</summary>
     private static string? Always(int[] s) =>
         s[Holders] > 1 ? "two threads hold the actor"
-        : s[Early] != 0 ? "a message started while the actor's constructor ran"
+        : s[Early] != 0 ? "a message started while the actor's constructor ran or before its restart"
         : s[Owners] > 1 ? "two owners of the reply"
         : s[Touched] != 0 ? "an owner of the reply read or wrote the waiter's frame once it was gone"
         : null;
@@ -320,13 +358,18 @@ public sealed class ModelTests
         // two senders, one thread
         new("two wakes", Start(3, (Built, 1)),
             [Sender("first", At(0)), Sender("second", At(1)), Runner("runner", At(2), broken)], Always, WordAtRest),
+
+        // a restart while an entry of the actor, queued before its crash, stands in the run queue with a message in its inbox, and a
+        // message sent meanwhile: a take passes the actor over while it waits for its restart, and the restart waits for that take
+        new("a take while a restart starts", Start(3, (Built, 1), (Life, 1), (Word, Queued), (Entries, 1), (Mail, 1)),
+            [Restarter(At(0), broken), Runner("runner", At(1), broken), Sender("sender", At(2))], Always, WordAtRest),
     ];
 
     /// <summary>
     /// The waiter of a call, whose thread holds its actor at the start: the reply's waiter stored (<c>ReplyWaiter</c>) and the message
     /// queued (<c>Enqueue</c>), the reply's word read (<c>Wait</c>), and where it is 0 the activation parked: <c>Ready</c> and the end of
-    /// the hold; then the takes of the actor's entries, each resuming the activation where the word is set (<c>RunOne</c>), until it
-    /// returned or crashed.
+    /// the hold; then the takes of the actor's entries, each resuming the activation where the word is set (<c>RunOne</c>), as long as it
+    /// neither returned nor crashed.
     /// </summary>
     private static Strand Waiting(int at, Break broken)
     {
@@ -509,6 +552,7 @@ public sealed class ModelTests
     [InlineData(Break.BuiltQueuesNothing, "a wake while the constructor runs", "a lost wake")]
     [InlineData(Break.WaiterReadAfterStore, "a call and its answer", "once it was gone")]
     [InlineData(Break.CrashLeavesAtOnce, "a call, its answer and the crash of its waiter", "once it was gone")]
+    [InlineData(Break.RestartHoldsNothing, "a take while a restart starts", "two threads hold the actor")]
     public void The_explorer_finds_each_break_of_a_model_in_the_model_it_breaks(Break broken, string name, string what)
     {
         // each break found in the model it breaks, with the moves that reach it: the explorer's own red proof
@@ -523,8 +567,8 @@ public sealed class ModelTests
     [Fact]
     public void Each_move_of_the_models_names_a_function_of_the_runtime_and_the_text_it_transcribes_in_its_order()
     {
-        // the guard against drift: every function a move names is declared in runtime/common/runtime.kz, the text a move transcribes
-        // stands in that function's body, and two moves of one function in a strand, one after the other, stand in that order there
+        // the guard against drift: every function a move names is declared in runtime/common/runtime.kz, the text a move transcribes and
+        // the texts it decides by stand in that function's body, and the moves of one function in a strand stand in their order there
         var text = Encoding.UTF8.GetString(Runtime.Files.Single(f => f.Path == "runtime/common/runtime.kz").Bytes).ReplaceLineEndings("\n");
         string Body(string function)
         {
@@ -541,26 +585,29 @@ public sealed class ModelTests
         {
             var body = Body(move.Function);
             Assert.True(move.Text is null || body.Contains(move.Text, StringComparison.Ordinal), $"`{move.Function}` holds no `{move.Text}`, which a move of the models transcribes");
-        }
-
-        var ordered = 0;
-        foreach (var strand in strands)
-        {
-            for (var k = 1; k < strand.Moves.Length; k++)
+            foreach (var rule in move.Rules ?? [])
             {
-                var (before, after) = (strand.Moves[k - 1], strand.Moves[k]);
-                if (before.Function != after.Function || before.Text is null || after.Text is null)
-                {
-                    continue;
-                }
-
-                var body = Body(after.Function);
-                Assert.True(body.IndexOf(before.Text, StringComparison.Ordinal) < body.IndexOf(after.Text, StringComparison.Ordinal),
-                    $"`{after.Function}` holds `{after.Text}` before `{before.Text}`, against the order of the moves of {strand.Name}");
-                ordered++;
+                Assert.True(body.Contains(rule, StringComparison.Ordinal), $"`{move.Function}` holds no `{rule}`, which a move of the models decides by");
             }
         }
 
-        Assert.True(ordered >= 6, $"{ordered} pairs of moves in order");
+        Assert.True(moves.SelectMany(m => m.Rules ?? []).Distinct().Count() >= 12, "the texts the moves decide by");
+        var ordered = 0;
+        foreach (var strand in strands)
+        {
+            foreach (var function in strand.Moves.Where(m => m.Text is not null).GroupBy(m => m.Function))
+            {
+                var texts = function.Select(m => m.Text!).Distinct().ToList();
+                var body = Body(function.Key);
+                for (var k = 1; k < texts.Count; k++)
+                {
+                    Assert.True(body.IndexOf(texts[k - 1], StringComparison.Ordinal) < body.IndexOf(texts[k], StringComparison.Ordinal),
+                        $"`{function.Key}` holds `{texts[k]}` before `{texts[k - 1]}`, against the order of the moves of {strand.Name}");
+                    ordered++;
+                }
+            }
+        }
+
+        Assert.True(ordered >= 12, $"{ordered} pairs of moves in order");
     }
 }

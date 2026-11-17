@@ -3293,7 +3293,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // U3, U28: `Boss`'s constructor spawns `Worker`, whose crash posts its block to `Boss` while that constructor waits on `Other`;
         // a thread that takes `Boss`'s entry then finds it BUILDING in its state word and leaves it NOTIFIED, and `ActorBuilt` queues it
-        // again at the constructor's end, so that the block runs after `spawn Boss(o)` returned, in the top-level code's next wait, as
+        // again at the constructor's end, so that the block runs after `spawn Boss(o)` returned, in the top-level code's wait after it, as
         // no message starts before its actor's `spawn` returns, and its log line is written at its decision
         const string text = """
             actor Worker {

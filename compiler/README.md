@@ -498,7 +498,8 @@ a function on a fresh stack with a return address of zero, where an unwinder's w
 `RunOne` takes the first actor of the run queue and holds it by a compare-exchange of its state word
 that sets RUNNING (`Claimed`), or, where a thread holds it or its constructor runs, sets NOTIFIED and
 leaves it to its holder, which queues it again as it lets go (`LetGo`), or to `ActorBuilt` at the
-constructor's end: the first message of an idle actor's inbox starts on
+constructor's end, and a restart holds it outside the queue by a compare-exchange from a word no thread
+holds (`HeldAlone`), waiting while a take holds it: the first message of an idle actor's inbox starts on
 a stack of its thread's pool, the first call of the side list of an actor that waits starts on another
 above the activation it waits in, and an activation whose reply is set goes on, each by a switch from
 the thread's side, where `ActorStart`, a stack's entry, runs the message and switches back. A stack

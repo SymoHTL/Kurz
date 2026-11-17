@@ -3485,7 +3485,7 @@ pub void HeapLeft(byte* heap) {
 // section 6 has it (assumed there): its reference is the spawner's once `spawn` returns, and a default of
 // its body reads neither `this` nor its methods (K7). The record names the name of the actor's type,
 // `name`, for the log line of its crash (U24), the block `side` of its restart (U22), and its supervisor,
-// the actor whose code spawns it (`Supervisor`), and says that its constructor runs until `ActorBuilt`, in
+// the actor whose code spawns it (`Supervisor`), and says that its constructor runs, to `ActorBuilt`, in
 // its life and in its state word (BUILDING).
 pub byte* ActorNew(byte* heap, long size, long stack, byte* side, byte* name) {
     sys.Entered()
@@ -4775,19 +4775,45 @@ void Unpause(byte* state) {
     }
 }
 
+// The hold of the actor whose reference is `state` by a thread that takes it outside the run queue, a restart's
+// (`Restart`): RUNNING set by a compare-exchange from a word in which no thread holds it, made again on what it
+// found, and waited for where a take holds it, which lets go at once of an actor that waits for its restart
+// (`RunOne`), as tokio's `transition_to_running` refuses a task that another worker runs (not checked at
+// source), so that no two threads hold one actor.
+void HeldAlone(byte* state) {
+    AtomicInt word = StateWord(state)
+    mut int seen = 0
+    raw {
+        seen = word.Load(MemoryOrder.Acquire)
+    }
+
+    mut bool stored = false
+    while !stored {
+        if (seen & 1) == 0 {
+            int found = Exchanged(word, seen, seen | 1)
+            stored = found == seen
+            seen = found
+        } else {
+            raw {
+                seen = word.Load(MemoryOrder.Acquire)
+            }
+        }
+    }
+}
+
 // The restart of the actor whose reference is `state`, the first of the queue of the pauses, whose pause
 // ended (U22): its constructor run again in an activation of its own, before any message of its inbox, on a
 // copy of the kept arguments of its `spawn` (section 6, Q13), by the function the first word of the block of
 // its restart names, which takes the block as a message's table and the actor's heap; the runtime runs it,
 // and no message of the supervisor does (section 6, assumed there), the thread holding the actor (RUNNING in
-// its state word) outside the run queue, where an entry of it can still stand. A crash there is the actor's
-// own (U3).
+// its state word, `HeldAlone`) outside the run queue, where an entry of it can still stand, before the actor
+// runs again. A crash there is the actor's own (U3).
 void Restart(byte* state) {
+    HeldAlone(state)
     raw {
         byte* side = *Ptr<byte*>(state - 80)
         paused = *Ptr<byte*>(side + 40)
         *Ptr<int>(state - 88) = 0
-        StateWord(state).FetchOr(1, MemoryOrder.AcqRel)
         *Ptr<long>(side + 24) = PauseClock()
         byte* message = AllocateIn(*Ptr<byte*>(state - 64), 40)
         *Ptr<byte*>(message) = null
