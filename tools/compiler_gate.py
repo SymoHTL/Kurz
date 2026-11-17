@@ -47,7 +47,12 @@ CWD = "compiler"  # the working directory of the command: the dotnet host reads 
 SOLUTION = "Kurz.sln"  # relative to CWD
 CONFIG = "compiler/NuGet.config"
 FLOOR = 1000  # below the tests the suites hold, above what is left without either corpus theory (over 300 cases each): a run that lost a project or a corpus theory cannot pass
-TIMEOUT = 900  # seconds for restore, build and tests together
+TIMEOUT = 1200  # seconds for restore, build and tests together: the Windows job's run took up to 864 s and met 900 twice on 2026-11-17 (runs 43985873704 and 43999911148, both green when run again)
+# the workflows whose job runs this gate, each with the seconds that job spends outside it: compiler-windows and compiler-arm run it
+# alone, after the checkout, the cache of LLVM's archive and the SDK (about 100 s on 2026-11-17); gates runs it among every other
+# gate, in its container, and the slowest run seen spent 681 s outside it, 641 s of them in the replay of the red proofs (run
+# 43999911205, 2026-11-17, whose job took 23 min 44 s of the 25 it had then)
+JOBS = {"compiler-windows.yml": 120, "compiler-arm.yml": 120, "gates.yml": 900}
 COMMAND = ["dotnet", "test", SOLUTION, "--nologo", "-c", "Release", "-p:RestoreLockedMode=true", "--disable-build-servers"]
 # the tests of the actors' stacks and of `naked` on 64-bit Arm, which the workflow compiler-arm runs natively (design record,
 # section 2; the owner, 2026-11-15, #519, comment 6892835500, Q8, "GitHub Arm runner job"): the actors, the check of the runtime
@@ -124,6 +129,13 @@ def judge_version(code, output, error):
     if not CLANG_RELEASE.search(output):
         return ["kurz --version exited 0 and named no clang release: nothing was proven"]
     return []
+
+
+def job_limit(text):
+    """The seconds of the one `timeout-minutes` a workflow holds, or 0 where it holds none or more than one: a second job's
+    limit or a step's could stand in for the limit of the job that runs this gate, so the budget case reads neither."""
+    found = re.findall(r"^\s+timeout-minutes:\s*(\d+)\s*$", text, re.M)
+    return int(found[0]) * 60 if len(found) == 1 else 0
 
 
 def judge(code, output, floor=FLOOR):
@@ -215,6 +227,16 @@ def self_test():
     case("a skipped test is red", 0, GREEN.replace("Skipped:     0", "Skipped:     1"), "skipped")
     case("fewer passed tests than the floor is red", 0, GREEN.replace("Passed:  1263", "Passed:   999"), "floor is")
     cases.append(("the floor is at least 1000 tests", FLOOR >= 1000, FLOOR))
+    limits = {}
+    for name in JOBS:
+        path = os.path.join(kit.ROOT, ".github", "workflows", name)  # a workflow that is gone has no limit: red, not a crash
+        limits[name] = job_limit(open(path, encoding="utf-8").read()) if os.path.exists(path) else 0
+    cases.append(("the budget of the tests and of the version, with what a job spends outside the gate, ends before the limit of every job that runs it",
+                  len(limits) == 3 and all(TIMEOUT + VERSION_TIMEOUT + JOBS[name] <= limit for name, limit in limits.items()), (TIMEOUT, VERSION_TIMEOUT, JOBS, limits)))
+    one = "jobs:\n  gates:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 40\n"
+    two = one + "  other:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 90\n"
+    cases.append(("a workflow's one limit is read in seconds", job_limit(one) == 2400, job_limit(one)))
+    cases.append(("a workflow with a second limit, of another job or of a step, has no limit the budget case reads", job_limit(two) == 0, job_limit(two)))
     case("no summary line is red: nothing was proven", 0, "Build succeeded.\n", "nothing was proven")
     case("a build failure names its first error", 1, BUILD_ERROR, "CS0019")
     case("a non-zero exit with no failed test is red", 3, GREEN, "exited 3")
