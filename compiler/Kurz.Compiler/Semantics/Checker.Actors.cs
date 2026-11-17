@@ -306,7 +306,8 @@ public sealed partial class Checker
     /// <summary>
     /// U12: how a value of the type crosses, with why where it does not cross with no word, and the build's limit it reaches, null where
     /// it reaches none. A type is read through the items of a list, the keys and values of a map, the cases of a union, the fields of a
-    /// data value and of a class, a class derived from it among them (K6), and the target of a <c>weak</c> reference, which crosses where
+    /// data value and of a class, a class derived from it among them (K6), a class's fields as declared, since no class takes type arguments
+    /// (a generic class is <c>not supported</c>, T19), and the target of a <c>weak</c> reference, which crosses where
     /// its target does (the owner, 2026-11-15, #519, comment 6896192351, Q3, "Points at the copy"), as Rust's <c>Send</c> is structural:
     /// a <c>mut</c> field needs a word, and an interface's type and a function type are read by their written type and never cross
     /// (comment 6892275110, item 2; comment 6896192351, Q5, "By written type"). A value of a type parameter, a handle of section 12, a
@@ -438,9 +439,11 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// U12: the first handle of section 12, hasher, command or child process that a value of the type holds, read as
-    /// <see cref="CrossingOf"/> reads a type, through a class of <c>std/</c>'s fields too, <c>HttpRequest</c>'s body among them; null where it
-    /// holds none. The build copies none of them: its copy keeps the sender's block and counts it once more (<c>Emit/Emitter.Copies.cs</c>),
+    /// U12: the first handle of section 12, hasher, command or child process that a value of the type holds, or the first value of a type
+    /// parameter, read on the function's text, which the copy of its function for such a type argument makes one of them, read as
+    /// <see cref="CrossingOf"/> reads a type, through a class of <c>std/</c>'s fields too, <c>HttpRequest</c>'s body among them, a class's
+    /// fields as declared, since no class takes type arguments (a generic class is <c>not supported</c>, T19); null where it holds none.
+    /// The build copies none of them: its copy keeps the sender's block and counts it once more (<c>Emit/Emitter.Copies.cs</c>),
     /// so that the receiver would hold a count of a block of the sender's heap, which the sender's restart or end frees, and the build's
     /// <c>not supported</c> stands for such a value after <c>move</c> as with no word (<see cref="CrossingErrors"/>).
     /// </summary>
@@ -459,6 +462,7 @@ public sealed partial class Checker
             DataType d when data.Add(d.Symbol) => First(d.Symbol.Fields.Select(f => SubstituteData(d, f.Type))),
             DataType d => First(HeldArguments(d)),
             ClassType c when classes.Add(c.Symbol) => First(classDeclared.Where(x => x.HasBaseOrIs(c.Symbol)).Prepend(c.Symbol).SelectMany(k => k.Fields).Select(f => f.Type)),
+            TypeParameterType => $"a value of the type parameter `{t}`",
             _ => null,
         };
         return Find(type);
@@ -544,8 +548,9 @@ public sealed partial class Checker
         for (var i = 0; i < c.Arguments.Count; i++)
         {
             // the build's limit; after `move` it stands only for a handle, a hasher, a command or a child process, which the copy would
-            // share by its count, a block of the sender's heap that the sender's restart or end frees (`SharedByCount`), and is set
-            // aside for the rest, which the move's copy brings whole into the receiver's heap or which holds no counted block
+            // share by its count, a block of the sender's heap that the sender's restart or end frees (`SharedByCount`), and for a value
+            // of a type parameter, which the copy of its function for such a type argument makes one of them, and is set aside for the
+            // rest, which the move's copy brings whole into the receiver's heap or which holds no counted block
             if (limits[i] is { } limit)
             {
                 NotSupported(c.Arguments[i].Line, c.Arguments[i].Word == ArgumentWord.Move

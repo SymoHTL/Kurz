@@ -339,8 +339,11 @@ public sealed partial class Checker
 
         var moves = string.Join(" or ", reaching.Select(s => $"`move {s.Text}` at line {s.Line}{(s.Earlier ? " in an earlier round of the loop" : "")}"));
         var loops = reaching.Select(s => TakingLoop(s.Value, variable)).ToList();
+        var taking = loops.Distinct().ToList(); // two loops over one list on two branches both reach a read after them
         var through = reaching.All(s => s.Text == variable.Name) ? "" : loops.All(l => l is not null)
-            ? $", which ended the list the loop at line {string.Join(" and line ", loops.Distinct())} takes"
+            ? taking.Count > 1
+                ? $", which ended the list the loops at line {string.Join(" and line ", taking)} take"
+                : $", which ended the list the loop at line {taking[0]} takes"
             : $", which ended every path into the value `{variable.Name}` reaches";
         var diagnostic = Diagnostic.Error(ErrorIds.UsedAfterMove, line, $"`{variable.Name}` is used after {moves}{through}; `copy` in place of `move` keeps `{variable.Name}`, or `{variable.Name}` is assigned again before this use (U12)");
         Add(diagnostic);
