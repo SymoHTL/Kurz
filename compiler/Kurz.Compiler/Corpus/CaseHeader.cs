@@ -26,7 +26,8 @@ public enum BuildKind
 /// <c>// expect: throws &lt;id&gt; at &lt;line&gt;</c>; then <c>// | </c> lines with what the program
 /// prints (not for an error); then an optional <c>// build: test</c> or <c>// build: release</c>;
 /// then an optional <c>// allow: raw</c>, <c>// allow: native</c> or <c>// allow: raw native</c>, the
-/// grants of a <c>project.kz</c> that the case's file takes; then exactly one <c>// rules: A1, B2</c>
+/// grants of a <c>project.kz</c> that the case's file takes; then an optional <c>// system: linux</c> or
+/// <c>// system: windows</c>, the one system the case runs on; then exactly one <c>// rules: A1, B2</c>
 /// line; then an empty line; then the program. A line of a diagnostic counts from the first line of
 /// the file, the header included.
 /// </summary>
@@ -37,6 +38,7 @@ public sealed partial record CaseHeader(
     IReadOnlyList<string> OutputLines,
     BuildKind? Build,
     IReadOnlyList<string> Grants,
+    string? RunsOn,
     IReadOnlyList<string> Rules,
     string Body,
     int BodyLine)
@@ -49,6 +51,9 @@ public sealed partial record CaseHeader(
 
     [GeneratedRegex(@"^// allow: (raw(?: native)?|native)$")]
     private static partial Regex AllowLine();
+
+    [GeneratedRegex(@"^// system: (linux|windows)$")]
+    private static partial Regex SystemLine();
 
     [GeneratedRegex(@"^// rules: [A-Z]\d+(?:, [A-Z]\d+)*$")]
     private static partial Regex RulesLine();
@@ -113,6 +118,20 @@ public sealed partial record CaseHeader(
             i++;
         }
 
+        string? system = null;
+        if (i < lines.Length && lines[i].StartsWith("// system:", StringComparison.Ordinal))
+        {
+            var systemMatch = SystemLine().Match(lines[i]);
+            if (!systemMatch.Success)
+            {
+                problem = "the `// system:` line is not `// system: linux` or `// system: windows`";
+                return null;
+            }
+
+            system = systemMatch.Groups[1].Value;
+            i++;
+        }
+
         if (i >= lines.Length || !RulesLine().IsMatch(lines[i]))
         {
             problem = "the header does not end in one `// rules: A1, B2` line";
@@ -136,6 +155,6 @@ public sealed partial record CaseHeader(
         }
 
         problem = null;
-        return new CaseHeader(expectation, id, errorLine, output, build, grants, rules, body, i + 1);
+        return new CaseHeader(expectation, id, errorLine, output, build, grants, system, rules, body, i + 1);
     }
 }

@@ -2,7 +2,7 @@
 // | added 5, now 5
 // | added 2, now 2
 // | 2
-// rules: U19
+// rules: U19, U22
 
 actor Counter {
     mut int n = 0

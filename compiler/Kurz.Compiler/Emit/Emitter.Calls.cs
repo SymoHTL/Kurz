@@ -338,6 +338,15 @@ public sealed partial class Emitter
         var session = into is null ? null : CallSession(Enumerable.Range(0, c.Arguments.Count).Count(i => info.Binding[i] >= 0 && !slotMut(info.Binding[i]) && Counted(Sub(slotType(info.Binding[i])))), into);
         var late = new List<(int Index, Func<string, string> Read)>(); // U12: the copies read after the call's last copy (Late)
         string? copied = null;
+
+        // U12: a function value crosses with the environment of the lambda the checker saw for it, the argument itself or the one an
+        // immutable local variable is declared with (`SeenLambda`), since every other function value is `send-needs-word` by its written
+        // type (`CrossingErrors`; the owner, 2026-11-15, #519, comment 6896192351, Q5, "By written type"), so that no program that checks
+        // clean reaches the throw
+        string? CrossingEnvironment(Expression a, KurzType type) => (Types.NonNull(type) ?? type) is FunctionType
+            ? CopyEnvironmentInto(Model.LambdaOf(Model.CrossingLambda(a) ?? throw new InvalidOperationException($"a function value crosses at line {a.Line} with no lambda the checker saw")).Captures.Select(v => Sub(v.Type)).ToList())
+            : null;
+
         void Cross(int i, string value, KurzType type, string? environment, bool keep)
         {
             // U12: a copy into the actor's heap, read at once where it is the call's one copy, else after its last
@@ -362,12 +371,17 @@ public sealed partial class Emitter
                 var takes = owned || TakesSlot(c, info, slot); // U12: a parameter written `move` owns its argument
                 if (Model.IsMove(a))
                 {
-                    // U12: the value goes to the place with no copy and no count changed (comment 6895076937); across into an actor's
-                    // heap, a copy there, and the moved value let go of, which frees it (section 13)
-                    var moved = Convert(MovedValue(a), TypeOf(a), type, a.Line);
+                    // U12: the value goes to a parameter's place with no copy and no count changed (comment 6895076937); across into an
+                    // actor's heap, a copy there, and the moved value let go of, which frees it (section 6, assumed on comment 6902210646, Q5)
+                    var moved = Convert(MovedValue(a), TypeOf(a), type, a.Line, owned: true);
                     if (into is not null && Counted(type))
                     {
-                        Cross(i, moved, type, null, takes);
+                        // a function value with its environment copied, as an argument with no word crosses (Q5)
+                        Cross(i, moved, type, CrossingEnvironment(a, type), takes);
+
+                        // in a session of more than one copy, the memo holds a count of every block it maps until the session's end
+                        // (`CopyKeep`, runtime/common/runtime.kz), so that this frees no block whose address a later argument's copy
+                        // could take
                         Release(moved, type);
                         continue;
                     }
@@ -381,9 +395,7 @@ public sealed partial class Emitter
                     // U12: each argument copied where it is evaluated, left to right, in the call's session; a function value with the
                     // environment of the lambda the checker saw for it
                     var crossing = Convert(EmitExpression(a), TypeOf(a), type, a.Line, owned: false);
-                    Cross(i, crossing, type, (Types.NonNull(type) ?? type) is FunctionType
-                        ? CopyEnvironmentInto(Model.LambdaOf(Model.CrossingLambda(a) ?? throw new InvalidOperationException($"a function value crosses at line {a.Line} with no lambda the checker saw")).Captures.Select(v => Sub(v.Type)).ToList())
-                        : null, owned);
+                    Cross(i, crossing, type, CrossingEnvironment(a, type), owned);
                     continue;
                 }
 
