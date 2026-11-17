@@ -7209,10 +7209,10 @@ public sealed class CheckerTests
     [InlineData("after 5")] // U26: the first pause is a duration (T1)
     [InlineData("after 5kb")]
     [InlineData("after 0.5")]
-    [InlineData("after 0ms")] // U26: above 0 and at most the cap of 30 s (assumed, as Akka's backoff supervisor)
+    [InlineData("after 0ms")] // U26: above 0 (assumed, as Akka's backoff supervisor)
     [InlineData("after -1ms")]
-    [InlineData("after 31s")]
-    [InlineData("max 0 in 1min")] // U26: a count of at least 1 (comment 6902210646, Q4)
+    [InlineData("after 31s")] // U26: at most the cap of 30 s (the owner, 2026-11-16, #519, comment 6919351399, "Compile error")
+    [InlineData("max 0 in 1min")] // U26: a count of at least 1 (assumed, U26)
     [InlineData("max -2 in 1min")]
     [InlineData("max 2.5 in 1min")] // U26: the count is an `int` (T1)
     [InlineData("max 2kb in 1min")]

@@ -110,9 +110,13 @@ public sealed class Toolchain : IDisposable
 /// Every corpus case that expects a run (<c>output</c> or <c>throws</c>), built by the emitter and the pinned clang and run on this
 /// machine, an x86-64 one, as the gates image and the Windows job are: on a 64-bit Arm machine the emitter says <c>not supported</c> to
 /// an <c>asm</c> and a <c>naked</c> function (R11, R12), whose cases this runs. A case the checker reads in full and the emitter lays out prints exactly the header's lines on standard output; an
-/// <c>output</c> case then exits with 0 and writes nothing on standard error but lines in P7's layout, which the runner leaves out of
-/// standard error for every case, so that a case can show an actor's restart, whose log line stands there (E3, U24; the taken points of
-/// comment 6899225864); a <c>throws</c> case exits with 1, and its error stream
+/// <c>output</c> case then exits with 0 and writes nothing on standard error but the log line of an actor's crash, a line in P7's layout
+/// at <c>Error</c> with the category <c>Kurz.Actor</c>, which the runner leaves out of standard error in a case whose <c>rules:</c> line
+/// names a rule of a crash, U19 to U34, and in no other, so that such a case can show an actor's restart, and every other line, the log
+/// line of a crash in another case among them, turns a case red (E3, U24; the taken points of comment 6899225864, assumed there for a case
+/// that expects an exception, and the case of a crash alone assumed there too, the fix of T3 of the reading of issue 39, comment
+/// 6926929175, which the answer of 2026-11-16 on pull request 554, comment 6926986795, gave to the change that follows it); a
+/// <c>throws</c> case exits with 1, and its error stream
 /// is the one line <c>error: &lt;id&gt; at &lt;file&gt;:&lt;n&gt;</c> of the design record's section 6, with the header's id and line and
 /// the case's path under <c>corpus/</c> as the file, or for <c>thrown</c> that line ending in a colon with the thrown text below it, and
 /// for <c>not-char-boundary</c> that line ending in a colon with the position of the cut below it (X10). A case that expects an error the
@@ -120,8 +124,8 @@ public sealed class Toolchain : IDisposable
 /// header's line; it is no case run.
 /// A case the checker says <c>not supported</c> to is held by the checker's theory in <see cref="CorpusTests"/> and is not built here; a
 /// case the checker reads and the emitter does not lay out is in <see cref="NotEmitted"/>, with the construct the emitter names; and a
-/// case it lays out whose expectation needs what the build does not hold is in <see cref="NotRun"/>, with why, and is built and not run.
-/// Neither list holds a stale entry. A case is built with the grants of its <c>allow:</c> line, and as its <c>build:</c> line says, else
+/// case it lays out whose <c>system:</c> line names another system than this machine's is built and not run (<see cref="NotRun"/>,
+/// chapter 0). Neither list holds a stale entry. A case is built with the grants of its <c>allow:</c> line, and as its <c>build:</c> line says, else
 /// as the test build, the default. A floor holds the count of cases run. Every case that is run runs a second time under an allocator that makes
 /// every block it frees inaccessible (<see cref="ListTests.Fenced"/>), so that a block the counting frees while a value still holds
 /// it ends that run with the system's signal; a case that allocator cannot hold is in <see cref="NotFenced"/>, with why, and is
@@ -129,12 +133,22 @@ public sealed class Toolchain : IDisposable
 /// </summary>
 public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
-    /// <summary>E3, U24: a line in P7's layout on standard error, the log line of an actor's crash among them, which the runner leaves out.</summary>
-    [GeneratedRegex(@"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z (?:Trace|Debug|Information|Warning|Error|Critical) [^ :\n]+: [^\n]*\n", RegexOptions.Multiline)]
-    private static partial Regex LogLine();
+    /// <summary>E3, U24: the log line of an actor's crash on standard error, a line in P7's layout at <c>Error</c> with the category <c>Kurz.Actor</c>.</summary>
+    [GeneratedRegex(@"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z Error Kurz\.Actor: [^\n]*\n", RegexOptions.Multiline)]
+    private static partial Regex CrashLine();
 
-    /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls, the reads of standard input and running a program. The number for Linux is the count measured in the gates image, with no margin, so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156). The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 585 : 712;
+    /// <summary>
+    /// E3: what a case wrote on standard error, <paramref name="written"/>, with the log line of each crash left out where its <c>rules:</c>
+    /// line, <paramref name="rules"/>, names a rule of a crash, U19 to U34, and whole in every other case, where such a line is a crash the
+    /// case does not show (E3, assumed there: the fix of T3 of the reading of issue 39, comment 6926929175, which named U19 to U24, the
+    /// rules of a crash at that head, the policy and its block, U25 to U34, having come since).
+    /// </summary>
+    internal static string LeftOut(string written, IReadOnlyList<string> rules) =>
+        rules.Any(r => r[0] == 'U' && int.Parse(r[1..], System.Globalization.CultureInfo.InvariantCulture) is >= 19 and <= 34)
+            ? CrashLine().Replace(written, string.Empty) : written;
+
+    /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the cases whose <c>system:</c> line names Linux, the stack overflows', nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls, the reads of standard input and running a program. The number for Linux is the count measured in the gates image, with no margin, so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156). The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 586 : 713;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -202,14 +216,12 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         .Concat(OperatingSystem.IsWindows() ? StdinCases.Select(c => KeyValuePair.Create(c, Emitter.StdinNotOnWindows)) : [])
         .Concat(OperatingSystem.IsWindows() ? CommandCases.Select(c => KeyValuePair.Create(c, Emitter.CommandNotOnWindows)) : []).ToDictionary(StringComparer.Ordinal);
 
-    /// <summary>Cases the emitter lays out whose expectation the build does not hold, each with why.</summary>
-    private static readonly Dictionary<string, string> NotRun = OperatingSystem.IsWindows()
-        ? new(StringComparer.Ordinal)
-        {
-            ["outcomes/stack-overflow.kz"] = "the raise of `stack-overflow` is the handler's of a fault (design record, section 6), which the runtime installs on Linux alone",
-            ["actors/crash-overflow-restarts.kz"] = "an actor's stack overflow is the handler's of a fault, which the runtime installs on Linux alone, and ends the process on Windows (compiler/README.md)",
-        }
-        : new(StringComparer.Ordinal);
+    /// <summary>
+    /// Whether the case whose header is <paramref name="header"/> is built and not run on this machine: its <c>system:</c> line names the
+    /// other system (chapter 0), as the cases of a stack overflow name Linux, whose raise is the handler's of a fault (design record,
+    /// section 6), which the runtime installs on Linux alone, an actor's overflow ending the process on Windows (U19, compiler/README.md).
+    /// </summary>
+    private static bool NotRun(CaseHeader header) => header.RunsOn is { } system && system != (OperatingSystem.IsWindows() ? "windows" : "linux");
 
     /// <summary>Cases run under the plain allocator alone, each with why the fenced one cannot hold them.</summary>
     private static readonly Dictionary<string, string> NotFenced = new(StringComparer.Ordinal)
@@ -308,14 +320,14 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         }
 
         var executable = toolchain.Build(program, name);
-        if (buildOnly || NotRun.ContainsKey(relativePath))
+        if (buildOnly || NotRun(header))
         {
             return;
         }
 
-        // the trace on, as a program runs where nobody set KURZ_TRACE; the log lines left out (E3)
+        // the trace on, as a program runs where nobody set KURZ_TRACE; the log line of a crash left out in a case of a crash (E3)
         var (code, output, written) = Toolchain.Run(executable, null);
-        var all = LogLine().Replace(written, string.Empty);
+        var all = LeftOut(written, header.Rules);
         Assert.Equal(header.OutputLines, output);
         if (header.Expectation == Expectation.Output)
         {
@@ -353,7 +365,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         foreach (var relativePath in CorpusTests.CaseFiles())
         {
             var header = Header(relativePath);
-            if (header.Expectation != Expectation.Error && !NotRun.ContainsKey(relativePath) && Emit(relativePath, header).Program is not null)
+            if (header.Expectation != Expectation.Error && !NotRun(header) && Emit(relativePath, header).Program is not null)
             {
                 run++;
             }
@@ -375,18 +387,12 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             Assert.True(program is null && notSupported == construct, $"{relativePath}: listed as `{construct}`, and the emitter {(program is null ? notSupported is null ? "is never asked: the checker does not read the case" : $"says `{notSupported}`" : "lays it out")}");
         }
 
-        foreach (var (relativePath, why) in NotRun)
-        {
-            var header = Header(relativePath);
-            Assert.True(header.Expectation != Expectation.Error && Emit(relativePath, header).Program is not null, $"{relativePath}: listed as not run ({why}), and the emitter does not lay it out");
-        }
-
         // a case listed with a trace of its own is a `throws` case the run runs
         Assert.NotEmpty(OwnTraces);
         foreach (var (relativePath, _) in OwnTraces)
         {
             var header = Header(relativePath);
-            Assert.True(header.Expectation == Expectation.Throws && !NotRun.ContainsKey(relativePath) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with a trace of its own, and the run does not run it as a `throws` case");
+            Assert.True(header.Expectation == Expectation.Throws && !NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with a trace of its own, and the run does not run it as a `throws` case");
         }
 
         // a case listed as run under the plain allocator alone is one the plain run runs
@@ -394,7 +400,41 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         foreach (var (relativePath, why) in NotFenced)
         {
             var header = Header(relativePath);
-            Assert.True(header.Expectation != Expectation.Error && !NotRun.ContainsKey(relativePath) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed as run under the plain allocator alone ({why}), and the plain run does not run it");
+            Assert.True(header.Expectation != Expectation.Error && !NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed as run under the plain allocator alone ({why}), and the plain run does not run it");
+        }
+    }
+
+    [Fact]
+    public void The_runner_leaves_out_the_log_line_of_a_crash_alone_and_in_a_case_of_a_crash_alone()
+    {
+        // E3: a case that names a rule of a crash, U19 to U34, shows its output without the line of each crash; a line of another category
+        // or level stays, and so does the line of a crash in a case that names none of those rules, so that each turns its case red
+        const string crash = "2026-11-16T10:00:00.000Z Error Kurz.Actor: Shop#1 crashed: thrown \"no stock\" at shop.kz:3\n";
+        const string other = "2026-11-16T10:00:00.000Z Error shop: paid order.Id=17\n";
+        const string warning = "2026-11-16T10:00:00.000Z Warning Kurz.Actor: Shop#1 crashed: thrown \"no stock\" at shop.kz:3\n";
+        Assert.Equal(other + warning, LeftOut(crash + other + crash + warning, ["U24"]));
+        Assert.Equal(string.Empty, LeftOut(crash, ["V1", "U19"]));
+        Assert.Equal(string.Empty, LeftOut(crash, ["U34"]));
+        Assert.Equal(crash, LeftOut(crash, ["U18"]));
+        Assert.Equal(crash, LeftOut(crash, ["U35"]));
+        Assert.Equal(crash, LeftOut(crash, ["P3"]));
+    }
+
+    [Fact]
+    public void A_case_whose_system_line_names_another_system_is_built_and_not_run()
+    {
+        // chapter 0: the `system:` line names the one system a case runs on, which the runner follows in place of a list of its own
+        string[] linux = ["outcomes/stack-overflow.kz", "actors/crash-overflow-restarts.kz"];
+        var here = OperatingSystem.IsWindows() ? "windows" : "linux";
+        var there = OperatingSystem.IsWindows() ? "linux" : "windows";
+        foreach (var relativePath in linux)
+        {
+            var header = Header(relativePath);
+            Assert.Equal("linux", header.RunsOn);
+            Assert.Equal(OperatingSystem.IsWindows(), NotRun(header));
+            Assert.False(NotRun(header with { RunsOn = here }));
+            Assert.True(NotRun(header with { RunsOn = there }));
+            Assert.False(NotRun(header with { RunsOn = null }));
         }
     }
 }

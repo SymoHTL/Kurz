@@ -1856,8 +1856,43 @@ is no current message that holds that end, and is dropped with the process, as a
 drops its tasks when its runtime shuts down (§6, the owner, 2026-11-15, #519, comment 6892835500, Q5, "Rust:
 dropped").
 
-No case: which message runs when the top-level code ends is the scheduler's to say where actors run
-on more than one thread, so that a case's output would hang on it.
+No case: for the end of the top-level code, since which message runs when it ends is the scheduler's to
+say where actors run on more than one thread, so that a case's output would hang on it; the end of a
+crashed supervisor's children has the case below.
+
+Case: [actors/crash-children-end.kz](../corpus/actors/crash-children-end.kz)
+```kurz
+actor Child(int N) {
+    pub void Tick(int t) {
+        print("child {N} tick {t}")
+    }
+}
+
+actor Parent {
+    mut Child? kid = null
+
+    pub void Make() {
+        kid = spawn Child(1)
+    }
+
+    pub void Boom() {
+        throw "parent fails"
+    }
+
+    pub Child? Kid() => kid
+}
+
+p = spawn Parent()
+p.Make()
+kid = p.Kid()
+if kid != null {
+    send kid.Tick(1)
+    send p.Boom()
+    send kid.Tick(2)
+}
+
+print(p.Kid() == null)
+```
 
 ### U14 (decided, §6) `spawn` and `send` before what is not theirs
 
@@ -2089,6 +2124,33 @@ Case: [actors/chain-send-waits.kz](../corpus/actors/chain-send-waits.kz)
 
 Case: [actors/call-self-through-this.kz](../corpus/actors/call-self-through-this.kz)
 
+Case: [actors/crash-waiter-chain.kz](../corpus/actors/crash-waiter-chain.kz)
+```kurz
+actor B {
+    pub int Get(int n) {
+        if n == 0 {
+            throw "zero"
+        }
+
+        return n
+    }
+}
+
+actor A(B Other) {
+    pub void Ask(int n) {
+        print("asked {Other.Get(n)}")
+    }
+
+    pub int Ping() => 1
+}
+
+b = spawn B()
+a = spawn A(b)
+send a.Ask(0)
+print(a.Ping())
+print(b.Get(2))
+```
+
 ### U18 (decided, §6) A wait of the top-level code that nothing can end
 
 The top-level code's call that waits runs the scheduler in place on the main thread's stack, each
@@ -2136,10 +2198,13 @@ top-level code, handles it (U22) (§6, "An exception kills only the actor it hap
 path of §6, which switches the thread to the scheduler's stack). An exception in the top-level code
 is the crash of the root actor, which ends the process with the exit code 1, the error line and the
 trace, as before (§6). `allocation-failed`, `random-failed` and a fault outside a guard page end the
-process wherever they happen (O11, M9), and on Windows an actor's stack overflow ends the process as
-the system ends it (`compiler/README.md`). The words of a policy, `on crash`, say what the
-supervisor does with the crash (U25 to U27), and an actor whose `spawn` and type write none has the
-default, `on crash restart` (§6).
+process wherever they happen (O11, M9), and so do, on the actor's stack too, a stack fault inside the
+allocator, the scheduler or the copy of a crossing (O11) and, in a test build, a check of the runtime's
+own code, as a stack fault inside the allocator or the scheduler does (chapter 12, "Run-time errors").
+On Windows an actor's stack overflow ends the process as the system ends it (`compiler/README.md`)
+*(assumed: §6, the points of comment 6899225864 that the answers left standing)*. The words of a
+policy, `on crash`, say what the supervisor does with the crash (U25 to U27), and an actor whose
+`spawn` and type write none has the default, `on crash restart` (§6).
 
 Case: [actors/crash-restarts-fresh.kz](../corpus/actors/crash-restarts-fresh.kz)
 ```kurz
@@ -2188,6 +2253,21 @@ send d.Go()
 print(d.Count())
 ```
 
+Case: [actors/crash-log-line.kz](../corpus/actors/crash-log-line.kz)
+```kurz
+actor Shop {
+    pub void Buy(string item) {
+        throw "no {item}"
+    }
+
+    pub string Name() => "shop"
+}
+
+s = spawn Shop()
+send s.Buy("stock")
+print(s.Name())
+```
+
 ### U20 (decided, §6) A waiting caller gets `callee-crashed`
 
 A call that waits on an actor that crashes before it answers, while it runs the call's message or a
@@ -2195,9 +2275,9 @@ message below it in the chain, raises `callee-crashed` at the line of that call,
 `gen_server:call` exits its caller, and the cause stands in the callee's log line (U24) (the owner,
 2026-11-15, #519, comment 6902210646, Q1, "Erlang: callee-crashed"). That raise is the crash of the
 waiting actor in its turn, and so on up the chain to the top-level code, whose crash ends the
-process (§6, "The exception kills the caller as well"). A call whose caller crashed runs to its end,
-and its result goes nowhere (§6); on one thread a caller that waits crashes only through a call of
-its own chain, which its callee waits on, so that the callee then crashes with `callee-crashed` too.
+process (§6, "The exception kills the caller as well"). A call whose caller crashed, where the callee
+runs on another thread than its caller, runs to its end, and its result goes nowhere (§6); on one
+thread a caller that waits crashes only through a call of its own chain, which its callee waits on, so that the callee then crashes with `callee-crashed` too.
 A call that waits on an actor that ended, a child whose supervisor crashed (U21), raises
 `actor-gone` there (§6).
 
@@ -2214,30 +2294,35 @@ print("after")
 ```
 
 Case: [actors/crash-waiter-chain.kz](../corpus/actors/crash-waiter-chain.kz)
+
+Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
 ```kurz
-actor B {
-    pub int Get(int n) {
-        if n == 0 {
-            throw "zero"
-        }
-
-        return n
-    }
-}
-
-actor A(B Other) {
-    pub void Ask(int n) {
-        print("asked {Other.Get(n)}")
-    }
-
+actor Child {
     pub int Ping() => 1
 }
 
-b = spawn B()
-a = spawn A(b)
-send a.Ask(0)
-print(a.Ping())
-print(b.Get(2))
+actor Parent {
+    mut Child? kid = null
+
+    pub void Make() {
+        kid = spawn Child()
+    }
+
+    pub Child? Kid() => kid
+
+    pub void Boom() {
+        throw "parent fails"
+    }
+}
+
+p = spawn Parent()
+p.Make()
+kid = p.Kid()
+send p.Boom()
+print(p.Kid() == null)
+if kid != null {
+    print(kid.Ping())
+}
 ```
 
 ### U21 (decided, §6) The inbox is kept, and the crashed instance's heap goes
@@ -2246,7 +2331,9 @@ A crashed actor's inbox is kept and its new instance serves it, in its order, th
 dropped, as Akka's restart keeps the mailbox (§6, the owner, 2026-11-14, #519, comment 6880404917,
 Q15, "All eight leans (Recommended)"); a call of the chain that waited on the crashed instance stands
 before them *(assumed: the side list of U17 goes to the front of the inbox, which the record does not
-say)*. The crashed instance's heap is freed whole and its stacks go back to the pool, the messages of
+say)*. The crashed instance's heap is freed whole but for its first page, which holds the record and the
+state *(assumed: §6, a reading of the crash path the points did not name)*, and its stacks go back to the
+pool, the messages of
 its inbox copied into the new instance's heap first, as a crossing copies them (U12), and the
 actor's reference names the same actor after the restart (U2) (§6; the taken points of comment
 6899225864). A crash ends the actors the crashed instance spawned as an end does, after their
@@ -2282,38 +2369,6 @@ print(l.Count())
 ```
 
 Case: [actors/crash-children-end.kz](../corpus/actors/crash-children-end.kz)
-```kurz
-actor Child(int N) {
-    pub void Tick(int t) {
-        print("child {N} tick {t}")
-    }
-}
-
-actor Parent {
-    mut Child? kid = null
-
-    pub void Make() {
-        kid = spawn Child(1)
-    }
-
-    pub void Boom() {
-        throw "parent fails"
-    }
-
-    pub Child? Kid() => kid
-}
-
-p = spawn Parent()
-p.Make()
-kid = p.Kid()
-if kid != null {
-    send kid.Tick(1)
-    send p.Boom()
-    send kid.Tick(2)
-}
-
-print(p.Kid() == null)
-```
 
 Case: [actors/crash-during-arguments.kz](../corpus/actors/crash-during-arguments.kz)
 ```kurz
@@ -2342,14 +2397,16 @@ send b.Boom()
 print(b.Sum([10, 20, 30], s.Get()))
 ```
 
+Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
+
 ### U22 (decided, §6) The supervisor restarts the actor
 
 The default policy, `on crash restart`, runs the actor's constructor again, after the pause of U23,
 on a copy of the arguments its `spawn` was given, their defaults among them, which the spawner's
 heap keeps, every block they reach copied, a `move` argument's too (§6, the owner, 2026-11-14, #519,
 comment 6880404917, Q13, "All eight leans (Recommended)"; the taken points of comment 6899225864).
-The runtime runs the restart before any message of the inbox, and no message of the supervisor
-does (§6, assumed there). The new instance has its state from the constructor and its body's
+The runtime runs the restart before any message of the inbox, and runs it in no message of the
+supervisor *(assumed, §6)*. The new instance has its state from the constructor and its body's
 defaults alone, as a new actor has it; a throw in the constructor at a restart is the actor's own
 crash, which restarts it again (U3).
 
@@ -2389,16 +2446,26 @@ send w.Fail()
 print(w.Start())
 ```
 
+Case: [actors/crash-restarts-fresh.kz](../corpus/actors/crash-restarts-fresh.kz)
+
+Case: [actors/crash-children-end.kz](../corpus/actors/crash-children-end.kz)
+
 ### U23 (decided, §6) The pause before a restart grows
 
 A restart waits a pause of 100 ms at the actor's first crash, twice the one before at each crash
 after it up to 30 s, each varied at random by up to 20% either way, and 100 ms again after a run
 of 30 s since the last restart with no crash, as Akka's backoff supervisor waits (§6, the owner,
 2026-10-30, "100 ms doubling to 30 s"; the variation drawn from the thread's generator and one
-clock of the runtime, the taken points of comment 6899225864). While a pause runs, a wait of the
-top-level code that finds nothing else to run sleeps until it ends, and raises no `deadlock` (U18)
+clock of the runtime, the taken points of comment 6899225864). What doubles is the pause before its
+variation, the cap holds that pause before it is varied, so that a pause reaches 36 s, and the run of
+30 s counts from the start of the last restart *(assumed: readings of the build, which the answer of
+2026-10-30 did not give)*. While a pause runs, a wait of the top-level code that finds nothing else to
+run sleeps until it ends, and raises no `deadlock` (U18)
 (§6, the taken points of comment 6899225864). A corpus case crashes at most three times, about
-0.7 s of pauses, unless it writes `after 1ms` (U26) *(assumed: as §6 marks it)*.
+0.7 s of pauses, unless it writes `after 1ms` (U26) *(assumed: as §6 marks it)*. The case below holds
+the wait that sleeps and raises no `deadlock`, and prints what a restart with no pause prints too; the
+pauses are held by `ActorTests.The_pause_doubles_up_to_30_s_and_starts_again_after_a_full_cap`, through
+a clock the test stands in for.
 
 Case: [actors/crash-wait-sleeps.kz](../corpus/actors/crash-wait-sleeps.kz)
 ```kurz
@@ -2418,29 +2485,20 @@ print(f.Ping())
 ### U24 (decided, §6) One log line per crash
 
 Each crash the supervisor handles writes one line at `Error` in the layout of P7 on standard error,
-through the runtime's writer on every target, with the category `Kurz.Actor`: the actor, its id, the
-place and the text below the error line, a thrown value's in double quotes as a `string` field is
-written, as the error line of a `throw` at the root carries them, `Counter#3 crashed: thrown "no
-stock" at shop.kz:12`, and no chain ID while P8 is open (§6, the owner, 2026-11-13, #519, comment
+through the runtime's writer on every target, with the category `Kurz.Actor`: the actor's type and
+its number of U2, the error's id, the text below the error line, a thrown value's in double quotes as
+a `string` field is written, and the place, as the error line of a `throw` at the root carries them,
+`Counter#3 crashed: thrown "no stock" at shop.kz:12`, and for an id with no text below its error line
+the id and the place alone, `Calc#1 crashed: divide-by-zero at calc.kz:2`, a stack overflow's as its
+error line writes them, and no chain ID while P8 is open (§6, the owner, 2026-11-13, #519, comment
 6847932993, Q24; the owner, 2026-11-14, comment 6880404917, Q16; the owner, 2026-11-15, comment
 6902210646, Q8, "With thrown text; points stand") *(assumed: the words of the line, and `KURZ_LOG`
 read at the start of a program that spawns, so that its filter holds for the line (P4))*. The
-corpus runner leaves such a line out of standard error (E3), so that a case shows its output alone.
+corpus runner leaves such a line out of standard error in a case that names a rule of a crash (E3),
+so that the case below shows its output alone, the restart (U19), and the words of the line are held
+by `ActorTests.The_log_line_carries_the_actor_the_id_the_place_and_the_thrown_text`.
 
 Case: [actors/crash-log-line.kz](../corpus/actors/crash-log-line.kz)
-```kurz
-actor Shop {
-    pub void Buy(string item) {
-        throw "no {item}"
-    }
-
-    pub string Name() => "shop"
-}
-
-s = spawn Shop()
-send s.Buy("stock")
-print(s.Name())
-```
 
 ### U25 (decided, §6) The policy at `spawn`
 
@@ -2520,9 +2578,10 @@ and `max N in <duration>` sets a limit, where by default none holds (§6, "Polic
 owner, 2026-10-30, "100 ms doubling to 30 s" and "No limit, as Akka"). The limit counts the crashes
 the policy restarts in a window of that duration that slides with each crash, as Erlang's
 `supervisor` keeps the times of its restarts within its period (`can_restart`), and the crash that
-finds N of them in the window passes it: the actor ends, and its supervisor crashes with
-`restart-limit` at the line of the `spawn`, which the supervisor's own policy takes in turn, at the
-top level the end of the process (§6, the owner, 2026-11-15, #519, comment 6902210646, Q4, "Erlang:
+finds N earlier crashes its policy restarted in the window, one exactly a window old among them
+*(assumed: a reading of the build, which the answers did not give)*, passes it: the actor ends, and its
+supervisor crashes with `restart-limit` at the line of the `spawn`, which the supervisor's own policy
+takes in turn, at the top level the end of the process (§6, the owner, 2026-11-15, #519, comment 6902210646, Q4, "Erlang:
 restart-limit id") *(assumed: as §6 marks it, each crash counted at its time, before its pause, the
 log line of the crash that passes the limit written, as Erlang's supervisor reports a child's exit
 before it shuts down, and at the top level the trace of the top-level code where it waits)*. The

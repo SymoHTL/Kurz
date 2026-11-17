@@ -148,13 +148,17 @@ public sealed partial class Emitter
     /// U3, U22: the function a restart of the actor of the type <paramref name="symbol"/> runs, with the state and the restart's message
     /// (the runtime's <c>Restart</c>), made for its <c>spawn</c>: a copy of each kept argument in the actor's heap, the one the allocation
     /// entry serves, the state's counts at one, and the constructor run on them as at the <c>spawn</c>, a constructor of the body
-    /// borrowing them, the primary one owning them, then the defaults of the body (K7); then the message freed. A throw there is the
-    /// actor's own crash (U3).
+    /// borrowing them, since <c>move</c> before a parameter of a constructor is <c>not supported</c> (<c>Semantics/Checker.Constructors.cs</c>),
+    /// so that the copies are released after it, the primary one owning them, then the defaults of the body (K7); then the message freed. A
+    /// throw there is the actor's own crash (U3).
     /// </summary>
     private string Restarted(ClassSymbol symbol, CallInfo info, List<KurzType> types, List<string?> copiesInto) =>
         Helper($"actor.restart.{symbol.Name}.{Number(++actorSites)}", "void", ["ptr", "ptr"], () =>
         {
             var side = SideType(types);
+            // the block of the restart in the supervisor's heap, read across the copies: the actors of a program run on one thread
+            // (the runtime's actors), these reads run no call that waits, and a supervisor's crash ends its children before it frees its
+            // heap (`Fall`: `EndChildren` before `Emptied`), an idle or paused child at once, its block of the restart dropped (`EndActor`)
             var table = fn.Value($"load ptr, ptr {fn.Value("getelementptr { ptr, ptr }, ptr %a1, i32 0, i32 1")}");
             var heap = fn.Value($"call ptr {StdFunction("HeapCurrent")}()");
             var session = CallSession(types.Count(Counted), heap, noExit: true);
@@ -357,7 +361,8 @@ public sealed partial class Emitter
     /// <summary>
     /// U12, Q5: for each slot of the call whose type is in <paramref name="types"/>, the function that copies its function value, by the
     /// environment of the lambda the checker saw for the argument bound to it (<see cref="CopyEnvironmentInto"/>), and null for a slot of
-    /// any other type.
+    /// any other type and for one its default fills, whose value is <c>null</c>, a parameter's default being a constant expression (F12),
+    /// with no environment to copy, which the copy of its type keeps as it is.
     /// </summary>
     private List<string?> CopiesInto(CallExpression c, CallInfo info, List<KurzType> types) => types.Select((t, j) =>
     {
@@ -367,7 +372,12 @@ public sealed partial class Emitter
         }
 
         var bound = Enumerable.Range(0, info.Binding.Count).Where(i => info.Binding[i] == j).Select(i => c.Arguments[i].Value).FirstOrDefault();
-        var lambda = bound is null ? null : Model.CrossingLambda(bound);
+        if (bound is null)
+        {
+            return null;
+        }
+
+        var lambda = Model.CrossingLambda(bound);
         return CopyEnvironmentInto(Model.LambdaOf(lambda ?? throw new InvalidOperationException($"a function value is kept at line {c.Line} with no lambda the checker saw")).Captures.Select(v => Sub(v.Type)).ToList());
     }).ToList();
 

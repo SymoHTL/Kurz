@@ -1,6 +1,6 @@
 // expect: output
 // | shop
-// rules: U24
+// rules: U19, U24
 
 actor Shop {
     pub void Buy(string item) {
