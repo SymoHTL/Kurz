@@ -333,7 +333,9 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             return;
         }
 
-        // the trace on, as a program runs where nobody set KURZ_TRACE; the log line of a crash left out in a case of a crash (E3)
+        // the trace on, as a program runs where nobody set KURZ_TRACE; the log line of a crash left out in a case of a crash (E3); a case's
+        // `threads: 1` line (chapter 0) asks for the one thread the build runs every program on, first in, first out (U35), so the run sets
+        // nothing for it
         var (code, output, written) = Toolchain.Run(executable, null);
         var all = LeftOut(written, header.Rules);
         Assert.Equal(header.OutputLines, output);

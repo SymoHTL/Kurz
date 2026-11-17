@@ -1,9 +1,10 @@
-// expect: throws actor-gone at 35
+// expect: throws actor-gone at 36
 // | 0
-// rules: U21, U22, U28, U32
+// threads: 1
+// rules: U21, U22, U28, U32, U35
 
-// `Worker`'s `Fail` runs before `Boss` takes the call the top-level code makes after `Go`, in the order the build's run queue
-// holds them, which no rule of chapter 19 fixes
+// `Worker`'s `Fail` runs before `Boss` takes the call the top-level code makes after `Go`, as one thread runs the ready actors
+// first in, first out (U35)
 
 actor Worker {
     pub void Fail() {

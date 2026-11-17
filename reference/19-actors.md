@@ -2529,8 +2529,8 @@ Case: [actors/send-gone.kz](../corpus/actors/send-gone.kz)
 
 Case: [actors/block-escalate.kz](../corpus/actors/block-escalate.kz)
 ```kurz
-// `Worker`'s `Fail` runs before `Boss` takes the call the top-level code makes after `Go`, in the order the build's run queue
-// holds them, which no rule of chapter 19 fixes
+// `Worker`'s `Fail` runs before `Boss` takes the call the top-level code makes after `Go`, as one thread runs the ready actors
+// first in, first out (U35)
 
 actor Worker {
     pub void Fail() {
@@ -2590,8 +2590,8 @@ print(w.Half(4))
 
 Case: [actors/block-throw.kz](../corpus/actors/block-throw.kz)
 ```kurz
-// `Worker`'s `Fail` runs before `Boss` takes the call the top-level code makes after `Go`, in the order the build's run queue
-// holds them, which no rule of chapter 19 fixes
+// `Worker`'s `Fail` runs before `Boss` takes the call the top-level code makes after `Go`, as one thread runs the ready actors
+// first in, first out (U35)
 
 actor Worker {
     pub void Fail() {
@@ -2989,6 +2989,9 @@ print(w.Ping())
 
 Case: [actors/block-order.kz](../corpus/actors/block-order.kz)
 ```kurz
+// `first`'s `Fail` runs before `Other` answers `Go`'s call, so that its block stands ahead of `Queued` in `Boss`'s inbox, as one
+// thread runs the ready actors first in, first out (U35)
+
 actor Other {
     pub int Ping() => 1
 }
@@ -3039,8 +3042,8 @@ print(w.Ping())
 
 Case: [actors/block-supervisor-state.kz](../corpus/actors/block-supervisor-state.kz)
 ```kurz
-// `Worker`'s `Fail` runs before `Boss` takes the call the top-level code makes after `Go`, in the order the build's run queue
-// holds them, which no rule of chapter 19 fixes
+// `Worker`'s `Fail` runs before `Boss` takes the call the top-level code makes after `Go`, as one thread runs the ready actors
+// first in, first out (U35)
 
 actor Worker {
     pub void Fail() {
@@ -3068,6 +3071,48 @@ actor Boss {
 b = spawn Boss()
 b.Go()
 print(b.Crashes())
+```
+
+Case: [actors/block-crash-order.kz](../corpus/actors/block-crash-order.kz)
+```kurz
+// `first`'s `Fail` runs before `second`'s, and both before `Other` answers `Go`'s call, so that both blocks stand in `Boss`'s
+// inbox ahead of the top-level code's `Ping`, as one thread runs the ready actors first in, first out (U35)
+
+actor Other {
+    pub int Ping() => 1
+}
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+}
+
+actor Boss {
+    pub void Go(Other other) {
+        first = spawn Worker() on crash (c) {
+            print("first's block")
+            stop
+        }
+
+        second = spawn Worker() on crash (c) {
+            print("second's block")
+            stop
+        }
+
+        send first.Fail()
+        send second.Fail()
+        print(other.Ping())
+        print("go ends")
+    }
+
+    pub int Ping() => 2
+}
+
+o = spawn Other()
+b = spawn Boss()
+b.Go(o)
+print(b.Ping())
 ```
 
 Case: [actors/block-throw.kz](../corpus/actors/block-throw.kz)
@@ -3265,45 +3310,6 @@ none at `escalate` (U25) (§6, assumed there, as Erlang's supervisor reports a c
 acts on it).
 
 Case: [actors/block-crash-order.kz](../corpus/actors/block-crash-order.kz)
-```kurz
-// `first`'s `Fail` runs before `second`'s, in the order the build's run queue holds them, which no rule of chapter 19 fixes
-
-actor Other {
-    pub int Ping() => 1
-}
-
-actor Worker {
-    pub void Fail() {
-        throw "worker fails"
-    }
-}
-
-actor Boss {
-    pub void Go(Other other) {
-        first = spawn Worker() on crash (c) {
-            print("first's block")
-            stop
-        }
-
-        second = spawn Worker() on crash (c) {
-            print("second's block")
-            stop
-        }
-
-        send first.Fail()
-        send second.Fail()
-        print(other.Ping())
-        print("go ends")
-    }
-
-    pub int Ping() => 2
-}
-
-o = spawn Other()
-b = spawn Boss()
-b.Go(o)
-print(b.Ping())
-```
 
 Case: [actors/block-reason.kz](../corpus/actors/block-reason.kz)
 
@@ -3322,8 +3328,20 @@ and an actor between messages moves to any thread (§6, the owner, 2026-11-17, #
 6946657505, Q2, "Stays on its thread (Recommended)"). A message that runs on another thread when the
 top-level code ends runs to its end or its wait, a wait then dropped as a parked message is (U13), and
 the process ends after it; a supervisor that is running acts on its child's crash once its own message
-ends or waits (U22) *(assumed in §6)*.
+ends or waits (U22) *(assumed in §6)*. In a case marked `// threads: 1` (chapter 0) one thread runs the
+actors that are ready first in, first out, the top-level code's wait running them (§6, the owner,
+2026-11-17, #570, comment 6961064167, Q1, "FIFO, as the build (Recommended)").
 
-No case: a case is a single file with no `project.kz` (chapter 0) and gives its program no
-environment, as `log-filter`'s place in chapter 12 says, and the thread that runs a message shows in
-no output.
+No case: for the count of the threads, since a case is a single file with no `project.kz` (chapter 0) and
+gives its program no environment, as `log-filter`'s place in chapter 12 says, and the thread that runs a
+message shows in no output; the order of one thread has the cases below.
+
+Case: [actors/block-escalate.kz](../corpus/actors/block-escalate.kz)
+
+Case: [actors/block-throw.kz](../corpus/actors/block-throw.kz)
+
+Case: [actors/block-order.kz](../corpus/actors/block-order.kz)
+
+Case: [actors/block-supervisor-state.kz](../corpus/actors/block-supervisor-state.kz)
+
+Case: [actors/block-crash-order.kz](../corpus/actors/block-crash-order.kz)

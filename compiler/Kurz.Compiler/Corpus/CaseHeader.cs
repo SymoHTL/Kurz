@@ -27,8 +27,9 @@ public enum BuildKind
 /// prints (not for an error); then an optional <c>// build: test</c> or <c>// build: release</c>;
 /// then an optional <c>// allow: raw</c>, <c>// allow: native</c> or <c>// allow: raw native</c>, the
 /// grants of a <c>project.kz</c> that the case's file takes; then an optional <c>// system: linux</c> or
-/// <c>// system: windows</c>, the one system the case runs on; then exactly one <c>// rules: A1, B2</c>
-/// line; then an empty line; then the program. A line of a diagnostic counts from the first line of
+/// <c>// system: windows</c>, the one system the case runs on; then an optional <c>// threads: 1</c>, a case whose output follows one
+/// thread's order (U35), which the build gives every program, since it runs every actor on its one thread (compiler/README.md); then
+/// exactly one <c>// rules: A1, B2</c> line; then an empty line; then the program. A line of a diagnostic counts from the first line of
 /// the file, the header included.
 /// </summary>
 public sealed partial record CaseHeader(
@@ -129,6 +130,17 @@ public sealed partial record CaseHeader(
             }
 
             system = systemMatch.Groups[1].Value;
+            i++;
+        }
+
+        if (i < lines.Length && lines[i].StartsWith("// threads:", StringComparison.Ordinal))
+        {
+            if (lines[i] != "// threads: 1")
+            {
+                problem = "the `// threads:` line is not `// threads: 1`";
+                return null;
+            }
+
             i++;
         }
 
