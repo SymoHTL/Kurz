@@ -9,9 +9,11 @@ namespace Kurz.Compiler.Emit;
 /// stack of its own, where a call that waits parks it until its reply is set, so that no function is rewritten (section 6, "Own
 /// stack"). An actor's state is an instance of its body, laid out and constructed as a class's
 /// (<see cref="Construct"/>), in the first block of the actor's own heap, which holds the actor's record in front of it, as a string's
-/// block stands in front of its bytes (the runtime's <c>ActorNew</c>; section 3): the reference is the address of the state, so that the
-/// actor's own methods reach the record through <c>this</c> (U11). Nothing counts an actor, which lives to the end of the process, where
-/// its heap is freed whole (U13). A call through a reference, or after <c>send</c>, is a message, one block of the heap of the actor it
+/// block stands in front of its bytes (the runtime's <c>ActorNew</c>; section 3): the reference is the index of the actor's slot in the
+/// runtime's table and its number, which the record holds, so that the actor's own methods make it from <c>this</c>
+/// (<see cref="Reference"/>; U10, U11). Nothing counts a reference: an actor that ends frees its heap whole at once, and a reference to
+/// it then finds no actor (the runtime's <c>Lookup</c>; section 6, the owner, 2026-11-16, #519, comment 6919351399), and the end of the
+/// process frees every heap (U13). A call through a reference, or after <c>send</c>, is a message, one block of the heap of the actor it
 /// goes to, as actix packs a message and the sender of its reply into one envelope: the
 /// message after it in its list, which the runtime's <c>Enqueue</c> sets, the table of its call site, the function that runs it and the
 /// one that copies it into the heap of an actor's new instance (U21), the reply its caller waits on, null
@@ -86,8 +88,23 @@ public sealed partial class Emitter
         fn.Emit($"call ptr {RuntimeFunction("Building")}(ptr {fn.Value($"load ptr, ptr {building}")})");
         fn.Emit($"call void {RuntimeFunction("ActorBuilt")}(ptr {state})");
         fn.Emit($"call ptr {StdFunction("HeapUse")}(ptr {fn.Value($"load ptr, ptr {spawner}")})");
-        return state;
+        return Reference(state);
     }
+
+    /// <summary>
+    /// U2, U10, U11: the reference of the actor whose state is <paramref name="state"/>, the two words its record holds: the index of its
+    /// slot in the runtime's table and its number (the runtime's <c>ActorNew</c>; section 6).
+    /// </summary>
+    private string Reference(string state)
+    {
+        var slot = fn.Value($"load i64, ptr {fn.Value($"getelementptr i8, ptr {state}, i64 -56")}");
+        var number = fn.Value($"load i64, ptr {fn.Value($"getelementptr i8, ptr {state}, i64 -40")}");
+        return fn.Value($"insertvalue %kz.actor {fn.Value($"insertvalue %kz.actor undef, i64 {slot}, 0")}, i64 {number}, 1");
+    }
+
+    /// <summary>The reference <paramref name="reference"/> as the two arguments the runtime's functions take for it: the index of the slot, then the number.</summary>
+    private string ReferenceWords(string reference) =>
+        $"i64 {fn.Value($"extractvalue %kz.actor {reference}, 0")}, i64 {fn.Value($"extractvalue %kz.actor {reference}, 1")}";
 
     /// <summary>
     /// U2, U24: the global of the name of the actor type <paramref name="symbol"/>, a text the record of each of its actors names for the
@@ -403,8 +420,8 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// U4, U6, U11: a call of an actor's method as a message: the actor, the address of its state, read first, through its reference
-    /// or, inside it, as <c>this</c> (U11), then the arguments, each a copy of its own in the actor's heap where it holds a block (U12,
+    /// U4, U6, U11: a call of an actor's method as a message: the actor's reference, read first, or, inside it, made from <c>this</c>
+    /// (U11), then the arguments, each a copy of its own in the actor's heap where it holds a block (U12,
     /// <see cref="Crossed"/>; comment 6902210646, Q5), stored into a block of that heap that the message's function frees once it ran; the block goes to the end of the actor's inbox (U5, U15), or of its side list, where it is a
     /// call of the chain the actor waits in (U17). A call that waits (U4), wherever it stands, passes a reply in its own frame, the one-shot
     /// slot of section 6, a byte the message's function sets once the result stands beside it, the activation that waits on it and the
@@ -419,21 +436,24 @@ public sealed partial class Emitter
     /// that the arguments and the message would go into (U21), or end (U13): the message is then built in a heap of its own, made for it (the runtime's
     /// <c>MessageHeapNew</c>), and at its queueing copied into the heap the actor has then by the function of its call site that copies it
     /// after a crash, its own heap then freed, as Erlang builds a message in the sender's heap and copies it into the receiver's at its
-    /// send; where the actor ended meanwhile, the copy goes into its first heap and the message is dropped as any message to an ended
-    /// actor (the runtime's <c>Enqueue</c>). Where no argument can wait, the message is built in the actor's heap.
+    /// send. Where no argument can wait, the message is built in the actor's heap, and nothing runs between the read of that heap and the
+    /// queueing that could end the actor. Where the actor ended, the message is built or copied in the heap the caller allocates in (the
+    /// runtime's <c>ActorHeap</c>), and its queueing raises <c>actor-gone</c> at the call's line, a <c>send</c>'s too (the runtime's
+    /// <c>Enqueue</c>; U6, U20; section 6, the owner, 2026-11-16, #519, comments 6919351399 and 6923513534).
     /// </summary>
     private string EmitMessage(CallExpression c, CallInfo info)
     {
         var f = info.Function!;
         var actor = c.Callee switch
         {
-            MemberAccess m => EmitExpression(m.Target),
-            NameExpression n => This(n, n.Line),
+            MemberAccess m when Sub(Model.TypeOf(m.Target).Type) is ActorType => EmitExpression(m.Target),
+            MemberAccess m => Reference(EmitExpression(m.Target)), // U11: `send this.Add(1)`, `this` the actor's own instance
+            NameExpression n => Reference(This(n, n.Line)),
             _ => throw new InvalidOperationException($"a message through `{c.Callee.GetType().Name}` at line {c.Line}"),
         };
         var own = c.Arguments.Any(a => Model.CanWait(a.Value)) ? fn.Value($"call ptr {RuntimeFunction("MessageHeapNew")}()") : null;
         var left = own is null ? null : HeapBegun(own, "MessageHeapFree");
-        var heap = own ?? fn.Value($"call ptr {RuntimeFunction("ActorHeap")}(ptr {actor})");
+        var heap = own ?? fn.Value($"call ptr {RuntimeFunction("ActorHeap")}({ReferenceWords(actor)})");
         var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => Default(f.Declaration!.Parameters[j].Default, owners[f]), cConvention: false, owned: true, into: heap);
         var message = MessageType(f);
         var block = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr {heap}, i64 {IrSize(message)})");
@@ -455,7 +475,7 @@ public sealed partial class Emitter
                 return block;
             }
 
-            var moved = fn.Value($"call ptr {copy}(ptr {block}, ptr {fn.Value($"call ptr {RuntimeFunction("ActorHeap")}(ptr {actor})")})");
+            var moved = fn.Value($"call ptr {copy}(ptr {block}, ptr {fn.Value($"call ptr {RuntimeFunction("ActorHeap")}({ReferenceWords(actor)})")})");
             fn.Emit($"call void {RuntimeFunction("MessageHeapFree")}(ptr {own})");
             fn.Emit($"store ptr null, ptr {left}");
             return moved;
@@ -464,7 +484,8 @@ public sealed partial class Emitter
         if (info.Kind == CallKind.ActorSend)
         {
             fn.Emit($"store ptr null, ptr {MessageField(message, block, 2)}");
-            fn.Emit($"call void {RuntimeFunction("Enqueue")}(ptr {actor}, ptr {Queued()})");
+            var sent = Queued();
+            fn.Emit($"call void {RuntimeFunction("Enqueue")}({ReferenceWords(actor)}, ptr {sent}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
             return "void";
         }
 
@@ -478,7 +499,7 @@ public sealed partial class Emitter
 
         fn.Emit($"store ptr {reply}, ptr {MessageField(message, block, 2)}");
         block = Queued();
-        fn.Emit($"call void {RuntimeFunction("Enqueue")}(ptr {actor}, ptr {block})");
+        fn.Emit($"call void {RuntimeFunction("Enqueue")}({ReferenceWords(actor)}, ptr {block}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
         fn.Emit($"call void {RuntimeFunction("Wait")}(ptr {reply}, ptr {block}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
         return Types.IsVoid(result) ? "void" : fn.Value($"load {Ir(result)}, ptr {fn.Value($"getelementptr {Reply(result)}, ptr {reply}, i32 0, i32 3")}");
     }

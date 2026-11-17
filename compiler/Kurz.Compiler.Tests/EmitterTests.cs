@@ -952,6 +952,22 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_map_hashes_an_actors_reference_by_its_number_and_keeps_no_hash_of_it()
+    {
+        // U2, U12: a reference is the index of its actor's slot in the runtime's table and its number, two words (section 6, the owner,
+        // 2026-11-16, #519, comment 6919351399); its hash reads the number alone, as `==` does, which no other actor of the process has,
+        // so that the hashes are those of the number the record held before the table, and a key of one word keeps no hash in its slot
+        // (`KeepsHash`; section 6, assumed there). A run cannot tell the index's hash from the number's, which `==` tells apart
+        // (ActorTests), so the IR is read
+        const string program = "actor Counter {\n    pub int Get() => 1\n}\n\nc = spawn Counter()\nmut m = Map<Counter, int>()\nm[c] = 1\nprint(m.Count)\n";
+        var compiled = Compile(program, Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
+        Assert.True(compiled is not null, "no program");
+        Assert.Contains("\n%\"entry.Map<Counter, int>\" = type { %kz.actor, i32 }", compiled.Ir, StringComparison.Ordinal);
+        Assert.NotEmpty(Regex.Matches(compiled.Ir, @"(%[\w.]+) = extractvalue %kz\.actor %[\w.]+, 1(, !dbg ![0-9]+)?\r?\n\s+store i64 \1, ptr %v\.key\."));
+        Assert.DoesNotMatch(@"(%[\w.]+) = extractvalue %kz\.actor %[\w.]+, 0(, !dbg ![0-9]+)?\r?\n\s+store i64 \1, ptr %v\.key\.", compiled.Ir);
+    }
+
+    [Fact]
     public void Remove_finds_the_slot_of_its_key_once_and_takes_the_slot_of_a_copy_at_its_offset()
     {
         // hashbrown's `remove_entry` finds the key's slot once, and so does the helper of `Remove`: where the block it found the slot in

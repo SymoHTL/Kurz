@@ -2231,12 +2231,13 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_message_whose_callee_ends_while_one_of_its_arguments_waits_holds_no_block_of_the_heap_the_end_freed()
     {
-        // U12, U13, U21: `Box` ends as the child of a supervisor that crashed during the wait of `s.Get()`, which frees its heap; the third
-        // argument reaches the list of the first, whose copy the call's memo gives it again, so a copy made in the callee's heap would be
-        // read after its free. The message is built in a heap of its own and copied into the ended callee's first heap at its queueing,
-        // where it is dropped as any message to an ended actor, a `send` with no error, which the table of slots and generations of the
-        // record's answer of 2026-11-16 would raise as `actor-gone`, a part of it this build does not hold (compiler/README.md); a call to
-        // the ended actor so built raises `actor-gone` at its line (U20); under the allocator that makes every freed block inaccessible
+        // U12, U13, U21, U6: `Box` ends as the child of a supervisor that crashed during the wait of `s.Get()`, which frees its heap whole,
+        // its first page with it, and its slot of the table; the third argument reaches the list of the first, whose copy the call's memo
+        // gives it again, so a copy made in the callee's heap would be read after its free. The message is built in a heap of its own and
+        // copied at its queueing into the heap the top-level code allocates in, since the reference finds no actor (the runtime's
+        // `ActorHeap`), and the `send` raises `actor-gone` at its line, "sent" never printed (U6; section 6, the owner, 2026-11-16, #519,
+        // comment 6923513534, "Raise actor-gone"), as a call does (`ListTests`, `actor-end-wait-fenced`); under the allocator that makes
+        // every freed block inaccessible
         const string text = """
             actor Slow {
                 pub int Get() => 7
@@ -2246,8 +2247,6 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 pub void Add(List<int> xs, int k, List<int> ys) {
                     print(xs[0] + k + ys[2])
                 }
-
-                pub int Sum(List<int> xs, int k, List<int> ys) => xs[0] + k + ys[2]
             }
 
             actor Parent {
@@ -2273,7 +2272,6 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 send p.Boom()
                 send kid.Add(items, s.Get(), items)
                 print("sent")
-                print(kid.Sum(items, s.Get(), items))
             }
 
             print("end")
@@ -2281,8 +2279,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             """;
         var run = BuildAndRun(text, ListTests.Fenced, "actor-ended-while-waiting");
         var (crashes, rest) = Logged(run.Error);
-        Assert.Equal(["Parent#1 crashed: thrown \"parent\" at program.kz:23"], crashes);
-        Ran((run.Code, run.Output, rest), 1, ["sent"], "error: actor-gone at program.kz:36\n");
+        Assert.Equal(["Parent#1 crashed: thrown \"parent\" at program.kz:21"], crashes);
+        Ran((run.Code, run.Output, rest), 1, [], "error: actor-gone at program.kz:32\n");
     }
 
     [Fact]
@@ -2419,6 +2417,320 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Slow#1 crashed: thrown \"slow\" at program.kz:3"], crashes);
         Ran((run.Code, run.Output, rest), 1, [], "error: actor-gone at program.kz:11\n");
+    }
+
+    [Fact]
+    public void A_reference_whose_actor_ended_compares_hashes_and_prints_by_its_number_and_reaches_no_later_actor_of_its_slot()
+    {
+        // section 6 (the owner, 2026-11-16, #519, comment 6919351399, "Erlang: id + generation"), U2, U12, U20: `old` ends as the child of
+        // `Parent`, whose crash frees its heap whole and its slot of the table, which `fresh`, the next actor spawned, takes again; `old`
+        // compares, hashes as a key and prints by its number, which reads no record (section 6, assumed there), and a call through it finds
+        // no actor in the slot and raises `actor-gone` at its line, where a reference without its number would reach `fresh` and print 2;
+        // under the allocator that makes every freed block inaccessible, so that a read of the freed record ends the run
+        const string text = """
+            actor Child(int N) {
+                pub int Get() => N
+            }
+
+            actor Parent {
+                pub Child Make(int n) => spawn Child(n)
+
+                pub void Boom() {
+                    throw "parent"
+                }
+            }
+
+            p = spawn Parent()
+            old = p.Make(1)
+            mut seen = Map<Child, string>()
+            seen[old] = "old"
+            send p.Boom()
+            fresh = p.Make(2)
+            seen[fresh] = "fresh"
+            print(old == fresh)
+            print("{old} {fresh}")
+            print(seen[old] ?? "none")
+            print(seen[fresh] ?? "none")
+            print(fresh.Get())
+            print(old.Get())
+
+            """;
+        var run = BuildAndRun(text, ListTests.Fenced, "actor-stale-reference");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Parent#1 crashed: thrown \"parent\" at program.kz:9"], crashes);
+        Ran((run.Code, run.Output, rest), 1, ["false", "Child#2 Child#3", "old", "fresh", "2"], "error: actor-gone at program.kz:25\n");
+    }
+
+    [Fact]
+    public void The_slot_of_an_ended_actor_is_taken_again_so_that_a_crash_looping_supervisors_children_take_one()
+    {
+        // section 6 (comment 6919351399): each crash of `Parent` ends the child its `Make` spawned, which frees its slot, and the next `Make`
+        // takes it again, the slot freed last first, as slotmap's free list takes them (section 6, assumed there), so that after five
+        // children the table has taken two slots, where one per actor ever spawned would be six; the count of the slots taken written at
+        // the end of the program
+        const string text = """
+            actor Child {
+                pub int Get() => 1
+            }
+
+            actor Parent {
+                mut Child? kid = null
+
+                pub int Make() {
+                    kid = spawn Child()
+                    return 1
+                }
+
+                pub void Boom() {
+                    throw "parent"
+                }
+            }
+
+            p = spawn Parent() on crash restart after 1ms
+            mut total = 0
+            for i in 0..<5 {
+                total = total + p.Make()
+                send p.Boom()
+            }
+
+            print(total)
+
+            """;
+        var counted = ListTests.Edited(("runtime/common/runtime.kz", "pub void Finish() {\n    EndActors()\n",
+            "pub void Finish() {\n    mut long used = 0\n    raw {\n        used = slotsUsed\n    }\n\n    Print(2, \"slots {used}\", \"\", 0)\n    EndActors()\n"));
+        var run = BuildAndRun(text, counted, "actor-slots-reused");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(Enumerable.Repeat("Parent#1 crashed: thrown \"parent\" at program.kz:14", 4), crashes);
+        Ran((run.Code, run.Output, rest), 0, ["5"], "slots 2\n");
+    }
+
+    [Fact]
+    public void References_in_the_pages_of_the_table_past_its_first_reach_their_actors()
+    {
+        // section 6 (comment 6919351399): the table's pages double from 64 slots and never move (section 6, assumed there), so that 300
+        // actors take slots of its first three pages, 64, 128 and 256 slots, and a call through each reference reaches its own actor
+        const string text = """
+            actor Idle(int N) {
+                pub int Get() => N
+            }
+
+            mut List<Idle> all = []
+            for i in 0..<300 {
+                all.Add(spawn Idle(i))
+            }
+
+            mut total = 0
+            for a in all {
+                total = total + a.Get()
+            }
+
+            print(total)
+            print(all[299])
+
+            """;
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-table-pages"), 0, ["44850", "Idle#300"], "");
+    }
+
+    [Fact]
+    public void An_ended_actor_frees_its_heap_at_once_or_where_it_stands_in_the_run_queue_when_the_scheduler_takes_it_off()
+    {
+        // section 6 (comment 6919351399; U13, U25): `Parent`'s crash under `stop` ends it and its children; `Child(1)`, idle, and `Parent`
+        // free their heaps at once, the new heap `Parent`'s fall made among them, and `Child(2)`, which stands in the run queue with
+        // `Tick(2)`, dropped, frees its first page when the scheduler takes it off at the next wait (section 6, assumed there), so that the
+        // heaps drop by 2 and then by 1; under the allocator that makes every freed block inaccessible, so that a record freed while the
+        // run queue holds it ends the run where the scheduler reads it
+        const string text = """
+            actor Child(int N) {
+                pub void Tick(int t) {
+                    print("tick {N} {t}")
+                }
+            }
+
+            actor Parent {
+                mut Child? one = null
+                mut Child? two = null
+
+                pub void Make() {
+                    one = spawn Child(1)
+                    two = spawn Child(2)
+                }
+
+                pub Child? Two() => two
+
+                pub void Boom() {
+                    throw "parent"
+                }
+            }
+
+            actor Quick {
+                pub int Get() => 5
+            }
+
+            p = spawn Parent() on crash stop
+            q = spawn Quick()
+            p.Make()
+            two = p.Two()
+            if two != null {
+                send two.Tick(1)
+                send two.Tick(2)
+            }
+
+            before = HttpServer.Heaps()
+            send p.Boom()
+            print(q.Get())
+            middle = HttpServer.Heaps()
+
+            """;
+        var run = BuildAndRun(text + "print(q.Get())\nprint(\"{before - middle} {middle - HttpServer.Heaps()}\")\n", ListTests.Edited([.. ListTests.Fence, .. HeapCount]), "actor-ended-heaps");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Parent#1 crashed: thrown \"parent\" at program.kz:19"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["tick 2 1", "5", "5", "2 1"], "");
+
+        // U13: an actor that ended while it stood in the run queue, still there when the program's actors end, has its first page freed
+        // with them (the runtime's `EndActors`), with `Quick`'s heap, the one actor of the table
+        var ended = BuildAndRun(text + "eprint(\"end actors\")\nprint(\"{before - middle} {middle - HttpServer.Heaps()}\")\n", ListTests.Edited([.. ListTests.Fence, .. HeapCount, ListTests.EndingActors]), "actor-ended-heaps-end");
+        var (endedCrashes, endedRest) = Logged(ended.Error);
+        Assert.Equal(["Parent#1 crashed: thrown \"parent\" at program.kz:19"], endedCrashes);
+        Ran((ended.Code, ended.Output, endedRest), 0, ["tick 2 1", "5", "2 2"], "");
+    }
+
+    [Fact]
+    public void A_child_whose_supervisor_ended_while_it_waited_takes_its_own_crash_and_writes_its_log_line()
+    {
+        // U13, U19, U24, section 6 (comment 6919351399): `Parent`'s crash under `stop` ends it, which frees its record, while `Child` waits
+        // in `Work` for `S.Get()`, so that `Child` ends after its current message with no supervisor (the runtime's `EndChildren`, section 6,
+        // assumed there); its crash after the wait is taken by its own end, and its log line written, reading nothing of the freed
+        // supervisor; under the allocator that makes every freed block inaccessible
+        const string text = """
+            actor Slow {
+                pub int Get() => 7
+            }
+
+            actor Other {
+                pub int Ping() => 0
+            }
+
+            actor Child(Slow S) {
+                pub void Work() {
+                    n = S.Get()
+                    throw "child {n}"
+                }
+            }
+
+            actor Parent(Slow S) {
+                mut Child? kid = null
+
+                pub void Make() {
+                    kid = spawn Child(S)
+                }
+
+                pub Child? Kid() => kid
+
+                pub void Boom() {
+                    throw "parent"
+                }
+            }
+
+            s = spawn Slow()
+            o = spawn Other()
+            p = spawn Parent(s) on crash stop
+            p.Make()
+            kid = p.Kid()
+            if kid != null {
+                send kid.Work()
+            }
+
+            send p.Boom()
+            print(o.Ping())
+            print(s.Get())
+
+            """;
+        var run = BuildAndRun(text, ListTests.Fenced, "actor-orphan-crash");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Parent#3 crashed: thrown \"parent\" at program.kz:26", "Child#4 crashed: thrown \"child 7\" at program.kz:12"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["0", "7"], "");
+    }
+
+    [Fact]
+    public void A_supervisors_crash_ends_its_children_from_the_last_slot_of_the_table_down()
+    {
+        // U13, U20, section 6 (comment 6919351399): `Parent`'s crash ends `second` before `first`, from the highest index of the table down
+        // (section 6, assumed there), each setting the call queued to it `gone`, so that the caller that waits on `second` wakes first and
+        // crashes with `actor-gone` first
+        const string text = """
+            actor Child {
+                pub int Get() => 1
+            }
+
+            actor Parent {
+                mut Child? first = null
+                mut Child? second = null
+
+                pub void Make() {
+                    first = spawn Child()
+                    second = spawn Child()
+                }
+
+                pub Child? First() => first
+
+                pub Child? Second() => second
+
+                pub void Boom() {
+                    throw "parent"
+                }
+
+                pub int Ping() => 0
+            }
+
+            actor Asker {
+                pub void Ask(Child c) {
+                    print(c.Get())
+                }
+            }
+
+            p = spawn Parent()
+            p.Make()
+            a = p.First()
+            b = p.Second()
+            one = spawn Asker()
+            two = spawn Asker()
+            if a != null {
+                send one.Ask(a)
+            }
+
+            if b != null {
+                send two.Ask(b)
+            }
+
+            send p.Boom()
+            print(p.Ping())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-children-order");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Parent#1 crashed: thrown \"parent\" at program.kz:19", "Asker#5 crashed: actor-gone at program.kz:27", "Asker#4 crashed: actor-gone at program.kz:27"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["0"], "");
+    }
+
+    [Fact]
+    public void A_spawn_past_the_largest_number_ends_the_process_as_a_refused_allocation()
+    {
+        // U2, section 6 (comment 6919351399): the actor's number is the generation of its slot, a `long`, and the spawn past the largest
+        // ends the process as a refused allocation does, with the bytes of its record and its state, as a string past the largest `int`
+        // does (T15), so that no two actors have one number (section 6, assumed there); the count of the spawns begins one below it here
+        const string text = """
+            actor Idle {
+                pub int Get() => 1
+            }
+
+            a = spawn Idle()
+            print(a)
+            b = spawn Idle()
+            print(b)
+
+            """;
+        var late = ListTests.Edited(("runtime/common/runtime.kz", "static mut long actorCount = 0\n", "static mut long actorCount = 9223372036854775806\n"));
+        Ran(BuildAndRun(text, late, "actor-number-last"), 1, ["Idle#9223372036854775807"], "error: allocation-failed (112 bytes)\n");
     }
 
     [Fact]
@@ -2928,7 +3240,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         // the error line names the scheduler's own line where the fault is, the call of `Burn` that did not fit, in the edited runtime's file
-        const string at = "pub void Enqueue(byte* state, byte* message) {\n    sys.Entered()\n";
+        const string at = "pub void Enqueue(long index, long number, byte* message, string file, int line) {\n    sys.Entered()\n";
         var run = BuildAndRun(text, Burning("runtime/common/runtime.kz", at), "actor-fault-scheduler");
         var (crashes, rest) = Logged(run.Error);
         Assert.Empty(crashes);
@@ -3095,7 +3407,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(s.Go())
 
             """;
-        const string at = "pub void Enqueue(byte* state, byte* message) {\n    sys.Entered()\n";
+        const string at = "pub void Enqueue(long index, long number, byte* message, string file, int line) {\n    sys.Entered()\n";
         (string Path, string Old, string New)[] edits = [("runtime/common/runtime.kz", at, Check + at + "    CheckArmed()\n"), Armed("CheckArm()")];
         var run = BuildAndRun(text, ListTests.Edited(edits), "actor-check-scheduler");
         var (crashes, rest) = Logged(run.Error);

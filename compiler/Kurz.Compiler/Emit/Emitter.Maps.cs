@@ -105,10 +105,10 @@ public sealed partial class Emitter
 
             case ActorType:
                 {
-                    // U12: a reference hashes its actor's number, which its record holds 40 bytes before the state (section 6, Q10 of
-                    // comment 6880404917)
+                    // U12: a reference hashes its actor's number, its second word, which reads no record, so that a reference whose actor
+                    // ended hashes too (section 6, Q10 of comment 6880404917)
                     var slot = fn.Alloca("i64", "key");
-                    fn.Emit($"store i64 {fn.Value($"load i64, ptr {fn.Value($"getelementptr i8, ptr {key}, i64 -40")}")}, ptr {slot}");
+                    fn.Emit($"store i64 {fn.Value($"extractvalue %kz.actor {key}, 1")}, ptr {slot}");
                     return fn.Value($"call i64 {StdFunction("MapHash")}(ptr {block}, ptr {slot}, i64 8)");
                 }
 
