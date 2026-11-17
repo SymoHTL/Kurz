@@ -563,6 +563,36 @@ print(d.Total())
 
 Case: [actors/constructor-arguments.kz](../corpus/actors/constructor-arguments.kz)
 
+Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
+```kurz
+actor Child {
+    pub int Ping() => 1
+}
+
+actor Parent {
+    mut Child? kid = null
+
+    pub void Make() {
+        kid = spawn Child()
+    }
+
+    pub Child? Kid() => kid
+
+    pub void Boom() {
+        throw "parent fails"
+    }
+}
+
+p = spawn Parent()
+p.Make()
+kid = p.Kid()
+send p.Boom()
+print(p.Kid() == null)
+if kid != null {
+    print(kid.Ping())
+}
+```
+
 ### U6 (decided, §6) `send`
 
 `send` before a call of an actor's method, `send c.Add(1)`, makes the call a message that nobody
@@ -2200,7 +2230,8 @@ is the crash of the root actor, which ends the process with the exit code 1, the
 trace, as before (§6). `allocation-failed`, `random-failed` and a fault outside a guard page end the
 process wherever they happen (O11, M9), and so do, on the actor's stack too, a stack fault inside the
 allocator, the scheduler or the copy of a crossing (O11) and, in a test build, a check of the runtime's
-own code, as a stack fault inside the allocator or the scheduler does (chapter 12, "Run-time errors").
+own code wherever it fires, as a stack fault inside the allocator or the scheduler ends it (chapter 12,
+"Run-time errors").
 On Windows an actor's stack overflow ends the process as the system ends it (`compiler/README.md`)
 *(assumed: §6, the points of comment 6899225864 that the answers left standing)*. The words of a
 policy, `on crash`, say what the supervisor does with the crash (U25 to U27), and an actor whose
@@ -2278,8 +2309,8 @@ waiting actor in its turn, and so on up the chain to the top-level code, whose c
 process (§6, "The exception kills the caller as well"). A call whose caller crashed, where the callee
 runs on another thread than its caller, runs to its end, and its result goes nowhere (§6); on one
 thread a caller that waits crashes only through a call of its own chain, which its callee waits on, so that the callee then crashes with `callee-crashed` too.
-A call that waits on an actor that ended, a child whose supervisor crashed (U21), raises
-`actor-gone` there (§6).
+A call that waits on an actor that ended, among them a child whose supervisor crashed (U21), one
+its policy stopped (U25) and one past its limit (U26), raises `actor-gone` there (§6).
 
 Case: [actors/crash-waiter.kz](../corpus/actors/crash-waiter.kz)
 ```kurz
@@ -2296,34 +2327,6 @@ print("after")
 Case: [actors/crash-waiter-chain.kz](../corpus/actors/crash-waiter-chain.kz)
 
 Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
-```kurz
-actor Child {
-    pub int Ping() => 1
-}
-
-actor Parent {
-    mut Child? kid = null
-
-    pub void Make() {
-        kid = spawn Child()
-    }
-
-    pub Child? Kid() => kid
-
-    pub void Boom() {
-        throw "parent fails"
-    }
-}
-
-p = spawn Parent()
-p.Make()
-kid = p.Kid()
-send p.Boom()
-print(p.Kid() == null)
-if kid != null {
-    print(kid.Ping())
-}
-```
 
 ### U21 (decided, §6) The inbox is kept, and the crashed instance's heap goes
 
@@ -2450,6 +2453,8 @@ Case: [actors/crash-restarts-fresh.kz](../corpus/actors/crash-restarts-fresh.kz)
 
 Case: [actors/crash-children-end.kz](../corpus/actors/crash-children-end.kz)
 
+Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
+
 ### U23 (decided, §6) The pause before a restart grows
 
 A restart waits a pause of 100 ms at the actor's first crash, twice the one before at each crash
@@ -2458,9 +2463,9 @@ of 30 s since the last restart with no crash, as Akka's backoff supervisor waits
 2026-10-30, "100 ms doubling to 30 s"; the variation drawn from the thread's generator and one
 clock of the runtime, the taken points of comment 6899225864). What doubles is the pause before its
 variation, the cap holds that pause before it is varied, so that a pause reaches 36 s, and the run of
-30 s counts from the start of the last restart *(assumed: readings of the build, which the answer of
-2026-10-30 did not give)*. While a pause runs, a wait of the top-level code that finds nothing else to
-run sleeps until it ends, and raises no `deadlock` (U18)
+30 s counts from the start of the last restart *(assumed: as §6 marks them, readings of the build
+that the answer of 2026-10-30 did not give)*. While a pause runs, a wait of the top-level code that
+finds nothing else to run sleeps until it ends, and raises no `deadlock` (U18)
 (§6, the taken points of comment 6899225864). A corpus case crashes at most three times, about
 0.7 s of pauses, unless it writes `after 1ms` (U26) *(assumed: as §6 marks it)*. The case below holds
 the wait that sleeps and raises no `deadlock`, and prints what a restart with no pause prints too; the
@@ -2579,7 +2584,8 @@ owner, 2026-10-30, "100 ms doubling to 30 s" and "No limit, as Akka"). The limit
 the policy restarts in a window of that duration that slides with each crash, as Erlang's
 `supervisor` keeps the times of its restarts within its period (`can_restart`), and the crash that
 finds N earlier crashes its policy restarted in the window, one exactly a window old among them
-*(assumed: a reading of the build, which the answers did not give)*, passes it: the actor ends, and its
+*(assumed: as §6 marks it, a reading of the build that the answers did not give)*, passes it: the
+actor ends, and its
 supervisor crashes with `restart-limit` at the line of the `spawn`, which the supervisor's own policy
 takes in turn, at the top level the end of the process (§6, the owner, 2026-11-15, #519, comment 6902210646, Q4, "Erlang:
 restart-limit id") *(assumed: as §6 marks it, each crash counted at its time, before its pause, the
