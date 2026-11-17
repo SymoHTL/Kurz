@@ -454,7 +454,9 @@ public sealed partial class Emitter
             case EnumType or FlagsType:
                 return fn.Value($"icmp eq {Ir(type)} {left}, {right}"); // D12: the same value; D13: a set, the same names
             case ActorType:
-                return fn.Value($"icmp eq ptr {left}, {right}"); // U2: one actor, whose reference is the address of its state
+                // U2: one actor, whose number no other actor of the process has, read alone, so that a reference whose actor ended compares
+                // too (section 6, assumed there)
+                return fn.Value($"icmp eq i64 {fn.Value($"extractvalue %kz.actor {left}, 1")}, {fn.Value($"extractvalue %kz.actor {right}, 1")}");
             case PrimitiveType p when Types.IsFloating(p):
                 {
                     var same = fn.Value($"fcmp oeq {Ir(type)} {left}, {right}");

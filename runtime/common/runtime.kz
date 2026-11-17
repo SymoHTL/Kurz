@@ -3343,22 +3343,24 @@ pub string ExitErrorText(ExitError e) {
 
 // The actors of a program run on the one thread the runtime runs, while the top-level code waits for a
 // call's result (U4), as tokio's `current_thread` runtime runs its tasks inside `block_on`
-// (compiler/README.md, "What the emitter emits"). An actor's reference is the address of its state, which
-// the emitted code constructs, with the actor's record in the 96 bytes in front of it, as a string's block
-// stands in front of its bytes, a multiple of 16 so that the state keeps the alignment of the allocator's
+// (compiler/README.md, "What the emitter emits"). An actor's state, which the emitted code constructs, has
+// the actor's record in the 96 bytes in front of it, as a string's block stands in front of its bytes, and its
+// reference is the index of its slot in the table of the process and its number (below), a multiple of 16
+// so that the state keeps the alignment of the allocator's
 // block, as Rust's `ArcInner` pads its counts to what it holds: the name of the actor's type, whether the
 // actor runs (0), waits for its restart (1), ends after its current
 // message (2), ended (3) (U19, U22), has its constructor run at its `spawn` (4) (U3, U25) or waits for the
 // decision of the block of its policy (5) (U28), the block of its
 // restart, which its supervisor's heap holds (U22), a block that names no function to run where its policy
 // is `escalate`, null where it does not restart (U25), its supervisor, null for the top-level code (U13), the actor's heap
-// (design record, section 3), the actor spawned before it, the size of the actor's stack its clause asked
+// (design record, section 3), the index of its slot in the table, the size of the actor's stack its clause asked
 // for (U1), the actor's number (U2), the first message of its inbox, the last, the actor after it in the
 // run queue, and its top activation, null while it is idle. The record and the state are the first block of
 // the actor's heap, and every block the actor's code allocates is a block of that heap, which `Run` has the
 // allocation entry serve while the actor's activation runs; a message is a block of the heap of the actor it
 // goes to, and what crosses into it a copy there (U12). After a crash the first block stays in the first
-// page of the heap it was made in, and every other block of the actor is a block of a new heap (U21). An
+// page of the heap it was made in, and every other block of the actor is a block of a new heap (U21); an
+// actor that ends frees its heap whole, that first page with it (`EndActor`). An
 // actor stands in the run queue where an actor stands after it or it is the last, as an intrusive list
 // tells its members by their links. A message is a block the emitted code makes: the message after it in
 // its list, the table of its call site, the function that runs it and the one that copies it into another
@@ -3390,11 +3392,25 @@ pub string ExitErrorText(ExitError e) {
 static mut byte* runFirst = null
 static mut byte* runLast = null
 
-// The count of the actors spawned, which is the number of the last one (U2), and the last one, whose
-// record names the one spawned before it, so that the end of the program reaches every actor (U13), whose
-// heap it frees (design record, section 6, assumed, with section 3's freeing of an ending actor's heap).
+// The count of the actors spawned, which is the number of the last one (U2); a spawn past the largest `long`
+// ends the process as a refused allocation does, as a string past the largest `int` does (T15), so that no
+// two actors of the process have one number (design record, section 6, assumed there).
 static mut long actorCount = 0
-static mut byte* actors = null
+
+// The table of the slots of the actors of the process (design record, section 6, the owner, 2026-11-16, #519,
+// comment 6919351399, "Erlang: id + generation"): an actor's reference is the index of its slot and its number,
+// and a slot holds the state of the actor in it and that actor's number, 16 bytes, or, while it is free, 0 for
+// the number and the index of the free slot freed before it, so that a reference whose actor ended, its slot
+// cleared or given to an actor spawned since, whose number is larger, finds no actor (`Lookup`), as Erlang's
+// table of processes finds none for a pid whose serial no longer matches. The slots stand in pages that never
+// move, 64 slots the first and each page twice the one before, as tokio's slab grows, a slot's page found from
+// the bit length of its index plus 64, each made at the first slot it gives, in the thread's own heap, so that a
+// lookup never meets a page moved under it; the directory holds a page for every bit length an index can have.
+// A free slot is taken again first, the one freed last first, as slotmap's free list takes them; `slotsUsed`
+// counts the slots ever taken (section 6, assumed there).
+static mut byte* slotPages = null
+static mut long slotsUsed = 0
+static mut long slotFree = -1
 
 // The header of the activation whose message runs on the thread, null while the top-level code runs,
 // the scheduler's loop in its wait among it.
@@ -3496,12 +3512,19 @@ pub void HeapLeft(byte* heap) {
 // The record of a new actor in the first block of its heap `heap`, numbered after the last one spawned,
 // its inbox empty, outside the run queue and idle, with room for a state of `size` bytes behind it, and
 // the bytes of its stack, `stack`, the size its clause wrote or 2 MiB (U1): the address of that room,
-// which is the actor's reference (U2). No message reaches the actor while `spawn` constructs it, as
+// the state, whose record holds the actor's reference, the index of the slot of the table it takes and its
+// number (U2). No message reaches the actor while `spawn` constructs it, as
 // section 6 has it (assumed there): its reference is the spawner's once `spawn` returns, and a default of
 // its body reads neither `this` nor its methods (K7). The record names the name of the actor's type,
 // `name`, for the log line of its crash (U24), the block `side` of its restart (U22), and its supervisor,
 // the actor whose code spawns it (`Supervisor`), and says that its constructor runs until `ActorBuilt`.
 pub byte* ActorNew(byte* heap, long size, long stack, byte* side, byte* name) {
+    raw {
+        if actorCount == 9223372036854775807 {
+            AllocationFailed(96 + size)
+        }
+    }
+
     sys.Entered()
     mut byte* state = std.HeapFirst(heap)
     raw {
@@ -3511,11 +3534,10 @@ pub byte* ActorNew(byte* heap, long size, long stack, byte* side, byte* name) {
         *Ptr<byte*>(state - 80) = side
         *Ptr<byte*>(state - 72) = Supervisor()
         *Ptr<byte*>(state - 64) = heap
-        *Ptr<byte*>(state - 56) = actors
-        actors = state
         *Ptr<long>(state - 48) = stack
         actorCount = actorCount + 1
         *Ptr<long>(state - 40) = actorCount
+        *Ptr<long>(state - 56) = SlotTake(state, actorCount)
         *Ptr<byte*>(state - 32) = null
         *Ptr<byte*>(state - 24) = null
         *Ptr<byte*>(state - 16) = null
@@ -3526,7 +3548,78 @@ pub byte* ActorNew(byte* heap, long size, long stack, byte* side, byte* name) {
     return state
 }
 
-// The end of the constructor of the actor whose reference is `state` at its `spawn`, which the emitted `spawn`
+// The slot of the table whose index is `index`, in its page, which is made at the first slot it gives (above).
+byte* Slot(long index) {
+    raw {
+        mut long page = 0
+        mut long first = 64
+        while index + 64 >= first * 2 {
+            first = first * 2
+            page = page + 1
+        }
+
+        byte* at = slotPages + page * 8
+        if *Ptr<byte*>(at) == null {
+            *Ptr<byte*>(at) = AllocateOwn(first * 16)
+        }
+
+        return *Ptr<byte*>(at) + (index + 64 - first) * 16
+    }
+}
+
+// A slot of the table taken for the actor whose state is `state` and whose number is `number`: the free slot
+// freed last, else the one after the slots ever taken; its index.
+long SlotTake(byte* state, long number) {
+    raw {
+        if slotPages == null {
+            slotPages = AllocateOwn(512)
+            mut long i = 0
+            while i < 64 {
+                *Ptr<byte*>(slotPages + i * 8) = null
+                i = i + 1
+            }
+        }
+
+        mut long index = slotFree
+        if index >= 0 {
+            slotFree = *Ptr<long>(Slot(index))
+        } else {
+            index = slotsUsed
+            slotsUsed = slotsUsed + 1
+        }
+
+        byte* slot = Slot(index)
+        *Ptr<byte*>(slot) = state
+        *Ptr<long>(slot + 8) = number
+        return index
+    }
+}
+
+// The slot of the index `index` freed at its actor's end: no number, which no reference holds, and the free
+// slot freed before it named, so that a spawn takes it first.
+void SlotFree(long index) {
+    raw {
+        byte* slot = Slot(index)
+        *Ptr<long>(slot + 8) = 0
+        *Ptr<long>(slot) = slotFree
+        slotFree = index
+    }
+}
+
+// The state of the actor whose reference is the slot of the index `index` and the number `number`, null where
+// that actor ended, its slot then holding no number or a later actor's (design record, section 6).
+byte* Lookup(long index, long number) {
+    raw {
+        byte* slot = Slot(index)
+        if *Ptr<long>(slot + 8) != number {
+            return null
+        }
+
+        return *Ptr<byte*>(slot)
+    }
+}
+
+// The end of the constructor of the actor whose state is `state` at its `spawn`, which the emitted `spawn`
 // calls once the constructor returned: its record no longer says that its constructor runs (U3, U25).
 pub void ActorBuilt(byte* state) {
     raw {
@@ -3557,7 +3650,7 @@ byte* Supervisor() {
     }
 }
 
-// The actor whose reference is `state` the one whose constructor the running code runs from now on, null for
+// The actor whose state is `state` the one whose constructor the running code runs from now on, null for
 // none: the one it was before.
 pub byte* Building(byte* state) {
     raw {
@@ -3573,8 +3666,16 @@ pub byte* Building(byte* state) {
     }
 }
 
-// The heap of the actor whose reference is `state`, which a message to it is made in (U12).
-pub byte* ActorHeap(byte* state) {
+// The heap of the actor whose reference is the slot `index` and the number `number`, which a message to it is
+// made in (U12); where that actor ended, the heap the running code allocates in, which the message and its
+// copies then stay in at the raise of `actor-gone` at its queueing (`Enqueue`), to the crash that raise is or
+// to the end of the process.
+pub byte* ActorHeap(long index, long number) {
+    byte* state = Lookup(index, number)
+    if state == null {
+        return std.HeapCurrent()
+    }
+
     mut byte* heap = null
     raw {
         heap = *Ptr<byte*>(state - 64)
@@ -3583,68 +3684,75 @@ pub byte* ActorHeap(byte* state) {
     return heap
 }
 
-// The end of every actor at the end of the program (U13): its heap freed whole, as section 3 frees the
+// The end of every actor at the end of the program (U13): the record of each actor that ended while it stood
+// in the run queue (`EndActor`), and each actor of the table, its heap freed whole, as section 3 frees the
 // heap of an actor that ends (design record, section 6, assumed: the end of the root actor read as the end
 // of every actor it stops), the messages queued in it with it, as tokio drops its tasks when its runtime
-// shuts down, and, after a crash, the first heap, which holds its record; no message runs after it, and no
-// restart whose pause runs (U22).
+// shuts down, and, after a crash, the first heap, which holds its record, its slot cleared; no message runs
+// after it, and no restart whose pause runs (U22).
 void EndActors() {
     raw {
-        mut byte* at = actors
-        while at != null {
-            byte* before = *Ptr<byte*>(at - 56)
-            byte* heap = *Ptr<byte*>(at - 64)
-            if heap != at - 144 {
-                std.HeapFree(heap)
+        mut byte* queued = runFirst
+        while queued != null {
+            byte* after = *Ptr<byte*>(queued - 16)
+            if *Ptr<long>(queued - 88) == 3 {
+                std.HeapFree(queued - 144)
             }
 
-            std.HeapFree(at - 144)
-            at = before
+            queued = after
         }
 
-        actors = null
+        mut long index = 0
+        while index < slotsUsed {
+            byte* slot = Slot(index)
+            if *Ptr<long>(slot + 8) != 0 {
+                byte* at = *Ptr<byte*>(slot)
+                byte* heap = *Ptr<byte*>(at - 64)
+                if heap != at - 144 {
+                    std.HeapFree(heap)
+                }
+
+                std.HeapFree(at - 144)
+                *Ptr<long>(slot + 8) = 0
+            }
+
+            index = index + 1
+        }
+
         runFirst = null
         runLast = null
         paused = null
     }
 }
 
-// The text of the actor whose reference is `state`, of the type named `name` (U2): the name, `#` and the
-// actor's number, `Counter#1`.
-pub string ActorText(string name, byte* state) {
-    mut long number = 0
-    raw {
-        number = *Ptr<long>(state - 40)
-    }
-
+// The text of the actor whose number is `number`, of the type named `name` (U2): the name, `#` and the
+// number, `Counter#1`, which reads no record, so that a reference whose actor ended has it too.
+pub string ActorText(string name, long number) {
     return "{name}#{number}"
 }
 
-// A message to the actor whose reference is `state`, stamped with its chain ID: the running message's,
+// A message to the actor whose reference is the slot `index` and the number `number`, stamped with its chain
+// ID: the running message's,
 // or a new one where the top-level code makes it, so that each waiting call and each `send` of the
 // top-level code starts a chain of its own (section 6, "Deadlocks", layer 1, assumed there). A call that
 // waits, of the chain the actor's activation waits in, goes to the end of that activation's side list
 // (layer 1; section 6, "One-shot reply slot"), and every other message to the end of the inbox, as
 // tokio's `mpsc` channel pushes a value at the tail of its list, so that an inbox keeps the order in
 // which its messages were sent (U5, U15); the actor goes to the end of the run queue where it does not
-// stand there and waits neither for its restart (U22) nor for the decision of its block (U34). A message to
-// an actor that ended is dropped, with what crossed into it, a call's reply set `gone`, which the call's wait
-// raises as `actor-gone` (U20).
-pub void Enqueue(byte* state, byte* message) {
+// stand there and waits neither for its restart (U22) nor for the decision of its block (U34). A call or a
+// `send` to an actor that ended raises `actor-gone` at its line `line` of the file `file`, the message and what
+// crossed into it staying in the heap the running code allocates in (`ActorHeap`) (U6, U20; design record,
+// section 6, the owner, 2026-11-16, #519, comments 6919351399 and 6923513534).
+pub void Enqueue(long index, long number, byte* message, string file, int line) {
     sys.Entered()
+    byte* state = Lookup(index, number)
+    if state == null {
+        sys.Left()
+        Raise("actor-gone", file, line)
+    }
+
     raw {
         *Ptr<byte*>(message) = null
-        if *Ptr<long>(state - 88) == 3 {
-            byte* reply = *Ptr<byte*>(message + 16)
-            if reply != null {
-                *reply = 3
-            }
-
-            std.HeapReset(state - 144)
-            sys.Left()
-            return
-        }
-
         if running == null {
             NewChain(message + 24)
         } else {
@@ -3696,14 +3804,14 @@ byte* Taken(byte* list) {
     }
 }
 
-// Whether the actor whose reference is `state` stands in the run queue.
+// Whether the actor whose state is `state` stands in the run queue.
 bool Queued(byte* state) {
     raw {
         return *Ptr<byte*>(state - 16) != null || runLast == state
     }
 }
 
-// The actor whose reference is `state` at the end of the run queue.
+// The actor whose state is `state` at the end of the run queue.
 void Queue(byte* state) {
     raw {
         *Ptr<byte*>(state - 16) = null
@@ -3717,7 +3825,7 @@ void Queue(byte* state) {
     }
 }
 
-// Whether the actor whose reference is `state` has a message that can go on: a call of its chain on the
+// Whether the actor whose state is `state` has a message that can go on: a call of its chain on the
 // side list of its top activation, that activation's reply set, or, where it is idle, a message in its
 // inbox.
 bool Ready(byte* state) {
@@ -3850,7 +3958,8 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
 // its top activation's side list, which starts an activation above that one; its top activation, whose
 // reply is set; or, where it is idle, the first message of its inbox; an actor with none of them is
 // passed over, a message sent to it while it waits staying in its inbox, and so is an actor that waits for
-// its restart or for the decision of its block, or ended (U22, U34).
+// its restart or for the decision of its block (U22, U34); an actor that ended while it stood there has its
+// record freed here, the first page of its heap (`EndActor`).
 void RunOne() {
     raw {
         byte* state = runFirst
@@ -3861,7 +3970,12 @@ void RunOne() {
 
         *Ptr<byte*>(state - 16) = null
         long life = *Ptr<long>(state - 88)
-        if life == 1 || life == 3 || life == 5 {
+        if life == 3 {
+            std.HeapFree(state - 144)
+            return
+        }
+
+        if life == 1 || life == 5 {
             return
         }
 
@@ -3881,7 +3995,7 @@ void RunOne() {
     }
 }
 
-// A new activation of the actor whose reference is `state` for `message`, on a stack of the size the
+// A new activation of the actor whose state is `state` for `message`, on a stack of the size the
 // actor asked for, above the activation `below`, null where the actor is idle, whose chain it takes and
 // whose side list it takes over, and its run from its first frame, `ActorStart`.
 void Start(byte* state, byte* message, byte* below) {
@@ -3914,7 +4028,7 @@ void Start(byte* state, byte* message, byte* below) {
     }
 }
 
-// The activation `header` of the actor whose reference is `state` run on its stack until it waits or
+// The activation `header` of the actor whose state is `state` run on its stack until it waits or
 // ends: the actor's heap the one the allocation entry serves (section 3), the bounds of that stack's guard
 // set for the target's handler of a fault (section 2), the switch to it and back, and the heap served
 // before it served again. An activation that ended gives the actor's top to the one below it, with its side list,
@@ -4099,7 +4213,7 @@ extern "C" void ActorOverflow(byte* line, long count) {
     }
 }
 
-// The crash of the actor whose reference is `state` in its activation `header`, on the scheduler's stack
+// The crash of the actor whose state is `state` in its activation `header`, on the scheduler's stack
 // (U19): its id, its place and the text below its error line, as the header holds them (`CrashActor`),
 // taken by the policies above it (`Fell`), with the value a `throw` named (`Thrown`) and, but for a stack
 // overflow, whose switch left from the stack of the fault's handler, the stack that raised, which a block
@@ -4135,7 +4249,7 @@ void Crashed(byte* state, byte* header) {
     Fell(state, header, hasText, id, idCount, file, fileCount, line, text, count)
 }
 
-// The crash of the actor whose reference is `state`, `header` its top activation, null where it has none,
+// The crash of the actor whose state is `state`, `header` its top activation, null where it has none,
 // with the id `id`, `idCount` bytes, its place, and, where `hasText` holds, the text below the error line,
 // `count` bytes at `from` (U19). The actor that takes the crash is found first (`Taker`): where it is the
 // top-level code, the process ends with that error line (`Ends`). The text is copied into the heap of the
@@ -4241,7 +4355,7 @@ void Fell(byte* state, byte* header, bool hasText, byte* id, long idCount, byte*
     }
 }
 
-// The actor that takes the crash of the actor whose reference is `state` (U25): the first, from it up through
+// The actor that takes the crash of the actor whose state is `state` (U25): the first, from it up through
 // its supervisors, whose own policy restarts or stops it, or which ends after its current message or ended;
 // null where the top-level code takes it. An actor whose policy is `escalate` passes its crash to its
 // supervisor, which crashes too, and so does one whose constructor runs at its `spawn`, whose crash is the
@@ -4291,7 +4405,7 @@ void Ends(bool hasText, byte* id, long idCount, byte* file, long fileCount, long
     sys.Exit(1)
 }
 
-// The fall of the actor whose reference is `state` at its crash, `header` its top activation, null where it
+// The fall of the actor whose state is `state` at its crash, `header` its top activation, null where it
 // has none (U19, U21). Each activation of the actor, from the top down, has its open copy sessions ended
 // (`CopyAbort`); where it waits, the message it waits on no longer names its reply, so that the callee runs
 // to its end and its reply goes nowhere; the call it runs answered `callee crashed`, which wakes its caller
@@ -4470,7 +4584,7 @@ bool Limited(byte* knobs, byte* heap, long now) {
     }
 }
 
-// The heap of the actor whose reference is `state` freed whole but for its first block, the record and the
+// The heap of the actor whose state is `state` freed whole but for its first block, the record and the
 // state, which stays in the first page of the heap it was made in, so that the actor's reference names the
 // same actor after its restart (U2, U21): a heap made since then freed, and that first heap emptied but for
 // its first page (`HeapReset`), which then holds no other block.
@@ -4486,10 +4600,12 @@ void Emptied(byte* state) {
     }
 }
 
-// The end of the actor whose reference is `state`, which has no activation (U13): it waits for no restart,
+// The end of the actor whose state is `state`, which has no activation (U13): it waits for no restart,
 // each message of its inbox is dropped, a call's reply set `gone`, and a block that waits there with its
-// child's stack (U34), its children end, and its heap is freed whole but for its first block, which names an
-// actor that ended for the calls that still reach it.
+// child's stack (U34), its children end, its slot of the table is freed, so that a call or a `send` that still
+// names it raises `actor-gone` (U6, U20), and its heap is freed whole, the first page, which holds its record,
+// at once, or, where it stands in the run queue, when the scheduler takes it off (`RunOne`) (design record,
+// section 6, the owner, 2026-11-16, #519, comment 6919351399; assumed there).
 void EndActor(byte* state) {
     raw {
         if *Ptr<long>(state - 88) == 1 {
@@ -4516,30 +4632,41 @@ void EndActor(byte* state) {
         *Ptr<byte*>(state - 24) = null
         EndChildren(state)
         Emptied(state)
-    }
-}
-
-// Each child of the actor whose reference is `state`, each actor its code spawned, ended at once where it
-// has no activation, and else after its current message, with no restart left to it (U13).
-void EndChildren(byte* state) {
-    raw {
-        mut byte* at = actors
-        while at != null {
-            if *Ptr<byte*>(at - 72) == state && *Ptr<long>(at - 88) != 3 {
-                if *Ptr<byte*>(at - 8) == null {
-                    EndActor(at)
-                } else {
-                    *Ptr<long>(at - 88) = 2
-                    *Ptr<byte*>(at - 80) = null
-                }
-            }
-
-            at = *Ptr<byte*>(at - 56)
+        SlotFree(*Ptr<long>(state - 56))
+        if !Queued(state) {
+            std.HeapFree(state - 144)
         }
     }
 }
 
-// The pause before the restart of the actor whose reference is `state` (U23), as the record has it: 100 ms,
+// Each child of the actor whose state is `state`, each actor of the table its code spawned, from the highest
+// index down, ended at once where it has no activation, and else after its current message, with no restart
+// left to it and no supervisor, whose record its own end may free first, so that its crash is taken by its own
+// end (`Taker`) (U13; design record, section 6, assumed there).
+void EndChildren(byte* state) {
+    raw {
+        mut long index = slotsUsed - 1
+        while index >= 0 {
+            byte* slot = Slot(index)
+            if *Ptr<long>(slot + 8) != 0 {
+                byte* at = *Ptr<byte*>(slot)
+                if *Ptr<byte*>(at - 72) == state && *Ptr<long>(at - 88) != 3 {
+                    if *Ptr<byte*>(at - 8) == null {
+                        EndActor(at)
+                    } else {
+                        *Ptr<long>(at - 88) = 2
+                        *Ptr<byte*>(at - 80) = null
+                        *Ptr<byte*>(at - 72) = null
+                    }
+                }
+            }
+
+            index = index - 1
+        }
+    }
+}
+
+// The pause before the restart of the actor whose state is `state` (U23), as the record has it: 100 ms,
 // or the first pause its `after` sets, which the block of its knobs holds (U26), and which holds 100 ms where
 // `max N in` alone is written (the emitter's `Knobs`), at its first crash, and at each crash after it twice
 // the one before, up to 30 s, where it crashes before it ran 30 s since its last restart, else that first
@@ -4586,7 +4713,7 @@ void Pause(byte* state) {
     }
 }
 
-// The actor whose reference is `state` taken off the queue of the pauses.
+// The actor whose state is `state` taken off the queue of the pauses.
 void Unpause(byte* state) {
     raw {
         mut byte* before = null
@@ -4607,7 +4734,7 @@ void Unpause(byte* state) {
     }
 }
 
-// The restart of the actor whose reference is `state`, the first of the queue of the pauses, whose pause
+// The restart of the actor whose state is `state`, the first of the queue of the pauses, whose pause
 // ended (U22): its constructor run again in an activation of its own, before any message of its inbox, on a
 // copy of the kept arguments of its `spawn` (section 6, Q13), by the function the first word of the block of
 // its restart names, which takes the block as a message's table and the actor's heap; the runtime runs it,
@@ -4642,7 +4769,7 @@ void PauseSleep(long nanoseconds) {
     sys.Sleep(nanoseconds)
 }
 
-// The log line of the crash of the actor whose reference is `state` (U24): `<time> Error Kurz.Actor:
+// The log line of the crash of the actor whose state is `state` (U24): `<time> Error Kurz.Actor:
 // <Type>#<n> crashed: <id>`, then the text that stands below the error line, a thrown value's, in double
 // quotes as a `string` field is written (P7), and the place, ` at <file>:<n>`, as the error line of a `throw`
 // at the root carries them, `Counter#3 crashed: thrown "no stock" at shop.kz:12`; for a stack overflow the
@@ -4735,7 +4862,7 @@ pub void Decide(long word) {
     }
 }
 
-// The message of the block of the policy of the actor whose reference is `taker`, made in the heap `above`
+// The message of the block of the policy of the actor whose state is `taker`, made in the heap `above`
 // of its supervisor (U28): the message after it, the blocks' table, no reply, a chain of its own, as a
 // restart's message has (U34; assumed: S11 of comment 6907441402), the actor, its stack that raised, `kept`,
 // null for none, then a copy of the crash's id, the file, a constant of the emitted code, and a copy of the
@@ -4815,7 +4942,7 @@ byte* RootHeap() {
     return own
 }
 
-// The message `message` of a block to the supervisor whose reference is `parent`: at the front of its
+// The message `message` of a block to the supervisor whose state is `parent`: at the front of its
 // inbox, after the blocks already there, so that it runs after the current message and before the queued
 // ones in the order of the crashes, and the supervisor at the end of the run queue where it can run it
 // (U28, U34); for the top-level code, null, at the end of the blocks its wait runs (U33).
@@ -4870,7 +4997,7 @@ byte* BlockTable() {
     }
 }
 
-// The run of the block's message `message` in an activation of the supervisor whose reference is `state`
+// The run of the block's message `message` in an activation of the supervisor whose state is `state`
 // (`RunBlock`).
 extern "C" void BlockRun(byte* state, byte* message) {
     RunBlock(message)
@@ -4902,7 +5029,7 @@ void RootBlock() {
     }
 }
 
-// The decision `word` of the block of the message `message` acted on for the actor whose reference is
+// The decision `word` of the block of the message `message` acted on for the actor whose state is
 // `child`, as the words of a policy act (U29): `restart` restarts it after its pause and `stop` ends it,
 // each after the crash's log line, written at the decision (U34; assumed: S10 of comment 6907441402), the
 // stack it raised on given back to the pool and the message freed; `escalate` crashes the supervisor

@@ -64,9 +64,9 @@ public sealed partial class Emitter
             case NameExpression n when Model.IsImplicitField(n, out _, out var field) && field is not null:
                 return ImplicitField(n, field, type); // K7
             case ThisExpression t:
-                return This(t, t.Line); // K7: borrowed, as a parameter is
+                return type is ActorType ? Reference(This(t, t.Line)) : This(t, t.Line); // K7: borrowed, as a parameter is; U10: inside an actor, as a value, its reference
             case SpawnExpression s:
-                return EmitActorSpawn(s); // U2's reference, with no count: an actor ends with its supervisor (section 6), here with the process
+                return EmitActorSpawn(s); // U2's reference, with no count: a reference whose actor ended finds no actor (section 6)
             case NameExpression n when Model.IsVariable(n):
                 {
                     var stored = Sub(Model.VariableOf(n).Type);
@@ -1061,7 +1061,7 @@ public sealed partial class Emitter
             case HasherType:
                 return StringValue(type.Text); // H6: the name of its type and nothing of its state
             case ActorType:
-                return fn.Value($"call %kz.str {RuntimeFunction("ActorText")}(%kz.str {StringValue(type.Text)}, ptr {value})"); // U2: `Counter#1`
+                return fn.Value($"call %kz.str {RuntimeFunction("ActorText")}(%kz.str {StringValue(type.Text)}, i64 {fn.Value($"extractvalue %kz.actor {value}, 1")})"); // U2: `Counter#1`, of the number
             case ListType list:
                 return ListText(value, list, line);
             case MapType map:

@@ -4874,6 +4874,50 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var (crashedFirst, othersFirst) = ActorTests.Logged(crashWaitFirst.Error);
         Assert.Equal(["Box#1 crashed: thrown \"boom\" at program.kz:7", "Box#1 crashed: thrown \"boom\" at program.kz:7"], crashedFirst);
         Ran((crashWaitFirst.Code, crashWaitFirst.Output, othersFirst), 0, ["1", "67"], "");
+        // U6, U12, U20, U21: a message whose callee ends during the wait of an argument, as the child of a supervisor that crashed, which
+        // frees its heap whole, its first page with it, and its slot of the table (section 6, the owner, 2026-11-16, #519, comment
+        // 6919351399): built in a heap of its own (Emitter.EmitMessage) and copied at its queueing into the heap the top-level code
+        // allocates in, since the reference finds no actor (the runtime's `ActorHeap`), so that no block of the freed heap is written, and
+        // the call raises `actor-gone` at its line
+        const string actorEndWait = """
+            actor Slow {
+                pub int Get() => 7
+            }
+
+            actor Box {
+                pub int Sum(List<int> xs, int k, List<int> ys) => xs[0] + k + ys[2]
+            }
+
+            actor Parent {
+                mut Box? kid = null
+
+                pub void Make() {
+                    kid = spawn Box()
+                }
+
+                pub Box? Kid() => kid
+
+                pub void Boom() {
+                    throw "parent"
+                }
+            }
+
+            p = spawn Parent()
+            p.Make()
+            kid = p.Kid()
+            s = spawn Slow()
+            items = [10, 20, 30]
+            if kid != null {
+                print(kid.Sum(items, s.Get(), items))
+                send p.Boom()
+                print(kid.Sum(items, s.Get(), items))
+            }
+
+            """;
+        var endWait = BuildAndRun(actorEndWait, fenced, "actor-end-wait-fenced");
+        var (endCrashed, endOthers) = ActorTests.Logged(endWait.Error);
+        Assert.Equal(["Parent#1 crashed: thrown \"parent\" at program.kz:19"], endCrashed);
+        Ran((endWait.Code, endWait.Output, endOthers), 1, ["47"], "error: actor-gone at program.kz:31\n");
         // U12 (the owner, 2026-11-15, #519, comment 6895076937): a variable moved on one branch only, whose place the scope's end lets go of
         // through the test for the empty address, and on the other branch let go of as it is; a loop that takes its list, which lets go of
         // the items it did not move and of no moved one, as the list's last holder lets go of it (comment 6897778812, Q1 (b)); a variable
