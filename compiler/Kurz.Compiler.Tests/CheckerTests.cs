@@ -1717,6 +1717,10 @@ public sealed class CheckerTests
         var lookup = "data EBare\n\nint | EBare Lookup(int id) {\n    if id == 1 {\n        return 1\n    }\n\n    return EBare\n}\n\nint Recover(() => int f) => f()\n\n";
         Assert.Equal([(ErrorIds.ThrowNeedsValue, 16)], Errors(lookup + "int Use(int id) {\n    v = Lookup(id) else {\n        EBare => Recover(() => {\n            throw\n        })\n    }\n\n    return v\n}\n\nprint(Use(1))"));
         Clean(lookup + "int Use(int id) {\n    v = Lookup(id) else {\n        EBare => throw\n    }\n\n    return v\n}\n\nprint(Use(1))");
+
+        // the arm is the arm again after the lambda's body: a bare `throw` that follows a lambda in the arm's last statement, in the
+        // branches of an `if` whose condition makes it, throws the arm's case
+        Clean(lookup + "bool Pick(() => bool f) => f()\n\nint Use(int id) {\n    v = Lookup(id) else {\n        EBare => {\n            if Pick(() => true) {\n                throw\n            } else {\n                throw\n            }\n        }\n    }\n\n    return v\n}\n\nprint(Use(1))");
         Clean("void Check(int n) {\n    if n < 0 {\n        throw \"negative\"\n    }\n}\n\nCheck(-1)");
         Clean("data ConfigMissing(string Path)\n\nthrow ConfigMissing(\"app.json\")");
         Clean("data NotFound\n\nint Find(int id) {\n    throw NotFound\n}\n\nprint(Find(1))");

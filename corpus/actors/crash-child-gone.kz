@@ -1,6 +1,6 @@
 // expect: throws actor-gone at 29
 // | true
-// rules: U20, U21
+// rules: U5, U20, U21, U22
 
 actor Child {
     pub int Ping() => 1
