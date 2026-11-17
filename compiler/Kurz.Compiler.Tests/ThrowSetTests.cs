@@ -49,6 +49,8 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         data EEscalate
         data ERestarted
         data ETypeEscalate
+        data EBlocked
+        data EInBlock
         data EGeneric
         data EBare
         data EOther
@@ -324,6 +326,25 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
                 send e.Fail()
                 send r.Fail()
                 send t.Fail()
+            }
+        }
+
+        actor Blocked {
+            pub void Fail() {
+                throw EBlocked
+            }
+        }
+
+        actor Deciding {
+            pub void Make() {
+                b = spawn Blocked() on crash (c) {
+                    if c.Place.Line > 1 {
+                        throw EInBlock
+                    }
+
+                    stop
+                }
+                send b.Fail()
             }
         }
 
@@ -875,6 +896,14 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void The_reason_of_an_actor_holds_what_the_block_of_its_spawn_throws_and_what_it_can_escalate()
+    {
+        // U28, U32: a block can pass the child's crash up whole with `escalate`, and its throw is the crash of the actor whose code spawns
+        Assert.Equal(["EBlocked", "EInBlock", "RuntimeError"], Names(Program.Value.Sets.ReasonOf(Actor("Deciding"))));
+        Assert.Equal(["EBlocked", "RuntimeError"], Names(Program.Value.Sets.ReasonOf(Actor("Blocked"))));
+    }
+
+    [Fact]
     public void The_pub_functions_are_listed_with_what_each_can_raise()
     {
         // section 5, "Compiler lists them": a `pub` function, and not one without `pub`
@@ -993,5 +1022,13 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         var kind = Assert.IsType<EnumType>(error.Fields[0].Type);
         Assert.True(Types.Same(Types.String, error.Fields[1].Type), $"the detail is {error.Fields[1].Type}");
         Assert.Equal(kinds, kind.Symbol.Declaration.Values.Select(v => v.Name));
+
+        // U30: std's `RuntimeErrorOf`, which the emitted block of `on crash` makes the runtime's error with, names each id of the table
+        // with its kind, in the order of the table
+        var std = File.ReadAllText(Path.Combine(CorpusTests.Root, "std", "std.kz"));
+        var of = std[std.IndexOf("pub RuntimeError RuntimeErrorOf(", StringComparison.Ordinal)..];
+        of = of[..of.IndexOf("\n}\n", StringComparison.Ordinal)];
+        var arms = Regex.Matches(of, "\"([a-z-]+)\" => RuntimeKind\\.([A-Za-z]+)").Select(m => (m.Groups[1].Value, m.Groups[2].Value)).ToList();
+        Assert.Equal(ids.Where(id => id != "thrown").Zip(kinds).ToList(), arms);
     }
 }

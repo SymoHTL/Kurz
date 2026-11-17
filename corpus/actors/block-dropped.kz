@@ -1,0 +1,14 @@
+// expect: throws callee-crashed at 14
+// rules: U33
+
+actor Worker {
+    pub int Fail() {
+        throw "worker fails"
+    }
+}
+
+w = spawn Worker() on crash (c) {
+    print("never")
+    restart
+}
+print(w.Fail())

@@ -28,6 +28,8 @@ public sealed class Parser
     private bool committed; // the speculative parse has seen the shape of a declaration: an error after that is reported, not rewound
     private bool noLambda; // the value of an operand of `asm`, where `=>` splits the operand (R11) and starts no lambda
     private int statementDepth; // the statements being parsed around the cursor: 1 at the top level of a file, more inside a block of code (R12, R16)
+    private bool deciding; // U29: inside the block of `on crash (c) { ... }`, outside a lambda in it, where `restart`, `stop` and `escalate` are statements
+    private int headers; // the conditions, collections and subjects being parsed before their blocks, where a name before `{` is no `attempt` (section 6)
     private readonly List<(int Index, Token Original)> tokenEdits = new(); // tokens a speculative parse rewrote (`>>`): undone with the rewind
 
     private Parser(SourceText source, IEnumerable<Token> tokens, DiagnosticBag diagnostics)
@@ -526,6 +528,9 @@ public sealed class Parser
                 // `match` with no value after it is a variable of that name (L12), an expression statement below
                 case "break": Advance(); return new BreakStatement(token.Line); // C7
                 case "continue": Advance(); return new ContinueStatement(token.Line); // C7
+                case "return" when deciding:
+                    // U29: the block decides with its words, and a path of it ends with one (assumed: S3 of issue 519, comment 6907441402)
+                    throw new ParseError(token.Line, "`return` in the block of `on crash`, which ends a path with `restart`, `stop` or `escalate` (U29)");
                 case "return": Advance(); return new ReturnStatement(token.Line, EndsStatement() ? null : ParseExpression());
                 case "throw":
                     // O7: `throw` takes a value, and stands bare in an arm of `else`; a bare one anywhere else is the checker's `throw-needs-value`
@@ -577,6 +582,11 @@ public sealed class Parser
 
         if (token.Kind == TokenKind.Name)
         {
+            if (deciding && token.Text is "restart" or "stop" or "escalate" && Peek().Kind != TokenKind.Assign)
+            {
+                return ParseDecision(); // U29: a decision of the block; the words stay names elsewhere, and before `=` there too, as `send` does (U6)
+            }
+
             if (token.Text == "const" && Peek() is { Kind: TokenKind.Name, Text: "assert" } && Peek(2).Kind == TokenKind.LeftParen
                 && !BodyFollowsTheParentheses())
             {
@@ -620,6 +630,20 @@ public sealed class Parser
         }
 
         return new ExpressionStatement(token.Line, expression);
+    }
+
+    /// <summary>The condition, the collection or the subject before the block of an <c>if</c>, a <c>while</c>, a <c>for</c> or a <c>match</c>.</summary>
+    private Expression Header()
+    {
+        headers++;
+        try
+        {
+            return ParseExpression();
+        }
+        finally
+        {
+            headers--;
+        }
     }
 
     private bool EndsStatement() => At(TokenKind.Newline) || At(TokenKind.EndOfFile) || At(TokenKind.RightBrace) || At(TokenKind.Semicolon);
@@ -1014,7 +1038,7 @@ public sealed class Parser
     private IfStatement ParseIf()
     {
         var keyword = Advance();
-        var condition = ParseExpression();
+        var condition = Header();
         // C1: the block opens where the condition ends, and E1: a block that is missing or opens on the next line is an error of the
         // whole `if`, reported on the line of its condition, its last line when the condition runs over several lines (the two rules
         // record the owner's choices of 2026-10-10 and 2026-10-11); a statement in its place is read as the block's one statement
@@ -1074,7 +1098,7 @@ public sealed class Parser
     private WhileStatement ParseWhile()
     {
         var keyword = Advance();
-        var condition = ParseExpression();
+        var condition = Header();
         return new WhileStatement(keyword.Line, condition, ParseBlockAfter(tokens[index - 1].Line, "`while`")); // C1: the last line of the header
     }
 
@@ -1099,7 +1123,7 @@ public sealed class Parser
             throw Fail("`in`");
         }
 
-        var collection = ParseExpression();
+        var collection = Header();
         var body = ParseBlockAfter(tokens[index - 1].Line, "`for`");
         List<MatchArm>? arms = null;
         var elseLine = 0;
@@ -1125,7 +1149,7 @@ public sealed class Parser
     private MatchStatement ParseMatchStatement()
     {
         var keyword = Advance();
-        var subject = ParseExpression();
+        var subject = Header();
         return new MatchStatement(keyword.Line, subject, ParseArms(keyword.Line, "`match`"));
     }
 
@@ -1671,9 +1695,9 @@ public sealed class Parser
     /// <c>:</c>, whose list stands in the head before the clauses (U1). <c>stack</c> takes one literal of bytes, <c>stack 8mb</c>, and a
     /// size written another way, or a second <c>stack</c>, is <c>syntax</c>, as C# refuses a modifier written twice (U1; section 6, the
     /// owner, 2026-11-15, #519, comment 6892812780, Q3, "Build it now"). <c>on crash</c> takes the words of a policy, the type's default
-    /// (U27, <see cref="ParseCrashPolicy"/>), and a second <c>on crash</c> is <c>syntax</c>, as a second <c>stack</c> is (assumed); its
-    /// block, <c>on crash (c) { ... }</c>, is passed over, its parameters and its braces, as at <c>spawn</c>, so that the braces after it
-    /// are the body and the checker says <c>not supported</c> to it at its line. Any other text before the body is <c>syntax</c> (E4).
+    /// (U27, <see cref="ParseCrashPolicy"/>), its block <c>on crash (c) { ... }</c> among them (U28), so that the braces after the block
+    /// are the body, and a second <c>on crash</c> is <c>syntax</c>, as a second <c>stack</c> is (assumed). Any other text before the body
+    /// is <c>syntax</c> (E4).
     /// </summary>
     private List<ActorClause> ParseActorClauses()
     {
@@ -1713,19 +1737,7 @@ public sealed class Parser
 
                 var on = Advance();
                 Advance();
-                var policy = ParseCrashPolicy(on.Line);
-                clauses.Add(new ActorClause(on.Line, "on crash", Policy: policy));
-                if (policy is null)
-                {
-                    // the block, `on crash (c) { ... }`, passed over as at `spawn`, its parameters and its braces, so that the braces
-                    // after it are the actor's body
-                    PassGroup();
-                    if (At(TokenKind.LeftBrace))
-                    {
-                        PassGroup();
-                    }
-                }
-
+                clauses.Add(new ActorClause(on.Line, "on crash", Policy: ParseCrashPolicy(on.Line)));
                 passing = false;
             }
             else if (clauses.Count == 0)
@@ -1749,23 +1761,6 @@ public sealed class Parser
         return clauses;
     }
 
-    /// <summary>Passes over the parenthesis or the brace at the current token and every token up to the one that closes it.</summary>
-    private void PassGroup()
-    {
-        var depth = 0;
-        do
-        {
-            depth += Current.Kind switch
-            {
-                TokenKind.LeftParen or TokenKind.LeftBracket or TokenKind.LeftBrace => 1,
-                TokenKind.RightParen or TokenKind.RightBracket or TokenKind.RightBrace => -1,
-                _ => 0,
-            };
-            index++;
-        }
-        while (depth > 0 && !At(TokenKind.EndOfFile));
-    }
-
     /// <summary><c>send c.Add(1)</c> (U6): the call that follows is the statement's; anything but a call there is <c>syntax</c> (U14).</summary>
     private SendStatement ParseSend()
     {
@@ -1783,8 +1778,8 @@ public sealed class Parser
     /// <c>spawn Counter(1)</c> (U2): the actor's name, its type arguments where it writes them, <c>spawn Pair&lt;int&gt;(1)</c>, as a
     /// generic class's construction takes them (T19, U14), and the arguments of its constructor, which bind as C#'s <c>new</c> does, so
     /// that a member after them is the new reference's, <c>spawn Counter(1).Get()</c>. The words of a policy after the arguments,
-    /// <c>on crash stop</c>, end the expression, so that anything but its end after them is <c>syntax</c> (U25); an <c>on crash</c>
-    /// block there is passed over to the end of the expression, its line kept, which the checker says <c>not supported</c> to.
+    /// <c>on crash stop</c>, or its block, <c>on crash (c) { ... }</c>, end the expression, so that anything but its end after them is
+    /// <c>syntax</c> (U25, U28).
     /// </summary>
     private SpawnExpression ParseSpawn()
     {
@@ -1810,56 +1805,35 @@ public sealed class Parser
         }
 
         var call = new CallExpression(name.Line, new NameExpression(name.Line, name.Text), typeArguments, ParseArguments());
-        var onCrash = 0;
         if (Current is { Kind: TokenKind.Name, Text: "on" } && Peek() is { Kind: TokenKind.Name, Text: "crash" })
         {
             var line = Advance().Line;
             Advance();
-            if (ParseCrashPolicy(line) is { } policy)
+            var policy = ParseCrashPolicy(line);
+            if (!At(TokenKind.Newline) && !At(TokenKind.Comma) && !At(TokenKind.RightParen) && !At(TokenKind.RightBracket) && !At(TokenKind.RightBrace) && !At(TokenKind.EndOfFile))
             {
-                if (!At(TokenKind.Newline) && !At(TokenKind.Comma) && !At(TokenKind.RightParen) && !At(TokenKind.RightBracket) && !At(TokenKind.RightBrace) && !At(TokenKind.EndOfFile))
-                {
-                    throw Fail("the end of the expression after the policy of `spawn` (U25)");
-                }
-
-                return new SpawnExpression(spawn.Line, call, Policy: policy);
+                throw Fail("the end of the expression after the policy of `spawn` (U25)");
             }
 
-            onCrash = line;
-            var depth = 0;
-            while (!At(TokenKind.EndOfFile))
-            {
-                if (depth == 0 && (At(TokenKind.Newline) || At(TokenKind.Comma) || At(TokenKind.RightParen) || At(TokenKind.RightBracket) || At(TokenKind.RightBrace)))
-                {
-                    break;
-                }
-
-                depth += Current.Kind switch
-                {
-                    TokenKind.LeftParen or TokenKind.LeftBracket or TokenKind.LeftBrace => 1,
-                    TokenKind.RightParen or TokenKind.RightBracket or TokenKind.RightBrace => -1,
-                    _ => 0,
-                };
-                index++;
-            }
+            return new SpawnExpression(spawn.Line, call, policy);
         }
 
-        return new SpawnExpression(spawn.Line, call, onCrash);
+        return new SpawnExpression(spawn.Line, call);
     }
 
     /// <summary>
     /// U25, U26: the words of a policy after <c>on crash</c>, at <c>spawn</c> and after an actor's name (U27): <c>restart</c>, <c>stop</c> or
     /// <c>escalate</c>, and after <c>restart</c> the knobs <c>after &lt;duration&gt;</c> and <c>max N in &lt;duration&gt;</c>, each at most once,
-    /// in either order, each value a number literal, which the checker reads (section 6, "Policy at <c>spawn</c>"); null where a <c>(</c>
-    /// follows, the block, which the caller passes over. Any other word after <c>on crash</c>, a knob after <c>stop</c> or <c>escalate</c>
-    /// (which the caller meets after the policy), a knob written twice, <c>max</c> without its <c>in</c> and a value that is no number
-    /// literal are <c>syntax</c> (E4).
+    /// in either order, each value a number literal, which the checker reads (section 6, "Policy at <c>spawn</c>"); or, where a <c>(</c>
+    /// follows, the block (U28, <see cref="ParseCrashBlock"/>). Any other word after <c>on crash</c>, a knob after <c>stop</c> or
+    /// <c>escalate</c> (which the caller meets after the policy), a knob written twice, <c>max</c> without its <c>in</c> and a value that is
+    /// no number literal are <c>syntax</c> (E4).
     /// </summary>
-    private CrashPolicy? ParseCrashPolicy(int line)
+    private CrashPolicy ParseCrashPolicy(int line)
     {
         if (At(TokenKind.LeftParen))
         {
-            return null;
+            return ParseCrashBlock(line);
         }
 
         if (Current is not { Kind: TokenKind.Name, Text: "restart" or "stop" or "escalate" })
@@ -1904,6 +1878,64 @@ public sealed class Parser
         }
 
         return new CrashPolicy(line, word, after, max, within);
+    }
+
+    /// <summary>
+    /// U28, U29: the block of a policy, <c>on crash (c) { ... }</c>, after <c>on crash</c>: its one parameter in parentheses, a name with no
+    /// type, which names the crash, and the block on the same line, whose statements <c>restart</c>, <c>stop</c> and <c>escalate</c> are
+    /// its decisions (<see cref="ParseDecision"/>), held as a lambda of that parameter (section 6, the owner, 2026-11-15, #519, comment
+    /// 6902210646, Q2). No name, a second one, a written type, a block on the next line and a <c>return</c> in it are <c>syntax</c> (E4;
+    /// assumed: S3 of issue 519, comment 6907441402, a typed parameter and <c>return</c> among it).
+    /// </summary>
+    private CrashPolicy ParseCrashBlock(int line)
+    {
+        var open = Advance();
+        if (Current.Kind != TokenKind.Name)
+        {
+            throw Fail("the name of the crash in the parentheses after `on crash`, `on crash (c) { ... }` (U28)");
+        }
+
+        var name = Advance();
+        if (!At(TokenKind.RightParen))
+        {
+            throw new ParseError(name.Line, "one name with no type in the parentheses after `on crash`, `on crash (c) { ... }` (U28, U29)");
+        }
+
+        Advance();
+        if (!At(TokenKind.LeftBrace))
+        {
+            throw Fail("the block after `on crash (c)`, opened on its line, `on crash (c) { ... }` (U28)");
+        }
+
+        var saved = deciding;
+        deciding = true;
+        try
+        {
+            var block = ParseBlock();
+            return new CrashPolicy(line, "block", Block: new LambdaExpression(open.Line, [new Parameter(name.Line, false, null, name.Text, null)], null, block));
+        }
+        finally
+        {
+            deciding = saved;
+        }
+    }
+
+    /// <summary>
+    /// U29: <c>restart</c>, <c>stop</c> or <c>escalate</c> as a statement of the block of <c>on crash</c>, which ends its statement: a word
+    /// after it, a knob of <c>restart</c> among them, is <c>syntax</c> (assumed: S3 of issue 519, comment 6907441402, <c>restart</c> with no
+    /// knobs, as Akka's directive carries none).
+    /// </summary>
+    private DecisionStatement ParseDecision()
+    {
+        var word = Advance();
+        if (!EndsStatement())
+        {
+            throw new ParseError(word.Line, word.Text == "restart"
+                ? "`restart` in the block of `on crash` takes no knobs: the default pause and no limit (U29)"
+                : $"`{word.Text}` in the block of `on crash` ends its statement (U29)");
+        }
+
+        return new DecisionStatement(word.Line, word.Text);
     }
 
     /// <summary>
@@ -2445,6 +2477,13 @@ public sealed class Parser
                     return ParseLambdaBody(token.Line, [new Parameter(token.Line, false, null, token.Text, null)]);
                 }
 
+                if (token.Text is "attempt" or "retry" && At(TokenKind.LeftBrace) && headers == 0)
+                {
+                    // section 6: `attempt { ... }` and `retry { ... }`, its block, which the checker says `not supported` to; the words stay
+                    // names elsewhere, and before the block of an `if`, a `while`, a `for` or a `match`
+                    return new AttemptExpression(token.Line, token.Text, ParseBlock());
+                }
+
                 return new NameExpression(token.Line, token.Text);
             case TokenKind.Keyword:
                 switch (token.Text)
@@ -2459,7 +2498,7 @@ public sealed class Parser
                         return new NameExpression(token.Line, token.Text);
                     case "match":
                         Advance();
-                        var subject = ParseExpression();
+                        var subject = Header();
                         return new MatchExpression(token.Line, subject, ParseArms(token.Line, "`match`"));
                     case "asm" when Peek().Kind == TokenKind.LeftParen:
                         throw new ParseError(token.Line, "`asm` is a statement of its own (R11)");
@@ -2543,12 +2582,24 @@ public sealed class Parser
     private LambdaExpression ParseLambdaBody(int line, List<Parameter> parameters)
     {
         SkipNewlines();
-        if (At(TokenKind.LeftBrace))
+        var saved = deciding;
+        var savedHeaders = headers;
+        deciding = false; // U29: a lambda inside the block of `on crash` decides nothing, its `restart` a name (assumed: S3 of comment 6907441402)
+        headers = 0;
+        try
         {
-            return new LambdaExpression(line, parameters, null, ParseBlock());
-        }
+            if (At(TokenKind.LeftBrace))
+            {
+                return new LambdaExpression(line, parameters, null, ParseBlock());
+            }
 
-        return new LambdaExpression(line, parameters, ParseExpression(), null);
+            return new LambdaExpression(line, parameters, ParseExpression(), null);
+        }
+        finally
+        {
+            deciding = saved;
+            headers = savedHeaders;
+        }
     }
 
     /// <summary>The segments of a string literal; each hole is parsed as an expression of its own (L6).</summary>

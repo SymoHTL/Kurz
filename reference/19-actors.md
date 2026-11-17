@@ -4,8 +4,8 @@ An actor is an object with private state and an inbox, which handles one message
 of its method through its reference is a message (§6, "Actors"). This chapter holds the actors of
 one machine and what a program writes of them: an actor's declaration, `spawn`, the call that waits
 for its result, `send`, and what crosses into a message, the crash of an actor, its restart by
-the default policy and its log line (U19 to U24), and the words of a policy (U25 to U27). The
-scheduler, the stacks, the block of a policy, deadlocks but the calls a waiting actor lets in (U17)
+the default policy and its log line (U19 to U24), the words of a policy (U25 to U27) and the block
+of a policy (U28 to U34). The scheduler, the stacks, deadlocks but the calls a waiting actor lets in (U17)
 and the wait of the top-level code that nothing can end (U18), the clauses after an actor's name but
 the stack's and the policy's (U1, U27) and the actors of other machines (§6, §7) have no rule here, and `compiler/README.md` says what the compiler builds of the rules here.
 
@@ -58,7 +58,7 @@ comment 6851105334, "Accept, set nothing (Recommended)").
 (U2), `actor Worker on crash stop { ... }`, and gives the type's default (U27) (§6, "Policy at
 `spawn`"), and a second `on crash` there is `syntax`, as a second `stack` is (E4) *(assumed: as §6
 marks it)*; `on crash` with a block after it, `on crash (c) { ... }`,
-has no rule here.
+is U28's.
 
 Case: [actors/counter.kz](../corpus/actors/counter.kz)
 ```kurz
@@ -212,7 +212,7 @@ number literal, with its sign where it has one, which the checker reads (U26); t
 expression. Another word after `on crash`, a knob after `stop` or `escalate`, a knob written twice,
 `max N` without its `in` and its duration, a value that is no number literal and anything after the
 policy but the end of the expression are `syntax` (E4) *(assumed: as §6 marks it, as `stack` takes its
-literal once (U1))*. `on crash` with a block after it, `on crash (c) { ... }`, has no rule here.
+literal once (U1))*. `on crash` with a block after it, `on crash (c) { ... }`, is U28's.
 
 Case: [actors/spawn-in-function.kz](../corpus/actors/spawn-in-function.kz)
 ```kurz
@@ -2449,3 +2449,355 @@ send g.Fail()
 print(f.Ping())
 print(g.Ping())
 ```
+
+### U28 (decided, §6) The block of a policy
+
+In the place of the words of a policy, after `spawn`'s arguments and after an actor's name, a block
+can decide what the supervisor does at the actor's crash: `on crash (c) { ... }`, its one parameter
+in parentheses, which names the crash (U30), and its block, opened on that line (§6, "Policy at
+`spawn`"). The block runs as a message of the supervisor, after its current message, with the calls
+of the chain that message lets in (U17), and before its queued ones, and its decision (U29) is what
+the supervisor does (§6, the owner, 2026-11-15, #519, comment 6902210646, Q2, "Erlang/Akka:
+supervisor msg"); at a `spawn` of the top-level code it runs in that code's wait (U33). The block
+ends the expression at `spawn`, as the words of a policy do (U2), and after an actor's name it is the
+type's default (U27), the braces after it the actor's body; no name in the parentheses, a second
+one, and a block that does not open on the line of its parameter are `syntax` (E4) *(assumed: as §6
+marks it)*. The blocks `attempt { ... }` and `retry { ... }` of §6, which keep a crash to a piece of
+code, have no rule here, and `compiler/README.md` says what the build does with them.
+
+Case: [actors/block-sample.kz](../corpus/actors/block-sample.kz)
+```kurz
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash (c) {
+    print("died: {c.Reason}")
+    restart
+}
+send w.Fail()
+print(w.Ping())
+```
+
+Case: [actors/block-order.kz](../corpus/actors/block-order.kz)
+```kurz
+actor Other {
+    pub int Ping() => 1
+}
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+}
+
+actor Boss {
+    pub void Go(Other other) {
+        first = spawn Worker() on crash (c) {
+            print("first's block")
+            stop
+        }
+
+        second = spawn Worker() on crash (c) {
+            print("second's block")
+            stop
+        }
+
+        send this.Queued()
+        send first.Fail()
+        send second.Fail()
+        print(other.Ping())
+        print("go ends")
+    }
+
+    pub void Queued() {
+        print("queued")
+    }
+
+    pub int Ping() => 2
+}
+
+o = spawn Other()
+b = spawn Boss()
+b.Go(o)
+print(b.Ping())
+```
+
+### U29 (decided, §6) The decisions
+
+`restart`, `stop` and `escalate` are the statements of the block that decide, and each does what the
+same word does after `on crash` (U22, U23, U25): `restart` restarts the actor after the growing pause,
+`stop` leaves it stopped, so that a call that waits in its inbox or comes after raises `actor-gone`,
+and `escalate` passes its crash up whole, which at the top level ends the process with the child's
+error line, the text below it, the trace of the child's stack and the exit code 1 (§6, "Policy at
+`spawn`"). A decision ends its path, as `return` ends a function's, and each path of the block ends
+with one or with a `throw` (U32); a path that decides nothing is `missing-return`, as a lambda's
+path that ends with no value is (F3) (§6, the owner, 2026-11-16, #519, comment 6919351399,
+"missing-return error"). `restart` there takes no knobs, the default's pause and no limit, as Akka's
+`Restart` directive carries none, and a knob after it, a type before the parameter and `return` in
+the block are `syntax` (E4); the three words are statements in the block alone, and names elsewhere,
+before `=` in the block among it, as `send` is (U6), and a lambda inside the block decides nothing,
+its words names there *(assumed: as §6 marks it)*. A block can restart, so that its `spawn` keeps the
+copy of its arguments that a restart constructs from, as `on crash restart` keeps it (U22).
+
+Case: [actors/block-stop.kz](../corpus/actors/block-stop.kz)
+```kurz
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash (c) {
+    print("stopped at {c.Place.Line}")
+    stop
+}
+send w.Fail()
+print(w.Ping())
+```
+
+Case: [actors/block-escalate.kz](../corpus/actors/block-escalate.kz)
+```kurz
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+}
+
+actor Boss {
+    mut int n = 0
+
+    pub void Go() {
+        n = n + 1
+        w = spawn Worker() on crash (c) {
+            print("escalating")
+            escalate
+        }
+
+        send w.Fail()
+    }
+
+    pub int Count() => n
+}
+
+b = spawn Boss()
+b.Go()
+print(b.Count())
+```
+
+Case: [actors/block-decides-nothing.kz](../corpus/actors/block-decides-nothing.kz)
+```kurz
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash (c) {
+    if c.Place.Line > 1 {
+        restart
+    }
+}
+print(w.Ping())
+```
+
+Case: [actors/block-restart-knob.kz](../corpus/actors/block-restart-knob.kz)
+```kurz
+actor Worker {
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash (c) {
+    restart after 1s
+}
+print(w.Ping())
+```
+
+### U30 (decided, §5, §6) The crash the block reads
+
+The block's parameter is a value of the standard library's `Crashed<R>`, whose fields are `Reason`,
+what the child threw, of the type `R`, `Place`, the place that raised it, a `Place(string File, int
+Line)`, and `Chain`, the ID of the chain of the message that crashed (§5, the place and the chain ID
+fields of the `Crashed` case beside `Reason`), its 32 hexadecimal digits *(assumed: as §6 marks it,
+the names, the place's type, as Rust's `panic::Location`, and the digits, as OpenTelemetry writes a
+trace-id)*. `R` is the union of every type the child's code can throw, found over the whole program,
+and of the runtime's error type, `RuntimeError(RuntimeKind Kind, string Detail)`, a member of every
+`Reason` (O7; §5, the owner, 2026-10-03), so that a run-time error of chapter 12 reaches the block as
+a `RuntimeError` of its kind, with the detail its error line names; the child's code is its
+construction and its methods, what they run, the construction of each actor they spawn, and the code
+of each actor they spawn under `escalate` or a block, whose crash can pass up to the child, with
+what that block throws (U32) *(assumed: as §5 marks it, the type's name, its kinds and its place,
+and the order of `R`'s cases, the program's own first and the runtime's last)*. `RuntimeError` and
+`RuntimeKind` are names every file sees, as the standard library's `HttpError` is (W1) *(assumed: as
+§6 marks it)*. The thrown value is moved out of the child's heap into the supervisor's, with
+everything it reaches, before the child's heap is freed (O7; §5, the owner, 2026-10-04), and the
+`Crashed` value goes when the block's message ends.
+
+Case: [actors/block-reason.kz](../corpus/actors/block-reason.kz)
+```kurz
+data Lost(int Code)
+
+actor Worker {
+    pub void Lose() {
+        throw Lost(7)
+    }
+
+    pub void Divide(int n) {
+        print(10 / n)
+    }
+
+    pub int Half(int n) => n / 2
+}
+
+w = spawn Worker() on crash (c) {
+    match c.Reason {
+        Lost l => print("lost {l.Code}")
+        RuntimeError e => print(e.Kind)
+    }
+
+    restart
+}
+send w.Lose()
+send w.Divide(0)
+print(w.Half(4))
+```
+
+### U31 (assumed, §6) What the block reads
+
+A block at a `spawn` in an actor's code reads and assigns the fields of that actor, the supervisor,
+as a message of it does, since it runs as one (U28), and takes the variables of the function around
+it that it names by value at the `spawn`, as a lambda takes them (F15), as Rust's `move` closure
+does; a block after an actor's name, where no supervisor is known, reads its parameter and what a
+top-level function reads, and a block in the top-level code reads what it took (§6, assumed there,
+as Akka Typed's `Behaviors.supervise` takes no state of the actor that spawns).
+
+Case: [actors/block-supervisor-state.kz](../corpus/actors/block-supervisor-state.kz)
+```kurz
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+}
+
+actor Boss {
+    mut int crashes = 0
+
+    pub void Go() {
+        name = "first"
+        w = spawn Worker() on crash (c) {
+            crashes = crashes + 1
+            print("{name} {crashes}")
+            stop
+        }
+
+        send w.Fail()
+    }
+
+    pub int Crashes() => crashes
+}
+
+b = spawn Boss()
+b.Go()
+print(b.Crashes())
+```
+
+Case: [actors/block-type.kz](../corpus/actors/block-type.kz)
+```kurz
+string Note(int line) => "type's block at {line}"
+
+actor Worker on crash (c) {
+    print(Note(c.Place.Line))
+    restart
+} {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+w = spawn Worker()
+send w.Fail()
+print(w.Ping())
+```
+
+### U32 (decided, §6) A throw in the block
+
+A throw inside the block is the supervisor's own crash, and the child stays stopped (§6, the owner,
+2026-11-15, #519, comment 6902210646, Q2): the child is ended with the supervisor's other children
+(U21), so that a call that waits in its inbox or comes after raises `actor-gone`, and the
+supervisor's crash goes as any crash goes (U19 to U25). The child's crash writes its log line as at
+`stop` before the supervisor's crash writes its own (U24) *(assumed: as §6 marks it)*.
+
+Case: [actors/block-throw.kz](../corpus/actors/block-throw.kz)
+```kurz
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+actor Boss {
+    pub Worker Go() {
+        kid = spawn Worker() on crash (c) {
+            throw "block fails"
+        }
+
+        send kid.Fail()
+        return kid
+    }
+}
+
+b = spawn Boss()
+w = b.Go()
+print(w.Ping())
+```
+
+### U33 (decided, §6) The block of the top-level code
+
+A block at a `spawn` in the top-level code runs in that code's wait: the wait runs the scheduler in
+place (U18), and it runs a pending block before it goes on, and the end of the top-level code drops a
+pending block and ends its child (U13) (§6, the owner, 2026-11-16, #519, comment 6919351399, "Root's
+wait runs it"). A wait on the call that crashed the child therefore ends with `callee-crashed` (U20)
+before the block runs, and the process ends with that error, the block dropped with no line.
+
+Case: [actors/block-sample.kz](../corpus/actors/block-sample.kz)
+
+Case: [actors/block-dropped.kz](../corpus/actors/block-dropped.kz)
+```kurz
+actor Worker {
+    pub int Fail() {
+        throw "worker fails"
+    }
+}
+
+w = spawn Worker() on crash (c) {
+    print("never")
+    restart
+}
+print(w.Fail())
+```
+
+### U34 (assumed, §6) Pending blocks and the log line
+
+The blocks pending in one supervisor run in the order of the crashes, and a block still pending at
+the supervisor's crash or end is dropped with no line, its child ended with the supervisor's other
+children (U21, U13); while its block is pending, the child takes no message, so that a call to it
+waits in its kept inbox, and a call that waited for it goes on waiting, until the decision (§6, the
+owner, 2026-11-16, #519, comment 6926540546, "Keep: it waits"); and the
+block's own calls run in a chain of their own, as a restart's construction does (U22). The log line
+of a crash that a block decides (U24) is written at the decision, at `restart` and at `stop`, and
+none at `escalate` (U25) (§6, assumed there, as Erlang's supervisor reports a child's exit as it
+acts on it).
+
+Case: [actors/block-order.kz](../corpus/actors/block-order.kz)

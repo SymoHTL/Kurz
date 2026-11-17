@@ -7158,7 +7158,7 @@ public sealed class CheckerTests
     [Theory]
     [InlineData(1, "U1", "actor A per Id {\n}\n")]
     [InlineData(1, "U1", "actor A stack 8mb per Id {\n}\n")]
-    [InlineData(3, "U1, U25", "print(1)\n\nactor A on crash (c) {\n    restart\n} {\n    pub int Get() => 1\n}\n")]
+    [InlineData(1, "U27, U28", "actor A per Id on crash (c) {\n    restart\n} {\n}\n")]
     [InlineData(1, "U1", "actor A per Id on crash stop {\n}\n")]
     [InlineData(1, "U1, T19", "actor A<T> {\n}\n")]
     [InlineData(1, "U1, T19", "actor Pair<T>(T First) {\n}\n\np = spawn Pair<int>(1)\nprint(p)\n")]
@@ -7478,12 +7478,119 @@ public sealed class CheckerTests
     }
 
     [Theory]
-    [InlineData(13, "U2, U25", "c = spawn Counter() on crash (c) {\n    print(1)\n}\nprint(c.Get())\n")]
+    [InlineData(13, "section 6, U28", "x = attempt {\n    print(1)\n}\n")]
+    [InlineData(13, "section 6, U28", "x = retry {\n    print(1)\n}\n")]
+    [InlineData(13, "U30", "c = spawn Counter() on crash (c) {\n    stop\n}\nprint(c.Get())\n")]
     [InlineData(14, "U4, F11", "c = spawn Counter()\nf = c.Get\nprint(f())\n")]
     public void A_message_or_a_spawn_where_the_build_makes_none_is_not_supported(int line, string rule, string program)
     {
-        // U2, U25: the block of `on crash` after `spawn` (Q1); U4 with F11: a method of an actor named without a call
+        // section 6: `attempt { ... }` and `retry { ... }`, which U28 leaves out; U30: the block of `on crash` in a file read without `std/`,
+        // which declares `Crashed`; U4 with F11: a method of an actor named without a call
         NotSupportedAt(line, rule, ActorCounter + program);
+    }
+
+    // ---- the block of `on crash` (U28 to U34) ----------------------------------------------------------------------------------
+
+    /// <summary>A child whose code throws a <c>Lost</c>, and the line the program after it starts at, 11.</summary>
+    private const string Thrower = "data Lost(int Code)\n\nactor Worker {\n    pub int Get() => 1\n\n    pub void Fail() {\n        throw Lost(1)\n    }\n}\n\n";
+
+    /// <summary>The errors of a program that sees <c>std/</c>, by id and line.</summary>
+    private static List<(string Id, int Line)> ErrorsSeeingStd(string program) =>
+        CheckSeeingStd(program).Diagnostics.Sorted.Select(d => (d.Id, d.Line)).ToList();
+
+    [Fact]
+    public void The_block_reads_the_crash_with_its_reason_place_and_chain()
+    {
+        // U30: `c` is a `Crashed<R>`, whose `Reason` is what the child's code can throw and the runtime's error type, its `Place` the file
+        // and the line, its `Chain` the chain's ID (section 5; S4 of comment 6907441402, assumed)
+        Assert.Empty(ErrorsSeeingStd(Thrower + "w = spawn Worker() on crash (c) {\n    match c.Reason {\n        Lost l => print(l.Code)\n        RuntimeError e => print(e.Detail)\n    }\n\n    print(c.Place.File)\n    print(c.Place.Line)\n    print(c.Chain)\n    restart\n}\nprint(w.Get())\n"));
+
+        // the Reason holds both: a `match` that leaves out the child's own type, or the runtime's, is not exhaustive
+        Assert.Equal([(ErrorIds.MatchNotExhaustive, 12)], ErrorsSeeingStd(Thrower + "w = spawn Worker() on crash (c) {\n    match c.Reason {\n        RuntimeError e => print(e.Detail)\n    }\n\n    stop\n}\nprint(w.Get())\n"));
+        Assert.Equal([(ErrorIds.MatchNotExhaustive, 12)], ErrorsSeeingStd(Thrower + "w = spawn Worker() on crash (c) {\n    match c.Reason {\n        Lost l => print(l.Code)\n    }\n\n    stop\n}\nprint(w.Get())\n"));
+
+        // a child that throws nothing of its own has the runtime's error type alone as its Reason
+        Assert.Empty(ErrorsSeeingStd("actor Quiet {\n    pub int Get() => 1\n}\n\nq = spawn Quiet() on crash (c) {\n    print(c.Reason.Detail)\n    stop\n}\nprint(q.Get())\n"));
+
+        // U30: the block names the runtime's error type and its kinds, which every file sees (W1), and a file's own type of that name is
+        // `redeclared` (V9)
+        Assert.Empty(ErrorsSeeingStd("actor Quiet {\n    pub int Get() => 1\n}\n\nq = spawn Quiet() on crash (c) {\n    if c.Reason.Kind == RuntimeKind.Overflow {\n        stop\n    }\n\n    restart\n}\nprint(q.Get())\n"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], ErrorsSeeingStd("data RuntimeError(int Code)\n\nprint(1)\n"));
+    }
+
+    [Theory]
+    [InlineData(11, "w = spawn Worker() on crash (c) {\n    print(c.Chain)\n}\nprint(w.Get())\n")]
+    [InlineData(11, "w = spawn Worker() on crash (c) {\n    if c.Place.Line > 1 {\n        restart\n    }\n}\nprint(w.Get())\n")]
+    [InlineData(11, "w = spawn Worker() on crash (c) {\n    match c.Reason {\n        Lost l => print(l.Code)\n        RuntimeError e => escalate\n    }\n}\nprint(w.Get())\n")]
+    public void A_path_of_the_block_that_decides_nothing_is_missing_return(int line, string program)
+    {
+        // U29: each path of the block ends with `restart`, `stop`, `escalate` or a `throw`, and one that ends with none is `missing-return`,
+        // as for a lambda whose path ends with no value (F3; issue 519, comment 6919351399, "missing-return error")
+        Assert.Equal([(ErrorIds.MissingReturn, line)], ErrorsSeeingStd(Thrower + program));
+    }
+
+    [Theory]
+    [InlineData("w = spawn Worker() on crash (c) {\n    if c.Place.Line > 1 {\n        restart\n    } else {\n        escalate\n    }\n}\nprint(w.Get())\n")]
+    [InlineData("w = spawn Worker() on crash (c) {\n    match c.Reason {\n        Lost l => stop\n        RuntimeError e => throw e\n    }\n}\nprint(w.Get())\n")]
+    [InlineData("w = spawn Worker() on crash (c) {\n    throw Lost(2)\n}\nprint(w.Get())\n")]
+    [InlineData("w = spawn Worker() on crash (c) {\n    restart = 1\n    print(restart)\n    f = () => {\n        stop = 2\n        print(stop)\n    }\n    f()\n    escalate\n}\nprint(w.Get())\n")]
+    public void Each_path_of_the_block_decides_or_throws(string program)
+    {
+        // U29: a decision ends its path, as `return` does; a throw ends it too, the supervisor's own crash (U32); before `=` and inside a
+        // lambda in the block the words are names (U6)
+        Assert.Empty(ErrorsSeeingStd(Thrower + program));
+    }
+
+    [Fact]
+    public void The_block_at_spawn_reads_the_supervisor_and_takes_locals_by_value()
+    {
+        // U31: a block at `spawn` reads and assigns the fields of the actor whose code spawns, as a message of it, and takes the locals it
+        // names by value, as a lambda does (F15; S7 of comment 6907441402, assumed)
+        var boss = "actor Boss {\n    mut int crashes = 0\n\n    pub void Go() {\n        n = 1\n        w = spawn Worker() on crash (c) {\n            crashes = crashes + n\n            stop\n        }\n        print(w.Get())\n    }\n\n    pub int Crashes() => crashes\n}\n\nb = spawn Boss()\nb.Go()\nprint(b.Crashes())\n";
+        Assert.Empty(ErrorsSeeingStd(Thrower + boss));
+        Assert.Equal([(ErrorIds.CaptureAssign, 13)], ErrorsSeeingStd(Thrower + "mut n = 1\nw = spawn Worker() on crash (c) {\n    n = n + 1\n    stop\n}\nprint(w.Get())\nprint(n)\n"));
+    }
+
+    [Fact]
+    public void The_block_after_an_actor_s_name_reads_c_and_what_a_top_level_function_reads()
+    {
+        // U31: the type's block reads `c` and what the body of a top-level function reads, no field of the actor and no top-level variable
+        // (S6 of comment 6907441402, assumed)
+        var own = "data Lost(int Code)\n\nint Twice(int n) => n * 2\n\nactor Worker on crash (c) {\n    print(Twice(c.Place.Line))\n    restart\n} {\n    pub int Get() => 1\n}\n\nw = spawn Worker()\nprint(w.Get())\n";
+        Assert.Empty(ErrorsSeeingStd(own));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], ErrorsSeeingStd("actor Worker on crash (c) {\n    print(count)\n    restart\n} {\n    mut int count = 0\n\n    pub int Get() => count\n}\n\nw = spawn Worker()\nprint(w.Get())\n"));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], ErrorsSeeingStd("actor Worker on crash (c) {\n    print(k)\n    restart\n} {\n    pub int Get() => 1\n}\n\nk = 1\nw = spawn Worker()\nprint(w.Get() + k)\n"));
+        Assert.Equal([(ErrorIds.MissingReturn, 1)], ErrorsSeeingStd("actor Worker on crash (c) {\n    print(c.Chain)\n} {\n    pub int Get() => 1\n}\n\nw = spawn Worker()\nprint(w.Get())\n"));
+    }
+
+    [Fact]
+    public void A_reason_the_crossing_copy_does_not_copy_is_not_supported()
+    {
+        // U30 with U12: the copy that brings the child's throw into the supervisor's heap copies what crosses; a class of std/ is the build's
+        // limit there, as at a message's argument
+        var (diagnostics, _) = CheckSeeingStd("actor Worker {\n    pub int Get() => 1\n\n    pub void Fail() {\n        throw HttpHeaders()\n    }\n}\n\nw = spawn Worker() on crash (c) {\n    stop\n}\nprint(w.Get())\n");
+        var only = Assert.Single(diagnostics.Items);
+        Assert.False(only.IsError);
+        Assert.Equal(9, only.Line);
+        Assert.EndsWith("(U30, U12)", only.Message);
+
+        // the positive control: a child whose throw crosses
+        Assert.Empty(ErrorsSeeingStd(Thrower + "w = spawn Worker() on crash (c) {\n    stop\n}\nprint(w.Get())\n"));
+    }
+
+    [Fact]
+    public void A_reason_that_grows_by_what_the_blocks_read_is_not_supported()
+    {
+        // U30: a block that throws its own `c`, whose child is the actor that spawns it, adds a `Crashed` of the `Reason` it reads to that
+        // `Reason` at each reading, which settles at none; the program is read four times and the block is `not supported`
+        var (diagnostics, _) = CheckSeeingStd("actor A {\n    pub void Go() {\n        a = spawn A() on crash (c) {\n            throw c\n        }\n\n        send a.Go()\n    }\n}\n\nsend spawn A().Go()\n");
+        var only = Assert.Single(diagnostics.Items);
+        Assert.False(only.IsError);
+        Assert.Equal(3, only.Line);
+        Assert.EndsWith("(U30)", only.Message);
+
+        // the positive control: a block that throws a value of its own settles at the second reading
+        Assert.Empty(ErrorsSeeingStd("data Again(int N)\n\nactor A {\n    pub void Go() {\n        a = spawn A() on crash (c) {\n            throw Again(1)\n        }\n\n        send a.Go()\n    }\n}\n\nsend spawn A().Go()\n"));
     }
 
     [Theory]

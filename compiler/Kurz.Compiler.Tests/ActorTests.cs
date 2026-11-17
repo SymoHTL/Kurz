@@ -26,7 +26,9 @@ namespace Kurz.Compiler.Tests;
 /// crash escalated to the root, into an actor and into one whose constructor runs, the first pause of <c>after</c>, the window of
 /// <c>max N in</c> and <c>restart-limit</c>; a stack fault inside the allocator, the scheduler and
 /// the copy of a crossing, which ends the process, and the count of their entries back at 0; the size a refused heap at a crash names;
-/// and <c>print-failed</c> and <c>not-char-boundary</c> in a message.
+/// and <c>print-failed</c> and <c>not-char-boundary</c> in a message. Last, the block of <c>on crash</c> (U28 to U34): at the root and in
+/// an actor, its order among the supervisor's messages, the state it reads, its three decisions, a throw in it, the type's block, the
+/// thrown value's copy, the runtime's error, an overflow, the blocks dropped, and memory over 10,000 crashes it restarts.
 /// </summary>
 public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -3072,5 +3074,624 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Cutter#1 crashed: not-char-boundary \"byte 2 is inside a code point\" at program.kz:6", "Caller#2 crashed: callee-crashed at program.kz:17"], crashes);
         Ran((run.Code, run.Output, rest), 0, ["7", "1"], "");
+    }
+
+    // ---- the block of `on crash` (U28 to U34) ------------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_block_at_the_root_reads_the_crash_and_restarts_its_child()
+    {
+        // U28, U30, U33: the top-level code's wait runs the block, which reads the thrown value as its case of `Reason`, the place,
+        // the chain's 32 hexadecimal digits (S4 of comment 6907441402) and a local of the top-level code, taken by value (S7 of that
+        // comment); `restart` restarts the child on the copy of its argument that its supervisor keeps where the policy can restart, a
+        // block among them (section 6, 2026-11-13, comment 6851105334), which serves the call that waits, and the log line is written at
+        // the decision (S10 of comment 6907441402)
+        const string text = """
+            data Lost(int Code)
+
+            actor Worker(string Name) {
+                pub void Fail(int code) {
+                    throw Lost(code)
+                }
+
+                pub string Ping() => Name
+            }
+
+            label = "worker"
+            w = spawn Worker("kept") on crash (c) {
+                match c.Reason {
+                    Lost l => print("{label} lost {l.Code} at {c.Place.File}:{c.Place.Line}")
+                    RuntimeError e => print("runtime {e.Detail}")
+                }
+
+                print(c.Chain)
+                restart
+            }
+            send w.Fail(7)
+            print(w.Ping())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-root-restart");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Worker#1 crashed: thrown \"Lost { Code = 7 }\" at program.kz:5"], crashes);
+        Ran((run.Code, run.Output.Where((_, i) => i != 1).ToList(), rest), 0, ["worker lost 7 at program.kz:5", "kept"], "");
+        Assert.Matches("^[0-9a-f]{32}$", run.Output[1]);
+    }
+
+    [Fact]
+    public void A_block_runs_after_the_supervisors_current_message_and_before_its_queued_ones_in_crash_order()
+    {
+        // U28, U31, U34: each block is a message of `Boss`, which runs once `Go`, parked in its call to `Other`, ended, before the
+        // `Queued` that `Go` sent itself, the first crash's first; each reads and assigns `Boss`'s field, `stop` ends its child, whose
+        // later call gets `actor-gone`, and `restart` restarts the other; each log line at the decision (S7, S10, S11 of comment
+        // 6907441402)
+        const string text = """
+            actor Other {
+                pub int Ping() => 1
+            }
+
+            actor Worker(string Name) {
+                pub void Fail() {
+                    throw "{Name} fails"
+                }
+
+                pub int Ping() => 2
+            }
+
+            actor Boss {
+                mut int crashes = 0
+
+                pub Worker Go(Other other) {
+                    first = spawn Worker("first") on crash (c) {
+                        crashes = crashes + 1
+                        match c.Reason {
+                            string s => print("block {s} {crashes}")
+                            RuntimeError e => print(e.Detail)
+                        }
+
+                        stop
+                    }
+
+                    second = spawn Worker("second") on crash (c) {
+                        crashes = crashes + 1
+                        match c.Reason {
+                            string s => print("block {s} {crashes}")
+                            RuntimeError e => print(e.Detail)
+                        }
+
+                        restart
+                    }
+
+                    send this.Queued()
+                    send first.Fail()
+                    send second.Fail()
+                    print(other.Ping())
+                    print("go ends {crashes}")
+                    return first
+                }
+
+                pub void Queued() {
+                    print("queued {crashes}")
+                }
+
+                pub int Crashes() => crashes
+            }
+
+            o = spawn Other()
+            b = spawn Boss()
+            w = b.Go(o)
+            print(b.Crashes())
+            print(w.Ping())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-order");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Worker#3 crashed: thrown \"first fails\" at program.kz:7", "Worker#4 crashed: thrown \"second fails\" at program.kz:7"], crashes);
+        Ran((run.Code, run.Output, rest), 1, ["1", "go ends 0", "block first fails 1", "block second fails 2", "queued 2", "2"], "error: actor-gone at program.kz:56\n");
+    }
+
+    [Fact]
+    public void A_throw_in_the_block_crashes_the_supervisor_and_the_child_stays_stopped()
+    {
+        // U32: the block's throw is `Boss`'s crash, after the child's log line as for a `stop` (S10 of comment 6907441402); the crash ends
+        // the child, whose call waiting in its inbox gets `actor-gone`, and the root restarts `Boss`
+        const string text = """
+            actor Worker {
+                pub void Fail() {
+                    throw "worker fails"
+                }
+
+                pub int Ping() => 2
+            }
+
+            actor Boss {
+                pub Worker Go() {
+                    kid = spawn Worker() on crash (c) {
+                        throw "block fails"
+                    }
+
+                    send kid.Fail()
+                    return kid
+                }
+            }
+
+            b = spawn Boss()
+            w = b.Go()
+            print(w.Ping())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-throw");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Worker#2 crashed: thrown \"worker fails\" at program.kz:3", "Boss#1 crashed: thrown \"block fails\" at program.kz:12"], crashes);
+        Ran((run.Code, run.Output, rest), 1, [], "error: actor-gone at program.kz:22\n");
+    }
+
+    [Fact]
+    public void A_block_that_escalates_to_the_root_ends_the_process_with_the_childs_error_line_and_trace()
+    {
+        // U34, U25: `escalate` in the top-level code's block passes the child's crash up whole: the process ends with the child's error
+        // line, its thrown text, and the trace of the stack the child raised on, kept while the block decided, and no log line
+        const string text = """
+            actor Worker {
+                pub void Fail() {
+                    throw "worker fails"
+                }
+
+                pub int Ping() => 1
+            }
+
+            w = spawn Worker() on crash (c) {
+                print("deciding")
+                escalate
+            }
+            print(w.Ping())
+            send w.Fail()
+            print(w.Ping())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-escalate-root", trace: null);
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Empty(crashes);
+        var error = "error: thrown at program.kz:3:\nworker fails\n" + (OperatingSystem.IsLinux() ? "  at Worker.Fail in program.kz:3\n" : string.Empty);
+        Ran((run.Code, run.Output, rest), 1, ["1", "deciding"], error);
+    }
+
+    [Fact]
+    public void A_block_that_escalates_crashes_the_supervisor_with_the_childs_crash()
+    {
+        // U34, U25: `escalate` in `Boss`'s block is `Boss`'s crash with the child's id, place and text, whose log line names `Boss`, and
+        // none the child; the root restarts `Boss`, fresh, and the child ended with it
+        const string text = """
+            actor Worker {
+                pub void Fail() {
+                    throw "worker fails"
+                }
+
+                pub int Ping() => 2
+            }
+
+            actor Boss {
+                mut int made = 0
+
+                pub Worker Go() {
+                    made = made + 1
+                    kid = spawn Worker() on crash (c) {
+                        escalate
+                    }
+
+                    send kid.Fail()
+                    return kid
+                }
+
+                pub int Made() => made
+            }
+
+            b = spawn Boss()
+            w = b.Go()
+            print(b.Made())
+            print(w.Ping())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-escalate");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Boss#1 crashed: thrown \"worker fails\" at program.kz:3"], crashes);
+        Ran((run.Code, run.Output, rest), 1, ["0"], "error: actor-gone at program.kz:28\n");
+    }
+
+    [Fact]
+    public void The_block_after_an_actors_name_decides_for_each_of_its_spawns()
+    {
+        // U27, U31: the type's block, which reads `c` and what a top-level function reads (S6 of comment 6907441402), runs as the
+        // block at the spawn does, here in the top-level code's wait; a block at a `spawn` of the type wins over it (2026-11-15, #519,
+        // comment 6902210646, Q3)
+        const string text = """
+            actor Worker on crash (c) {
+                print("type's block at {c.Place.Line}")
+                restart
+            } {
+                pub void Fail() {
+                    throw "worker fails"
+                }
+
+                pub int Ping() => 1
+            }
+
+            w = spawn Worker()
+            send w.Fail()
+            print(w.Ping())
+            v = spawn Worker() on crash (c) {
+                print("spawn's block at {c.Place.Line}")
+                restart
+            }
+            send v.Fail()
+            print(v.Ping())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-type");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Worker#1 crashed: thrown \"worker fails\" at program.kz:6", "Worker#2 crashed: thrown \"worker fails\" at program.kz:6"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["type's block at 6", "1", "spawn's block at 6", "1"], "");
+    }
+
+    [Fact]
+    public void A_block_pending_where_the_top_level_code_ends_is_dropped_with_no_log_line()
+    {
+        // U33: the top-level code waits on the call that crashes the child, so that its wait ends with `callee-crashed` before it runs
+        // the block the crash left pending; the end drops the block, which decided nothing and wrote no line (U13; issue 519, comment
+        // 6919351399, "Root's wait runs it")
+        const string text = """
+            actor Worker {
+                pub int Fail() {
+                    throw "worker fails"
+                }
+            }
+
+            w = spawn Worker() on crash (c) {
+                print("never")
+                restart
+            }
+            print(w.Fail())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-dropped");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Empty(crashes);
+        Ran((run.Code, run.Output, rest), 1, [], "error: callee-crashed at program.kz:11\n");
+    }
+
+    [Fact]
+    public void Memory_stays_flat_over_ten_thousand_crashes_a_block_restarts()
+    {
+        // U30, U34: each crash's copy into the top-level code's heap, its message, its `c` and the stack the child raised on are let go
+        // of at the decision, so that 10,000 crashes after 1,000 that warm the pools grow the resident memory by less than 256 KiB; the
+        // pauses stood in for
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // no `/proc/self/status` reads the resident memory on Windows
+        }
+
+        const string program = """
+            long | IoError Resident() {
+                bytes = File.ReadAll("/proc/self/status")
+                text = string.FromUtf8(bytes) else {
+                    InvalidUtf8 => ""
+                }
+
+                for line in text.Split('\n') {
+                    if line.StartsWith("VmRSS:") {
+                        return long.Parse(line.Replace("VmRSS:", "").Replace("kB", "").Trim()) else {
+                            ParseError => -1
+                        }
+                    }
+                }
+
+                return -1
+            }
+
+            data Lost(string Why)
+
+            actor Flaky {
+                pub void Fail(string s) {
+                    throw Lost("fails at {s}")
+                }
+
+                pub int Ping() => 1
+            }
+
+            f = spawn Flaky() on crash (c) {
+                match c.Reason {
+                    Lost l => {
+                        if l.Why.Bytes.Count == 0 {
+                            stop
+                        }
+                    }
+                    RuntimeError e => stop
+                }
+
+                restart
+            }
+
+            mut total = 0
+            for i in 0..<1000 {
+                send f.Fail("warm {i}")
+                total = total + f.Ping()
+            }
+
+            before = Resident() else {
+                IoError e => -1
+            }
+
+            for i in 0..<10000 {
+                send f.Fail("run {i}")
+                total = total + f.Ping()
+            }
+
+            after = Resident() else {
+                IoError e => -1
+            }
+
+            print(total)
+            print(after - before)
+
+            """;
+        var run = BuildAndRun(program, StoodIn(print: false), "actor-block-memory");
+        Assert.Equal((0, 11000), (run.Code, Logged(run.Error).Crashes.Count));
+        Assert.Equal("11000", run.Output[0]);
+        var grown = long.Parse(run.Output[1], System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(grown < 256, $"10,000 crashes a block restarts grow the resident memory by {grown} KiB");
+    }
+
+    [Fact]
+    public void The_thrown_value_reaches_the_block_as_a_copy_in_the_supervisors_heap()
+    {
+        // U30 with U12: the thrown instance, its `mut` field and its list among it, is copied into `Boss`'s heap before the child's heap
+        // is freed, under the allocator that makes every freed block inaccessible, so that the block reads no block of the freed heap
+        const string text = """
+            class Note(mut string Why, List<int> Codes) {
+                pub string Text() => Why
+            }
+
+            actor Worker {
+                pub void Fail() {
+                    throw Note("lost", [1, 2, 3])
+                }
+            }
+
+            actor Boss {
+                mut int total = 0
+
+                pub void Go() {
+                    kid = spawn Worker() on crash (c) {
+                        match c.Reason {
+                            Note n => {
+                                total = total + n.Codes.Count
+                                print("{n.Why} {n.Codes}")
+                            }
+                            RuntimeError e => print(e.Detail)
+                        }
+
+                        stop
+                    }
+
+                    send kid.Fail()
+                }
+
+                pub int Total() => total
+            }
+
+            b = spawn Boss()
+            b.Go()
+            print(b.Total())
+
+            """;
+        var run = BuildAndRun(text, ListTests.Fenced, "actor-block-copy");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Worker#2 crashed: thrown \"lost\" at program.kz:7"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["lost [1, 2, 3]", "3"], "");
+    }
+
+    [Fact]
+    public void A_block_pending_in_a_supervisor_that_crashes_is_dropped_and_its_child_ended()
+    {
+        // U34: the block waits in `Boss`'s inbox while `Go` runs on, and `Go`'s throw drops it with no line and ends its child, the
+        // inbox's call kept for `Boss`'s restart (S11 of comment 6907441402)
+        const string text = """
+            actor Other {
+                pub int Ping() => 1
+            }
+
+            actor Worker {
+                pub void Fail() {
+                    throw "worker fails"
+                }
+            }
+
+            actor Boss {
+                pub void Go(Other other) {
+                    kid = spawn Worker() on crash (c) {
+                        print("never")
+                        restart
+                    }
+
+                    send kid.Fail()
+                    print(other.Ping())
+                    throw "boss fails"
+                }
+
+                pub int Ping() => 2
+            }
+
+            o = spawn Other()
+            b = spawn Boss()
+            send b.Go(o)
+            print(b.Ping())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-supervisor-crash");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Boss#2 crashed: thrown \"boss fails\" at program.kz:20"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["1", "2"], "");
+    }
+
+    [Fact]
+    public void A_call_sent_to_a_child_whose_block_is_pending_waits_in_its_inbox_for_the_restart()
+    {
+        // U34: while its block waits behind `Go`, the child takes no message, so that the `Note` that `Go` sends it waits in its kept
+        // inbox and runs on the instance the block's restart constructs, whose `n` is 0 again (S11 of comment 6907441402)
+        const string text = """
+            actor Other {
+                pub int Ping() => 1
+            }
+
+            actor Worker {
+                mut int n = 0
+
+                pub void Fail() {
+                    n = 5
+                    throw "worker fails"
+                }
+
+                pub void Note() {
+                    print("note {n}")
+                }
+
+                pub int Get() => n
+            }
+
+            actor Boss {
+                pub Worker Go(Other other) {
+                    kid = spawn Worker() on crash (c) {
+                        print("block")
+                        restart
+                    }
+
+                    send kid.Fail()
+                    print(other.Ping())
+                    send kid.Note()
+                    return kid
+                }
+            }
+
+            o = spawn Other()
+            b = spawn Boss()
+            w = b.Go(o)
+            print(w.Get())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-pending-call");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Worker#3 crashed: thrown \"worker fails\" at program.kz:10"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["1", "block", "note 0", "0"], "");
+    }
+
+    [Fact]
+    public void A_message_of_the_supervisor_that_calls_its_child_whose_block_waits_behind_it_ends_the_top_level_wait_in_deadlock()
+    {
+        // U34 (the owner, 2026-11-16, #519, comment 6926540546, "Keep: it waits"): `Go` calls its child while the child's block waits in
+        // `Boss`'s inbox behind `Go`, so that the call waits for the decision and the block for `Go`; nothing left to run can end the
+        // top-level code's wait, which ends the process with `deadlock` at its line, and the block decided nothing and wrote no line
+        const string text = """
+            actor Other {
+                pub int Ping() => 1
+            }
+
+            actor Worker {
+                pub void Fail() {
+                    throw "worker fails"
+                }
+
+                pub int Ping() => 2
+            }
+
+            actor Boss {
+                pub int Go(Other other) {
+                    kid = spawn Worker() on crash (c) {
+                        print("never")
+                        restart
+                    }
+
+                    send kid.Fail()
+                    print(other.Ping())
+                    return kid.Ping()
+                }
+            }
+
+            o = spawn Other()
+            b = spawn Boss()
+            print(b.Go(o))
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-wait-deadlock");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Empty(crashes);
+        Ran((run.Code, run.Output, rest), 1, ["1"], "error: deadlock at program.kz:28\n");
+    }
+
+    [Fact]
+    public void An_overflow_a_block_escalates_to_the_root_reads_as_the_runtimes_stack_overflow()
+    {
+        // U30, U34: the overflow's `Reason` is the runtime's error of the kind `StackOverflow`, and its escalation ends the process with
+        // its error line; the stack it overflowed on left from the handler's stack, so that the trace is the top-level code's (assumed)
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // an actor's overflow on Windows ends the process as the system ends it (compiler/README.md)
+        }
+
+        const string text = """
+            actor Deep {
+                int Down(int n) => Down(n) + 1
+
+                pub void Go() {
+                    print(Down(0))
+                }
+
+                pub int Ping() => 1
+            }
+
+            d = spawn Deep() on crash (c) {
+                match c.Reason {
+                    RuntimeError e => print("{e.Kind} {c.Place.Line}")
+                }
+
+                escalate
+            }
+            send d.Go()
+            print(d.Ping())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-overflow");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Empty(crashes);
+        Ran((run.Code, run.Output, rest), 1, ["StackOverflow 0"], "error: stack-overflow at program.kz:2\n");
+    }
+
+    [Fact]
+    public void A_raise_of_the_runtime_reaches_the_block_as_the_runtimes_error_of_its_kind()
+    {
+        // U30: a child whose code throws nothing has the runtime's error type alone as its `Reason`, its kind the id of the raise and its
+        // place the raise's line; `stop` ends the child, whose call waiting in its inbox meanwhile gets `actor-gone` (S11 of comment
+        // 6907441402)
+        const string text = """
+            actor Worker {
+                pub void Fail(int at) {
+                    xs = [1, 2]
+                    print(xs[at])
+                }
+
+                pub int Ping() => 1
+            }
+
+            w = spawn Worker() on crash (c) {
+                print("{c.Reason.Kind} at {c.Place.Line}")
+                stop
+            }
+            send w.Fail(5)
+            print(w.Ping())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-runtime-error");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Worker#1 crashed: index-out-of-range at program.kz:4"], crashes);
+        Ran((run.Code, run.Output, rest), 1, ["IndexOutOfRange at 4"], "error: actor-gone at program.kz:15\n");
     }
 }

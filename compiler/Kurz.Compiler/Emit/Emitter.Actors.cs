@@ -45,7 +45,9 @@ public sealed partial class Emitter
     /// the spawner's heap is served again once the state stands. The spawner's heap, the supervisor's, holds the block of the actor's
     /// restart with a copy of each argument the constructor is given (<see cref="KeptArguments"/>; U22) where the policy restarts, the policy
     /// written after the <c>spawn</c>, else the type's, else <c>on crash restart</c> (U25, U27); <c>escalate</c> keeps the block alone, which
-    /// names no function, and <c>stop</c> keeps none (section 6). While the constructor runs, the runtime names the actor as the one whose
+    /// names no function, and <c>stop</c> keeps none (section 6); a block that decides, <c>on crash (c) { ... }</c>, keeps the block of a
+    /// restart, which names the block's function value, made here in the supervisor's heap before the constructor runs, and the function
+    /// that runs it (<see cref="Deciding"/>; U28, U31). While the constructor runs, the runtime names the actor as the one whose
     /// constructor runs, so that an actor it spawns is its child (the runtime's <c>Building</c>; U13), and its record says that its
     /// constructor runs until <c>ActorBuilt</c>, so that an escalation that reaches it is its spawner's crash (U3, U25).
     /// </summary>
@@ -64,6 +66,7 @@ public sealed partial class Emitter
         var building = fn.Alloca("ptr", "building");
         var side = "null";
         var policy = s.Policy ?? symbol.Declaration.Clauses?.FirstOrDefault(c => c.Policy is not null)?.Policy ?? new CrashPolicy(s.Line, "restart");
+        var decides = policy.Block is { } l ? EmitLambda(l, Model.LambdaOf(l).Type) : null;
         var state = Construct(symbol, s.Call, info, () =>
         {
             var state = fn.Value($"call ptr {RuntimeFunction("ActorNew")}(ptr {heap}, i64 {IrSize(block)}, i64 {stack}, ptr {side}, ptr {ActorName(symbol)})");
@@ -77,6 +80,7 @@ public sealed partial class Emitter
         {
             "restart" => KeptArguments(s.Call, info, symbol, arguments, types, supervisor, policy),
             "escalate" => Escalating(supervisor),
+            "block" => Deciding(KeptArguments(s.Call, info, symbol, arguments, types, supervisor, policy), decides!, policy.Block!, supervisor),
             _ => "null",
         });
         fn.Emit($"call ptr {RuntimeFunction("Building")}(ptr {fn.Value($"load ptr, ptr {building}")})");
@@ -106,7 +110,8 @@ public sealed partial class Emitter
     /// again (<see cref="Restarted"/>), the first word of a message's table, which the restart's message names (the runtime's
     /// <c>Restart</c>), a word that stands where a table's copy stands, the pause, the time of the last restart, the time the pause ends
     /// and the next actor of the queue of the pauses, each the runtime's (<c>Pause</c>), the block of the policy's knobs, null where it
-    /// writes none (<see cref="Knobs"/>, U26), and a copy of each argument the constructor is given, its default among them, every counted
+    /// writes none (<see cref="Knobs"/>, U26), the block of a policy that decides, null for none (<see cref="Deciding"/>, U28), and a
+    /// copy of each argument the constructor is given, its default among them, every counted
     /// block it reaches copied into that heap, a <c>move</c> argument's too (the taken points of comment 6899225864).
     /// </summary>
     private string KeptArguments(CallExpression c, CallInfo info, ClassSymbol symbol, List<string> arguments, List<KurzType> types, string heap, CrashPolicy policy)
@@ -115,7 +120,7 @@ public sealed partial class Emitter
         var side = SideType(types);
         var restart = Restarted(symbol, info, types, copiesInto);
         var block = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr {heap}, i64 {IrSize(side)})");
-        fn.Emit($"store {side} {{ ptr {restart}, ptr null, i64 0, i64 0, i64 0, ptr null, ptr null, {Kept(types)} zeroinitializer }}, ptr {block}");
+        fn.Emit($"store {side} {{ ptr {restart}, ptr null, i64 0, i64 0, i64 0, ptr null, ptr null, ptr null, {Kept(types)} zeroinitializer }}, ptr {block}");
         if (Knobs(policy, heap, c.Line) is { } knobs)
         {
             fn.Emit($"store ptr {knobs}, ptr {fn.Value($"getelementptr {side}, ptr {block}, i32 0, i32 6")}");
@@ -131,7 +136,7 @@ public sealed partial class Emitter
                 value = Crossed(value, types[i], session, heap, copiesInto[i]);
             }
 
-            fn.Emit($"store {Ir(types[i])} {value}, ptr {fn.Value($"getelementptr {side}, ptr {block}, i32 0, i32 7, i32 {Number(i)}")}");
+            fn.Emit($"store {Ir(types[i])} {value}, ptr {fn.Value($"getelementptr {side}, ptr {block}, i32 0, i32 8, i32 {Number(i)}")}");
         }
 
         return block;
@@ -154,7 +159,7 @@ public sealed partial class Emitter
             var values = new List<string>();
             for (var i = 0; i < types.Count; i++)
             {
-                var value = fn.Value($"load {Ir(types[i])}, ptr {fn.Value($"getelementptr {side}, ptr {table}, i32 0, i32 7, i32 {Number(i)}")}");
+                var value = fn.Value($"load {Ir(types[i])}, ptr {fn.Value($"getelementptr {side}, ptr {table}, i32 0, i32 8, i32 {Number(i)}")}");
                 values.Add(Counted(types[i]) ? Crossed(value, types[i], session, heap, copiesInto[i]) : value);
             }
 
@@ -190,7 +195,105 @@ public sealed partial class Emitter
         });
 
     /// <summary>The IR type of the block of a restart whose constructor takes values of the types <paramref name="types"/> (<see cref="KeptArguments"/>).</summary>
-    private string SideType(List<KurzType> types) => $"{{ ptr, ptr, i64, i64, i64, ptr, ptr, {Kept(types)} }}";
+    private string SideType(List<KurzType> types) => $"{{ ptr, ptr, i64, i64, i64, ptr, ptr, ptr, {Kept(types)} }}";
+
+    /// <summary>
+    /// U28, U31: the block of a restart <paramref name="side"/> of a policy that decides, given the block of the decision, in the heap
+    /// <paramref name="heap"/> of the supervisor: the function that runs the block (<see cref="BlockEntry"/>) and the block's function value
+    /// <paramref name="decides"/>, one holder more of its environment, which takes the locals the block reads by value at the <c>spawn</c>
+    /// and <c>this</c> of the supervisor, as a lambda does (F15; assumed: S7 of issue 519, comment 6907441402). A block can
+    /// restart its child, so the block of the restart keeps the copies of the arguments (section 6, "restart-needs-copy").
+    /// </summary>
+    private string Deciding(string side, string decides, LambdaExpression block, string heap)
+    {
+        const string type = "{ ptr, %kz.fn }";
+        var record = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr {heap}, i64 {IrSize(type)})");
+        fn.Emit($"store ptr {BlockEntry(block)}, ptr {fn.Value($"getelementptr {type}, ptr {record}, i32 0, i32 0")}");
+        fn.Emit($"call void {RetainEnvironment()}(%kz.fn {decides})");
+        fn.Emit($"store %kz.fn {decides}, ptr {fn.Value($"getelementptr {type}, ptr {record}, i32 0, i32 1")}");
+        fn.Emit($"store ptr {record}, ptr {fn.Value($"getelementptr i8, ptr {side}, i64 56")}");
+        return side;
+    }
+
+    /// <summary>
+    /// U30, U34: the function that runs the block <paramref name="block"/>, which the runtime calls with the block of the restart and the
+    /// block's message: <c>c</c>, the <c>Crashed</c> it reads, built from the copy of the crash the message holds in the supervisor's heap,
+    /// its <c>Reason</c> the thrown value of the case its type's number names, or, for the runtime's own crash, the runtime's error of its
+    /// id and its text (std's <c>RuntimeErrorOf</c>, which throws for an id no row of the run-time table names, as for a type the
+    /// <c>Reason</c> lacks), its <c>Place</c> the file and the line, and its <c>Chain</c> the crashing chain's ID as text; then the block's
+    /// function value called with it, which sets the decision (<c>Decide</c>), and <c>c</c> let go of.
+    /// </summary>
+    private string BlockEntry(LambdaExpression block)
+    {
+        var crashed = (DataType)Model.LambdaOf(block).Type.Parameters[0];
+        var reason = crashed.TypeArguments[0];
+        var place = new DataType(std.Model.DataTypes.Single(d => d.Name == "Place"), []);
+        var error = std.Model.DataTypes.Single(d => d.Name == "RuntimeError");
+        return Helper($"actor.block.{Number(++actorSites)}", "void", ["ptr", "ptr"], () =>
+        {
+            const string type = "{ ptr, %kz.fn }";
+            var record = fn.Value("load ptr, ptr " + fn.Value("getelementptr i8, ptr %a0, i64 56"));
+            var decides = fn.Value($"load %kz.fn, ptr {fn.Value($"getelementptr {type}, ptr {record}, i32 0, i32 1")}");
+            string Word(int offset, string ir) => fn.Value($"load {ir}, ptr {fn.Value($"getelementptr i8, ptr %a1, i64 {Number(offset)}")}");
+            string Text(int at, int count) => fn.Value($"call %kz.str {RuntimeFunction("TextAt")}(ptr {Word(at, "ptr")}, i64 {Word(count, "i64")})");
+
+            var number = Word(136, "i64");
+            var held = Word(144, "ptr");
+            var slot = fn.Alloca(Ir(reason), "reason");
+            IReadOnlyList<KurzType> cases = reason is Semantics.UnionType u ? u.Cases : [reason];
+            var labels = cases.Select(_ => fn.Label("case")).ToList();
+            var runtime = fn.Label("runtime");
+            var done = fn.Label("reason");
+            fn.Terminate($"switch i64 {number}, label %{runtime} [ {string.Join(" ", cases.Select((c, i) => $"i64 {Number(layout.Number(c) + 1)}, label %{labels[i]}"))} ]");
+            string Case(KurzType c, string? value) => reason is Semantics.UnionType union ? MakeUnion(union, c, value) : value!;
+            for (var i = 0; i < cases.Count; i++)
+            {
+                fn.Block(labels[i]);
+                string? value = null;
+                if (cases[i] is not (Semantics.VoidType or NullType))
+                {
+                    value = fn.Value($"load {Ir(cases[i])}, ptr {held}");
+                    fn.Emit($"call void {StdFunction("Free")}(ptr {held}, i64 {IrSize(Ir(cases[i]))})");
+                }
+
+                fn.Emit($"store {Ir(reason)} {Case(cases[i], value)}, ptr {slot}");
+                fn.Branch(done);
+            }
+
+            fn.Block(runtime);
+            var id = Text(56, 64);
+            var detail = Text(104, 112);
+            var errorType = new DataType(error, []);
+            var made = fn.Value($"call {Ir(errorType)} {StdFunction("RuntimeErrorOf")}(%kz.str {id}, %kz.str {detail})");
+            Release(id, Types.String);
+            Release(detail, Types.String);
+            fn.Emit($"store {Ir(reason)} {Case(cases.Single(c => c is DataType d && d.Symbol == error), made)}, ptr {slot}");
+            fn.Branch(done);
+
+            fn.Block(done);
+            var file = fn.Value($"call %kz.str {RuntimeFunction("TextAt")}(ptr {Word(72, "ptr")}, i64 {Word(80, "i64")})");
+            var line = fn.Value($"trunc i64 {Word(88, "i64")} to i32");
+            var where = Make(place, [file, line]);
+            var chain = fn.Value($"call %kz.str {RuntimeFunction("ChainText")}(ptr {fn.Value("getelementptr i8, ptr %a1, i64 120")})");
+            var c = Make(crashed, [fn.Value($"load {Ir(reason)}, ptr {slot}"), where, chain]);
+            fn.Emit($"call void {fn.Value($"extractvalue %kz.fn {decides}, 0")}(ptr {fn.Value($"extractvalue %kz.fn {decides}, 1")}, {Ir(crashed)} {c})");
+            Release(c, crashed);
+            fn.Return(null);
+        });
+    }
+
+    /// <summary>
+    /// U30: the function that copies a thrown value of the type <paramref name="type"/> from its slot into a heap, which the runtime calls
+    /// where a block takes the crash, before the child's heap is freed: a block of that heap that holds the copy, every counted block it
+    /// reaches copied there in a session of its own, as a crossing copies it (U12).
+    /// </summary>
+    private string ThrownCopy(KurzType type) => Helper($"thrown.copy.{Lower.Mangle(type)}", "ptr", ["ptr", "ptr"], () =>
+    {
+        var value = fn.Value($"load {Ir(type)}, ptr %a0");
+        var block = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr %a1, i64 {IrSize(Ir(type))})");
+        fn.Emit($"store {Ir(type)} {(Counted(type) ? Crossed(value, type, null, "%a1") : value)}, ptr {block}");
+        fn.Return($"ptr {block}");
+    });
 
     /// <summary>
     /// U26: the block of the knobs of a restart's policy, in the heap <paramref name="heap"/> of the supervisor, made where <c>after</c> or

@@ -1,0 +1,30 @@
+// expect: output
+// | escalating
+// | 0
+// rules: U29
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+}
+
+actor Boss {
+    mut int n = 0
+
+    pub void Go() {
+        n = n + 1
+        w = spawn Worker() on crash (c) {
+            print("escalating")
+            escalate
+        }
+
+        send w.Fail()
+    }
+
+    pub int Count() => n
+}
+
+b = spawn Boss()
+b.Go()
+print(b.Count())
