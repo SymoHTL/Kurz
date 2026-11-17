@@ -787,7 +787,7 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
 
         // a function that reads its type and that no call copies runs nowhere, and its text adds nothing, so the list of such a `pub`
         // function holds the runtime's type alone, as Rust makes no code of a generic function that nothing instantiates (section 5,
-        // assumed there)
+        // the owner, 2026-11-17, #560, comment 6945856976, Q2)
         var listed = Program.Value.Sets.PubFunctions();
         Assert.Equal(["RuntimeError"], Names(listed[Assert.Single(listed.Keys, f => f.Name == "Refuse")]));
     }
@@ -1129,7 +1129,8 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         // default `restart` it does not
         Assert.Equal(["EEscalate", "ETypeEscalate", "RuntimeError"], Names(Program.Value.Sets.ReasonOf(Actor("Parent"))));
 
-        // section 5, assumed there: the list of a `pub` function holds what the children it spawns under `escalate` can pass up, since
+        // section 5, the owner, 2026-11-17, #560, comment 6945856976, Q1: the list of a `pub` function holds what the children it spawns
+        // under `escalate` can pass up, since
         // that crash can come while a call of it still waits
         var listed = Program.Value.Sets.PubFunctions();
         Assert.Equal(["EEscalate", "ETypeEscalate", "RuntimeError"], Names(listed[Assert.Single(listed.Keys, f => f.Name == "Make" && f.Owner?.Name == "Parent")]));

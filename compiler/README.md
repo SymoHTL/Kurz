@@ -2642,10 +2642,10 @@ methods among them, which alone take messages (U9), hold with every type argumen
 and the roots solved again until they grow no more. A set holds every type a run can throw, and can hold more: every override of
 the method a call names and every implementer through an interface, every lambda and every function of the C calling convention
 whose type fits a call of a value, the text of every derived type without type parameters, built or not, and, in the list of a
-`pub` function, what the children it spawns under `escalate` or a block can pass up (section 5, assumed there); an instantiation the
+`pub` function, what the children it spawns under `escalate` or a block can pass up (section 5, the owner, 2026-11-17, #560, comment 6945856976, Q1); an instantiation the
 program does not build adds nothing. A call through an actor's reference reaches nothing of the callee's
 code, the text of a thrown value adds nothing, a function that reads its type and that no call copies adds nothing (section 5,
-assumed there), and a function of a folder of the runtime throws nothing. A bare `throw` throws the case its arm of `else` took,
+the owner, 2026-11-17, #560, comment 6945856976, Q2), and a function of a folder of the runtime throws nothing. A bare `throw` throws the case its arm of `else` took,
 and one in a lambda is the checker's `throw-needs-value`, in a lambda inside such an arm too (O7; section 5, assumed there). The
 checker reads the sets for the block of `on crash` alone (U30): it reads a program with a block again with the `Reason` of each block's child that the reading before found, the first reading with the runtime's type alone
 and the sets without the blocks' bodies, the blocks' own diagnostics left out of it, until the `Reason`s found are the ones
