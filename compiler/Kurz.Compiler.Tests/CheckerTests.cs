@@ -4107,14 +4107,32 @@ public sealed class CheckerTests
         Clean(Atomics("raw {\n    print(AtomicLong.FromPtr(&w).Load(MemoryOrder.SeqCst))\n    print(*AtomicPtr<long>.FromPtr(&slot).Load(MemoryOrder.SeqCst))\n}"), "raw");
     }
 
+    [Fact]
+    public void The_t_atomic_ptrs_from_ptr_does_not_write_is_inferred_from_its_argument()
+    {
+        // R19 with T27 (the fix of T2 of the reading of issue 39, comment 6957856856): `&slot`, a `long**`, gives the `T` of a `T**`
+        // its `long`, so the view is an `AtomicPtr<long>`, which no `AtomicPtr<int>` takes
+        Clean(Atomics("raw {\n    print(*AtomicPtr.FromPtr(&slot).Load(MemoryOrder.SeqCst))\n}\n\nKeep(a, c, n, AtomicPtr.FromPtr(&slot))"), "raw");
+        Assert.Equal([(ErrorIds.TypeMismatch, 14)], Errors(Atomics("void Take(AtomicPtr<int> x) {\n    print(1)\n}\n\nTake(AtomicPtr.FromPtr(&slot))"), "raw"));
+    }
+
     [Theory]
     [InlineData("enum MemoryOrder { Weak, Strong }\nprint(1)")]
     [InlineData("data NotExchanged(int X)\nprint(1)")]
     [InlineData("void Fence() {\n    print(1)\n}\n\nprint(2)")]
     [InlineData("data AtomicPtr(int X)\nprint(1)")]
     [InlineData("class AtomicLong {\n}\n\nprint(1)")]
+    [InlineData("Fence = 1\nprint(Fence)")] // a variable (V9; the fix of T8 of the reading of issue 39, comment 6957856856)
+    [InlineData("MemoryOrder = 2\nprint(MemoryOrder)")]
+    [InlineData("void Take(int AtomicLong) {\n    print(AtomicLong)\n}\n\nTake(1)")] // a parameter
     public void A_files_own_declaration_of_a_name_of_the_atomic_types_is_redeclared(string program) =>
         Assert.Equal([(ErrorIds.Redeclared, 1)], Errors(program));
+
+    [Fact]
+    public void A_field_may_take_a_name_of_the_atomic_types() =>
+        // R19, as R18's names (chapter 12, `redeclared`): a field so named, a parameter of a primary constructor among them, is no
+        // declaration the names refuse, the control of `A_files_own_declaration_of_a_name_of_the_atomic_types_is_redeclared`
+        Clean("class Box(int Fence)\n\ndata Pair(int AtomicLong, int NotExchanged)\n\nb = Box(3)\np = Pair(1, 2)\nprint(b.Fence + p.AtomicLong + p.NotExchanged)");
 
     [Fact]
     public void A_program_may_declare_its_own_ordering_beside_the_atomic_types_memory_order()
@@ -4124,17 +4142,26 @@ public sealed class CheckerTests
         Clean("enum Ordering { Less, Equal, Greater }\nmut long w = 1\na = AtomicLong.FromPtr(&w)\nraw {\n    print(a.Load(MemoryOrder.SeqCst))\n}\n\nprint(Ordering.Less == Ordering.Equal)", "raw");
     }
 
+    // R19 (assumed in section 6, the fix of T2 and T3 of the reading of issue 39, comment 6957856856), each row by the rule it follows
     [Theory]
-    [InlineData("void Take(AtomicPtr x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.CannotInfer, 1)]
-    [InlineData("void Take(AtomicLong<int> x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.Syntax, 1)]
-    [InlineData("void Take(AtomicPtr<long, int> x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.Syntax, 1)]
-    [InlineData("void Take(AtomicPtr<string> x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.CountedPointee, 1)]
-    [InlineData("mut long w = 1\nmut long* s = &w\nraw {\n    print(*AtomicPtr.FromPtr(&s).Load(MemoryOrder.SeqCst))\n}", ErrorIds.CannotInfer, 4)]
-    [InlineData("print(AtomicLong.FromPtr)", ErrorIds.UnknownName, 1)]
-    [InlineData("print(AtomicLong)", ErrorIds.Syntax, 1)]
-    [InlineData("print(Fence)", ErrorIds.Syntax, 1)]
+    [InlineData("void Take(AtomicPtr x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.CannotInfer, 1)] // a type with no type argument, as `List` is (M9, T17)
+    [InlineData("void Take(AtomicLong<int> x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.Syntax, 1)] // a count of type arguments the type has not, as `List`'s (T17, E4)
+    [InlineData("void Take(AtomicPtr<long, int> x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.Syntax, 1)] // the same (T17, E4)
+    [InlineData("raw {\n    Fence<long>(MemoryOrder.SeqCst)\n}", ErrorIds.Syntax, 2)] // a type argument to a function that has no type parameter (T19, E4)
+    [InlineData("void Take(AtomicPtr<string> x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.CountedPointee, 1)] // `T`, a type a pointer points to (R10)
+    [InlineData("mut long w = 1\nraw {\n    print(long(AtomicPtr.FromPtr(&w).Load(MemoryOrder.SeqCst)))\n}", ErrorIds.CannotInfer, 3)] // a `long*` gives the `T` of a `T**` nothing (T27)
+    [InlineData("raw {\n    print(long(AtomicPtr.FromPtr(&nowhere).Load(MemoryOrder.SeqCst)))\n}", ErrorIds.UnknownName, 2)] // the argument's own error alone (T27, E1)
+    [InlineData("print(AtomicLong.FromPtr)", ErrorIds.UnknownName, 1)] // a function of the type read as a value, as R18's function of `Vector128` is (V10)
+    [InlineData("print(AtomicLong)", ErrorIds.Syntax, 1)] // a type where a value stands (T10, E4)
+    [InlineData("print(Fence)", ErrorIds.Syntax, 1)] // a function where a value stands (F11)
     public void An_atomic_type_or_fence_written_as_no_atomic_type_takes_it_is_its_error(string program, string id, int line) =>
         Assert.Equal([(id, line)], Errors(program, "raw"));
+
+    [Theory]
+    [InlineData("print(a == a)")]
+    [InlineData("print(a != a)")]
+    public void Two_views_of_an_atomic_type_take_neither_equality_operator(string program) =>
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors(Atomics(program), "raw")); // R19, as Rust's atomic types implement no `PartialEq`
 
     [Fact]
     public void A_view_of_an_atomic_type_does_not_cross_into_an_actor_in_the_build() =>

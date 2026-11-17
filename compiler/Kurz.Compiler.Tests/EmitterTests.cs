@@ -1409,8 +1409,8 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void An_atomic_order_held_in_a_value_is_chosen_when_the_call_runs_and_one_rust_refuses_raises_at_the_call()
     {
-        // R19: a `switch` over the five values of `MemoryOrder`, each to the instruction of its order, as Rust's `match` on the order;
-        // `Release` and `AcqRel`, which a load does not take, raise `invalid-ordering-at-run-time` at the call's line
+        // R19: a `switch` over the five values of `MemoryOrder`, as Rust's `match` on the order: each order a load takes goes to its
+        // instruction, and `Release` and `AcqRel`, which a load does not take, raise `invalid-ordering-at-run-time` at the call's line
         const string text = "long Read(AtomicLong a, MemoryOrder order) {\n    mut long v = 0\n    raw {\n        v = a.Load(order)\n    }\n\n    return v\n}\n\n"
             + "mut long w = 70001\nview = AtomicLong.FromPtr(&w)\nprint(Read(view, MemoryOrder.Relaxed))\nprint(Read(view, MemoryOrder.Acquire))\nprint(Read(view, MemoryOrder.SeqCst))\nprint(Read(view, MemoryOrder.AcqRel))\n";
         var program = Emit(text, "raw");
