@@ -133,10 +133,13 @@ Each line names a trap; its evidence is in the entry it links.
   request 426; [knowledge/the-pull-request-shows-the-old-head-after-a-push.md](knowledge/the-pull-request-shows-the-old-head-after-a-push.md)).
   HAZARD (#432): the merge tool refuses the old head only when it is given the pushed commit, or
   when that head is behind `main`.
-- A compiler gate that ends with "no answer within N s" and names no test, on a head that passed
-  before or passes when run again: the suite grew into the gate's budget, not a hang of the change.
-  On 2026-11-17 two Windows runs met the 900 s the gate had, and the `gates` job took 23 min 44 s of
-  its 25 ([knowledge/a-suite-grows-into-its-timeout.md](knowledge/a-suite-grows-into-its-timeout.md)).
+- A compiler gate that ends with "no answer within N s" and names no test: read the step's time on
+  earlier heads first. After steps near the limit, the suite grew into the gate's budget; after steps
+  far below it, the run is read as a hang, which can come and go and pass when run again, as an
+  orphan child does ([knowledge/an-orphan-holds-the-output-of-its-program.md](knowledge/an-orphan-holds-the-output-of-its-program.md)).
+  On 2026-11-17 two Windows runs met the 900 s the gate had, after steps of up to 887 s on earlier
+  heads (run 43929000363), and the `gates` job took 23 min 44 s of its 25
+  ([knowledge/a-suite-grows-into-its-timeout.md](knowledge/a-suite-grows-into-its-timeout.md)).
   The budget, with what each job that runs the gate spends outside it, ends before that job's
   `timeout-minutes`. Gate: `self-tests` (the compiler gate's case of the budget and its red proofs);
   that a job's share still covers what it spends outside the gate is a `judgment step`.

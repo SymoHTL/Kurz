@@ -18,32 +18,39 @@ of the three jobs that run the gate held 25 minutes.
   at 864 s.
 - The `gates` job, the required check, took 14 to 17 minutes on the same heads, but 23 min 44 s in
   run 43999911205: 641 s in the replay of the red proofs, 743 s in the compiler gate, the rest in the
-  container and the other gates. A job cut off at its own limit ends with no table of the gates at
-  all.
+  container and the other gates. The table of the gates is the last thing `tools/gates.py` prints, so
+  a job stopped at its own limit ends before it.
 
-Each change that adds tests or red proofs moves every run closer to these limits, so the failure
-comes back more often, on heads that have nothing to do with it, and on a slow runner first.
+Each change that adds tests moves every job that runs the gate closer to its limit, and each that
+adds red proofs moves the `gates` job, the one that replays them; so the failure comes back more
+often, on heads that have nothing to do with it, and on a slow runner first.
 
 The limit is there to end a hang, not to measure speed. Its size has to leave room above the slowest
 run seen, and the gate's own limit has to end before the limit of the job around it, or the job is
-cut off and the gate prints nothing of what it saw.
+stopped before the gate reports its own limit.
 
 ## What to do
 
 - A run that ends with "no answer within N s" and names no test: compare the step's time with the
-  limit on earlier heads before reading it as a hang of the change. Two failures at the limit on heads
-  that also passed are the suite's time, not a test.
+  limit on earlier heads before reading it as a hang of the change. A failure at the limit after steps
+  near it on earlier heads is the suite's time. A failure after steps far below it is read as a hang,
+  which can come and go and pass when run again, as a child that holds its program's output does
+  ([an-orphan-holds-the-output-of-its-program.md](an-orphan-holds-the-output-of-its-program.md)).
 - The fix is the budget, raised with room above the slowest run seen: the gate's `TIMEOUT`, and the
   `timeout-minutes` of a job that would cut the gate off. The self-test case "the budget of the tests
   and of the version, with what a job spends outside the gate, ends before the limit of every job
   that runs it" holds `TIMEOUT + VERSION_TIMEOUT` plus each job's share in `JOBS` within that job's
   `timeout-minutes`, for `compiler-windows.yml`, `compiler-arm.yml` and `gates.yml`; a workflow that
-  is gone or names no limit counts as a limit of 0, so the case is red.
+  is gone, names no limit or names more than one counts as a limit of 0, so the case is red.
 - A share in `JOBS` is a measured time with room, not a bound anything enforces: the replay of the
-  red proofs grows with the ledger. When a job's run nears its limit, measure the steps again (the
-  `=== gate:` lines of the gates log carry their start times) and raise the share and the limit in a
-  change of their own, with the runs named.
+  red proofs grows with the ledger. When a job's run nears its limit, measure the steps again and
+  raise the share and the limit in a change of their own, with the runs named. The forge stamps every
+  line of a job's log with its time, so the line `tools/gates.py` prints before each gate gives that
+  gate's start: `2026-11-17T02:12:40.6252889Z === gate: tools/compiler_gate.py` in run 43999911205.
 
-Gate: `self-tests` (the case above and its two red proofs in `tools/red_proofs.json`); that a share
-still covers what its job spends outside the gate is a `judgment step`: the shares are read by hand
-from the logs, and nothing measures them again.
+Gate: `self-tests`: the case above, with its four red proofs in `tools/red_proofs.json` (`TIMEOUT`
+raised past a job's limit, the `gates` share raised past its job's limit, a workflow name with no
+file, a limit pattern that matches nothing), and the cases of the reader of a workflow's one limit,
+with the red proof that reads the first of two. That a share still covers what its job spends
+outside the gate is a `judgment step`: the shares are read by hand from the logs, and nothing
+measures them again.
