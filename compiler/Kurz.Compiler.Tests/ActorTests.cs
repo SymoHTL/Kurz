@@ -2829,8 +2829,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(s.Get())
 
             """;
-        var poisoned = ListTests.Edited([.. ListTests.Fence, ("runtime/common/runtime.kz", "        if !Queued(state) {\n            std.HeapFree(state - 144)\n",
-            "        if !Queued(state) {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 144)\n")]);
+        var poisoned = ListTests.Edited([.. ListTests.Fence, ("runtime/common/runtime.kz", "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            std.HeapFree(state - 144)\n",
+            "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 144)\n"),
+            ("runtime/common/runtime.kz", "    } else if ended && (seen & 2) == 0 {\n        raw {\n            std.HeapFree(state - 144)\n",
+            "    } else if ended && (seen & 2) == 0 {\n        raw {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 144)\n")]);
         var run = BuildAndRun(text, poisoned, "actor-orphan-crash");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Parent#3 crashed: thrown \"parent\" at program.kz:26", "Child#4 crashed: thrown \"child 7\" at program.kz:12"], crashes);
@@ -3997,6 +3999,60 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Worker#3 crashed: thrown \"first fails\" at program.kz:7", "Worker#4 crashed: thrown \"second fails\" at program.kz:7"], crashes);
         Ran((run.Code, run.Output, rest), 1, ["1", "go ends 0", "block first fails 1", "block second fails 2", "queued 2", "2"], "error: actor-gone at program.kz:56\n");
+    }
+
+    [Fact]
+    public void A_block_posted_to_a_supervisor_whose_constructor_waits_runs_once_its_spawn_returned()
+    {
+        // U17, U28: `Boss`'s constructor spawns `Worker`, whose crash posts its block to `Boss` while that constructor waits on `Other`;
+        // a thread that takes `Boss`'s entry then finds it BUILDING in its state word and leaves it NOTIFIED, and `ActorBuilt` queues it
+        // again at the constructor's end, so that the block runs after `spawn Boss(o)` returned, in the top-level code's wait after it, as
+        // no message starts before its actor's `spawn` returns (U17, assumed in section 6), and its log line is written at its decision
+        const string text = """
+            actor Worker {
+                pub void Fail() {
+                    throw "fails"
+                }
+            }
+
+            actor Other {
+                pub int Ping() => 1
+            }
+
+            Worker Started() {
+                w = spawn Worker() on crash (c) {
+                    print("block")
+                    stop
+                }
+
+                send w.Fail()
+                return w
+            }
+
+            int Shown(int n) {
+                print("built {n}")
+                return n
+            }
+
+            actor Boss(Other O) {
+                Worker w = Started()
+                int first = O.Ping()
+                int second = Shown(O.Ping())
+
+                pub int Sum() => first + second
+            }
+
+            o = spawn Other()
+            b = spawn Boss(o)
+            print("spawned")
+            print(o.Ping())
+            print(b.Sum())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-building");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Worker#3 crashed: thrown \"fails\" at program.kz:3"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["built 1", "spawned", "block", "1", "2"], "");
     }
 
     [Fact]
