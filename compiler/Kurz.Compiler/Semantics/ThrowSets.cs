@@ -29,6 +29,7 @@ public sealed class ThrowSets
     private readonly Checker program;
     private readonly Checker? std;
     private readonly bool blocks;
+    private readonly IReadOnlySet<CrashPolicy>? skipped;
     private readonly Dictionary<object, Unit> units = new(new UnitKeys());
     private readonly List<Unit> order = [];
     private readonly KurzType runtimeError;
@@ -40,14 +41,16 @@ public sealed class ThrowSets
     /// <summary>
     /// The sets of the code of <paramref name="program"/>, which sees the types of <paramref name="std"/> (W1); null where the program is
     /// <c>std/</c> itself. Where <paramref name="blocks"/> does not hold, the bodies of the blocks of <c>on crash</c> are left out, as at the
-    /// checker's first reading of such a program, which reads them with no <c>Reason</c> found yet (U30).
+    /// checker's first reading of such a program, which reads them with no <c>Reason</c> found yet (U30), and so are those of the blocks
+    /// <paramref name="skipped"/> names, which reported errors at a reading whose <c>Reason</c>s may not have settled.
     /// </summary>
-    public ThrowSets(Checker program, Checker? std, bool blocks = true)
+    public ThrowSets(Checker program, Checker? std, bool blocks = true, IReadOnlySet<CrashPolicy>? skipped = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         this.program = program;
         this.std = std;
         this.blocks = blocks;
+        this.skipped = skipped;
         var error = (std ?? program).Model.DataTypes.FirstOrDefault(d => d.Name == "RuntimeError")
             ?? throw new InvalidOperationException("std/ declares no `RuntimeError`, the runtime's error type of section 5");
         runtimeError = new DataType(error, []);
@@ -796,7 +799,7 @@ public sealed class ThrowSets
                     if (model.CallOf(s.Call).Target is ClassType { Symbol: var actor } && Policy(s, actor) is { Word: "escalate" or "block" } policy)
                     {
                         unit.Edges.Add(new Edge(new Root(actor), null)); // U25, U28: the child's crash passes up whole, as a block can pass it up
-                        if (policy.Block is { } block && sets.blocks)
+                        if (policy.Block is { } block && sets.blocks && sets.skipped?.Contains(policy) != true)
                         {
                             Statement(block.BlockBody!); // U32: the block runs as a message of the actor whose code spawns, and its throw is that actor's crash
                         }
@@ -1191,7 +1194,7 @@ public sealed class ThrowSets
         private void TextMethods(IEnumerable<FunctionSymbol?> methods) =>
             unit.Edges.AddRange(methods.OfType<FunctionSymbol>().Distinct().Select(m => new Edge(m, null)));
 
-        // U25, U27: the policy a spawn gives its actor: its own, else the type's default, null for `restart`
+        // U25, U27: the policy a spawn gives its actor: its own, else the type's default, null where none is written, the default `restart`
         private static CrashPolicy? Policy(SpawnExpression s, ClassSymbol actor) =>
             s.Policy ?? actor.Declaration.Clauses?.FirstOrDefault(c => c.Policy is not null)?.Policy;
     }

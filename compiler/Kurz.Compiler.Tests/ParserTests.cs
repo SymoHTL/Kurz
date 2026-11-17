@@ -1127,9 +1127,10 @@ public sealed class ParserTests
     public void Copy_and_move_before_an_argument_are_its_words_and_names_elsewhere(string program, string tree)
     {
         // U12: `copy` and `move`, contextual words of section 6, read before an argument as `mut` is (L12): the word where an expression
-        // follows, `copy(x)` among them, and a name with nothing after it, before `.` or another token that begins no expression, before `[`, `-`, `*`, `&` or `with`, which go on from a name, and
+        // follows, `copy(x)` among them, and a name with nothing after it, before `[`, `-`, `*`, `&` or `with`, which go on from a name, and
         // in parentheses, so that a variable named `copy` is called as `(copy)(x)` (comment 6895076937, "Taken as they follow from the
-        // record")
+        // record"); before `.` or another token that begins no expression it is the name too (section 6's assumed reading, which Q10 of
+        // 2026-11-13 did not give)
         Assert.Equal(tree, Tree(program));
     }
 
@@ -1716,10 +1717,12 @@ public sealed class ParserTests
     [InlineData("c = spawn Worker() on crash (c, d) {\n    stop\n}", 1)]
     [InlineData("c = spawn Worker() on crash (Crashed c) {\n    stop\n}", 1)] // U29: and no type (assumed: S3)
     [InlineData("c = spawn Worker() on crash (c)", 1)] // U28: the block after the parameter
+    [InlineData("c = spawn Worker() on crash {\n    stop\n}", 1)] // U28: the parameter in parentheses before the block
     [InlineData("c = spawn Worker() on crash (c) stop", 1)]
     [InlineData("c = spawn Worker() on crash (c) {\n    stop\n}.Get()", 3)] // U25: the block ends the expression
+    [InlineData("if spawn Worker() on crash (c) {\n    x = attempt {\n        f()\n    }\n\n    stop\n} {\n}", 7)] // in a header too, where `attempt` in the block is the form (U28)
     [InlineData("c = spawn Worker() on crash (c) {\n    restart after 1ms\n}", 2)] // U29: `restart` takes no knobs (assumed: S3)
-    [InlineData("c = spawn Worker() on crash (c) {\n    stop now\n}", 2)] // a decision ends its statement
+    [InlineData("c = spawn Worker() on crash (c) {\n    stop now\n}", 2)] // U29: a decision is a statement, which ends there, and text after it is syntax (E4)
     [InlineData("c = spawn Worker() on crash (c) {\n    return\n}", 2)] // U29: the block decides, with no `return` (assumed: S3)
     public void A_block_of_a_policy_without_its_parts_is_syntax(string program, int line)
     {
@@ -1733,10 +1736,17 @@ public sealed class ParserTests
     [InlineData("if attempt {\n    f()\n}", "(if attempt {(call f)})")]
     [InlineData("while retry {\n    f()\n}", "(while retry {(call f)})")]
     [InlineData("if g(() => attempt {\n    f()\n}) {\n}", "(if (call g (lambda () (attempt {(call f)}))) {})")]
+    [InlineData("if (attempt {\n    f()\n}) {\n}", "(if (paren (attempt {(call f)})) {})")]
+    [InlineData("if g(attempt {\n    f()\n}) {\n}", "(if (call g (attempt {(call f)})) {})")]
+    [InlineData("for x in [attempt {\n    f()\n}] {\n}", "(for x in (list (attempt {(call f)})) {})")]
+    [InlineData("if xs[attempt {\n    f()\n}] {\n}", "(if (index xs (attempt {(call f)})) {})")]
+    [InlineData("if match k {\n    else => attempt {\n        f()\n    }\n} {\n}", "(if (match-expression k [(else => (attempt {(call f)}))]) {})")]
     public void An_attempt_is_its_block_and_a_name_before_the_block_of_a_header(string program, string tree)
     {
         // section 6: `attempt { ... }` and `retry { ... }` parse, for the checker to refuse; before the block of an `if`, a `while`, a `for`
-        // or a `match` the word is a name, as a struct literal is no condition in Rust, and a lambda's body is no header
+        // or a `match` the word is a name, so that a variable of either name stands in a condition, as a struct literal is no condition in
+        // Rust; inside the header's parentheses, brackets, arms and blocks, a lambda's body and the block of `on crash` among them, the
+        // word is the form again, as Rust reads a struct literal there (U28; assumed: section 6, comment 6847932993, Q10)
         Assert.Equal(tree, Tree(program));
     }
 

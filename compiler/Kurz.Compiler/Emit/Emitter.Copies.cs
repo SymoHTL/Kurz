@@ -14,8 +14,8 @@ namespace Kurz.Compiler.Emit;
 /// unbuilt"), so that the heap of an actor holds every block its code reaches and is freed whole at the actor's end (section 3): a value
 /// arrives as a copy of its own, with a count of one, made before the message is queued, a string's block, a list's, a map's, a
 /// <c>data</c> block, an instance and the environment of a lambda among them; a value after <c>copy</c> at a call that is no crossing
-/// has every block on a path to a class instance copied, the instance among them, and shares by its count only a block that reaches
-/// none. The copy is made by the type's helpers: a new block for each block on the way, an instance's strong and weak counts at one; a class with derived classes copies through the copy
+/// has every block on a path to a class instance that passes through no function value and no actor's reference copied, the instance
+/// among them, and shares by its count every other block. The copy is made by the type's helpers: a new block for each block on the way, an instance's strong and weak counts at one; a class with derived classes copies through the copy
 /// slot of the instance's table (K6); whether a block that reaches no instance is copied is the session's, which the runtime's
 /// <c>CopyWhole</c> reads. The copies one call makes, of its
 /// arguments, share one memo, the call's session in the caller's frame, so that two paths that reach one block, in one argument or
@@ -40,8 +40,10 @@ public sealed partial class Emitter
     // U12: the sessions of more than one copy begun in each region, which its end, or a jump out of it, ends (LetGo)
     private readonly Dictionary<List<(string Value, KurzType Type)>, List<string>> regionSessions = new(ReferenceEqualityComparer.Instance);
 
-    // U12: the slots of the copies each session of more than one copy made so far, which its call reads after its last copy (Late)
-    private readonly Dictionary<string, List<(string Slot, KurzType Type, bool Held)>> lateCopies = new(StringComparer.Ordinal);
+    // U12: the slots of the copies each session of more than one copy made so far, which its call reads after its last copy (Late), keyed
+    // by the function that runs the session and its name, which is unique only in that function: a guarded block's function, begun in the
+    // middle of an argument with a count of its own, can name a session as the function around it named the call's open one (LateKey)
+    private readonly Dictionary<(IrFunction Function, string Session), List<(string Slot, KurzType Type, bool Held)>> lateCopies = new();
 
     /// <summary>
     /// U12: whether a value of the type reaches a class instance through a block a copy makes anew: an instance, an interface's value and a
@@ -69,7 +71,7 @@ public sealed partial class Emitter
     /// for null, after <c>copy</c> at a call that is no crossing, into the heap the allocation entry serves, every block on a path to a
     /// class instance among them (Q5). A function value crosses by <paramref name="copyInto"/>, the copy of the environment of its lambda
     /// (<see cref="CopyEnvironmentInto"/>). A session of more than one copy points the <c>weak</c> references of its copies at its last
-    /// copy, the ones the slot holds itself among them, a <c>weak T</c> and a plain <c>data</c> value or a union that holds one, so that
+    /// copy, the ones the slot holds itself among them, a <c>weak T?</c> and a plain <c>data</c> value or a union that holds one, so that
     /// the slot is read after the call's last copy (<see cref="Late"/>), or is the place the callee reads.
     /// </summary>
     private void CrossInto(string into, string value, KurzType type, string? session, string? heap, string? copyInto = null)
@@ -97,9 +99,9 @@ public sealed partial class Emitter
     {
         var slot = fn.Alloca(Ir(type), "copy");
         CrossInto(slot, value, type, session, heap, copyInto);
-        if (!lateCopies.TryGetValue(session, out var listed))
+        if (!lateCopies.TryGetValue(LateKey(session), out var listed))
         {
-            lateCopies[session] = listed = [];
+            lateCopies[LateKey(session)] = listed = [];
         }
 
         listed.Add((slot, type, held));
@@ -186,7 +188,10 @@ public sealed partial class Emitter
     /// U12: at a region's end, or a jump out of it, the sessions begun in it ended where their calls' code did not reach their last
     /// copy, a case propagated out of a later argument among them, before the region lets go of the copies, so that their <c>weak</c>
     /// references are pointed as a whole call's are and the memo's counts let go of (the runtime's <c>CopyAbort</c>); then the copies
-    /// the call had not read yet (<see cref="Late"/>) let go of, as the temporaries of the region they would have been.
+    /// the call had not read yet and held (<see cref="Late"/>) let go of, as the temporaries of the region they would have been. A copy
+    /// whose slot takes it, a field of a construction or a parameter written <c>move</c>, is not held and stays where it was made: no
+    /// code lets go of it at such an exit, as of no value such a slot took from an argument before the one that left, so a construction
+    /// left so keeps one block for each such slot, a copy, a count of a shared block and a new value alike.
     /// </summary>
     private void EndSessions(List<(string Value, KurzType Type)> temporaries)
     {
@@ -195,7 +200,7 @@ public sealed partial class Emitter
             foreach (var session in begun)
             {
                 fn.Emit($"call void {RuntimeFunction("CopyAbort")}(ptr {session})");
-                foreach (var (slot, type, _) in lateCopies.GetValueOrDefault(session, []).Where(l => l.Held))
+                foreach (var (slot, type, _) in lateCopies.GetValueOrDefault(LateKey(session), []).Where(l => l.Held))
                 {
                     Release(fn.Value($"load {Ir(type)}, ptr {slot}"), type);
                 }
@@ -209,7 +214,7 @@ public sealed partial class Emitter
     /// </summary>
     private void ReadLate(string? session, Action<int, string> read)
     {
-        if (session is not null && lateCopies.Remove(session, out var listed))
+        if (session is not null && lateCopies.Remove(LateKey(session), out var listed))
         {
             for (var i = 0; i < listed.Count; i++)
             {
@@ -217,6 +222,9 @@ public sealed partial class Emitter
             }
         }
     }
+
+    /// <summary>U12: the key of the session <paramref name="session"/> of the function being emitted among the listed copies (<see cref="Late"/>).</summary>
+    private (IrFunction Function, string Session) LateKey(string session) => (fn, session);
 
     /// <summary>
     /// The run of a copy in the session <c>%a3</c>, which it names to the runtime first (<c>CopyUse</c>), since another call's session
@@ -641,8 +649,14 @@ public sealed partial class Emitter
     /// placed again, each key under its copy's hash, by identity or by content as its class compares (K4, K5), by the helper a lookup past the
     /// bound rehashes with (<see cref="Rehash"/>), once the run's work list is empty, since a key's hash reads the fields of the instances
     /// it reaches, and a copy the memo gave can still wait there to be filled (the runtime's <c>CopyAfter</c>; section 6, the owner,
-    /// 2026-11-16, #519, comment 6923513534, "Rehash each key (Recommended)"). No two keys are compared: two keys of the source are two of
-    /// the copy, since a copy gives each block of its source one copy (Q2).
+    /// 2026-11-16, #519, comment 6923513534, "Rehash each key (Recommended)"). The maps are placed before the session's last copy points
+    /// the <c>weak</c> references of its copies (the runtime's <c>CopyLeft</c>), and no key the checker admits hashes a <c>weak</c> slot:
+    /// a <c>weak T?</c> as a map's key or value is <c>not supported</c> (the checker's <c>WeakUnread</c>), a key type that reaches one
+    /// through a field, an item or a case is no key the checker reads (its <c>KeyOf</c>), a class with a <c>weak</c> field compares, and
+    /// hashes, by identity (K4, <c>ComparesByIdentity</c>), by its copy's address, which the pointing does not change, and an
+    /// <c>equal by</c> that names such a field is <c>not supported</c> (K8). No two keys are compared: two keys of the source are two of
+    /// the copy, since a copy gives each block of its source one copy (Q2), and a key the checker admits reaches no <c>weak</c> reference
+    /// through what it compares, the one thing a copy can set to null (those checks).
     /// </summary>
     private string FillMap(MapType type) => Helper($"fill.map.{Lower.Mangle(type)}", "void", ["ptr", "ptr"], () =>
     {

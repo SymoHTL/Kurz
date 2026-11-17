@@ -16,7 +16,8 @@ namespace Kurz.Compiler.Tests;
 /// compiled again for its sets, and every function that copy calls, the runtime's among them, while a function value is not; a run
 /// guarded by a class under <c>Arm</c> never reached on x86-64, and on an Arm machine a test of one <c>not supported</c>; an
 /// intrinsic in <c>raw</c> without a test, a call of a function compiled for its set; the ways out of a guarded block, under the
-/// allocator that makes every freed block inaccessible; every intrinsic giving what .NET's gives; and an element outside the lanes.
+/// allocator that makes every freed block inaccessible; every intrinsic giving what .NET's gives; an element outside the lanes; and
+/// a call of copies in a guarded block begun in an argument of another, each reading its own copies.
 /// </summary>
 public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -803,6 +804,25 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
         Assert.Contains("call i32 @\"f.Acc.Lane.12.for.X86.Sse41\"", block.Body, StringComparison.Ordinal);
         Assert.Contains("\"target-features\"=\"+sse,+sse2,+sse3,+sse4.1,+ssse3\"", functions["f.Acc.Lane.12.for.X86.Sse41"].Header, StringComparison.Ordinal);
         Ran(BuildAndRun(text, ListTests.Fenced, "intrinsic-method"), 0, ["14", "14"], "");
+    }
+
+    [Fact]
+    public void A_call_of_copies_in_a_guarded_block_begun_in_an_argument_of_another_reads_its_own_copies_and_that_call_its_own()
+    {
+        // U12 with R18: the right side of `&&` after a test is a function of its own, begun in the middle of `Keep`'s arguments, whose names
+        // are counted apart from the function around it, so that the session of `Both`'s copies in it can bear the name of `Keep`'s open
+        // session; the calls of `Id` before it move its number, and one of the nine functions names the two alike (the check of the IR
+        // below); each call reads the copies its own session made
+        var runs = string.Concat(Enumerable.Range(0, 9).Select(k =>
+            $"void Run{k}(Box a, Box b, Box c, Box d) {{\n    Keep(copy a, copy b, X86.Sse41.IsSupported && Two({string.Concat(Enumerable.Repeat("Id(", k))}true{new string(')', k)}, Both(copy c, copy d)))\n}}\n\n"));
+        var text = "class Box(mut int N)\n\nbool Id(bool b) => b\n\nbool Two(bool x, bool y) => x && y\n\nvoid Keep(Box a, Box b, bool t) {\n    print(\"{a.N} {b.N} {t}\")\n}\n\nbool Both(Box c, Box d) => c.N + d.N > 0\n\n"
+            + runs + string.Concat(Enumerable.Range(0, 9).Select(k => $"Run{k}(Box(1), Box(2), Box(3), Box(4))\n"));
+        var functions = Functions(Ir(text));
+        static IEnumerable<string> Sessions(string body) => Regex.Matches(body, @"%v\.session\.\d+(?= = alloca \[)").Select(m => m.Value);
+        Assert.Contains(Enumerable.Range(0, 9), k => functions.Where(f => f.Key.StartsWith($"f.Run{k}.guarded.", StringComparison.Ordinal))
+            .Any(g => Sessions(g.Value.Body).Intersect(Sessions(Assert.Single(functions, f => f.Key.StartsWith($"f.Run{k}.", StringComparison.Ordinal) && !f.Key.Contains(".guarded.", StringComparison.Ordinal)).Value.Body)).Any()));
+        HasTheSets();
+        Ran(BuildAndRun(text, toolchain.Runtime, "intrinsic-copies"), 0, [.. Enumerable.Repeat("1 2 true", 9)], "");
     }
 
     private static void Ran((int Code, IReadOnlyList<string> Output, string Error) run, int code, string[] lines, string error)

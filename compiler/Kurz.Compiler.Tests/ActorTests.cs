@@ -30,7 +30,8 @@ namespace Kurz.Compiler.Tests;
 /// process, and the count of their entries back at 0; the size a refused heap at a crash names;
 /// and <c>print-failed</c> and <c>not-char-boundary</c> in a message. Last, the block of <c>on crash</c> (U28 to U34): at the root and in
 /// an actor, its order among the supervisor's messages, the state it reads, its three decisions, a throw in it, the type's block, the
-/// thrown value's copy, the runtime's error, an overflow, the blocks dropped, and memory over 10,000 crashes it restarts.
+/// thrown value's copy, the variables it takes after the spawn's arguments, a thrown <c>null</c>, the runtime's error, an overflow, the
+/// blocks dropped, and memory over 10,000 crashes it restarts.
 /// </summary>
 public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -4174,6 +4175,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             print(total)
             print(after - before)
+            print(before)
 
             """;
         var run = BuildAndRun(program, StoodIn(print: false), "actor-block-memory");
@@ -4181,6 +4183,9 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal("11000", run.Output[0]);
         var grown = long.Parse(run.Output[1], System.Globalization.CultureInfo.InvariantCulture);
         Assert.True(grown < 256, $"10,000 crashes a block restarts grow the resident memory by {grown} KiB");
+
+        // the bound is read against a reading: `Resident` gives -1 where it reads none, which a growth of 0 would hide
+        Assert.True(long.Parse(run.Output[2], System.Globalization.CultureInfo.InvariantCulture) > 0, $"the resident memory before the run read {run.Output[2]}");
     }
 
     [Fact]
@@ -4233,19 +4238,111 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void The_block_takes_the_variables_it_reads_after_the_spawns_arguments_ran()
+    {
+        // U28, U31: the block is written after the spawn's arguments, and the checker reads it after them, so the variables it takes by
+        // value (F15) are taken after the arguments ran: `n`, which the argument `Bumped(mut n)` changes, reaches the block as 1; the
+        // string it takes too, under the allocator that makes every freed block inaccessible
+        const string text = """
+            int Bumped(mut int n) {
+                n = n + 1
+                return n
+            }
+
+            actor Worker(int Start) {
+                pub void Fail() {
+                    throw "worker fails"
+                }
+            }
+
+            actor Boss {
+                mut string seen = ""
+
+                pub void Go() {
+                    mut n = 0
+                    who = "kid"
+                    w = spawn Worker(Bumped(mut n)) on crash (c) {
+                        seen = "{who} {n}"
+                        stop
+                    }
+
+                    send w.Fail()
+                }
+
+                pub string Seen() => seen
+            }
+
+            b = spawn Boss()
+            b.Go()
+            print(b.Seen())
+
+            """;
+        var run = BuildAndRun(text, ListTests.Fenced, "actor-block-after-arguments");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Worker#2 crashed: thrown \"worker fails\" at program.kz:8"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["kid 1"], "");
+    }
+
+    [Fact]
+    public void A_thrown_null_reaches_the_block_as_the_null_case_of_its_reason()
+    {
+        // U30: a `throw` of a nullable value whose value is `null` puts the `null` case in the child's `Reason`, which holds no value and
+        // has none to copy into the supervisor's heap; the block reads it, and the restarted child takes the call that waited
+        const string text = """
+            data Lost(int Code)
+
+            actor Worker {
+                pub void Fail(Lost? lost) {
+                    throw lost
+                }
+
+                pub int Ping() => 1
+            }
+
+            w = spawn Worker() on crash (c) {
+                match c.Reason {
+                    Lost l => print("lost {l.Code}")
+                    null => print("null")
+                    RuntimeError e => print(e.Kind)
+                }
+
+                restart
+            }
+            send w.Fail(null)
+            send w.Fail(Lost(7))
+            print(w.Ping())
+
+            """;
+        var run = BuildAndRun(text, ListTests.Fenced, "actor-block-null");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Worker#1 crashed: thrown \"null\" at program.kz:5", "Worker#1 crashed: thrown \"Lost { Code = 7 }\" at program.kz:5"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["null", "lost 7", "1"], "");
+    }
+
+    [Fact]
     public void A_block_pending_in_a_supervisor_that_crashes_is_dropped_and_its_child_ended()
     {
         // U34: the block waits in `Boss`'s inbox while `Go` runs on, and `Go`'s throw drops it with no line and ends its child, the
-        // inbox's call kept for `Boss`'s restart (S11 of comment 6907441402)
+        // inbox's call kept for `Boss`'s restart (S11 of comment 6907441402); `Other` keeps the child's reference, and a call to it after
+        // the drop is `actor-gone` at its line (U13)
         const string text = """
             actor Other {
-                pub int Ping() => 1
+                mut List<Worker> kept = []
+
+                pub int Keep(Worker w) {
+                    kept.Add(w)
+                    return 1
+                }
+
+                pub Worker Kept() => kept[0]
             }
 
             actor Worker {
                 pub void Fail() {
                     throw "worker fails"
                 }
+
+                pub int Ping() => 3
             }
 
             actor Boss {
@@ -4256,7 +4353,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
                     }
 
                     send kid.Fail()
-                    print(other.Ping())
+                    print(other.Keep(kid))
                     throw "boss fails"
                 }
 
@@ -4267,12 +4364,13 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             b = spawn Boss()
             send b.Go(o)
             print(b.Ping())
+            print(o.Kept().Ping())
 
             """;
         var run = BuildAndRun(text, toolchain.Runtime, "actor-block-supervisor-crash");
         var (crashes, rest) = Logged(run.Error);
-        Assert.Equal(["Boss#2 crashed: thrown \"boss fails\" at program.kz:20"], crashes);
-        Ran((run.Code, run.Output, rest), 0, ["1", "2"], "");
+        Assert.Equal(["Boss#2 crashed: thrown \"boss fails\" at program.kz:29"], crashes);
+        Ran((run.Code, run.Output, rest), 1, ["1", "2"], "error: actor-gone at program.kz:39\n");
     }
 
     [Fact]
@@ -4401,10 +4499,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(d.Ping())
 
             """;
-        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-overflow");
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-overflow", trace: null);
         var (crashes, rest) = Logged(run.Error);
         Assert.Empty(crashes);
-        Ran((run.Code, run.Output, rest), 1, ["StackOverflow 0"], "error: stack-overflow at program.kz:2\n");
+        Ran((run.Code, run.Output, rest), 1, ["StackOverflow 0"], "error: stack-overflow at program.kz:2\n  at main in program.kz:19\n");
     }
 
     [Fact]

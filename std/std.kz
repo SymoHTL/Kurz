@@ -14612,10 +14612,12 @@ long RegexTimes(long a, long b) {
 // ---- the runtime's errors (section 5) -------------------------------------------------------------------------------------
 
 // The kinds of the runtime's own errors: one for each run-time error of the reference's chapter 12, in the order of its table, but
-// `thrown`, which is a `throw` of the program and not the runtime's (design record, section 5, assumed there).
+// `thrown`, which is a `throw` of the program and not the runtime's (design record, section 5, assumed there), and after them
+// `invalid-argument` (S13), which the chapter names outside its table and an actor's read of the command line raises (assumed: its
+// place after the table's, which the order of the table does not give).
 pub enum RuntimeKind {
     Overflow, DivideByZero, IndexOutOfRange, ReversedRangeAtRunTime, StackOverflow, PrintFailed, AllocationFailed, NotCharBoundary,
-    RandomFailed, Deadlock, CalleeCrashed, ActorGone, RestartLimit, CpuLacksSet, SettingsUnpublished
+    RandomFailed, Deadlock, CalleeCrashed, ActorGone, RestartLimit, CpuLacksSet, SettingsUnpublished, InvalidArgument
 }
 
 // The runtime's own error, the one `data` type of the runtime's errors that is a member of every `Reason` (design record, section 5):
@@ -14634,8 +14636,9 @@ pub data Crashed<R>(R Reason, Place Place, string Chain)
 
 // The runtime's error of a crash that the block of `on crash` reads in its child's `Reason` (section 5): its
 // kind by the id its error line names, the first word of `id`, as the rows of the reference's run-time table
-// name them, and the text below that line, `detail`, empty where it has none. An id no row names is a defect
-// of the runtime, which ends the block with a `throw`.
+// name them, and `invalid-argument`, which the chapter names outside its table, and the text below that
+// line, `detail`, empty where it has none. An id neither names is a defect of the runtime, which ends the
+// block with a `throw`.
 pub RuntimeError RuntimeErrorOf(string id, string detail) {
     mut string word = id
     space = id.IndexOf(" ")
@@ -14659,6 +14662,7 @@ pub RuntimeError RuntimeErrorOf(string id, string detail) {
         "restart-limit" => RuntimeKind.RestartLimit
         "cpu-lacks-set" => RuntimeKind.CpuLacksSet
         "settings-unpublished" => RuntimeKind.SettingsUnpublished
+        "invalid-argument" => RuntimeKind.InvalidArgument
         else => throw "the runtime raised `{word}`, which no row of the run-time table names"
     }
 

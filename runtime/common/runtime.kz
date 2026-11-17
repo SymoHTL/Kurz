@@ -4133,7 +4133,7 @@ static mut byte* paused = null
 // stored in the activation's header, and the thread switched to the scheduler's stack, which never comes
 // back here (`Run` reads the crash), but where the block of a supervisor escalates the crash to the
 // top-level code, which ends the process on this stack with the error line of the crash and the trace of
-// this stack (`Escalate`; U34). Nothing in the top-level code, whose raise ends the process, but the log
+// this stack (`Escalate`; U29, U25). Nothing in the top-level code, whose raise ends the process, but the log
 // line of the child whose block runs in its wait, written first, as for a `stop` (U32; assumed: S10 of issue
 // 519, comment 6907441402); nor where the count of the entries under way is above 0, a check of the
 // runtime's own code in a test build that fires inside the allocator, the scheduler or the copy of a
@@ -4186,7 +4186,8 @@ void CrashActor(string id, string file, int line, bool hasText, string text) {
 // The crash of the actor whose message overflowed its stack (U19), which the target's handler of the fault
 // calls on its own stack with the error line it wrote of the overflow, from its id on, `count` bytes at
 // `line`, the place in it, which the log line carries (U24); where the policies escalate it to the top-level
-// code, it returns, and the handler ends the process with that error line and its trace (U25).
+// code, it returns, and the handler ends the process with that error line and its trace (U25). The header
+// marks the crash as an overflow, 3, so that the stack that raised is not kept (`Crashed`).
 extern "C" void ActorOverflow(byte* line, long count) {
     raw {
         byte* header = running
@@ -4194,7 +4195,7 @@ extern "C" void ActorOverflow(byte* line, long count) {
             return
         }
 
-        *Ptr<long>(header + 448) = 1
+        *Ptr<long>(header + 448) = 3
         *Ptr<byte*>(header + 456) = line
         *Ptr<long>(header + 464) = count
         *Ptr<long>(header + 480) = 0
@@ -4206,8 +4207,9 @@ extern "C" void ActorOverflow(byte* line, long count) {
 // The crash of the actor whose state is `state` in its activation `header`, on the scheduler's stack
 // (U19): its id, its place and the text below its error line, as the header holds them (`CrashActor`),
 // taken by the policies above it (`Fell`), with the value a `throw` named (`Thrown`) and, but for a stack
-// overflow, whose switch left from the stack of the fault's handler, the stack that raised, which a block
-// keeps for the trace of a crash it escalates to the top-level code (U34).
+// overflow, which its header marks (`ActorOverflow`) and whose switch left from the stack of the fault's
+// handler, the stack that raised, which a block keeps for the trace of a crash it escalates to the top-level
+// code (U29, U25).
 void Crashed(byte* state, byte* header) {
     mut bool hasText = false
     mut byte* id = null
@@ -4231,7 +4233,7 @@ void Crashed(byte* state, byte* header) {
         }
 
         raising = null
-        if fileCount > 0 {
+        if *Ptr<long>(header + 448) != 3 {
             raising = header
         }
     }
@@ -4404,7 +4406,7 @@ void Ends(bool hasText, byte* id, long idCount, byte* file, long fileCount, long
 // the inbox, which is kept, the crashing message dropped (U21), and the actor's children end after their
 // current message (U13). The inbox's messages are copied into a new heap, each by the function its call
 // site's table names, and the actor's heap is freed whole but for its first block (`Emptied`). The stack of
-// the activation `kept`, the one that raised, stays out of the pool while a block decides (U34). A block that
+// the activation `kept`, the one that raised, stays out of the pool while a block decides (U29, U25). A block that
 // runs in an activation of the actor, whose throw is the actor's crash, writes the log line of its child as
 // a `stop` does (U32; assumed: S10 of comment 6907441402), and a block that waits in the inbox is dropped,
 // with no line, its child ended with the actor's other children (U34; assumed: S11 of that comment).
@@ -4832,7 +4834,7 @@ thread static mut byte* escalated = null
 // The table of every block's message: the function that runs it, and no copy, since a block that waits in
 // the inbox of an actor that crashes is dropped (`BlockLeft`), in the thread's own heap, made at the first
 // block.
-static mut byte* blockTable = null
+thread static mut byte* blockTable = null
 
 // The value a `throw` throws, of the type numbered `number` in the program, in the slot `slot`, and the
 // function `copy` that copies it into a heap (U30), which the emitted code names before `Throw` where a block
@@ -4855,10 +4857,12 @@ pub void Decide(long word) {
 // The message of the block of the policy of the actor whose state is `taker`, made in the heap `above`
 // of its supervisor (U28): the message after it, the blocks' table, no reply, a chain of its own, as a
 // restart's message has (U34; assumed: S11 of comment 6907441402), the actor, its stack that raised, `kept`,
-// null for none, then a copy of the crash's id, the file, a constant of the emitted code, and a copy of the
-// text, with their counts, its line and whether the text stands below the error line, the chain of the activation `header` that crashed, the number of the
-// thrown value's type, one more, 0 for none, the copy of that value, made by `copy` from `slot`, and that
-// copy's function, and whether the block escalated the crash (`Escalate`), 168 bytes.
+// null for none, then a copy of the crash's id and its count, the file, a constant of the emitted code, and
+// its count, the line, whether the text stands below the error line, a copy of the text and its count, the
+// chain of the activation `header` that crashed, the number of the thrown value's type, one more, 0 for none,
+// the copy of that value, made by `copy` from `slot`, null where `copy` is null, as for a thrown `null`,
+// which holds no value, and that copy's function, and whether the block escalated the crash (`Escalate`),
+// 168 bytes.
 byte* Pending(byte* taker, byte* above, byte* kept, byte* header, bool hasText, byte* id, long idCount, byte* file, long fileCount, long line, byte* from, long count, long number, byte* slot, byte* copy) {
     raw {
         byte* message = AllocateIn(above, 168)
@@ -4891,7 +4895,7 @@ byte* Pending(byte* taker, byte* above, byte* kept, byte* header, bool hasText, 
         *Ptr<byte*>(message + 144) = null
         *Ptr<byte*>(message + 152) = copy
         *Ptr<long>(message + 160) = 0
-        if number != 0 {
+        if number != 0 && copy != null {
             extern "C" (byte*, byte*) => byte* made = *Ptr<extern "C" (byte*, byte*) => byte*>(message + 152)
             mut byte* into = above
             if into == null {
@@ -4995,7 +4999,8 @@ extern "C" void BlockRun(byte* state, byte* message) {
 
 // The run of the block's message `message`, in an activation of the supervisor or in the top-level code's
 // wait: the emitted function of the block, which the restart's block of the child names, builds `c` and runs
-// the block, and the decision it set is acted on (`Decided`).
+// the block, and the decision it set is acted on (`Decided`). The block's record stands at byte 56 of the
+// child's side, its eighth word on every target, each 64-bit, where the emitter's `Deciding` writes it.
 void RunBlock(byte* message) {
     raw {
         byte* child = *Ptr<byte*>(message + 40)
@@ -5056,7 +5061,7 @@ void Decided(byte* child, byte* message, long word) {
 // whose activation runs the block, with the child's id, place, text and thrown value, as the child's crash
 // would have passed up under `escalate`; where the top-level code takes it, the block running in its wait
 // among it, the process ends with the child's error line and the trace of the stack the child raised on,
-// switched back to (`EndsEscalated`), or of this one where none is kept (U34; design record, section 6, the trace
+// switched back to (`EndsEscalated`), or of this one where none is kept (U29, U25; design record, section 6, the trace
 // from the stack of the actor that raised).
 void Escalate(byte* message) {
     raw {
@@ -5098,7 +5103,7 @@ void Escalate(byte* message) {
     }
 }
 
-// The end of the process at a crash that a block escalated to the top-level code (U34): the error line of
+// The end of the process at a crash that a block escalated to the top-level code (U29, U25): the error line of
 // the crash, as the copy in the block's message holds it, the trace of the stack this runs on, and the exit
 // code 1 (`Ends`).
 void EndsEscalated() {
@@ -5193,8 +5198,8 @@ pub string TextAt(byte* bytes, long count) {
 // of the pool, at 400 the stack's size, and from 408 the target's words of the trim; at 424 the actor whose
 // constructor the activation runs (`Building`), at 432 the message it waits on, at 440 the first of its open
 // copy sessions (`CopyOpen`), and from 448 its crash: 1 where it crashed, 2 where a text stands below the
-// error line, then the id, the file, the line and that text, each text its address and its count of bytes
-// (`CrashActor`). The thread's own
+// error line, 3 where its stack overflowed (`ActorOverflow`), then the id, the file, the line and that text,
+// each text its address and its count of bytes (`CrashActor`). The thread's own
 // side of the switch, its save area, is in the thread's record, `threadSide`, 320 bytes of the thread's
 // own heap, made at the thread's first message.
 thread static mut byte* threadSide = null
@@ -5307,8 +5312,9 @@ extern "C" void ActorStart() {
 // program code. A crossing copies every counted block the value reaches into the heap of the actor it
 // crosses into, or of the caller its result goes to (design record, section 6; the owner, 2026-11-15,
 // #519, comment 6902210646, Q5, "Copy all, share big unbuilt"); a value after `copy` at a call that is
-// no crossing has every block on a path to a class instance copied into the heap the allocation entry
-// serves, the instance among them, and shares by its count only a block that reaches none (`CopyWhole`).
+// no crossing has every block on a path to a class instance that passes through no function value and no
+// actor's reference copied into the heap the allocation entry serves, the instance among them, and shares by
+// its count every other block (`CopyWhole`).
 // The copies one call makes of its arguments share one memo, so
 // that a block two paths of the call reach arrives as one block (Q2, "Sharing kept"), and a result has a
 // memo of its own: the session of the call, eleven words in the caller's frame, the memo, its slots and its
@@ -5562,7 +5568,12 @@ pub byte* CopyNext() {
 // The copy at `copy` of a map whose keys reach a class instance put on the list of the copies the run
 // places again, with `place`, the function that places its entries under their keys' new hashes: the run
 // calls it once its work list is empty, since a key's hash reads the fields of the instances it reaches,
-// which a copy the memo gave can still wait to be filled while the map is filled.
+// which a copy the memo gave can still wait to be filled while the map is filled. The maps are placed before
+// the session's last copy points the `weak` references of its copies (`CopyLeft`), and no key the checker
+// admits hashes a `weak` slot: a `weak` reference as a map's key or value is `not supported` (the checker's
+// `WeakUnread`), a key type that reaches one is no key it reads (its `KeyOf`), a class with a `weak` field
+// compares and hashes by identity (K4), by its copy's address, which the pointing does not change, and an
+// `equal by` that names such a field is `not supported` (K8).
 pub void CopyAfter(byte* copy, byte* place) {
     raw {
         mut long grown = 0
