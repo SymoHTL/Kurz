@@ -2004,11 +2004,11 @@ or `AcqRel` for a `Load`, `Acquire` or `AcqRel` for a `Store`, `Release` or `Acq
 order of a compare-exchange, and `Relaxed` for `Fence`; any other order is read when the call runs,
 and an order this rule refuses for the call, read there, is the exception
 `invalid-ordering-at-run-time` at the call's line (E3), which in a message is the crash of its actor
-(U19), as Rust's `load` panics on it *(assumed in §6)*. A file's own type, function, variable or
-parameter named `AtomicBool`, `AtomicInt`, `AtomicLong`, `AtomicPtr`, `Fence`, `MemoryOrder` or
-`NotExchanged` is `redeclared`, as R18's names are, and `Ordering` stays free for a program's own
-type (§6, Q7), a field so named, a parameter of a primary constructor among them, excepted
-*(assumed in §6)*; a view has no text (`no-text`), and neither `==` nor `!=` takes it
+(U19), as Rust's `load` panics on it *(assumed in §6)*. A file's own type or function named
+`AtomicBool`, `AtomicInt`, `AtomicLong`, `AtomicPtr`, `Fence`, `MemoryOrder` or `NotExchanged` is
+`redeclared`, as R18's names are, and `Ordering` stays free for a program's own type (§6, Q7); a
+variable or a parameter so named is `redeclared` too, and a field so named, a parameter of a primary
+constructor among them, excepted *(assumed in §6)*; a view has no text (`no-text`), and neither `==` nor `!=` takes it
 (`type-mismatch`), as Rust's atomic types implement neither `Display` nor `PartialEq` *(assumed in
 §6)*.
 
