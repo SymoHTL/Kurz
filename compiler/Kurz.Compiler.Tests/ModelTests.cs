@@ -1,0 +1,566 @@
+using System.Text;
+using System.Text.RegularExpressions;
+using Kurz.Compiler.Build;
+using Xunit;
+
+namespace Kurz.Compiler.Tests;
+
+/// <summary>
+/// The two protocols by which actors can run on any number of threads, transcribed into C# and explored, as loom explores the
+/// interleavings of the threads of a Rust test and CDSChecker those of a C11 program (neither checked at source): the actor's state
+/// word, whose wakes, takes and ends of a hold say whether a thread holds the actor and whether an entry of it stands in the run queue,
+/// and the reply of a call that waits, which its callee and the crash of its waiter each take by one atomic swap. Each move of a model
+/// is one atomic operation of the runtime, or one plain read or write that no other thread races, and names the function of
+/// <c>runtime/common/runtime.kz</c> it transcribes, with the text of the atomic operation it is there; a test holds every name and
+/// every such text to that file, a guard against a model that says what the runtime no longer does. The explorer runs every
+/// interleaving of two or three threads, each state once, and finds no lost wake (a message queued or a reply set always leads to the
+/// actor or the waiter running), no two owners of a reply, no two threads holding one actor, no message while its constructor runs
+/// (U3), and no owner of a reply that reads or writes the waiter's frame once it is gone; and it finds each of these broken in a model
+/// broken so, the cases of <see cref="Break"/>. Its moves are sequentially consistent: the orders of the runtime's atomic operations,
+/// acquire and release, are the IR's to show (<c>EmitterTests</c>), not the explorer's.
+/// </summary>
+public sealed class ModelTests
+{
+    /// <summary>The breaks the explorer finds, each a change of one move of a model.</summary>
+    public enum Break
+    {
+        /// <summary>The models as the runtime is.</summary>
+        None,
+
+        /// <summary>The emitted call stores the reply's waiter after <c>Enqueue</c> queued its message.</summary>
+        WaiterAfterEnqueue,
+
+        /// <summary>The callee and the crash take the message's reply by a plain read and then a plain write of null, not by one swap.</summary>
+        ReadThenWrite,
+
+        /// <summary>A take that finds the actor held drops its entry and sets no NOTIFIED.</summary>
+        NotifiedDropped,
+
+        /// <summary>The end of a hold queues the actor again where it can go on alone, NOTIFIED left out.</summary>
+        RequeueLeftOut,
+
+        /// <summary>A take reads the actor as held by BUILDING alone, RUNNING left out.</summary>
+        RunningNotHeld,
+
+        /// <summary>A take reads the actor as held by RUNNING alone, BUILDING left out.</summary>
+        BuildingNotHeld,
+
+        /// <summary><c>ActorBuilt</c> clears NOTIFIED and queues nothing.</summary>
+        BuiltQueuesNothing,
+
+        /// <summary><c>Replied</c> reads the reply's waiter after its store of the reply's word.</summary>
+        WaiterReadAfterStore,
+
+        /// <summary>The crash gives the waiter's stack back at once where the callee took the reply first.</summary>
+        CrashLeavesAtOnce,
+    }
+
+    /// <summary>
+    /// One atomic move of a strand: the runtime's function it transcribes, the text of that function it is, its atomic operation where it
+    /// is one, null where the function's name alone is held, whether it can be made in a state, and what it does, which sets the strand's
+    /// place.
+    /// </summary>
+    private sealed record Move(string Function, string? Text, Func<int[], bool> Can, Action<int[]> Make);
+
+    /// <summary>A thread of a model: its name, the word of the state that holds its place, -1 once it ended, and its moves by place.</summary>
+    private sealed record Strand(string Name, int Place, Move[] Moves);
+
+    /// <summary>A model: its name, its first state, its strands, what every state keeps, and what a state in which no strand can move keeps.</summary>
+    private sealed record Model(string Name, int[] Start, Strand[] Strands, Func<int[], string?> Always, Func<int[], string?> AtRest);
+
+    /// <summary>A state that breaks what its model keeps: what it breaks, and the moves that reached it.</summary>
+    private sealed record Broken(string What, IReadOnlyList<string> Path);
+
+    /// <summary>The most moves of a path the explorer follows; a longer one is a break of its own.</summary>
+    private const int Bound = 200;
+
+    /// <summary>
+    /// Every interleaving of the model's strands from its first state, depth first, a state seen before not explored again, since what
+    /// follows a state depends on that state alone: the first state that breaks what the model keeps, with the moves that reached it,
+    /// or null, and the count of the states seen. A path longer than <see cref="Bound"/> moves is a break, so that a model that does not
+    /// end is never read as one that keeps everything.
+    /// </summary>
+    private static (Broken? Broken, int States) Explore(Model model)
+    {
+        var seen = new HashSet<string>();
+        var path = new List<string>();
+
+        Broken? Visit(int[] state)
+        {
+            if (!seen.Add(string.Join(",", state)))
+            {
+                return null;
+            }
+
+            var what = model.Always(state);
+            if (what is not null)
+            {
+                return new Broken(what, path.ToList());
+            }
+
+            if (path.Count >= Bound)
+            {
+                return new Broken($"a path of more than {Bound} moves", path.ToList());
+            }
+
+            var moved = false;
+            foreach (var strand in model.Strands)
+            {
+                var place = state[strand.Place];
+                if (place < 0 || !strand.Moves[place].Can(state))
+                {
+                    continue;
+                }
+
+                moved = true;
+                var after = (int[])state.Clone();
+                strand.Moves[place].Make(after);
+                path.Add($"{strand.Name}: {strand.Moves[place].Function}");
+                var found = Visit(after);
+                path.RemoveAt(path.Count - 1);
+                if (found is not null)
+                {
+                    return found;
+                }
+            }
+
+            var rest = moved ? null : model.AtRest(state);
+            return rest is null ? null : new Broken(rest, path.ToList());
+        }
+
+        var broken = Visit((int[])model.Start.Clone());
+        return (broken, seen.Count);
+    }
+
+    // The bits of the actor's state word (`StateWord`).
+    private const int Running = 1, Queued = 2, Notified = 4, Building = 8;
+
+    // The words every model's state holds first: the actor's state word, its entries in the run queue, the messages of its inbox, the
+    // threads that hold it, whether its constructor ended, whether a message started while it ran; then the reply's: whether the
+    // message names the reply, whether the message is queued, whether the reply names its waiter, the reply's word, the owners of the
+    // reply, whether the waiter's frame is gone, whether the waiter parked, returned or crashed, and whether an owner of the reply read
+    // or wrote the frame once it was gone. Each strand's words follow: its place, the word it read, what `Ready` gave, a register.
+    private const int Word = 0, Entries = 1, Mail = 2, Holders = 3, Built = 4, Early = 5;
+    private const int Hook = 6, Published = 7, Waiter = 8, Answer = 9, Owners = 10, Gone = 11, Parked = 12, Returned = 13, Crashed = 14;
+    private const int Touched = 15, Shared = 16, Own = 4;
+
+    /// <summary>A first state: the shared words zero but those given, each strand at its place 0 but those given.</summary>
+    private static int[] Start(int strands, params (int Word, int Value)[] set)
+    {
+        var state = new int[Shared + strands * Own];
+        foreach (var (word, value) in set)
+        {
+            state[word] = value;
+        }
+
+        return state;
+    }
+
+    /// <summary>The first word of the strand numbered <paramref name="n"/>, its place.</summary>
+    private static int At(int n) => Shared + n * Own;
+
+    /// <summary>
+    /// <c>Enqueue</c>'s append of a message to the inbox, one move, as a queue of many senders appends; then the wake: one atomic
+    /// <c>or</c> of QUEUED, and where the mark was clear the entry put in the run queue (<c>Wake</c>, <c>Queue</c>).
+    /// </summary>
+    private static Strand Sender(string name, int at) => new(name, at,
+    [
+        new("Enqueue", "Append(state - 32, message)", _ => true, s => { s[Mail]++; s[at] = 1; }),
+        .. Woken(at, 1, -1),
+    ]);
+
+    /// <summary>The wake of the actor from the place <paramref name="from"/>, the strand going on at <paramref name="then"/>.</summary>
+    private static Move[] Woken(int at, int from, int then) =>
+    [
+        new("Wake", ".FetchOr(2, MemoryOrder.AcqRel)", _ => true, s =>
+        {
+            var before = s[Word];
+            s[Word] |= Queued;
+            s[at] = (before & Queued) == 0 ? from + 1 : then;
+        }),
+        new("Queue", "runLast = state", _ => true, s => { s[Entries]++; s[at] = then; }),
+    ];
+
+    /// <summary>
+    /// The take of an entry off the run queue at the place <paramref name="from"/> and the hold of the actor (<c>Claimed</c>: a load, then
+    /// a compare-exchange, made again on what it found): RUNNING where neither RUNNING nor BUILDING is set, the strand going on at
+    /// <paramref name="held"/>, else NOTIFIED, the strand back at <paramref name="from"/>; QUEUED cleared either way.
+    /// </summary>
+    private static Move[] Taken(int at, int from, int held, Break broken)
+    {
+        var holds = broken switch { Break.RunningNotHeld => Building, Break.BuildingNotHeld => Running, _ => Running | Building };
+        return
+        [
+            new("RunOne", "runFirst = *Ptr<byte*>(state - 16)", s => s[Entries] > 0, s => { s[Entries]--; s[at] = from + 1; }),
+            new("Claimed", "word.Load(MemoryOrder.Acquire)", _ => true, s => { s[at + 1] = s[Word]; s[at] = from + 2; }),
+            new("Claimed", "Exchanged(word, seen, wanted)", _ => true, s =>
+            {
+                var seen = s[at + 1];
+                if (s[Word] != seen)
+                {
+                    s[at + 1] = s[Word];
+                    return;
+                }
+
+                if ((seen & holds) != 0)
+                {
+                    s[Word] = (seen & ~Queued) | (broken == Break.NotifiedDropped ? 0 : Notified);
+                    s[at] = from;
+                    return;
+                }
+
+                s[Word] = (seen & ~Queued) | Running;
+                s[Holders]++;
+                s[at] = held;
+            }),
+        ];
+    }
+
+    /// <summary>
+    /// The end of the hold at the place <paramref name="from"/> (<c>LetGo</c>: a load, then a compare-exchange, made again on what it
+    /// found), with what <c>Ready</c> gave in the strand's third word: RUNNING and NOTIFIED cleared, and where no entry stands while
+    /// NOTIFIED was set or the actor can go on, QUEUED set and the entry put in the run queue; the strand going on at the place
+    /// <paramref name="then"/> gives for the state.
+    /// </summary>
+    private static Move[] LetGone(int at, int from, Func<int[], int> then, Break broken) =>
+    [
+        new("LetGo", "word.Load(MemoryOrder.Acquire)", _ => true, s => { s[at + 1] = s[Word]; s[at] = from + 1; }),
+        new("LetGo", "Exchanged(word, seen, wanted)", _ => true, s =>
+        {
+            var seen = s[at + 1];
+            if (s[Word] != seen)
+            {
+                s[at + 1] = s[Word];
+                return;
+            }
+
+            var notified = broken != Break.RequeueLeftOut && (seen & Notified) != 0;
+            var queue = (seen & Queued) == 0 && (notified || s[at + 2] != 0);
+            s[Word] = (seen & ~(Running | Notified)) | (queue ? Queued : 0);
+            s[Holders]--;
+            s[at] = queue ? from + 2 : then(s);
+        }),
+        new("Queue", "runLast = state", _ => true, s => { s[Entries]++; s[at] = then(s); }),
+    ];
+
+    /// <summary>
+    /// A thread of the scheduler: the take of an entry and the hold (<c>RunOne</c>, <c>Claimed</c>), the first message of the inbox
+    /// started where it holds the actor (<c>RunOne</c>), <c>Ready</c> read after the switch back, and the end of the hold
+    /// (<c>LetGo</c>); then another entry. One that starts at the place 4 holds the actor already, its message ran.
+    /// </summary>
+    private static Strand Runner(string name, int at, Break broken) => new(name, at,
+    [
+        .. Taken(at, 0, 3, broken),
+        new("RunOne", "Start(state, Taken(state - 32), null)", _ => true, s =>
+        {
+            if (s[Mail] > 0)
+            {
+                s[Mail]--;
+                s[Early] |= s[Built] == 0 ? 1 : 0;
+                s[at] = 4;
+                return;
+            }
+
+            s[at + 2] = 0;
+            s[at] = 5;
+        }),
+        new("Ready", "return *Ptr<byte*>(state - 32) != null", _ => true, s => { s[at + 2] = s[Mail] > 0 ? 1 : 0; s[at] = 5; }),
+        .. LetGone(at, 5, _ => 0, broken),
+    ]);
+
+    /// <summary>
+    /// The end of the constructor at its <c>spawn</c> (<c>ActorBuilt</c>: a load, then a compare-exchange, made again on what it found):
+    /// BUILDING and NOTIFIED cleared, and where NOTIFIED was set and no entry stands, QUEUED set and the entry put in the run queue.
+    /// </summary>
+    private static Strand Builder(int at, Break broken) => new("builder", at,
+    [
+        new("ActorBuilt", "word.Load(MemoryOrder.Acquire)", _ => true, s => { s[at + 1] = s[Word]; s[at] = 1; }),
+        new("ActorBuilt", "Exchanged(word, seen, wanted)", _ => true, s =>
+        {
+            var seen = s[at + 1];
+            if (s[Word] != seen)
+            {
+                s[at + 1] = s[Word];
+                return;
+            }
+
+            var queue = broken != Break.BuiltQueuesNothing && (seen & (Queued | Notified)) == Notified;
+            s[Word] = (seen & ~(Building | Notified)) | (queue ? Queued : 0);
+            s[Built] = 1;
+            s[at] = queue ? 2 : -1;
+        }),
+        new("Queue", "runLast = state", _ => true, s => { s[Entries]++; s[at] = -1; }),
+    ]);
+
+    /// <summary>What every state of a model keeps.</summary>
+    private static string? Always(int[] s) =>
+        s[Holders] > 1 ? "two threads hold the actor"
+        : s[Early] != 0 ? "a message started while the actor's constructor ran"
+        : s[Owners] > 1 ? "two owners of the reply"
+        : s[Touched] != 0 ? "an owner of the reply read or wrote the waiter's frame once it was gone"
+        : null;
+
+    /// <summary>What a state of the state word's models in which no thread can move keeps.</summary>
+    private static string? WordAtRest(int[] s) =>
+        s[Mail] > 0 ? $"{s[Mail]} message(s) wait in the inbox and nothing runs the actor: a lost wake"
+        : s[Word] != 0 ? $"the state word is {s[Word]} with no thread moving, not idle"
+        : null;
+
+    /// <summary>The models of the state word, each of three threads.</summary>
+    private static Model[] WordModels(Break broken) =>
+    [
+        // a message sent while the actor's constructor runs: it starts once `ActorBuilt` ran (U3)
+        new("a wake while the constructor runs", Start(3, (Word, Building)),
+            [Builder(At(0), broken), Sender("sender", At(1)), Runner("runner", At(2), broken)], Always, WordAtRest),
+
+        // a message sent while a thread holds the actor: a second thread takes its entry, which the holder queues again
+        new("a wake while a thread holds the actor", Start(3, (Word, Running), (Holders, 1), (Built, 1), (At(0), 4)),
+            [Runner("holder", At(0), broken), Runner("runner", At(1), broken), Sender("sender", At(2))], Always, WordAtRest),
+
+        // two senders, one thread
+        new("two wakes", Start(3, (Built, 1)),
+            [Sender("first", At(0)), Sender("second", At(1)), Runner("runner", At(2), broken)], Always, WordAtRest),
+    ];
+
+    /// <summary>
+    /// The waiter of a call, whose thread holds its actor at the start: the reply's waiter stored (<c>ReplyWaiter</c>) and the message
+    /// queued (<c>Enqueue</c>), the reply's word read (<c>Wait</c>), and where it is 0 the activation parked: <c>Ready</c> and the end of
+    /// the hold; then the takes of the actor's entries, each resuming the activation where the word is set (<c>RunOne</c>), until it
+    /// returned or crashed.
+    /// </summary>
+    private static Strand Waiting(int at, Break broken)
+    {
+        var late = broken == Break.WaiterAfterEnqueue;
+        Move stored = new("ReplyWaiter", "*Ptr<byte*>(reply + 8) = running", _ => true, s => { s[Waiter] = 1; s[at] = late ? 2 : 1; });
+        Move queued = new("Enqueue", "Append(state - 32, message)", _ => true, s => { s[Published] = 1; s[at] = late ? 1 : 2; });
+        int Then(int[] s) => s[Returned] != 0 || s[Crashed] != 0 ? -1 : 7;
+        return new("waiter", at,
+        [
+            late ? queued : stored,
+            late ? stored : queued,
+            new("Wait", "while ReplyState(reply) == 0", _ => true, s =>
+            {
+                if (s[Answer] != 0)
+                {
+                    s[Returned] = 1;
+                    s[Gone] = 1;
+                    s[at + 2] = 0;
+                    s[at] = 4;
+                    return;
+                }
+
+                s[Parked] = 1;
+                s[at] = 3;
+            }),
+            new("Ready", "ReplyState(reply) != 0", _ => true, s => { s[at + 2] = s[Answer] != 0 ? 1 : 0; s[at] = 4; }),
+            .. LetGone(at, 4, Then, broken),
+            .. Taken(at, 7, 10, broken),
+            new("RunOne", "if reply != null && ReplyState(reply) != 0", _ => true, s =>
+            {
+                if (s[Crashed] == 0 && s[Answer] != 0)
+                {
+                    s[Returned] = 1;
+                    s[Gone] = 1;
+                }
+
+                s[at + 2] = 0;
+                s[at] = 4;
+            }),
+        ]);
+    }
+
+    /// <summary>The count of the moves of <see cref="Took"/>.</summary>
+    private static int Takes(Break broken) => broken == Break.ReadThenWrite ? 2 : 1;
+
+    /// <summary>
+    /// The take of the message's reply at the place <paramref name="from"/> (<c>ReplyTaken</c>, one swap), or, broken so, a plain read of
+    /// it and then a plain write of null: the strand going on at <paramref name="owned"/> where it took the reply and at
+    /// <paramref name="lost"/> where another took it first.
+    /// </summary>
+    private static Move[] Took(int at, int from, int owned, int lost, Func<int[], bool> can, Break broken)
+    {
+        void Owned(int[] s, bool reply)
+        {
+            if (reply)
+            {
+                s[Owners]++;
+            }
+
+            s[at] = reply ? owned : lost;
+        }
+
+        return Takes(broken) == 2
+            ?
+            [
+                new("ReplyTaken", null, can, s => { s[at + 3] = s[Hook]; s[at] = from + 1; }),
+                new("ReplyTaken", null, _ => true, s => { s[Hook] = 0; Owned(s, s[at + 3] != 0); }),
+            ]
+            :
+            [
+                new("ReplyTaken", ".Swap(null, MemoryOrder.AcqRel)", can, s =>
+                {
+                    var reply = s[Hook] != 0;
+                    s[Hook] = 0;
+                    Owned(s, reply);
+                }),
+            ];
+    }
+
+    /// <summary>
+    /// The callee, once its message is queued: the take of the reply (<c>ReplyTaken</c>), and where it owns it, <c>Replied</c>: the
+    /// waiter read, then the release store of the reply's word, then the wake of the waiter's actor (<c>Wake</c>).
+    /// </summary>
+    private static Strand Callee(int at, Break broken)
+    {
+        var first = Takes(broken);
+        var late = broken == Break.WaiterReadAfterStore;
+        Move read = new("Replied", "byte* waiter = *Ptr<byte*>(reply + 8)", _ => true, s =>
+        {
+            s[Touched] |= s[Gone];
+            s[at + 1] = s[Waiter];
+            s[at] = late ? first + 2 : first + 1;
+        });
+        Move store = new("Replied", ".Store(1, MemoryOrder.Release)", _ => true, s =>
+        {
+            s[Touched] |= s[Gone];
+            s[Answer] = 1;
+            s[at] = late ? first + 1 : first + 2;
+        });
+        return new("callee", at,
+        [
+            .. Took(at, 0, first, -1, s => s[Published] != 0, broken),
+            late ? store : read,
+            late ? read : store,
+            new("Replied", "Wake(state)", _ => true, s => { s[at] = s[at + 1] != 0 ? first + 3 : -1; }),
+            .. Woken(at, first + 3, -1),
+        ]);
+    }
+
+    /// <summary>
+    /// The crash of the waiter's actor while its activation is parked: the hold of the actor by the crash, from a state word no thread
+    /// holds (<c>Fell</c>, as the record's default of a crash through the state word has it, which the build makes on its one thread);
+    /// where the reply's word is 0 (<c>Fall</c>), the take of the reply (<c>ReplyTaken</c>), and where the callee took it first, the wait
+    /// for its word (<c>Fall</c>); then the stack given back, the activation gone, and the end of the hold (<c>LetGo</c>).
+    /// </summary>
+    private static Strand Crash(int at, Break broken)
+    {
+        var wait = 2 + Takes(broken);
+        var lost = broken == Break.CrashLeavesAtOnce ? wait + 1 : wait;
+        return new("crash", at,
+        [
+            new("Fell", null, s => s[Parked] != 0 && s[Returned] == 0 && (s[Word] & (Running | Building)) == 0, s =>
+            {
+                s[Word] |= Running;
+                s[Holders]++;
+                s[at] = 1;
+            }),
+            new("Fall", "ReplyState(waited) == 0", _ => true, s => { s[at] = s[Answer] != 0 ? wait + 1 : 2; }),
+            .. Took(at, 2, wait + 1, lost, _ => true, broken),
+            new("Fall", "while ReplyState(waited) == 0", s => s[Answer] != 0, s => { s[at] = wait + 1; }),
+            new("Fall", "Give(at)", _ => true, s =>
+            {
+                s[Crashed] = 1;
+                s[Gone] = 1;
+                s[at + 2] = 0;
+                s[at] = wait + 2;
+            }),
+            .. LetGone(at, wait + 2, _ => -1, broken),
+        ]);
+    }
+
+    /// <summary>What a state of the reply's models in which no thread can move keeps.</summary>
+    private static string? ReplyAtRest(int[] s) =>
+        s[Returned] == 0 && s[Crashed] == 0 ? "the waiter waits and nothing wakes it: a lost wake" : null;
+
+    /// <summary>The models of the reply, of two threads and of three.</summary>
+    private static Model[] ReplyModels(Break broken) =>
+    [
+        // a call that waits and its answer
+        new("a call and its answer", Start(2, (Word, Running), (Holders, 1), (Built, 1), (Hook, 1)),
+            [Waiting(At(0), broken), Callee(At(1), broken)], Always, ReplyAtRest),
+
+        // the waiter's actor crashes while its activation is parked, the callee answering meanwhile
+        new("a call, its answer and the crash of its waiter", Start(3, (Word, Running), (Holders, 1), (Built, 1), (Hook, 1)),
+            [Waiting(At(0), broken), Callee(At(1), broken), Crash(At(2), broken)], Always, ReplyAtRest),
+    ];
+
+    private static Model[] Models(Break broken) => [.. WordModels(broken), .. ReplyModels(broken)];
+
+    [Fact]
+    public void The_state_word_and_the_reply_keep_every_interleaving_of_their_threads()
+    {
+        // the five properties in every state of every model, as the runtime is; each model reaches more than a handful of states, so
+        // that a model whose threads do not move is not read as one that keeps everything
+        foreach (var model in Models(Break.None))
+        {
+            var (broken, states) = Explore(model);
+            Assert.True(broken is null, $"{model.Name}: {broken?.What} after {string.Join(", ", broken?.Path ?? [])}");
+            Assert.True(states >= 40, $"{model.Name}: {states} states");
+        }
+    }
+
+    [Theory]
+    [InlineData(Break.WaiterAfterEnqueue, "a call and its answer", "a lost wake")]
+    [InlineData(Break.ReadThenWrite, "a call, its answer and the crash of its waiter", "two owners of the reply")]
+    [InlineData(Break.NotifiedDropped, "a wake while a thread holds the actor", "a lost wake")]
+    [InlineData(Break.RequeueLeftOut, "a wake while a thread holds the actor", "a lost wake")]
+    [InlineData(Break.RunningNotHeld, "a wake while a thread holds the actor", "two threads hold the actor")]
+    [InlineData(Break.BuildingNotHeld, "a wake while the constructor runs", "a message started while the actor's constructor ran")]
+    [InlineData(Break.BuiltQueuesNothing, "a wake while the constructor runs", "a lost wake")]
+    [InlineData(Break.WaiterReadAfterStore, "a call and its answer", "once it was gone")]
+    [InlineData(Break.CrashLeavesAtOnce, "a call, its answer and the crash of its waiter", "once it was gone")]
+    public void The_explorer_finds_each_break_of_a_model_in_the_model_it_breaks(Break broken, string name, string what)
+    {
+        // each break found in the model it breaks, with the moves that reach it: the explorer's own red proof
+        var models = Models(broken);
+        var model = models.Single(m => m.Name == name);
+        var (found, _) = Explore(model);
+        Assert.True(found is not null, $"{name}: no break found for {broken}");
+        Assert.Contains(what, found.What, StringComparison.Ordinal);
+        Assert.NotEmpty(found.Path);
+    }
+
+    [Fact]
+    public void Each_move_of_the_models_names_a_function_of_the_runtime_and_the_text_it_transcribes_in_its_order()
+    {
+        // the guard against drift: every function a move names is declared in runtime/common/runtime.kz, the text a move transcribes
+        // stands in that function's body, and two moves of one function in a strand, one after the other, stand in that order there
+        var text = Encoding.UTF8.GetString(Runtime.Files.Single(f => f.Path == "runtime/common/runtime.kz").Bytes).ReplaceLineEndings("\n");
+        string Body(string function)
+        {
+            var declared = Regex.Match(text, $@"^(pub )?[\w*<>]+ {function}\([^\n]*\{{\n(.*?)\n\}}\n", RegexOptions.Multiline | RegexOptions.Singleline);
+            Assert.True(declared.Success, $"runtime/common/runtime.kz declares no function `{function}`, which a move of the models names");
+            return declared.Groups[2].Value;
+        }
+
+        var strands = Models(Break.None).SelectMany(m => m.Strands).ToList();
+        var moves = strands.SelectMany(s => s.Moves).ToList();
+        Assert.True(moves.Select(m => m.Function).Distinct().Count() >= 12, string.Join(", ", moves.Select(m => m.Function).Distinct()));
+        Assert.True(moves.Where(m => m.Text is not null && m.Text.Contains("MemoryOrder", StringComparison.Ordinal)).Select(m => (m.Function, m.Text)).Distinct().Count() >= 6, "the atomic operations the moves are");
+        foreach (var move in moves)
+        {
+            var body = Body(move.Function);
+            Assert.True(move.Text is null || body.Contains(move.Text, StringComparison.Ordinal), $"`{move.Function}` holds no `{move.Text}`, which a move of the models transcribes");
+        }
+
+        var ordered = 0;
+        foreach (var strand in strands)
+        {
+            for (var k = 1; k < strand.Moves.Length; k++)
+            {
+                var (before, after) = (strand.Moves[k - 1], strand.Moves[k]);
+                if (before.Function != after.Function || before.Text is null || after.Text is null)
+                {
+                    continue;
+                }
+
+                var body = Body(after.Function);
+                Assert.True(body.IndexOf(before.Text, StringComparison.Ordinal) < body.IndexOf(after.Text, StringComparison.Ordinal),
+                    $"`{after.Function}` holds `{after.Text}` before `{before.Text}`, against the order of the moves of {strand.Name}");
+                ordered++;
+            }
+        }
+
+        Assert.True(ordered >= 6, $"{ordered} pairs of moves in order");
+    }
+}

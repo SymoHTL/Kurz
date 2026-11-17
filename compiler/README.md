@@ -495,7 +495,10 @@ rsi, r12 to r15, xmm6 to xmm15 and the four words of the thread environment bloc
 four words through x18, at the offsets of x86-64's block (the owner, 2026-11-15, #519, comment
 6892812780, Q2, "Rust: AArch64 switch now"). `Enter` sets a save area so that the switch to it enters
 a function on a fresh stack with a return address of zero, where an unwinder's walk ends. `common/`'s
-`RunOne` takes the first actor of the run queue: the first message of an idle actor's inbox starts on
+`RunOne` takes the first actor of the run queue and holds it by a compare-exchange of its state word
+that sets RUNNING (`Claimed`), or, where a thread holds it or its constructor runs, sets NOTIFIED and
+leaves it to its holder, which queues it again as it lets go (`LetGo`), or to `ActorBuilt` at the
+constructor's end: the first message of an idle actor's inbox starts on
 a stack of its thread's pool, the first call of the side list of an actor that waits starts on another
 above the activation it waits in, and an activation whose reply is set goes on, each by a switch from
 the thread's side, where `ActorStart`, a stack's entry, runs the message and switches back. A stack
@@ -975,16 +978,21 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `ActorNew` fills, the actor's record in the 96 bytes in front of it, the build's own layout, which no rule of the record names, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps
   the alignment of the allocator's block, as Rust's `ArcInner` pads its counts to what it holds, a
   `Vector128` field's 16 among it: the name of its type and two words the emitted code holds (U2),
-  whether it runs, waits for its restart, ends after its current message or ended (U19, U22), the
+  whether it runs, waits for its restart, ends after its current message or ended (U19, U22), an `int`,
+  and beside it the actor's state word, an `int` reached only through `AtomicInt` (R19), whose bits say
+  whether a thread holds the actor (RUNNING), whether an entry of it stands in the run queue (QUEUED),
+  whether a take found it held and left the entry to its holder (NOTIFIED) and whether its constructor
+  runs (BUILDING), as tokio's task state keeps RUNNING and NOTIFIED bits (not checked at source), the
   block of its restart, which its supervisor's heap holds, null where it does not restart (U22), its
   supervisor, null for the top-level code (U13), its heap, the actor spawned before it, by which the runtime's
   `EndActors` reaches every actor, the size of the stack its messages run on, 2 MiB or what its
   `stack` clause sets (U1), the actor's number, the first and the last
   message of its inbox, the actor after it in the run queue, and the activation at the top of its
-  stacks, the one that runs or waits, none while it is idle, which nothing marks while its
-  constructor runs, since no message can reach an actor before `spawn` gives its reference and a
-  default reads neither `this` nor its methods (K7), while the life of the record marks it, so that a
-  crash passed up into an actor whose constructor runs at its `spawn` goes on to its spawner (U25, U3). The number
+  stacks, the one that runs or waits, none while it is idle and none while its constructor runs,
+  which runs inside `spawn` and whose defaults read neither `this` nor its methods (K7), while the
+  state word's BUILDING marks it, so that no message starts before its `spawn` returns, the block of a
+  child's crash posted while the constructor waits among them (U3, U28), and the life of the record
+  marks it, so that a crash passed up into an actor whose constructor runs at its `spawn` goes on to its spawner (U25, U3). The number
   counts the actors of every type from 1, in the order `ActorNew` makes them (U2). The reference is
   the address of the state, which nothing counts, an actor living to the end of the process: `==` of
   two references compares the two addresses, `this` as a value inside an actor is the address of its
@@ -998,14 +1006,18 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `Enqueue` stamps the chain, a new one in the top-level code, drawn from the thread's generator, and
   the running message's inside a message (section 6), and puts a call that waits, of the chain that
   the actor's top activation waits in, at the end of that activation's side list, and every other
-  message at the end of the inbox, a `send` of the chain among them, and the actor at the end of the
-  run queue where it does not stand there, so that an inbox keeps the order its messages were sent in
+  message at the end of the inbox, a `send` of the chain among them, and wakes the actor (`Wake`):
+  one atomic `or` sets QUEUED in its state word, and where the mark was clear the actor goes to the
+  end of the run queue, so that an inbox keeps the order its messages were sent in
   (U5, U15, U17). The function of a method's messages, made at its first use and named outside the
   program's functions, so that a trace leaves its frame out with the runtime's, calls the method on
-  the state, lets go of the arguments, moves the result beside the reply and calls the runtime's
-  `Replied`, which sets the reply's byte and puts the actor back in the run queue where the activation
-  that waits on it is its top, as tokio's `oneshot` stores its value and wakes its receiver, and
-  frees the message. An argument of a message or of `spawn` crosses as the type of its parameter says,
+  the state, lets go of the arguments, takes the reply off the message by the runtime's `ReplyTaken`,
+  one atomic swap that leaves null there, so that of it and the crash of the waiter's actor, which
+  unhooks the reply by the same swap, exactly one owns the reply, as tokio's `oneshot` decides
+  between its two ends by one word (not checked at source), and where it owns the reply moves the
+  result beside it and calls the runtime's `Replied`, which reads the reply's waiter, then stores the
+  reply's word with release, then wakes the actor where the activation that waits on it is its top,
+  as tokio's `oneshot` stores its value and wakes its receiver, and frees the message. An argument of a message or of `spawn` crosses as the type of its parameter says,
   where it is evaluated, before a later argument's call that waits can change what it reads, and a
   result crosses before it moves beside the reply, while the method's count of it still holds it
   (U12): a value that holds a block is copied deep into the receiver's heap, the actor's or, for a
@@ -1072,12 +1084,20 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   its list, a variable moved and assigned again in a loop, and a parameter written `move` left by a
   `return` or moved on.
   A call that waits (U4), wherever it stands, passes a reply in its own frame, the
-  one-shot slot of section 6, and its file and line, and the runtime's `Wait` sets the activation
-  that waits on it: in the top-level code it runs the first actor of the run queue ("The runtime"),
-  in a loop until the byte is set, as tokio's `block_on` runs its queue until its future is ready, so
+  one-shot slot of section 6, an `int` word, the activation that waits on it and the result, whose
+  waiter the runtime's `ReplyWaiter` stores before `Enqueue` queues the message, so that whoever
+  answers finds it, and its file and line to the runtime's `Wait`, which loads the word with acquire:
+  in the top-level code it runs the first actor of the run queue ("The runtime"),
+  in a loop until the word is set, as tokio's `block_on` runs its queue until its future is ready, so
   that a call behind any count of messages takes the stack of one, and ends the process with
-  `deadlock` at the call's line where the queue is empty and the byte is not set (U18); inside a
-  message it parks the activation, switching to the thread's side until the byte is set (`ActorTests`);
+  `deadlock` at the call's line where the queue is empty and the word is not set (U18); inside a
+  message it parks the activation, switching to the thread's side until the word is set (`ActorTests`).
+  `ModelTests` explores every interleaving of two and three threads over a transcription of the state
+  word's protocol and the reply's into C#, as loom explores a Rust test's (not checked at source), each
+  move naming the runtime's function it transcribes, which a test holds to `runtime/common/runtime.kz`,
+  and finds no lost wake, no two owners of a reply, no two threads holding one actor and no message
+  while its constructor runs, and each of these in a model broken so; `EmitterTests` holds the orders
+  of the atomic operations in the IR, which one thread does not show;
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
   number among the cases needs (section 5, round 19), a data type's number that of its name, as the IR names it, so
   that a built-in type the runtime's files see as one symbol and a program's as another, `IoError` or `ExitError`,
@@ -2014,7 +2034,8 @@ reads the guarantee in force on Windows and on Linux compiles the program alone.
 Of section 6 the emitter builds the actors of one thread, each message run to its end or to a wait that parks it (Q1 (a), the
 answers of 2026-11-14, issue 519, comment 6880404917), and no case shows
 where a program it builds differs from the section: every actor runs on the one thread the runtime
-runs, each message on a stack of its own ("The runtime"), with no worker thread, no line `threads`
+runs, each message on a stack of its own ("The runtime"), its state word and the replies of its
+calls changed by atomic operations that hold on any number of threads ("What the emitter emits"), with no worker thread, no line `threads`
 and no `KURZ_THREADS` read (U35), and the top-level code's wait runs the scheduler in place on the
 main thread's stack (U18), and messages run only while the top-level
 code waits for a call's result, one message of each actor in turn, so that a `send` made after the
@@ -2025,7 +2046,8 @@ nor layer 3, so that a loop of waits that the top-level code does not wait on st
 program; a crash in a message is the crash of its actor (U19): the runtime stores it in the
 activation's header and switches to the scheduler's stack, frees the actor's heap whole but for its
 first block, the record and the state, copies the messages of its inbox into a new heap, ends the
-open copy sessions of its activations, unhooks the reply each parked activation waits on, answers
+open copy sessions of its activations, unhooks the reply each parked activation waits on by the swap
+of `ReplyTaken`, or, where the callee took it first, waits for its word, answers
 each waiting caller `callee-crashed` (U20), ends the actor's children after their current message
 (U13, U21), writes one log line (U24) and restarts the actor after a pause of 100 ms that doubles up
 to 30 s, run by the top-level code's wait, which sleeps while only a pause is left (U22, U23); the
@@ -2078,7 +2100,11 @@ models, AVR and WebAssembly, for which the build has no target; and, on Windows,
 overflow, which ends the process as the system ends it whatever the policy (U19); a crash at the root, the top-level code, still ends
 the process with its error line, its trace and the exit code 1. A call whose caller crashed runs to its end and its result goes nowhere, which on
 one thread no program reaches but through the crash path, a caller that waits crashing only through
-a call of its own chain; an actor that ended keeps its first page to the end of the process, so that
+a call of its own chain; the swap by which a crash unhooks a reply reads the message its activation
+waits on, which the callee frees once it answered, so that on threads of their own that message has to
+stay while either can reach it, as tokio's `oneshot` keeps its state in an `Arc` (not checked at
+source), which is not built, where on the one thread the crash reads the reply's word first and no
+answer comes between; an actor that ended keeps its first page to the end of the process, so that
 a call that still reaches it raises `actor-gone`, where section 6 frees the page at the end through a
 table of slots and generations (2026-11-16), which is not built; and the copies a crashed message made of the
 arguments of a call it had not sent yet, in the callee's heap where no argument could wait, and the heap of a `spawn` whose arguments it was still

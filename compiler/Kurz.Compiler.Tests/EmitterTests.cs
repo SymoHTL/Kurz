@@ -1394,6 +1394,59 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void The_reply_and_the_state_word_are_taken_and_set_by_atomic_operations_of_their_protocols_orders()
+    {
+        // U12, U17, R19: the call stores its reply's waiter (`ReplyWaiter`) before `Enqueue` queues its message; the message's function
+        // takes the reply off the message after the method returned by one swap (`ReplyTaken`), as the crash's unhook does, so that one
+        // of them owns it, as tokio's `oneshot` decides by one word (not checked at source); the owner reads the waiter, then stores the
+        // reply's word with release, then wakes (`Replied`, `Signal`, `Enqueue` for an actor that ended), the waiter loads it with acquire
+        // (`ReplyState`); a wake sets QUEUED by one `or` (`Wake`), a take, a hold's end and a constructor's end change the state word by
+        // one compare-exchange (`Exchanged`); the orders are Rust's for each, which a thread of their own needs and one thread does not
+        // show
+        const string text = "actor Counter {\n    mut long count = 0\n\n    pub void Add(long n) {\n        count = count + n\n    }\n\n    pub long Get() => count\n}\n\n"
+            + "c = spawn Counter()\nsend c.Add(2)\nprint(c.Get())\n";
+        var program = Emit(text);
+        var ir = program.Ir.ReplaceLineEndings("\n");
+        string Body(string name)
+        {
+            var defined = Regex.Match(ir, $@"^define [^\n]*@{name}\([^\n]*\n(.*?)\n\}}\n", RegexOptions.Multiline | RegexOptions.Singleline);
+            Assert.True(defined.Success, $"no function {name}");
+            return defined.Groups[1].Value;
+        }
+
+        string Runtime(string name) => Body($@"""rt\.common\.{name}\.[0-9]+""");
+        void InOrder(string body, params string[] patterns)
+        {
+            var at = 0;
+            foreach (var pattern in patterns)
+            {
+                var found = new Regex(pattern).Match(body, at);
+                Assert.True(found.Success, $"no `{pattern}` after the place {at} of:\n{body}");
+                at = found.Index + found.Length;
+            }
+        }
+
+        InOrder(Body(@"kz\.main"), @"store i32 0, ptr %v\.reply\.\d+", @"call void @""rt\.common\.ReplyWaiter\.\d+""\(ptr %v\.reply\.\d+\)",
+            @"store ptr %v\.reply\.\d+, ptr %t\d+", @"call void @""rt\.common\.Enqueue\.\d+""", @"call void @""rt\.common\.Wait\.\d+""");
+        Assert.Contains("getelementptr { i32, ptr, ptr, i64 }, ptr %v.reply.", ir, StringComparison.Ordinal);
+        InOrder(Body(@"""message\.Counter\.Get\.\d+"""), @"call i64 @""f\.Counter\.Get\.\d+""", @"call ptr @""rt\.common\.ReplyTaken\.\d+""\(ptr %a1\)",
+            @"call void @""rt\.common\.Replied\.\d+""");
+        InOrder(Runtime("ReplyTaken"), @"atomicrmw xchg ptr %t\d+, ptr null acq_rel, align 8");
+        InOrder(Runtime("ReplyState"), @"load atomic i32, ptr %t\d+ acquire, align 4");
+        InOrder(Runtime("Replied"), @"store ptr %t\d+, ptr %v\.waiter\.\d+", @"store atomic i32 1, ptr %t\d+ release, align 4", @"call void @""rt\.common\.Wake\.\d+""");
+        InOrder(Runtime("Signal"), @"store ptr %t\d+, ptr %v\.waiter\.\d+", @"store atomic i32 %t\d+, ptr %t\d+ release, align 4", @"call void @""rt\.common\.Wake\.\d+""");
+        InOrder(Runtime("Enqueue"), @"call ptr @""rt\.common\.ReplyTaken\.\d+""", @"store atomic i32 3, ptr %t\d+ release, align 4");
+        InOrder(Runtime("Wake"), @"atomicrmw or ptr %t\d+, i32 2 acq_rel, align 4", @"call void @""rt\.common\.Queue\.\d+""");
+        InOrder(Runtime("Exchanged"), @"cmpxchg ptr %t\d+, i32 %t\d+, i32 %t\d+ acq_rel acquire, align 4");
+        foreach (var name in new[] { "Claimed", "LetGo", "ActorBuilt" })
+        {
+            InOrder(Runtime(name), @"load atomic i32, ptr %t\d+ acquire, align 4", @"call i32 @""rt\.common\.Exchanged\.\d+""");
+        }
+
+        Ran(Toolchain.Run(toolchain.Build(program, "reply-orders")), 0, ["2"], string.Empty);
+    }
+
+    [Fact]
     public void An_atomic_order_a_copy_holds_as_its_constant_that_rust_refuses_raises_at_the_call()
     {
         // R19: an order no call writes, held as a constant by a copy of a function (T35), is no compile error; the copy that holds

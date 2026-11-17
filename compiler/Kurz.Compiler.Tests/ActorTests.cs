@@ -3289,6 +3289,60 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_block_posted_to_a_supervisor_whose_constructor_waits_runs_once_its_spawn_returned()
+    {
+        // U3, U28: `Boss`'s constructor spawns `Worker`, whose crash posts its block to `Boss` while that constructor waits on `Other`;
+        // a thread that takes `Boss`'s entry then finds it BUILDING in its state word and leaves it NOTIFIED, and `ActorBuilt` queues it
+        // again at the constructor's end, so that the block runs after `spawn Boss(o)` returned, in the top-level code's next wait, as
+        // no message starts before its actor's `spawn` returns, and its log line is written at its decision
+        const string text = """
+            actor Worker {
+                pub void Fail() {
+                    throw "fails"
+                }
+            }
+
+            actor Other {
+                pub int Ping() => 1
+            }
+
+            Worker Started() {
+                w = spawn Worker() on crash (c) {
+                    print("block")
+                    stop
+                }
+
+                send w.Fail()
+                return w
+            }
+
+            int Shown(int n) {
+                print("built {n}")
+                return n
+            }
+
+            actor Boss(Other O) {
+                Worker w = Started()
+                int first = O.Ping()
+                int second = Shown(O.Ping())
+
+                pub int Sum() => first + second
+            }
+
+            o = spawn Other()
+            b = spawn Boss(o)
+            print("spawned")
+            print(o.Ping())
+            print(b.Sum())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-building");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Worker#3 crashed: thrown \"fails\" at program.kz:3"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["built 1", "spawned", "block", "1", "2"], "");
+    }
+
+    [Fact]
     public void A_throw_in_the_block_crashes_the_supervisor_and_the_child_stays_stopped()
     {
         // U32: the block's throw is `Boss`'s crash, after the child's log line as for a `stop` (S10 of comment 6907441402); the crash ends
