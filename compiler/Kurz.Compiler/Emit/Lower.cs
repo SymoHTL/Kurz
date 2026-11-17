@@ -17,8 +17,9 @@ namespace Kurz.Compiler.Emit;
 /// and their count, whose highest bit marks a string that holds a block of the standard library in front of the bytes, which a
 /// literal does not, the pointer of an empty string pointing at a constant of no bytes and never
 /// <c>null</c> (R15; design record, section 3, and section 4, the counter: the owner, 2026-10-29, "Bit in the count"); a pointer and a C function value are <c>ptr</c> (R10, R17), and so are a list, the
-/// address of its block (M9), a file, the address of its handle's block (S5), and an actor's reference, the address of its state with
-/// its record in front of it (U2, <see cref="Emitter"/>); a function value is <c>%kz.fn</c>, the address of its code and of its
+/// address of its block (M9), and a file, the address of its handle's block (S5); an actor's reference is <c>%kz.actor</c>, the index of
+/// its actor's slot in the runtime's table and the actor's number, two words, 16 bytes aligned to 8 (U2, section 6, assumed there,
+/// <see cref="Emitter"/>); a function value is <c>%kz.fn</c>, the address of its code and of its
 /// environment, null for a lambda that reads no variable (F11, F15); a value of an enum is its number, or its place among the values
 /// where the declaration writes none, in the smallest of <c>i8</c>, <c>i16</c> and <c>i32</c> that holds every one, signed where a number
 /// is negative, as Rust stores the value of an enum without fields (D12, D18; section 4, an assumption there). Every other type is not emitted:
@@ -46,7 +47,8 @@ internal static class Lower
         NullType => "{}", // N1: one value, of no size
         EnumType e => $"i{EnumBits(e.Symbol).ToString(CultureInfo.InvariantCulture)}",
         FlagsType => "i32", // D13, D19: the bits of its names, 31 at most, below the sign of an `int`
-        PointerType or CFunctionType or ListType or MapType or HandleType or HasherType or CommandType or ChildProcessType or ActorType => "ptr",
+        PointerType or CFunctionType or ListType or MapType or HandleType or HasherType or CommandType or ChildProcessType => "ptr",
+        ActorType => "%kz.actor", // U2: the index of the actor's slot and its number (section 6)
         UnionType u when Types.NonNull(u) is CFunctionType => "ptr", // R17: its `null` is the address 0 (Layout.Niche)
         UnionType u when Types.NonNull(u) is FunctionType => "%kz.fn", // N1: its `null` is the pair of no code and no environment (Layout.Niche)
         FunctionType => "%kz.fn",
@@ -64,7 +66,7 @@ internal static class Lower
         "i16" => 2,
         "i32" or "float" => 4,
         "i64" or "double" or "ptr" => 8,
-        "%kz.str" or "%kz.fn" or "%kz.dec" or "i128" => 16,
+        "%kz.str" or "%kz.fn" or "%kz.dec" or "%kz.actor" or "i128" => 16,
         var other => throw new InvalidOperationException($"no size for `{other}`"),
     };
 
