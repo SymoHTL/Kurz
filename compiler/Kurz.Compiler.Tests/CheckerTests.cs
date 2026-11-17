@@ -1711,6 +1711,12 @@ public sealed class CheckerTests
         // O7; O6: a throw is an exception, which ends the actor and is no case of the result, so a function may throw a type its result does
         // not list, and the top level may throw
         Assert.Equal([(ErrorIds.ThrowNeedsValue, 2)], Errors("void Fail() {\n    throw\n}\n\nFail()"));
+
+        // a lambda's body is code of its own, which can run after the arm that makes it, so a bare `throw` there is refused inside an
+        // arm too (section 5, assumed there); the control throws in the arm itself
+        var lookup = "data EBare\n\nint | EBare Lookup(int id) {\n    if id == 1 {\n        return 1\n    }\n\n    return EBare\n}\n\nint Recover(() => int f) => f()\n\n";
+        Assert.Equal([(ErrorIds.ThrowNeedsValue, 16)], Errors(lookup + "int Use(int id) {\n    v = Lookup(id) else {\n        EBare => Recover(() => {\n            throw\n        })\n    }\n\n    return v\n}\n\nprint(Use(1))"));
+        Clean(lookup + "int Use(int id) {\n    v = Lookup(id) else {\n        EBare => throw\n    }\n\n    return v\n}\n\nprint(Use(1))");
         Clean("void Check(int n) {\n    if n < 0 {\n        throw \"negative\"\n    }\n}\n\nCheck(-1)");
         Clean("data ConfigMissing(string Path)\n\nthrow ConfigMissing(\"app.json\")");
         Clean("data NotFound\n\nint Find(int id) {\n    throw NotFound\n}\n\nprint(Find(1))");

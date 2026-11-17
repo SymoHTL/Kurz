@@ -1,6 +1,6 @@
 // expect: throws thrown at 13
 // | before
-// rules: O7
+// rules: O7, A3, A5, D6
 
 data Plain(int N)
 
