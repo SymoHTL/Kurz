@@ -409,7 +409,9 @@ entry serves, the second in the thread's own heap and the third in the heap it i
 process where the entry gives null (the owner, 2026-10-24, "Null, runtime ends it"), as Rust's `GlobalAlloc::alloc`
 returns null and leaves the end of the process to a caller, which its documentation encourages to
 call `handle_alloc_error`. The entry serves a heap (record, section 3): the one the runtime's `Run` sets before each
-switch to an actor's stack and puts back after it, the running actor's, else the thread's own, which
+switch to an actor's stack and puts back after it, the running actor's, which a waiting call sets
+aside while it waits (`Wait`); the new actor's, while `spawn` runs its constructor and the defaults
+of its body; the heap of a copy's session, from `CopyUse` to `CopyLeft`; else the thread's own, which
 holds what the top-level code allocates and what lives as long as the process ("The runtime"). A heap
 takes its memory in pages, its first page sized to what it holds first, from 256 bytes, each later page
 twice the size of the one before it, up to 65536 bytes, and larger, the smallest power of two that holds
@@ -1054,18 +1056,20 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   A `move` before an argument of a call that crosses nothing copies nothing and changes no count
   (U12): a variable's value leaves its place, which is stored null, or a string of no block, the count
   it held going to the parameter written `move` the argument fills, which its function owns and lets go of where it
-  leaves; the item of a loop that takes its list leaves its place in the list the same way, and the
-  release of a list of an item type such a loop takes, read from every unit's model before the first
+  leaves; the item of a loop that takes its list leaves its place in the list the same way where the
+  place has an empty value, a reference or a string, an item of another type staying there, counted
+  once more, and the release of a list of an item type such a loop takes, read from every unit's model before the first
   helper is built, tests each item for null, so that the list lets go of every item it still holds
   and of no moved one; a value of another type, inline or a function value, is counted once more. A
   place a `move` names is let go of through a test for null, at its scope's end and where an
   assignment replaces it, as rustc keeps a drop flag, and a message's function lets go of no
   argument of a parameter written `move`, which the method owns. A `move` into a message or a `spawn`
   copies the value into the receiver's heap, in the call's session, as an argument with no word
-  crosses, and lets go of the moved value, which frees it (section 6). A function value whose parameter is
+  crosses, a function value with a copy of its lambda's environment, and lets go of the moved value,
+  which frees it (section 6). A function value whose parameter is
   not written `move` where its type writes it, and a loop that takes a list of `weak` references,
-  are the emitter's `not supported`. `ActorTests` pins a moved instance that the receiver changes and
-  keeps, a `move` into an actor that copies into its heap and frees the original where `copy` frees
+  are the emitter's `not supported`. `ActorTests` pins a moved instance whose copy the receiver changes and
+  keeps, a moved lambda whose environment the receiver's heap holds, a `move` into an actor that copies into its heap and frees the original where `copy` frees
   nothing, and the allocations equal
   to the frees on a branch, in a loop that takes its list, after a reassignment and through a
   parameter written `move`; the line `actor-move-fenced` of `ListTests` a branch, a loop that takes
@@ -2097,8 +2101,10 @@ actor that spawned it (the owner, 2026-10-30), at the root the top-level code, w
 process, and no actor stops but a child of a supervisor that crashed, one whose policy stops it at its
 crash and one whose crash passes its limit (U25, U26). Every actor's blocks come from
 its own heap (section 3, "The runtime"), and the end of the top-level code frees every actor's heap
-whole before the process exits (`EndActors`), as the end of an actor frees its heap (U13); a crossing
-copies every counted block it reaches, so that no actor holds a block of another's heap (U12). Of
+whole before the process exits (`EndActors`), as the end of an actor frees its heap (U13, and the
+record's section 6, assumed: the end of the root actor read as the end of every actor it stops, whose
+heap section 3 frees whole); a crossing copies every counted block it reaches, so that no actor holds
+a count of a block of another's heap, a reference to an actor naming its state alone (U12). Of
 the heaps two things are not built: the share of a big value by pointer outside every heap, which
 section 6 decides, every big value crossing as a copy, and the sweep of section 13, every block
 being freed at its last count (the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share
@@ -2340,7 +2346,8 @@ ask about it.
   `ActorTests`, the cases `corpus/actors/copy-shared-graph.kz`, `corpus/actors/references-in-list.kz`,
   `corpus/actors/references-map-key.kz` (the hash a crossing keeps), `corpus/actors/send-lambda.kz`
   and the six of the memo of a call (above), and the line `actor-crossing-fenced` of `ListTests`.
-- U12 with section 6: on one thread a `move` into a parameter copies nothing and changes no count,
+- U12 with section 6: on one thread a `move` into a parameter copies nothing and, of a value whose
+  place it empties, changes no count,
   the moved place's count becoming the parameter's, a `move` into a message or a `spawn` copying the
   value into the receiver's heap and freeing the original, and a place a `move` names is let go of through a
   test for null, as rustc keeps a drop flag *(assumed in section 6, "What a `move` ends, and where it
@@ -2595,11 +2602,13 @@ type, a lambda's parameter whose type is not written taking it from the type the
 SE-0414 does, a tag for each place that makes a value, the tag 0 for the region outside the function,
 a parameter not written `move`, `this` with its fields, a captured variable and a static, and the
 links a call, an assignment to a field or an item, a `with`, a lambda's captures and a binding of
-`match` or `else` make between them, joined where `Known` is joined, after an `if`, a `match`, `&&`,
-`||` and a loop's rounds until both stand still; a value that crosses with no word joins none. A
+`match` or `else` make between them, joined where `Known` is joined, after an `if`, a `match`, an
+`else`, `&&` and `||`, whose join keeps the moves of the right side, and a loop's rounds until both
+stand still; a value that crosses with no word joins none. A
 `move` ends the variable it names and every variable its region reaches, on the paths that reach a
 later read, which is `used-after-move` at the read, naming each `move`'s line; a loop whose body
-moves its variable takes its list; a `move` of what the region outside reaches is `move-reachable`,
+moves either of its variables takes its list, whatever its item, and one the build cannot take, over
+a range, a map or a list of a type parameter's items, is `not supported`; a `move` of what the region outside reaches is `move-reachable`,
 and a word that does not fit a plain call's parameter `move-at-call`, in U16's order; a block that
 ends an arm of `match` or `else` gives the arm's value the region of its last expression, its own
 variables' regions read as they stood at the block's end, as rustc reads a block's tail. The model

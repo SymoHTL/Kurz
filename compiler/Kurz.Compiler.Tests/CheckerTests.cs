@@ -7368,8 +7368,8 @@ public sealed class CheckerTests
         // U12, section 6: a read of a variable a `move` ended, on any path, is `used-after-move` at the read (the owner, 2026-11-15, #519,
         // comment 6896192351, Q1), a call of a lambda that captured it and a capture after it among them; an assignment makes the variable
         // live again; a `move` in a loop that does not assign its variable again before the round ends is one at that `move`, read in an
-        // earlier round, and a `break` after it leaves the loop; an argument after a `move` in the same call reads after it (D11)
-        // (comment 6897444564, the points taken as following from the record)
+        // earlier round, and a `break` after it leaves the loop; an argument after a `move` in the same call reads after it (D11), the error
+        // standing at the read where the argument starts on a line before it (comment 6897444564, the points taken as following from the record)
         Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "cart = Cart(1)\nshop.Add(move cart)\nprint(cart.Items)\n"));
         Assert.Equal([(ErrorIds.UsedAfterMove, 64)], Errors(MoveShop + "cart = Cart(1)\nif args.Count > 0 {\n    shop.Add(move cart)\n}\nprint(cart.Items)\n"));
         Clean(MoveShop + "mut cart = Cart(1)\nif args.Count > 0 {\n    shop.Add(move cart)\n    cart = Cart(2)\n}\nprint(cart.Items)\n");
@@ -7378,6 +7378,7 @@ public sealed class CheckerTests
         Clean(MoveShop + "cart = Cart(1)\nwhile true {\n    shop.Add(move cart)\n    break\n}\n");
         Clean(MoveShop + "mut cart = Cart(1)\nshop.Add(move cart)\ncart = Cart(2)\nprint(cart.Items)\n");
         Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "cart = Cart(1)\nshop.Two(move cart,\n    cart.Items)\n"));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "cart = Cart(1)\nshop.Two(move cart, 1 +\n    cart.Items)\n"));
         Assert.Equal([(ErrorIds.UsedAfterMove, 63)], Errors(MoveShop + "cart = Cart(1)\nf = () => cart.Items\nshop.Add(move cart)\nprint(f())\n"));
         Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "cart = Cart(1)\nshop.Add(move cart)\nf = () => cart.Items\nprint(f())\n"));
     }
@@ -7414,6 +7415,8 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UsedAfterMove, 65)], Errors(MoveShop + "Item it = Big(1, 2)\nmatch it {\n    Big b => shop.AddItem(move b)\n    Item x => print(x.N)\n}\nprint(it.N)\n"));
         Assert.Equal([(ErrorIds.UsedAfterMove, 63)], Errors(MoveShop + "pair = Pair(Cart(1), 2)\nother = pair with { K = 3 }\nshop.AddPair(move other)\nprint(pair.K)\n"));
         Clean(MoveShop + "cart = Cart(1)\nlabel = \"a\"\ncount = cart.Items\nshop.Name(move label)\nshop.Add(move cart)\nprint(count)\n");
+        Clean(MoveShop + "first = Pair(Cart(1), 2).A\nshop.Add(move first)\n"); // a field of a value the function made is in that value's region, a fresh one
+        Assert.Equal([(ErrorIds.MoveReachable, 62)], Errors(MoveShop + "void Give(Shop s, Pair p) {\n    first = p.A\n    s.Add(move first)\n}\n\nGive(shop, Pair(Cart(1), 2))\n")); // a field of a parameter, outside
         Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "label = \"a\"\nshop.Name(move label)\nprint(label)\n"));
     }
 
@@ -7425,6 +7428,38 @@ public sealed class CheckerTests
         Clean(MoveShop + "carts = [Cart(1), Cart(2)]\nfor k in carts {\n    shop.Add(move k)\n}\n");
         Assert.Equal([(ErrorIds.UsedAfterMove, 64)], Errors(MoveShop + "carts = [Cart(1), Cart(2)]\nfor k in carts {\n    shop.Add(move k)\n}\nprint(carts.Count)\n"));
         Assert.Equal([(ErrorIds.MoveReachable, 62)], Errors(MoveShop + "void Send(Shop to, List<Cart> carts) {\n    for k in carts {\n        to.Add(move k)\n    }\n}\n\nSend(shop, [Cart(1)])\n"));
+
+        // either of a loop's two names over a map is the loop's, whose `move` is `not supported`
+        NotSupportedAt(63, "U12", MoveShop + "mut m = Map<string, Cart>()\nm[\"a\"] = Cart(1)\nfor k, v in m {\n    Take(move v)\n}\nsend shop.Name(\"x\")\n");
+    }
+
+    [Fact]
+    public void A_move_of_a_loops_variable_that_crosses_with_no_word_takes_its_list_too()
+    {
+        // U12: the variable of a loop over a list, of an item that crosses with no word, ends with the list the loop takes, which is dead
+        // after the loop and `move-reachable` where it is held outside the function (Q1 (b), assumed for such an item); a loop over a range,
+        // either name of a loop over a map and a loop over a list of a type parameter's items are `not supported`, read before the item's
+        // region is
+        const string Say = "void Say(move string s) {\n    print(s)\n}\n\nvoid Num(move int n) {\n    print(n)\n}\n\n";
+        Clean(Say + "names = [\"a\", \"b\"]\nfor s in names {\n    Say(move s)\n}\n");
+        Assert.Equal([(ErrorIds.UsedAfterMove, 13)], Errors(Say + "names = [\"a\", \"b\"]\nfor s in names {\n    Say(move s)\n}\nprint(names)\n"));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 13)], Errors(Say + "nums = [1, 2]\nfor n in nums {\n    Num(move n)\n}\nprint(nums)\n"));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 6)], Errors("void Two(move string s, int n) {\n}\n\nnames = [\"a\"]\nfor s in names {\n    Two(move s, names.Count)\n    break\n}\n"));
+        Assert.Equal([(ErrorIds.MoveReachable, 11)], Errors(Say + "void All(List<string> names) {\n    for s in names {\n        Say(move s)\n    }\n}\n\nAll([\"a\"])\n"));
+        NotSupportedAt(10, "U12", Say + "for n in 0..<2 {\n    Num(move n)\n}\n");
+        NotSupportedAt(12, "U12", Say + "mut m = Map<string, string>()\nm[\"a\"] = \"b\"\nfor k, v in m {\n    Say(move k)\n}\n");
+        NotSupportedAt(12, "U12", Say + "mut m = Map<string, string>()\nm[\"a\"] = \"b\"\nfor k, v in m {\n    Say(move v)\n}\n");
+        NotSupportedAt(12, "U12", Say + "void Each<T>(T a, (move T) => void f) {\n    xs = [a]\n    for x in xs {\n        f(move x)\n    }\n}\n\nEach(\"a\", t => print(t))\n");
+    }
+
+    [Fact]
+    public void A_value_a_round_of_a_loop_makes_is_new_in_each_round()
+    {
+        // U12: a variable declared in the body is new each round, so that what an earlier round's value was linked to holds no value of a
+        // later round (comment 6897444564, the points taken as following from the record), while what holds an earlier round's value stays
+        // linked to all that holds it
+        Clean(MoveShop + "mut carts = [Cart(0)]\nfor i in 0..<2 {\n    c = Cart(i)\n    if i == 0 {\n        shop.Add(move c)\n    } else {\n        Keep(mut carts, c)\n    }\n}\nprint(carts.Count)\n");
+        Assert.Equal([(ErrorIds.UsedAfterMove, 66)], Errors(MoveShop + "mut a = [Cart(0)]\nmut b = [Cart(0)]\nfor i in 0..<2 {\n    c = Cart(i)\n    if i == 1 {\n        shop.Add(move a[0])\n        print(b.Count)\n        break\n    }\n    Keep(mut a, c)\n    Keep(mut b, c)\n}\n"));
     }
 
     [Fact]
@@ -7436,6 +7471,9 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.MoveReachable, 61)], Errors(MoveShop + "void Give(Cart p) {\n    Take(move p)\n}\n\nGive(Cart(1))\nsend shop.Name(\"x\")\n"));
         Assert.Equal([(ErrorIds.MoveReachable, 61)], Errors(MoveShop + "void Say(Shop to, string t) {\n    to.Name(move t)\n}\n\nSay(shop, \"a\")\n"));
         Assert.Equal([(ErrorIds.MoveReachable, 61)], Errors(MoveShop + "cart = Cart(1)\ngive = () => shop.Add(move cart)\ngive()\n"));
+        // 551 T6 146: each reading of a loop declares its body's variables again, so the lambda of a later reading holds no tag an
+        // earlier reading ended; its `move` of the captured variable is `move-reachable` once, at the lambda's line
+        Assert.Equal([(ErrorIds.MoveReachable, 62)], Errors(MoveShop + "for i in 0..<2 {\n    m = Cart(i)\n    give = () => shop.Add(move m)\n    give()\n}\n"));
         Clean(MoveShop + "void Pass(Shop to, move Cart c) {\n    to.Add(move c)\n}\n\nPass(shop, move Cart(1))\n");
     }
 
@@ -7456,6 +7494,9 @@ public sealed class CheckerTests
         Clean(MoveShop + "void Run((move Cart) => void f) {\n    f(move Cart(1))\n}\n\nRun(k => shop.Add(move k))\n");
         Assert.Equal([(ErrorIds.MoveReachable, 64)], Errors(MoveShop + "void Run((move Cart) => void f) {\n    f(move Cart(1))\n}\n\nRun((Cart k) => shop.Add(move k))\n"));
         Assert.Equal([(ErrorIds.TypeMismatch, 64)], Errors(MoveShop + "void Plain((Cart) => void f) {\n    f(Cart(1))\n}\n\nPlain((move Cart k) => print(k.Items))\nsend shop.Name(\"x\")\n"));
+
+        // a call of a function value reads the words of its type: no word before a parameter its type writes `move` is `move-at-call`
+        Assert.Equal([(ErrorIds.MoveAtCall, 4)], Errors("class Cart(mut int Items)\n\nvoid Run((move Cart) => void f) {\n    f(Cart(1))\n}\n\nRun(k => print(k.Items))\n"));
     }
 
     [Fact]
@@ -7694,6 +7735,10 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.SendNeedsWord, 22)], Errors(A + "Keep(a.Face())\n"));
         Assert.Equal([(ErrorIds.SendNeedsWord, 23)], Errors(A + "print(\n    a.All().Count)\n"));
         Assert.Empty(Errors(A + "print(a.Name().Text)\n"));
+
+        // a function value as a result, read by its written type (Q5), and a `send` of such a method, which drops no result (U6)
+        Assert.Equal([(ErrorIds.SendNeedsWord, 6)], Errors("actor A {\n    pub () => int Job() => () => 1\n}\n\na = spawn A()\nf = a.Job()\nprint(f())\n"));
+        Assert.Equal([(ErrorIds.SendResult, 6)], Errors("actor A {\n    pub () => int Job() => () => 1\n}\n\na = spawn A()\nsend a.Job()\n"));
     }
 
     [Fact]
@@ -7709,6 +7754,12 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.SendNeedsWord, 15)], Errors(Run + "f = () => b.N + k\na.Run(f)\n"));
         Assert.Equal([(ErrorIds.SendNeedsWord, 15)], Errors(Run + "mut f = () => k\na.Run(f)\nf = () => 3\nprint(f() + b.N)\n"));
         Assert.Equal([(ErrorIds.SendNeedsWord, 15)], Errors(Run + "void Pass(A target, () => int g) {\n    target.Run(g)\n}\n\nPass(a, () => b.N + k)\n"));
+
+        // a field, an item and the value of a `match` are read by their written type too, whatever lambda they hold
+        const string Held = "class Holder(() => int F)\n\nactor A {\n    pub void Run(() => int job) {\n        print(job())\n    }\n}\n\na = spawn A()\nk = 1\n";
+        Assert.Equal([(ErrorIds.SendNeedsWord, 12)], Errors(Held + "h = Holder(() => k)\na.Run(h.F)\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 12)], Errors(Held + "List<() => int> fs = [() => k]\na.Run(fs[0])\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 11)], Errors(Held + "a.Run(match k > 0 {\n    true => () => k\n    false => () => 2\n})\n"));
     }
 
     [Fact]

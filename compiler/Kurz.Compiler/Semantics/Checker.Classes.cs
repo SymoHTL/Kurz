@@ -1421,7 +1421,7 @@ public sealed partial class Checker
             Assigned(new NullPath(receiver, field.Name), field.Type, value); // N9: a path with no `weak` reference is narrowed by its assignment
         }
 
-        Merge([Outside, RegionOf(a.Value)]); // U12: a value stored in a field of `this` joins the region outside the function
+        Merge([Outside, RegionOf(a.Value)]); // U12 (assumed): a value stored in a field of `this` joins the region outside the function
     }
 
     // ---- static members ------------------------------------------------------------------------------
@@ -1906,7 +1906,7 @@ public sealed partial class Checker
             Assigned(PathOf(a.Target), field.Type, value); // N9: a path with no `weak` reference is narrowed by its assignment
         }
 
-        Merge([RegionOf(last.Target), RegionOf(a.Value)]); // U12: the value joins the region of the instance it is stored in
+        Merge([RegionOf(last.Target), RegionOf(a.Value)]); // U12 (assumed): the value joins the region of the instance it is stored in
     }
 
     /// <summary>

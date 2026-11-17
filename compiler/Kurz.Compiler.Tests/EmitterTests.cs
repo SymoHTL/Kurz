@@ -1332,4 +1332,18 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.DoesNotContain("@\"table.Dot\" =", program.Ir, StringComparison.Ordinal);
         Ran(Toolchain.Run(toolchain.Build(program, "interface-layout")), 0, ["1", "8", "4"], string.Empty);
     }
+
+    [Theory]
+    [InlineData("(move Cart) => void g = (Cart c) => print(c.Items)\ng(move Cart(4))\n")]
+    [InlineData("((move Cart) => void)? g = (Cart c) => print(c.Items)\nif g != null {\n    g(move Cart(4))\n}\n")]
+    public void A_function_value_whose_parameter_is_not_written_move_given_for_a_type_that_writes_it_is_not_supported_through_a_nullable_too(string text)
+    {
+        // U12: a lambda whose parameter's type is written without `move` fits a type that writes it (2026-11-05, Q4), which the build does
+        // not wrap, so that the callee would borrow what its caller hands over; a nullable function type reaches the refusal through its
+        // case, as the plain one does
+        var refused = Compile("class Cart(mut int Items)\n\n" + text, toolchain.Runtime);
+        Assert.Null(refused.Program);
+        var d = Assert.Single(refused.Diagnostics.Items);
+        Assert.Equal((DiagnosticKind.NotSupported, 3), (d.Kind, d.Line));
+    }
 }

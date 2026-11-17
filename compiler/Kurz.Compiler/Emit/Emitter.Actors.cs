@@ -532,7 +532,10 @@ public sealed partial class Emitter
             fn.Block(answered);
             if (Counted(f.ReturnType))
             {
-                // U12: a result that holds a block crosses back into the caller's heap as a copy of its own, and the method's lets go
+                // U12: a result that holds a block crosses back into the caller's heap as a copy of its own, and the method's lets go;
+                // no function value reaches here, since a call that waits on a method whose result does not cross with no word, a
+                // function type among them, is `send-needs-word` at the call, and a `send` of a method with a result is `send-result`
+                // (U6; `Checker.Actors.cs`, the stage of the result)
                 var heap = fn.Value($"load ptr, ptr {fn.Value($"getelementptr {Reply(f.ReturnType)}, ptr {reply}, i32 0, i32 2")}");
                 var crossed = Crossed(result, f.ReturnType, heap); // in a session of its own, not the call's
                 Release(result, f.ReturnType);

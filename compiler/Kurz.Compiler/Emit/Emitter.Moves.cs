@@ -5,14 +5,16 @@ using FunctionType = Kurz.Compiler.Semantics.FunctionType;
 namespace Kurz.Compiler.Emit;
 
 /// <summary>
-/// U12, section 6: <c>move</c> on one thread copies nothing and changes no count (the owner, 2026-11-15, #519, comment 6895076937): the
-/// value of a variable written <c>move</c> leaves its place, which is emptied, and the count it held goes with it to the place the
-/// argument goes to, a message's or a parameter written <c>move</c>, which the function owns and lets go of at its end. Into an actor,
-/// whose heap is its own, the moved value is copied into that heap and let go of, which frees it (section 13, the point of comment
-/// 6895076937 that the answers left standing; <see cref="Arguments"/>). A place a
+/// U12, section 6: <c>move</c> into a parameter on one thread copies nothing and changes no count (the owner, 2026-11-15, #519, comment
+/// 6895076937, which gave the moved count to "the message's or the parameter's" place): the value of a variable written <c>move</c>
+/// leaves its place, which is emptied, and the count it held goes with it to the parameter written <c>move</c>, which the function owns
+/// and lets go of at its end; a value whose place is not emptied, inline data, a fat class reference and a function value, is counted
+/// once more (section 6, assumed). Into a message or a <c>spawn</c>, the actor's heap being its own, the moved value is copied into that
+/// heap and let go of, which frees it, as an argument with no word crosses (section 6, "What a <c>move</c> ends, and where it stands",
+/// assumed on comment 6902210646, Q5, which narrows comment 6895076937 to a parameter; <see cref="Arguments"/>). A place a
 /// <c>move</c> may have emptied is let go of through a test for the empty value, as rustc keeps a drop flag (comment 6897444564), and a
-/// loop that takes its list empties the item's place in the list (comment 6897778812, Q1 (b)), so that the list lets go of every item
-/// it still holds and of no moved one.
+/// loop that takes its list empties the item's place in the list where the item's place has an empty value (comment 6897778812, Q1
+/// (b)), so that the list lets go of every item it still holds and of no moved one, and counts any other moved item once more.
 /// </summary>
 public sealed partial class Emitter
 {
