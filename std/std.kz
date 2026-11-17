@@ -6430,7 +6430,7 @@ pub bool FixedTimeEqual(byte* a, byte* b) {
 }
 
 // The digit of `d`, 0 to 15, in lower-case hexadecimal.
-byte HexDigit(int d) {
+pub byte HexDigit(int d) {
     if d < 10 {
         return byte(48 + d)
     }
@@ -14621,3 +14621,46 @@ pub enum RuntimeKind {
 // The runtime's own error, the one `data` type of the runtime's errors that is a member of every `Reason` (design record, section 5):
 // its kind, and the detail its error line names, as `HttpError` holds its kind and its detail (section 5, assumed there).
 pub data RuntimeError(RuntimeKind Kind, string Detail)
+
+// The place of a crash, the file and the line that raised it, 0 where no line is known, as Rust's `panic::Location` holds them
+// (section 5, the place of the `Crashed` case; its name and its fields assumed, S4 of issue 519, comment 6907441402).
+pub data Place(string File, int Line)
+
+// The crash of a child that the block of its policy reads, `on crash (c) { ... }` (section 5, section 6): what the child threw, its
+// `Reason`, whose type `R` is the union of what the child's code can throw and the runtime's error type, the place of the crash and the
+// ID of the chain of the message that crashed, 32 hexadecimal digits, as OpenTelemetry writes a trace-id (the names of the fields and the
+// chain's digits assumed, S4 of comment 6907441402).
+pub data Crashed<R>(R Reason, Place Place, string Chain)
+
+// The runtime's error of a crash that the block of `on crash` reads in its child's `Reason` (section 5): its
+// kind by the id its error line names, the first word of `id`, as the rows of the reference's run-time table
+// name them, and the text below that line, `detail`, empty where it has none. An id no row names is a defect
+// of the runtime, which ends the block with a `throw`.
+pub RuntimeError RuntimeErrorOf(string id, string detail) {
+    mut string word = id
+    space = id.IndexOf(" ")
+    if space != null {
+        word = id.Substring(0, space)
+    }
+
+    kind = match word {
+        "overflow" => RuntimeKind.Overflow
+        "divide-by-zero" => RuntimeKind.DivideByZero
+        "index-out-of-range" => RuntimeKind.IndexOutOfRange
+        "reversed-range-at-run-time" => RuntimeKind.ReversedRangeAtRunTime
+        "stack-overflow" => RuntimeKind.StackOverflow
+        "print-failed" => RuntimeKind.PrintFailed
+        "allocation-failed" => RuntimeKind.AllocationFailed
+        "not-char-boundary" => RuntimeKind.NotCharBoundary
+        "random-failed" => RuntimeKind.RandomFailed
+        "deadlock" => RuntimeKind.Deadlock
+        "callee-crashed" => RuntimeKind.CalleeCrashed
+        "actor-gone" => RuntimeKind.ActorGone
+        "restart-limit" => RuntimeKind.RestartLimit
+        "cpu-lacks-set" => RuntimeKind.CpuLacksSet
+        "settings-unpublished" => RuntimeKind.SettingsUnpublished
+        else => throw "the runtime raised `{word}`, which no row of the run-time table names"
+    }
+
+    return RuntimeError(kind, detail)
+}

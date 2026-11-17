@@ -25,6 +25,7 @@ public sealed class ThrowSets
 {
     private readonly Checker program;
     private readonly Checker? std;
+    private readonly bool blocks;
     private readonly Dictionary<object, Unit> units = new(new UnitKeys());
     private readonly List<Unit> order = [];
     private readonly KurzType runtimeError;
@@ -33,12 +34,17 @@ public sealed class ThrowSets
     private List<DataType>? instantiations;
     private List<(object Key, Unit Unit)>? waiting;
 
-    /// <summary>The sets of the code of <paramref name="program"/>, which sees the types of <paramref name="std"/> (W1); null where the program is <c>std/</c> itself.</summary>
-    public ThrowSets(Checker program, Checker? std)
+    /// <summary>
+    /// The sets of the code of <paramref name="program"/>, which sees the types of <paramref name="std"/> (W1); null where the program is
+    /// <c>std/</c> itself. Where <paramref name="blocks"/> does not hold, the bodies of the blocks of <c>on crash</c> are left out, as at the
+    /// checker's first reading of such a program, which reads them with no <c>Reason</c> found yet (U30).
+    /// </summary>
+    public ThrowSets(Checker program, Checker? std, bool blocks = true)
     {
         ArgumentNullException.ThrowIfNull(program);
         this.program = program;
         this.std = std;
+        this.blocks = blocks;
         var error = (std ?? program).Model.DataTypes.FirstOrDefault(d => d.Name == "RuntimeError")
             ?? throw new InvalidOperationException("std/ declares no `RuntimeError`, the runtime's error type of section 5");
         runtimeError = new DataType(error, []);
@@ -72,7 +78,8 @@ public sealed class ThrowSets
         [typeof(WithExpression)] = "its target, its values, and the fields of the data type's body",
         [typeof(ElseExpression)] = "its call and its arms",
         [typeof(ParenthesizedExpression)] = "its inner expression",
-        [typeof(SpawnExpression)] = "the actor's construction, and its code under escalate",
+        [typeof(SpawnExpression)] = "the actor's construction, its code under escalate or a block, and the block's body",
+        [typeof(AttemptExpression)] = "no code: the checker refuses it",
         [typeof(Block)] = "its statements",
         [typeof(VariableDeclaration)] = "its value",
         [typeof(AssignOrDeclare)] = "its value",
@@ -89,6 +96,7 @@ public sealed class ThrowSets
         [typeof(RawBlock)] = "its body",
         [typeof(UseStatement)] = "no code",
         [typeof(SendStatement)] = "its call's arguments",
+        [typeof(DecisionStatement)] = "no code: the runtime acts on the decision",
         [typeof(AsmStatement)] = "its operands, and the function a sym operand names",
         [typeof(ConstAssertStatement)] = "no code: the compiler reads it",
         [typeof(ExternBlock)] = "no code",
@@ -737,9 +745,13 @@ public sealed class ThrowSets
                     break;
                 case SpawnExpression s:
                     Call(s.Call);
-                    if (model.CallOf(s.Call).Target is ClassType { Symbol: var actor } && Policy(s, actor) == "escalate")
+                    if (model.CallOf(s.Call).Target is ClassType { Symbol: var actor } && Policy(s, actor) is { Word: "escalate" or "block" } policy)
                     {
-                        unit.Edges.Add(new Edge(new Root(actor), null)); // U25: the child's crash passes up whole
+                        unit.Edges.Add(new Edge(new Root(actor), null)); // U25, U28: the child's crash passes up whole, as a block can pass it up
+                        if (policy.Block is { } block && sets.blocks)
+                        {
+                            Statement(block.BlockBody!); // U32: the block runs as a message of the actor whose code spawns, and its throw is that actor's crash
+                        }
                     }
 
                     break;
@@ -797,7 +809,7 @@ public sealed class ThrowSets
                 case MatchStatement m:
                     Match(m.Subject, m.Arms);
                     break;
-                case BreakStatement or ContinueStatement or UseStatement or ConstAssertStatement or ExternBlock or FunctionDeclaration or FieldDeclaration or ConstructorDeclaration or TypeDeclaration:
+                case BreakStatement or ContinueStatement or UseStatement or ConstAssertStatement or ExternBlock or FunctionDeclaration or FieldDeclaration or ConstructorDeclaration or TypeDeclaration or DecisionStatement:
                     break;
                 case ReturnStatement r:
                     Optional(r.Value);
@@ -1115,8 +1127,8 @@ public sealed class ThrowSets
         private void TextMethods(IEnumerable<FunctionSymbol?> methods) =>
             unit.Edges.AddRange(methods.OfType<FunctionSymbol>().Distinct().Select(m => new Edge(m, null)));
 
-        // U25, U27: the policy a spawn gives its actor: its own, else the type's default, else `restart`
-        private static string Policy(SpawnExpression s, ClassSymbol actor) =>
-            (s.Policy ?? actor.Declaration.Clauses?.FirstOrDefault(c => c.Policy is not null)?.Policy)?.Word ?? "restart";
+        // U25, U27: the policy a spawn gives its actor: its own, else the type's default, null for `restart`
+        private static CrashPolicy? Policy(SpawnExpression s, ClassSymbol actor) =>
+            s.Policy ?? actor.Declaration.Clauses?.FirstOrDefault(c => c.Policy is not null)?.Policy;
     }
 }

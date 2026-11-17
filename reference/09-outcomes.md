@@ -1149,7 +1149,7 @@ Case: [outcomes/else-throw.kz](../corpus/outcomes/else-throw.kz)
 form. It is a statement and can stand wherever one can. As an arm of `else` it can also stand
 alone (O5): a bare `throw` there throws the case value that reached the arm, so the arm
 `NotFound => throw` throws the `NotFound`. A bare `throw` anywhere else is the compile error
-`throw-needs-value`: there is no value it could mean. *(proposed)* When a supervisor reads what
+`throw-needs-value`: there is no value it could mean. When a supervisor reads what
 was thrown as the `Reason` of a crashed child, its type is the union of everything the
 child's code can throw, found over the whole program (the owner, 2026-10-03, against a fixed type
 that carries the text and the place, and against limiting `throw` to `data` values and text). Where
@@ -1165,8 +1165,9 @@ such union in every build; the place and the chain id are fields of the `Crashed
 them to what was thrown: they travel with the crash, not inside the thrown value; a
 thrown class instance is moved out of the dying child's heap into the supervisor's
 with everything it reaches, which is the cost, paid once per such crash (the owner, 2026-10-04,
-against a compile error for a thrown class instance). The supervisors
-themselves are outside this reference. The bare `throw` of an `else` arm is the `throw` that
+against a compile error for a thrown class instance). The block that reads the crash, its
+`Reason` among it, is U28 to U34 of chapter 19, with the names of the runtime's type, its kinds and
+the order of the union's cases (U30) *(assumed: as §5 marks it)*. The bare `throw` of an `else` arm is the `throw` that
 raised (E3): it throws the case value that reached the arm, and nothing is raised a second time,
 because nothing catches.
 

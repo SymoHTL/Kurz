@@ -29,6 +29,17 @@ public sealed partial class Emitter
         return value;
     }
 
+    /// <summary>The IR value of an argument after <c>copy</c> before its copy, which its call makes (<see cref="CopiedLate"/>).</summary>
+    private string EmitUncopied(Expression e)
+    {
+        var f = fn;
+        var around = f.Location;
+        At(e.Line);
+        var value = EmitExpressionAt(e);
+        f.Location = around;
+        return value;
+    }
+
     private string EmitExpressionAt(Expression e)
     {
         var typed = Model.TypeOf(e);

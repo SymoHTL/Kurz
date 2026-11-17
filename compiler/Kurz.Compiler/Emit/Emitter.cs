@@ -781,6 +781,11 @@ public sealed partial class Emitter
             case ThrowStatement t:
                 EmitThrow(t);
                 break;
+            case DecisionStatement d:
+                // U29: the decision of the block of `on crash`, which the runtime acts on once the block's function returns
+                fn.Emit($"call void {RuntimeFunction("Decide")}(i64 {(d.Word switch { "restart" => 1, "stop" => 2, _ => 3 })})");
+                EmitReturn(null, Types.Void, d.Line);
+                break;
             case MatchStatement m:
                 EmitMatch(m.Subject, m.Arms, null);
                 break;
@@ -866,15 +871,66 @@ public sealed partial class Emitter
         fn.Block(exit);
     }
 
-    /// <summary>A <c>throw</c> (O6): the text of the value and the place of the throw to the runtime's <c>Throw</c>, which ends the process; a bare <c>throw</c> in an arm of <c>else</c> throws the case value that reached the arm (O7).</summary>
+    /// <summary>
+    /// A <c>throw</c> (O6): the text of the value and the place of the throw to the runtime's <c>Throw</c>, which ends the process; a bare
+    /// <c>throw</c> in an arm of <c>else</c> throws the case value that reached the arm (O7). Where a block of <c>on crash</c> of the program
+    /// reads a <c>Reason</c> with the value's type, or with the type of its case, the value, its type's number and its copy go to the
+    /// runtime first (the runtime's <c>Thrown</c>; U30).
+    /// </summary>
     private void EmitThrow(ThrowStatement t)
     {
         var (value, type) = t.Value is null
             ? elseCase ?? throw new InvalidOperationException($"a bare `throw` outside an arm of `else` at line {t.Line}: the checker reports it")
             : (EmitExpression(t.Value), TypeOf(t.Value));
         var text = TextOf(value, type, t.Line);
+        if (program.Model.CrashReasons.Count > 0)
+        {
+            EmitThrown(value, type);
+        }
+
         fn.Emit($"call void {RuntimeFunction("Throw")}(%kz.str {text}, %kz.str {StringValue(unit.File)}, i32 {Number(t.Line)})");
         fn.Unreachable();
+    }
+
+    /// <summary>
+    /// U30: the thrown value <paramref name="value"/> named to the runtime, where a block's <c>Reason</c> has its type: its type's number,
+    /// a slot that holds it and the function that copies it (<see cref="ThrownCopy"/>); a union's value by the case its tag names.
+    /// </summary>
+    private void EmitThrown(string value, KurzType type)
+    {
+        var read = program.Model.CrashReasons.SelectMany(r => r is UnionType u ? u.Cases : new[] { r }).Select(layout.Number).ToHashSet();
+        void Name(string? one, KurzType c)
+        {
+            if (!read.Contains(layout.Number(c)))
+            {
+                return;
+            }
+
+            var slot = "null";
+            var copy = "null";
+            if (one is not null)
+            {
+                slot = fn.Alloca(Ir(c), "thrown");
+                fn.Emit($"store {Ir(c)} {one}, ptr {slot}");
+                copy = ThrownCopy(c);
+            }
+
+            fn.Emit($"call void {RuntimeFunction("Thrown")}(i64 {Number(layout.Number(c))}, ptr {slot}, ptr {copy})");
+        }
+
+        if (type is not UnionType union)
+        {
+            Name(value, type);
+            return;
+        }
+
+        var done = fn.Label("thrown");
+        ByCase(Tag(value, union), union, union.Cases, c =>
+        {
+            Name(c is VoidType or NullType ? null : Payload(value, union, c), c);
+            fn.Branch(done);
+        });
+        fn.Block(done);
     }
 
     /// <summary>An exception of the run-time table (chapter 12) at its line of the file being emitted: the runtime's <c>Raise</c>, which ends the process.</summary>

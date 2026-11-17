@@ -336,6 +336,22 @@ public sealed partial class Emitter
     {
         var values = new string?[c.Arguments.Count];
         var session = into is null ? null : CallSession(Enumerable.Range(0, c.Arguments.Count).Count(i => info.Binding[i] >= 0 && !slotMut(info.Binding[i]) && Counted(Sub(slotType(info.Binding[i])))), into);
+        var late = new List<(int Index, Func<string, string> Read)>(); // U12: the copies read after the call's last copy (Late)
+        string? copied = null;
+        void Cross(int i, string value, KurzType type, string? environment, bool keep)
+        {
+            // U12: a copy into the actor's heap, read at once where it is the call's one copy, else after its last
+            if (session is null)
+            {
+                var copy = Crossed(value, type, into, environment);
+                values[i] = keep ? copy : Temp(copy, type);
+                return;
+            }
+
+            Late(value, type, session, into, !keep, environment);
+            late.Add((i, v => keep ? v : Temp(v, type)));
+        }
+
         for (var i = 0; i < c.Arguments.Count; i++)
         {
             var slot = info.Binding[i];
@@ -351,9 +367,9 @@ public sealed partial class Emitter
                     var moved = Convert(MovedValue(a), TypeOf(a), type, a.Line);
                     if (into is not null && Counted(type))
                     {
-                        var across = Crossed(moved, type, session, into);
+                        Cross(i, moved, type, null, takes);
                         Release(moved, type);
-                        moved = across;
+                        continue;
                     }
 
                     values[i] = takes ? moved : Temp(moved, type);
@@ -365,10 +381,20 @@ public sealed partial class Emitter
                     // U12: each argument copied where it is evaluated, left to right, in the call's session; a function value with the
                     // environment of the lambda the checker saw for it
                     var crossing = Convert(EmitExpression(a), TypeOf(a), type, a.Line, owned: false);
-                    var copy = (Types.NonNull(type) ?? type) is FunctionType
-                        ? Crossed(crossing, type, session, into, CopyEnvironmentInto(Model.LambdaOf(Model.CrossingLambda(a) ?? throw new InvalidOperationException($"a function value crosses at line {a.Line} with no lambda the checker saw")).Captures.Select(v => Sub(v.Type)).ToList()))
-                        : Crossed(crossing, type, session, into);
-                    values[i] = owned ? copy : Temp(copy, type);
+                    Cross(i, crossing, type, (Types.NonNull(type) ?? type) is FunctionType
+                        ? CopyEnvironmentInto(Model.LambdaOf(Model.CrossingLambda(a) ?? throw new InvalidOperationException($"a function value crosses at line {a.Line} with no lambda the checker saw")).Captures.Select(v => Sub(v.Type)).ToList())
+                        : null, owned);
+                    continue;
+                }
+
+                if (copySessions.TryGetValue(a, out var shared))
+                {
+                    // U12: an argument after `copy` in a call of more than one copy, read after the call's last copy
+                    var own = TypeOf(a);
+                    var line = a.Line;
+                    copied = shared;
+                    CopiedLate(a, held: !takes);
+                    late.Add((i, v => Convert(takes ? v : Temp(v, own), own, type, line, takes)));
                     continue;
                 }
 
@@ -376,6 +402,8 @@ public sealed partial class Emitter
                 values[i] = Convert(value, TypeOf(a), type, a.Line, takes);
             }
         }
+
+        ReadLate(session ?? copied, (k, v) => values[late[k].Index] = late[k].Read(v));
 
         var arguments = new List<string>();
         for (var j = 0; j < info.SlotCount; j++)

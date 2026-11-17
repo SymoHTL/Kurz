@@ -506,8 +506,8 @@ owner, 2026-11-14, #519, comment 6880404917, Q11). On Linux a fault on a stack's
 `stack-overflow` as one on the main thread's is (below), and a stack the system refuses ends the
 process with `allocation-failed` and the size asked for. `common/`'s copy of a crossing (U12) works
 in the session of a call, nine words in the caller's frame, the ninth the heap the copies go into, the
-receiver's, or none for a `copy` at a call that crosses nothing, which copies the class instances it
-reaches and shares every other block by its count (`CopyWhole`), since the copies one call makes share
+receiver's, or none for a `copy` at a call that crosses nothing, which copies every block on a path to a
+class instance and shares by its count only a block that reaches none (`CopyWhole`), since the copies one call makes share
 one memo and a result has one of its own (section 6): the memo, open addressing on a block's address
 and never more than half full, which `CopyFind` reads and `CopyKeep` fills with each block held more
 than once, or every block in a call of more than one copy, its copy and the function that lets go
@@ -520,7 +520,9 @@ lets other sessions run between two copies of one call, and `CopyAbort` ends a s
 was left before its last copy. The work list, which `CopyPush` fills with a block, its copy and the
 function that fills the copy, and `CopyNext` empties, the last first, is the thread's own, from the
 thread's own heap (`AllocateOwn`), as the memo and the room of the `weak` references are, grown by doubling and kept for the thread's next copy, since a run runs no program code
-and leaves it empty. `ActorTests` pins the stacks, the guard page,
+and leaves it empty; so is the list of the copies of maps whose keys reach a class instance, which
+`CopyAfter` fills with a copy and the function that places its entries again, and `CopyAfterNext`
+empties once the work list is empty (section 6, 2026-11-16). `ActorTests` pins the stacks, the guard page,
 the overflow, the refusal, the sizes, the pool, the trim and the registers a switch keeps, `RuntimeTests` the directories
 of the architectures, and `EmitterTests.The_switch_of_every_target_and_architecture_is_assembled_by_clang_for_its_machine`
 that clang assembles each switch for its machine.
@@ -1017,21 +1019,38 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   session, which the copies of all its arguments share and a result has of its own, so that two
   paths to one block, in one argument or in two, arrive as two paths to one copy (Q2), and once the
   call's last copy is made each `weak` reference in its copies points at the copy of its target
-  where they hold that target, and is null otherwise, with its weak count taken there (Q3). The
+  where they hold that target, and is null otherwise, with its weak count taken there (Q3), so that
+  the call reads each copy after its last, or makes it in the place its callee reads, a restart's
+  kept arguments and a message a crash copies among them, and a `weak` reference an argument holds
+  in its own bytes, a `weak T?` or a field of a plain `data` value, is pointed too. The
   session is zero from the function's start, begun at the call where it makes more than one copy,
   and ended by the region's end, or a jump out of it, where a case a later argument propagates left
   the call before its last copy (section 6). `copy` before an argument of any other call copies the
   same way, the copy a temporary the call reads and its statement lets go of (Q6). The copy walks a
   work list and never recurses ("The runtime"). `ActorTests` pins a chain of a million links copied,
   10,000 references to one instance arriving as references to one copy, a weak parent link pointing
-  at the copy and the allocations equal to the frees; the line `actor-crossing-fenced` of
+  at the copy, a `weak` reference an argument holds in its own bytes pointing at its copy at a
+  restart and in a message a crash copies, and the allocations equal to the frees; the line `actor-crossing-fenced` of
   `ListTests` a field's list copied before a later argument's wait replaces it, the memo, the weak
   fix-up, a result copied from a field, and two arguments of one message that reach one instance
   arriving as one copy across a later argument's wait whose chain crosses a result; the cases
-  `corpus/actors/copy-two-arguments.kz`, `copy-two-at-call.kz` and `copy-weak-across-arguments.kz`
-  the memo of a call, `copy-left-to-right.kz` the order, `copy-memo-keeps-block.kz` a block the memo
-  holds living to the call's last copy and `copy-left-early.kz` a call left before it; and
-  `corpus/actors/copy-derived.kz` an instance of a derived class held as its base.
+  `corpus/actors/copy-two-arguments.kz`, `copy-two-at-call.kz`, `copy-weak-across-arguments.kz`,
+  `copy-weak-argument.kz` and `copy-weak-at-call.kz` the memo of a call, `copy-left-to-right.kz` the order, `copy-memo-keeps-block.kz` a block the memo
+  holds living to the call's last copy and `copy-left-early.kz` a call left before it, whose copies
+  the call had not read yet are let go of (`ActorTests`, by the count of blocks); and
+  `corpus/actors/copy-derived.kz` an instance of a derived class held as its base. The copy of a map whose
+  keys reach a class instance is the copy of its block's bytes, with its source's hash and keys, each key
+  and each value copied in its slot, and then each entry placed again under its copied key's hash, by
+  identity or by content as the key's class compares, by the helper a lookup past the bound rehashes with,
+  once the run's work list is empty, since a key's hash reads the fields of the instances it reaches and a
+  copy the memo gave can still wait there to be filled (`CopyAfter`; section 6, the owner, 2026-11-16, #519,
+  comment 6923513534, "Rehash each key (Recommended)"); it compares no two keys, allocates no block of the
+  receiver's heap beyond the copy of the map's block, and runs no program code, since a key's hash is the
+  one the map's type takes, built from the fields its class compares. `corpus/actors/copy-map-instance-keys.kz` sends maps
+  keyed by instances that compare by identity and by content, one of whose keys the memo gives before its
+  fields are filled, and finds each copied key in the receiver's map, at a message, after `move` at a
+  message, which copies the moved map into the receiver's heap by the same copy, and after `copy` at a
+  plain call.
   A `move` before an argument of a call that crosses nothing copies nothing and changes no count
   (U12): a variable's value leaves its place, which is stored null, or a string of no block, the count
   it held going to the parameter written `move` the argument fills, which its function owns and lets go of where it
@@ -2034,10 +2053,29 @@ line and the trace of the child's stack, a crash passed into an actor whose cons
 crashes in the window in a ring in the supervisor's heap, which grows by doubling up to N, the crash
 that finds N there writing its line, ending the actor and crashing the supervisor with `restart-limit`
 at the line of the `spawn`, at the root the end of the process with the trace of the top-level code
-where it waits. What stays `not supported` of section 6's supervision: the block `on crash (c) { ... }`
-with its `Crashed` and its `Reason`, after `spawn` and after a type's name, a policy after the name of
-a `per` actor with `per` itself (U1), and, on Windows, an actor's stack overflow, which ends the process
-as the system ends it whatever the policy (U19); a crash at the root, the top-level code, still ends
+where it waits. The block `on crash (c) { ... }`, after `spawn` and after a type's name, is built
+(U28 to U34): the emitted `spawn` gives the runtime the block's function and the values it took in
+the block of its restart, and keeps the copy of the arguments a restart constructs from; at the
+crash of an actor whose supervisor's policy is a block, the runtime copies the crash's id and text
+and the thrown value into the supervisor's heap, the value by the crossing copy of its type (U12),
+before the child's heap is freed, keeps the stack the child raised on, leaves the child in a state
+in which it takes no message, and puts the block's message at the front of the supervisor's inbox,
+after the block messages already there, or, at the top level, on a list that the top-level code's
+wait runs before it goes on; the block's function makes the `Crashed` value from the copies, a
+run-time error's `RuntimeError` by `RuntimeErrorOf` of `std/` from its id and its detail, and gives
+the runtime its decision, which it acts on as on the words of a policy, writing the log line at
+`restart` and at `stop` and, at an `escalate` to the top level, switching back to the kept stack for
+the child's error line and its trace; a supervisor's crash or end, and the end of the top-level
+code, drop its pending blocks and end their children. On Linux the `Crashed` value of a stack
+overflow holds an empty file and the line 0 in its `Place`, its place standing in its `Detail`, and
+an overflow escalated to the top level writes the trace of the top-level code where it waits, since
+the stack the child overflowed on, whose state the signal's stack held, is not kept. What stays `not
+supported` of section 6's supervision: `attempt { ... }` and `retry { ... }`; a block whose child can
+throw a type the crossing copy does not copy (U12), a block in a file read without `std/`, and a block
+whose child's `Reason` grows by what the blocks of the program read, read four times; a policy after
+the name of a `per` actor with `per` itself (U1), a block there among it; the crash paths of the ESP32
+models, AVR and WebAssembly, for which the build has no target; and, on Windows, an actor's stack
+overflow, which ends the process as the system ends it whatever the policy (U19); a crash at the root, the top-level code, still ends
 the process with its error line, its trace and the exit code 1. A call whose caller crashed runs to its end and its result goes nowhere, which on
 one thread no program reaches but through the crash path, a caller that waits crashing only through
 a call of its own chain; an actor that ended keeps its first page to the end of the process, so that
@@ -2311,7 +2349,8 @@ ask about it.
   deep copy stops at one *(all assumed in section 6, "How a value crosses and what `copy`
   does")*; and an actor's reference as a key of a map hashes by the actor's number, which a crossing
   keeps, as section 6 has it ("An actor's reference compares by the actor it names"). Pinned by
-  `ActorTests`, the cases `corpus/actors/copy-shared-graph.kz`, `corpus/actors/references-in-list.kz`
+  `ActorTests`, the cases `corpus/actors/copy-shared-graph.kz`, `corpus/actors/references-in-list.kz`,
+  `corpus/actors/references-map-key.kz` (the hash a crossing keeps), `corpus/actors/send-lambda.kz`
   and the six of the memo of a call (above), and the line `actor-crossing-fenced` of `ListTests`.
 - U12 with section 6: on one thread a `move` into a parameter copies nothing and changes no count,
   the moved place's count becoming the parameter's, a `move` into a message or a `spawn` copying the
@@ -2491,10 +2530,15 @@ that sit under a rule by its id. Every one is pinned by a test.
   has one; another word there, a knob after `stop` or `escalate` or written twice, `max N` without its
   `in`, a value that is no number literal, anything but the end of the expression after a policy at
   `spawn` and a second `on crash` after an actor's name are `syntax` (U25, U26, U27). An `on crash`
-  block, `on crash (c) { ... }`, after the arguments of a `spawn` is kept by its line and passed over
-  to the end of the expression, and after an actor's name passed over with its parameters and its
-  braces, so that the braces after it are the body. The checker says
-  `not supported` to the blocks and to the clauses but `stack` and a policy, and reads a policy's
+  block, `on crash (c) { ... }`, there and after the arguments of a `spawn`, is held as a lambda of its
+  one parameter, a name with no type, its block opened on that line, in which `restart`, `stop` and
+  `escalate` before anything but `=` are statements, and `return` is `syntax`, the words names in a
+  lambda inside it; no name, a second one or a type in the parentheses, a block on a line of its own,
+  a knob after `restart` and a word after a decision are `syntax` (U28, U29). `attempt` and `retry`
+  before a block are an expression of that block, which the checker says `not supported` to (section 6),
+  but in the condition, the collection or the subject before the block of an `if`, a `while`, a `for`
+  or a `match` the word is a name, as a struct literal is no condition in Rust. The checker says
+  `not supported` to the clauses but `stack` and a policy, and reads a policy's
   duration and count (U26, `type-mismatch`). `spawn` binds as C#'s `new`, so that `spawn Counter().Get()` calls `Get` on the new
   reference, a name after `spawn` without its `(` is `syntax`, and `send` before what the parser
   reads as no call is `syntax` (U14), and before a call of anything but an actor's method the
@@ -2624,13 +2668,18 @@ construction runs; the fields of a `data` body that a construction or a `with` c
 lambda whose type fits a call of a function value, and a lambda a built-in call takes; the `Text()` that `print`, `eprint`, an
 interpolation's hole and `string.Join` call, through the fields, items and cases of the type, and of a generic `data` type derived
 from it through each instantiation of it that the program builds (the owner, 2026-11-16); the construction of an actor it spawns; and
-the code of an actor it spawns under `escalate`. The instantiations are found as Rust's monomorphization finds its instances: the
+the code of an actor it spawns under `escalate` or a block, with the block's body, which runs as a message of the
+actor whose code spawns (U32), a type's block among it. The instantiations are found as Rust's monomorphization finds its instances: the
 fixed point joins the generic `data` types each unit constructs with those of the units it runs, through the same type arguments, and
 with those of the lambdas it makes, as Rust collects a closure's instance in the instance of the function that makes it, and the
 program builds those that the sets of its roots, the top-level code and the `pub` functions without type parameters, hold with
 every type argument named. A call through an actor's reference reaches nothing of the callee's
 code, the text of a thrown value adds nothing, and a function of a folder of the runtime throws nothing. A bare `throw` throws the
-case its arm of `else` took. No build reads the sets: `ThrowSetTests` holds one thrown type for each of these forms over a fenced
+case its arm of `else` took. The checker reads the sets for the block of `on crash` alone (U30): it reads a program with a block
+again with the `Reason` of each block's child that the reading before found, the first reading with the runtime's type alone
+and the sets without the blocks' bodies, the blocks' own diagnostics left out of it, until the `Reason`s found are the ones
+read, and says `not supported` to a block whose child's `Reason` still grows at the fourth, so that a block's own errors show
+once the rest of the program reads clean. `ThrowSetTests` holds one thrown type for each of these forms over a fenced
 program, the text of each instantiation a program builds over a program of its own, every kind of node of the tree to the table
 `ThrowSets.Kinds`, the walk of every corpus case and of `std/`, a runtime that
 throws nothing, and a kind of `RuntimeKind` for each run-time row of the error table.
@@ -2764,21 +2813,22 @@ or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` 
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
 type or a time type (T10, T29);
 a modifier of a method on a top-level function, which leaves the function and every call of its
-name unread (K7, M6); of an actor, a clause after its name but `stack` and the words of a policy (U1, U27), the block of `on crash` among them, a modifier but `pub`, type parameters and
+name unread (K7, M6); of an actor, a clause after its name but `stack` and the words of a policy (U1, U27), the block of `on crash` after a `per` actor's name among them, a modifier but `pub`, type parameters and
 an interface, which an actor may declare (U1), a `static` method and an immutable `static` field of a type that holds no class,
 or of a type not written (U1), and a modifier of a method but `pub`, which a method
 may take as a class's does (U1, U9), each of which leaves the
 actor and every use of its name unread, besides what a class's body does not read, as the checker's `syntax` for a base after
 an actor's name, `equal by` and a constructor in its body (U1, U2), and its `static-state` for a `static mut` field and one
 whose type is or holds a class (U1), leave it too, while an actor after a class's `:` is `syntax` and the class is read without
-that base (U1); the block `on crash (c) { ... }` after a `spawn` (U2, U25); `move` before a field of a primary
+that base (U1); `attempt { ... }` and `retry { ... }` (section 6, U28); a block of `on crash` whose child can throw a type the
+crossing copy does not copy, one in a file read without `std/` and one whose child's `Reason` grows past the fourth reading
+(U30); `move` before a field of a primary
 constructor, a parameter of a constructor of K14, of a C function's declaration or of a `naked`
 function, a `move` of the variable of a loop over anything but a list, and a `move` of a value whose
 region the checker does not keep (U12); an argument
 or a result of a message or of an actor's constructor, and a value after `copy` at any call, that
 reaches a value of a type parameter, an instance of a class of `std/`, `HttpRequest` and
-`HttpHeaders` among them, a handle of section 12, a pointer or a map whose keys reach a class
-instance, whose hash a copy would keep (U12); `copy` at a call that is no message before a value that
+`HttpHeaders` among them, a handle of section 12 or a pointer (U12); `copy` at a call that is no message before a value that
 reaches a function value or an interface's value, which no word makes cross (U12); and a log call
 inside an actor (P8). The refusal of
 the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered

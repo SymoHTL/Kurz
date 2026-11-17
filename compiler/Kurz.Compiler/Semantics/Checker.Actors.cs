@@ -28,6 +28,9 @@ public sealed partial class Checker
     /// <summary>U1: the name of each actor the file declares, read or not, which no type after an actor's name may name.</summary>
     private readonly HashSet<string> actorNames = new(StringComparer.Ordinal);
 
+    /// <summary>U28, U30: each block of <c>on crash</c> the checker read, with the actor whose crash it decides and the <c>Reason</c> it read of it.</summary>
+    private readonly List<(CrashPolicy Policy, ClassSymbol Child, IReadOnlyList<KurzType> Read)> crashBlocks = [];
+
     /// <summary>
     /// U1: an actor the checker reads is declared as a class is, its body read by the class's code; an actor with a part the build does
     /// not read, or with <c>equal by</c> or a constructor in its body, which no rule gives a meaning (U2), joins the types the checker does
@@ -105,11 +108,14 @@ public sealed partial class Checker
     /// </summary>
     private static (int Line, string Construct)? UnreadActorPart(TypeDeclaration d)
     {
+        if ((d.Clauses ?? []).Any(c => c.Word == "per") && (d.Clauses ?? []).FirstOrDefault(c => c.Policy is { Block: not null }) is { } block)
+        {
+            return (block.Line, "the block `on crash (c) { ... }` after the name of a `per` actor (U27, U28)");
+        }
+
         if ((d.Clauses ?? []).FirstOrDefault(c => c.Word != "stack" && c.Policy is null) is { } clause)
         {
-            return (clause.Line, clause.Word == "on crash"
-                ? "the block `on crash (c) { ... }` after an actor's name (U1, U25)"
-                : $"the clause `{clause.Word}` after an actor's name (U1)");
+            return (clause.Line, $"the clause `{clause.Word}` after an actor's name (U1)");
         }
 
         if ((d.Modifiers & ~Modifiers.Pub) != 0)
@@ -299,8 +305,9 @@ public sealed partial class Checker
     /// its target does (the owner, 2026-11-15, #519, comment 6896192351, Q3, "Points at the copy"), as Rust's <c>Send</c> is structural:
     /// a <c>mut</c> field needs a word, and an interface's type and a function type are read by their written type and never cross
     /// (comment 6892275110, item 2; comment 6896192351, Q5, "By written type"). A value of a type parameter, a handle of section 12, a
-    /// pointer, a class of <c>std/</c>, which is no class of the file (W1), <c>HttpRequest</c> among them, and a map whose keys reach a
-    /// class instance, whose hash the copy would not keep, are the build's limits.
+    /// pointer and a class of <c>std/</c>, which is no class of the file (W1), <c>HttpRequest</c> among them, are the build's limits; a map
+    /// whose keys reach a class instance is none, since its copy hashes each key again (the owner, 2026-11-16, #519, comment 6923513534,
+    /// "Rehash each key (Recommended)").
     /// </summary>
     private (ActorCrossing Kind, string? Why, string? Limit) CrossingOf(KurzType type)
     {
@@ -320,7 +327,7 @@ public sealed partial class Checker
             switch (t)
             {
                 case FunctionType:
-                    Meet(ActorCrossing.Never, $"a function value, `{t}`, which crosses only as a lambda the sending function shows, written at the argument or bound to an immutable local variable");
+                    Meet(ActorCrossing.Never, $"a function value, `{t}`, which crosses only as a lambda the sending function shows, the argument itself or bound to an immutable local variable");
                     break;
                 case InterfaceType:
                     Meet(ActorCrossing.Never, $"a value of the interface `{t}`, which may hold a mutable class instance whatever the program puts there");
@@ -350,11 +357,6 @@ public sealed partial class Checker
                     Walk(l.Element);
                     break;
                 case MapType m:
-                    if (ReachesClass(m.Key))
-                    {
-                        limit ??= $"a map whose keys of type `{m.Key}` reach a class instance";
-                    }
-
                     Walk(m.Key);
                     Walk(m.Value);
                     break;
@@ -393,20 +395,6 @@ public sealed partial class Checker
         Walk(type);
         return (kind, why, limit);
     }
-
-    /// <summary>Whether a value of the type holds a class instance, through what a copy walks: a key of a map whose hash the copy keeps (<see cref="CrossingOf"/>).</summary>
-    private static bool ReachesClass(KurzType type) => ReachesClass(type, []);
-
-    private static bool ReachesClass(KurzType type, HashSet<DataSymbol> data) => type switch
-    {
-        ClassType or InterfaceType or WeakRefType => true,
-        ListType l => ReachesClass(l.Element, data),
-        MapType m => ReachesClass(m.Key, data) || ReachesClass(m.Value, data),
-        UnionType u => u.Cases.Any(c => ReachesClass(c, data)),
-        DataType d when data.Add(d.Symbol) => d.Symbol.Fields.Any(f => ReachesClass(SubstituteData(d, f.Type), data)),
-        DataType d => HeldArguments(d).Any(a => ReachesClass(a, data)),
-        _ => false,
-    };
 
     /// <summary>
     /// U12: how the argument crosses into the slot of the type <paramref name="slot"/>: a function value by what it captures where the
@@ -461,9 +449,10 @@ public sealed partial class Checker
     /// U12, U16: the stage of the arguments of a message or of an actor's constructor, after the own error of each argument (E1), in the
     /// order of U16: <c>send-needs-word</c> of the first argument that does not cross, at its argument, then in the order the arguments are
     /// written, the words of <c>move</c> (<see cref="MessageMove"/>: <c>move-at-call</c>, <c>move-reachable</c> and a later argument's
-    /// <c>used-after-move</c>), the build's <c>not supported</c> of a value it does not make cross (<see cref="CrossingOf"/>), and
-    /// <c>mut-in-message</c> of a <c>mut</c> parameter, which <paramref name="mutInMessage"/> reports (the owner, 2026-11-15, issue 519,
-    /// comment 6891937666, item 4); then each <c>move</c> ends what it sends. Whether it reported one.
+    /// <c>used-after-move</c>) and <c>mut-in-message</c> of a <c>mut</c> parameter, which <paramref name="mutInMessage"/> reports (the owner,
+    /// 2026-11-15, issue 519, comment 6891937666, item 4), and after every argument the build's <c>not supported</c> of the first value it
+    /// does not make cross (<see cref="CrossingOf"/>), so that the build's limit hides no error of the language (E1); then each <c>move</c>
+    /// ends what it sends. Whether it reported one.
     /// </summary>
     private bool CrossingErrors(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, bool> slotMove, string callee, Action<int> mutInMessage)
     {
@@ -515,7 +504,10 @@ public sealed partial class Checker
             {
                 return true;
             }
+        }
 
+        for (var i = 0; i < c.Arguments.Count; i++)
+        {
             if (limits[i] is { } limit && c.Arguments[i].Word != ArgumentWord.Move)
             {
                 NotSupported(c.Arguments[i].Line, $"{limit}, crossing into an actor (U12)");
@@ -539,13 +531,6 @@ public sealed partial class Checker
     /// </summary>
     private Typed CheckSpawn(SpawnExpression s)
     {
-        if (s.OnCrashLine != 0)
-        {
-            NotSupported(s.OnCrashLine, "the block `on crash (c) { ... }` after `spawn` (U2, U25)");
-            CheckArgumentsLoosely(s.Call);
-            return Typed.Error;
-        }
-
         var name = ((NameExpression)s.Call.Callee).Name;
         if (!classes.TryGetValue(name, out var symbol) || !symbol.IsActor)
         {
@@ -583,8 +568,111 @@ public sealed partial class Checker
             return Typed.Error; // U25, U16: the policy is read after the arguments, as it is written after them
         }
 
+        if (s.Policy is { Block: not null } block && CheckCrashBlock(block, symbol))
+        {
+            return Typed.Error; // U28: the block is read after the arguments, as it is written after them
+        }
+
         return new Typed(new ActorType(symbol));
     }
+
+    /// <summary>
+    /// U28 to U31: the block of a policy, <c>on crash (c) { ... }</c>, of the actor <paramref name="child"/>, read as the body of a lambda of
+    /// its one parameter, the crash, a <c>Crashed</c> of <c>std/</c> whose <c>Reason</c> is the child's (section 5): where it stands at
+    /// <c>spawn</c>, it takes the variables around it by value and reads the fields of the actor whose code spawns, as a lambda there does
+    /// (F15, K7), and after a type's name it reads what a top-level function reads (F16; assumed: S6 and S7 of issue 519,
+    /// comment 6907441402); each path of it ends with a decision or a <c>throw</c>, and one that ends with neither is <c>missing-return</c>,
+    /// as for a lambda whose path ends with no value (F3; the owner, 2026-11-16, comment 6919351399, "missing-return error"). Whether it
+    /// reported an error. The <c>Reason</c> read is the one the reading before found (<see cref="Check(ProgramSyntax, DiagnosticBag)"/>):
+    /// at the first reading it is the runtime's error type alone and what the block reports is dropped. A <c>Reason</c> with a type the
+    /// crossing copy does not copy (U12) is <c>not supported</c>, as the copy that brings it into the supervisor's heap is not built.
+    /// </summary>
+    private bool CheckCrashBlock(CrashPolicy policy, ClassSymbol child)
+    {
+        var l = policy.Block!;
+        var crashed = std?.Model.DataTypes.FirstOrDefault(d => d.Name == "Crashed");
+        var error = std?.Model.DataTypes.FirstOrDefault(d => d.Name == "RuntimeError");
+        if (crashed is null || error is null)
+        {
+            NotSupported(policy.Line, "the block `on crash (c) { ... }` in a file read without `std/`, which declares `Crashed` (U30)");
+            return true;
+        }
+
+        IReadOnlyList<KurzType> reason = reasons is null ? [new DataType(error, [])] : Translated(reasons[child.Declaration]);
+        if (reasons is not null && reason.FirstOrDefault(t => t is TypeParameterType || CrossingOf(t) is { Kind: ActorCrossing.Never } or { Limit: not null }) is { } uncopied)
+        {
+            NotSupported(policy.Line, $"a block of `on crash` whose child can throw {Types.A(uncopied)}, which the crossing copy does not bring into the supervisor's heap (U30, U12)");
+            return true;
+        }
+
+        crashBlocks.Add((policy, child, reason));
+        var type = new DataType(crashed, [Types.Union(reason)]);
+        var outer = frame;
+        Push();
+        frame = new Frame
+        {
+            IsLambda = true,
+            Deciding = true,
+            Outer = outer,
+            CapturedScope = outer.Scope,
+            ReturnType = Types.Void,
+            Line = l.Line,
+            TypeParameters = outer.TypeParameters,
+            Reserved = outer.Reserved,
+            Known = Unchangeable(outer.Known), // N3 with F15, as a lambda's
+            Moves = MoveState.Empty.With(moved: outer.Moves.Moved), // U12, as a lambda's
+        };
+        var parameter = DeclareParameter(l.Parameters[0].Name, type, false, l.Parameters[0].Line, l.Parameters[0]);
+        if (CheckBlock(l.BlockBody!) == Flow.Completes)
+        {
+            Report(ErrorIds.MissingReturn, l.Line, "a path of the block of `on crash` ends with no decision, `restart`, `stop` or `escalate` (U29, F3)");
+        }
+
+        ReportUnused(frame.Scope);
+        var block = frame;
+        frame = outer;
+        var reported = Pop(commit: reasons is not null).Count > 0;
+        model.RecordLambda(l, new LambdaInfo([parameter], block.Captures.ToList(), new FunctionType([type], Types.Void)));
+        model.RecordCrashReason(type.TypeArguments[0]);
+        return reported && reasons is not null;
+    }
+
+    /// <summary>
+    /// U27, U28: the block of a policy after the name of each actor the checker reads, the type's default, read as the body of a top-level
+    /// function reads (F16; assumed: S6 of comment 6907441402), with no supervisor in scope.
+    /// </summary>
+    private void CheckTypeBlocks()
+    {
+        foreach (var symbol in classDeclared.Where(c => c.IsActor))
+        {
+            if (symbol.Declaration.Clauses?.FirstOrDefault(c => c.Policy is { Block: not null })?.Policy is { } policy)
+            {
+                frame = new Frame { ReturnType = Types.Void, Line = policy.Line, Reserved = reservedTopLevel };
+                CheckCrashBlock(policy, symbol);
+            }
+        }
+    }
+
+    /// <summary>
+    /// U30: the types of a <c>Reason</c> the reading before found, with the symbols of this reading: a type of the file, of the built-in
+    /// types among them, by the symbol this reading made of its declaration, and a type of <c>std/</c>, whose checker both readings share, as
+    /// it is.
+    /// </summary>
+    private List<KurzType> Translated(IReadOnlyList<KurzType> types) => types.Select(Translated).ToList();
+
+    private KurzType Translated(KurzType t) => t switch
+    {
+        DataType d => new DataType(dataTypes.TryGetValue(d.Symbol.Name, out var s) && ReferenceEquals(s.Declaration, d.Symbol.Declaration) ? s : d.Symbol, d.TypeArguments.Select(Translated).ToList()),
+        ClassType c => new ClassType(classes.TryGetValue(c.Symbol.Name, out var s) && ReferenceEquals(s.Declaration, c.Symbol.Declaration) ? s : c.Symbol),
+        EnumType e => new EnumType(enums.TryGetValue(e.Symbol.Name, out var s) && ReferenceEquals(s.Declaration, e.Symbol.Declaration) ? s : e.Symbol),
+        FlagsType f => new FlagsType(flagsTypes.TryGetValue(f.Symbol.Name, out var s) && ReferenceEquals(s.Declaration, f.Symbol.Declaration) ? s : f.Symbol),
+        InterfaceType i => new InterfaceType(interfaces.TryGetValue(i.Symbol.Name, out var s) && ReferenceEquals(s.Declaration, i.Symbol.Declaration) ? s : i.Symbol),
+        ListType l => new ListType(Translated(l.Element)),
+        MapType m => new MapType(Translated(m.Key), Translated(m.Value)),
+        UnionType u => Types.Union(u.Cases.Select(Translated)),
+        WeakRefType w => new WeakRefType((ClassType)Translated(w.Target)),
+        _ => t, // a type that holds no symbol of the file; a function type, a pointer or a type parameter, which no copy brings over, is refused above
+    };
 
     /// <summary>
     /// U26: the values of a policy's knobs, each a constant the emitter reads, reported; whether one has an error. <c>after</c> takes a duration

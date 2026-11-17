@@ -4,8 +4,9 @@ An actor is an object with private state and an inbox, which handles one message
 of its method through its reference is a message (§6, "Actors"). This chapter holds the actors of
 one machine and what a program writes of them: an actor's declaration, `spawn`, the call that waits
 for its result, `send`, and what crosses into a message, the crash of an actor, its restart by
-the default policy and its log line (U19 to U24), and the words of a policy (U25 to U27), and the threads that run the actors (U35). The
-scheduler but its threads, the stacks, the block of a policy, deadlocks but the calls a waiting actor lets in (U17)
+the default policy and its log line (U19 to U24), the words of a policy (U25 to U27), the block of a policy (U28
+to U34) and the threads that run the actors (U35). The scheduler but its threads, the stacks, deadlocks but the
+calls a waiting actor lets in (U17)
 and the wait of the top-level code that nothing can end (U18), the clauses after an actor's name but
 the stack's and the policy's (U1, U27) and the actors of other machines (§6, §7) have no rule here, and `compiler/README.md` says what the compiler builds of the rules here.
 
@@ -58,7 +59,7 @@ comment 6851105334, "Accept, set nothing (Recommended)").
 (U2), `actor Worker on crash stop { ... }`, and gives the type's default (U27) (§6, "Policy at
 `spawn`"), and a second `on crash` there is `syntax`, as a second `stack` is (E4) *(assumed: as §6
 marks it)*; `on crash` with a block after it, `on crash (c) { ... }`,
-has no rule here.
+is U28's.
 
 Case: [actors/counter.kz](../corpus/actors/counter.kz)
 ```kurz
@@ -184,7 +185,8 @@ makes an actor with a state of its own. An actor's constructor is its primary on
 actor's name without `spawn` is the compile error `spawn-required` (§6, the owner, 2026-11-13, #519,
 comment 6847932993, Q13, "Primary ctor, kept args (Recommended)"). An actor's reference compares by
 the actor it names: `==` is true of two references to one actor, `!=` of two to different actors,
-and its text is its actor's type and number, `Counter#1`, the number counted from 1 in the order in
+its hash is its actor's number's, so that a reference can be a key of a map, and its text is its
+actor's type and number, `Counter#1`, the number counted from 1 in the order in
 which the actors of one machine are spawned (§6, the owner, 2026-11-14, #519, comment 6880404917, Q10, "All eight leans (Recommended)") *(assumed: that shape and that
 count, which the answer did not give)*. `==` and `!=` take two references to actors of one type, and
 on references to actors of two types they are `type-mismatch`, since no actor's type converts to
@@ -212,7 +214,7 @@ number literal, with its sign where it has one, which the checker reads (U26); t
 expression. Another word after `on crash`, a knob after `stop` or `escalate`, a knob written twice,
 `max N` without its `in` and its duration, a value that is no number literal and anything after the
 policy but the end of the expression are `syntax` (E4) *(assumed: as §6 marks it, as `stack` takes its
-literal once (U1))*. `on crash` with a block after it, `on crash (c) { ... }`, has no rule here.
+literal once (U1))*. `on crash` with a block after it, `on crash (c) { ... }`, is U28's.
 
 Case: [actors/spawn-in-function.kz](../corpus/actors/spawn-in-function.kz)
 ```kurz
@@ -319,6 +321,42 @@ c = a
 print("{a} {b}")
 print(a == c)
 print(a == b)
+```
+
+Case: [actors/references-map-key.kz](../corpus/actors/references-map-key.kz)
+```kurz
+actor Counter {
+}
+
+actor Hub {
+    pub string Find(Map<Counter, string> known, Counter c) => known[c] ?? "none"
+}
+
+a = spawn Counter()
+b = spawn Counter()
+mut names = Map<Counter, string>()
+names[a] = "a"
+names[b] = "b"
+h = spawn Hub()
+print(h.Find(names, a))
+print(h.Find(names, b))
+```
+
+Case: [actors/generic-reference.kz](../corpus/actors/generic-reference.kz)
+```kurz
+actor Counter {
+    mut int count = 0
+
+    pub int Bump() {
+        count = count + 1
+        return count
+    }
+}
+
+T Same<T>(T x) => x
+
+c = spawn Counter()
+print(Same(c).Bump())
 ```
 
 Case: [actors/first-error-spawn-required.kz](../corpus/actors/first-error-spawn-required.kz)
@@ -813,8 +851,8 @@ actor Worker {
 ### U12 (decided, §6) What crosses
 
 What crosses between actors is a value (a string, a number), a collection, a `data` value or an
-immutable class instance where every value it reaches crosses, a function value where every value
-it captures crosses, and an actor's reference; a mutable class instance, and a collection or a `data` value that reaches one, crosses with `copy`
+immutable class instance where every value it reaches crosses, a lambda the sending function shows
+where every value it captures crosses (§6, Q5), and an actor's reference; a mutable class instance, and a collection or a `data` value that reaches one, crosses with `copy`
 or `move` alone, where every value it reaches crosses or is a mutable class instance, and with
 `move` only where every path into it ends (§6, "What may cross between actors"). A message's arguments and its result cross so, and so
 do the arguments of an actor's constructor, which cross as a call's do (§6, the owner,
@@ -845,32 +883,38 @@ compile error of a mutable class instance given as a call's result (§6, the own
 issue 519, comment 6892275110, item 3, option (a), "Same error, by written type"), and so is a
 collection, a `data` value or a class instance that reaches one *(assumed: as §6 marks it)*.
 An immutable class is one through which nothing
-reachable has a `mut` field, and a value crosses where every value it reaches crosses, a
-collection's items and a `data` value's fields among them, as Rust's `Send` is structural
-*(assumed: the reading of Q14 (i) said back in #519, comment 6882879015, reading 4)*; a
-function value crosses where every value it captures crosses, and a
+reachable has a `mut` field, and a value crosses where every type its type reaches crosses, a
+collection's item type and a `data` value's field types among them, as Rust's `Send` is
+structural and read from types *(assumed: the reading of Q14 (i) said back in #519, comment
+6882879015, reading 4, read by types, as a crossing copies by the parameter's type)*; a lambda
+the sending function shows crosses where every value it captures crosses (§6, Q5), and a
 mutable class instance given as a call's result, where no word can stand, is a compile error (§6,
 the owner, 2026-11-14, #519, comment 6880404917, Q14, "All eight leans (Recommended)"), and that
 error is `send-needs-word`, as rustc gives the same error to a task's output as to its input
 (`tokio::spawn` asks `F::Output: Send`) (§6, the owner, 2026-11-15, #519, comment 6896192351, Q4,
 "Rust: send-needs-word"), at the line of the call *(assumed: that place, since no argument stands
-for a result)*.
+for a result)*, and so is a function value and a value that reaches a value no word makes cross, or
+a mutable class instance, given as a result *(assumed, §6: as rustc asks `Send` of a task's output by
+its type, which Q4 named for a mutable class instance and an interface's value alone)*.
 A collection or a `data` value that reaches a mutable class instance is `send-needs-word` at its
-argument with neither word, and crosses with `copy`, a deep copy of all it reaches up to a function
-value or an actor's reference, or with `move`, every path into it ending, `move-reachable` where
+argument with neither word, and crosses with `copy`, a deep copy of all it reaches up to an actor's
+reference, since one that reaches a function value does not cross (§6, Q5), or with `move`, every path into it ending, `move-reachable` where
 one cannot *(assumed: that reading of §6's `copy` and `move`, carried from a mutable class instance
 to a value that holds one, where rustc reads `Send` through a struct's fields whatever a call
-writes)*. A collection, a `data` value or a class instance that reaches a function value whose
-captures do not cross is `send-needs-word` at its argument with a word or with none, as that
-function value is, the paths `move` ends stopping at a function value it reaches *(assumed: Q24's
+writes)*. A collection, a `data` value or a class instance that reaches a function value is
+`send-needs-word` at its argument with a word or with none, as that function value is, one
+reached through a field or an item being read by its written type (§6, Q5), the paths `move` ends stopping at a function value it reaches *(assumed: Q24's
 cost read for a word at the argument as for that function value, as rustc reads `Send` through a
 struct's fields and a closure's through its captures)*. A reference that crosses names the same
 actor, so that `==` holds across a crossing (§6, the owner, 2026-11-14, #519, comment 6880404917,
 Q10). The deep copy of `copy` stops at a function value it reaches, which the receiver gets as it
 would with no word, copied into its heap with the values it captures where the call crosses (§6,
-the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big unbuilt") and shared by
-its count with them where the call crosses nothing, `copy f` of one whose captures cross among
-them, and at an actor's reference, which the receiver gets naming the same
+the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big unbuilt"), there only
+the argument itself, a lambda the sending function shows, since one reached through a field or an
+item does not cross (§6, Q5), an instance it captures arriving as the copy that an argument
+reaching the same instance arrives as, in the memo of the call (§6) *(assumed, §6: the memo read
+for what a lambda captures)*, and shared by its count with them where the call crosses nothing, at
+any function value the copy reaches, `copy f` of one whose captures cross among them, and at an actor's reference, which the receiver gets naming the same
 actor, as a reference that crosses names it *(assumed, §6: the stop at a function value, Q24's cost read for a word at the argument, as rustc reads a closure's
 `Send` through its captures; the stop at an actor's reference, as Rust's clone of a channel's
 `Sender` is another sender to the same channel, `impl<T> Clone for Sender<T>`,
@@ -912,28 +956,42 @@ whose lambda the checker does not see, a parameter, a field or a call's result, 
 written type, as a value of an interface's type is: it crosses only as a lambda the function that
 sends it shows, and any other is `send-needs-word`, so that a callback received as a parameter is
 never sent (§6, the owner, 2026-11-15, #519, comment 6896192351, Q5, "By written type")
-*(assumed: that a lambda the function shows is one written at the argument or the one an immutable
-local variable is declared with, and that the named function the answer names stands for no case,
+*(assumed: that a lambda the function shows is one that is the argument itself or the one an
+immutable local variable is declared with, a lambda inside an argument, a field of a construction
+there, being read by its written type, and that the named function the answer names stands for no case,
 since F11 gives a function value through a lambda only)*. `copy` before an argument is a deep copy wherever it is
 written, a call that crosses nothing included, as Rust's `.clone()` stands anywhere (§6, the owner,
-2026-11-15, #519, comment 6896192351, Q6, "Rust: deep copy anywhere"). The sender makes the copy,
+2026-11-15, #519, comment 6896192351, Q6, "Rust: deep copy anywhere"), save that a block the call's
+memo holds is not copied again (Q2), so that an argument's copy of it shows the block as the first
+copy found it *(assumed, §6: the memo of the call and the order of its copies)*. The sender makes the copy,
 at the send; every class instance a crossing reaches is copied, so that identity does not survive
 a crossing; the copy walks a work list and never recurses, so that a chain of a million links crosses on a
 stack of 2 MiB; and a copy runs no program code, no `Text()` and no `equal by` *(assumed, §6: the
-points comment 6895076937 takes as following from §6, which the answers left standing)*. Each actor
+points comment 6895076937 takes as following from §6, which the answers left standing)*, but for the
+hash of each key of a map whose keys reach a class instance, by the fields its class compares,
+`equal by`'s among them (§6, the owner, 2026-11-16, #519, comment 6923513534), which runs no program
+code, since a class declares no `Equals` or `GetHashCode` (K5). Each actor
 having its own heap, a crossing copies every counted block it reaches into the receiver's heap,
 small or big, and §6's share of a big value by pointer stays decided and unbuilt, which no program
 can tell from a copy (§6, the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big
-unbuilt"); a `copy` at a call that crosses nothing copies every class instance it reaches and shares
-every other block by its count *(assumed, §6: the answer read for a call inside one heap)*. `copy`
+unbuilt"); a `copy` at a call that crosses nothing copies every block on a path to a class
+instance, the instance among them, and shares by its count only a block that reaches none
+*(assumed, §6: the answer read for a call inside one heap)*. The copy of a map whose keys reach a
+class instance, where it crosses or stands after `copy`, hashes each key again as it is copied, by
+identity or by content as its class compares (K4, K5), so that the copied map finds what the source
+found; the cost, the key's hash and its `equal by` running inside the copy, falls on such maps alone
+(§6, the owner, 2026-11-16, #519, comment 6923513534, "Rehash each key (Recommended)"), as a Rust
+`HashMap` collected from cloned pairs hashes each key it takes *(assumed, §6: the comparison)*. `copy`
 and `move` are words before an argument alone, as `mut` is there (L12), `move` before a parameter's
 type and inside a function type too, as `mut` is before a parameter's (§6, the owner, 2026-11-05,
 issue 156, comment 6657251688), and names everywhere else,
 so that `copy(x)` is the word before `(x)` and a variable named `copy` is called as `(copy)(x)` (§6,
 the owner, 2026-11-13, #519, comment 6847932993, Q10, "Any order + contextual (Recommended)"); a
 `copy` or a `move` followed by `[`, `-`, `*`, `&` or `with`, which go on from a name, is the name,
-so that `copy[0]` reads an item of a list named `copy` *(assumed, §6: as a name before what goes
-on from a name is read, which the answers did not give)*.
+so that `copy[0]` reads an item of a list named `copy`, and so is one that nothing that begins an
+expression follows, so that `f(copy)` passes a variable named `copy` and `f(copy.N)` reads its
+field *(assumed, §6: as a name before what goes on from a name is read, which the answers did not
+give)*.
 
 A `move` ends every path into the value it sends: the checker tracks, in each function, every
 variable that reaches into the value, all of them dead after the `move`, and refuses the `move`
@@ -1013,6 +1071,7 @@ s = spawn Shop()
 s.Place(order)
 f = s.First()
 print("{f.Customer} {f.Items}")
+// `Order` has no `mut` field and no `weak` one, so it compares by content (K4), and the copy of its copy equals it
 print(f == order)
 ```
 
@@ -1041,10 +1100,9 @@ b = spawn Counter()
 h = spawn Hub()
 h.Tell([a, b, a])
 print(a.Get() + b.Get())
-mut names = Map<Counter, string>()
-names[a] = "a"
-print(names[a] ?? "none")
 ```
+
+Case: [actors/references-map-key.kz](../corpus/actors/references-map-key.kz)
 
 Case: [actors/send-needs-word.kz](../corpus/actors/send-needs-word.kz)
 ```kurz
@@ -1094,6 +1152,20 @@ actor Runner {
 t = Tally(1)
 r = spawn Runner()
 r.Run(() => t.Count)
+```
+
+Case: [actors/send-lambda.kz](../corpus/actors/send-lambda.kz)
+```kurz
+class Rate(int Per)
+
+actor Worker {
+    pub int Run(() => int job) => job()
+}
+
+r = Rate(3)
+k = 4
+w = spawn Worker()
+print(w.Run(() => r.Per + k))
 ```
 
 Case: [actors/result-mutable.kz](../corpus/actors/result-mutable.kz)
@@ -1222,6 +1294,66 @@ s.Add(copy cart)
 print("at home: {cart.Show()}")
 ```
 
+Case: [actors/copy-map-instance-keys.kz](../corpus/actors/copy-map-instance-keys.kz)
+```kurz
+class Box(mut int N)
+class Tag(string Name, Box Owner)
+data Shelf(Tag First, Map<Tag, int> Counts)
+
+int Found(Map<Box, string> known) {
+    mut found = 0
+    for e in known {
+        if (known[e.Key] ?? "") == e.Value {
+            found = found + 1
+        }
+    }
+
+    return found
+}
+
+string ByBox(Map<Box, string> known, Box a, Box b) => "{known[a] ?? "none"} {known[b] ?? "none"}, {Found(known)} found"
+
+string ByTag(Shelf s) {
+    mut found = 0
+    for e in s.Counts {
+        if (s.Counts[e.Key] ?? 0) == e.Value {
+            found = found + 1
+        }
+    }
+
+    bob = Tag("bob", s.First.Owner)
+    return "{s.Counts[s.First] ?? 0} {s.Counts[bob] ?? 0}, {found} found"
+}
+
+actor Hub {
+    pub string Names(Map<Box, string> known, Box a, Box b) => ByBox(known, a, b)
+
+    pub string Tags(Shelf s) => ByTag(s)
+
+    pub string Moved(Map<Box, string> known) => "{Found(known)} found"
+}
+
+one = Box(1)
+two = Box(2)
+mut names = Map<Box, string>()
+names[one] = "a"
+names[two] = "b"
+box = Box(3)
+ann = Tag("ann", box)
+mut counts = Map<Tag, int>()
+counts[ann] = 3
+counts[Tag("bob", box)] = 4
+h = spawn Hub()
+print(h.Names(copy names, copy one, copy two))
+print(h.Tags(copy Shelf(ann, counts)))
+mut kept = Map<Box, string>()
+kept[Box(5)] = "e"
+kept[Box(6)] = "f"
+print(h.Moved(move kept))
+print(ByBox(copy names, copy one, copy two))
+print(ByTag(copy Shelf(ann, counts)))
+```
+
 Case: [actors/copy-two-arguments.kz](../corpus/actors/copy-two-arguments.kz)
 ```kurz
 class Counter(mut int N)
@@ -1263,6 +1395,30 @@ print(s.Look(copy tag, copy box))
 print(box.N)
 ```
 
+Case: [actors/copy-weak-argument.kz](../corpus/actors/copy-weak-argument.kz)
+```kurz
+class Box(mut int N)
+data Link(weak Box? To)
+
+actor Shelf {
+    pub string Look(weak Box? w, Link l, Box b) {
+        b.N = 2
+        v = w
+        t = l.To
+        if v != null && t != null {
+            return "{v.N} {t.N} {v == b} {t == b}"
+        }
+
+        return "gone"
+    }
+}
+
+box = Box(1)
+s = spawn Shelf()
+print(s.Look(copy box, copy Link(box), copy box))
+print(box.N)
+```
+
 Case: [actors/copy-two-at-call.kz](../corpus/actors/copy-two-at-call.kz)
 ```kurz
 class Cart(mut int Items)
@@ -1275,6 +1431,28 @@ string Both(Cart a, Cart b) {
 cart = Cart(1)
 print(Both(copy cart, copy cart))
 print(cart.Items)
+```
+
+Case: [actors/copy-weak-at-call.kz](../corpus/actors/copy-weak-at-call.kz)
+```kurz
+class Box(mut int N)
+data Link(weak Box? To)
+
+string Look(Box a, Link l, Box b) {
+    b.N = 2
+    t = l.To
+    if t != null {
+        return "{a.N} {t.N} {a == b} {t == b}"
+    }
+
+    return "gone"
+}
+
+box = Box(1)
+print(Look(copy box, copy Link(box), copy box))
+f = (Box a, Link l, Box b) => Look(a, l, b)
+print(f(copy box, copy Link(box), copy box))
+print(box.N)
 ```
 
 Case: [actors/copy-left-to-right.kz](../corpus/actors/copy-left-to-right.kz)
@@ -1785,6 +1963,8 @@ print(v)
 Case: [actors/send-own-method.kz](../corpus/actors/send-own-method.kz)
 
 Case: [actors/this-reference.kz](../corpus/actors/this-reference.kz)
+Case: [actors/references-in-list.kz](../corpus/actors/references-in-list.kz)
+
 
 ### U16 (decided, §6) One error for a construct that breaks two rules
 
@@ -2451,6 +2631,358 @@ send g.Fail()
 print(f.Ping())
 print(g.Ping())
 ```
+
+### U28 (decided, §6) The block of a policy
+
+In the place of the words of a policy, after `spawn`'s arguments and after an actor's name, a block
+can decide what the supervisor does at the actor's crash: `on crash (c) { ... }`, its one parameter
+in parentheses, which names the crash (U30), and its block, opened on that line (§6, "Policy at
+`spawn`"). The block runs as a message of the supervisor, after its current message, with the calls
+of the chain that message lets in (U17), and before its queued ones, and its decision (U29) is what
+the supervisor does (§6, the owner, 2026-11-15, #519, comment 6902210646, Q2, "Erlang/Akka:
+supervisor msg"); at a `spawn` of the top-level code it runs in that code's wait (U33). The block
+ends the expression at `spawn`, as the words of a policy do (U2), and after an actor's name it is the
+type's default (U27), the braces after it the actor's body; no name in the parentheses, a second
+one, and a block that does not open on the line of its parameter are `syntax` (E4) *(assumed: as §6
+marks it)*. The blocks `attempt { ... }` and `retry { ... }` of §6, which keep a crash to a piece of
+code, have no rule here, and `compiler/README.md` says what the build does with them.
+
+Case: [actors/block-sample.kz](../corpus/actors/block-sample.kz)
+```kurz
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash (c) {
+    print("died: {c.Reason}")
+    restart
+}
+send w.Fail()
+print(w.Ping())
+```
+
+Case: [actors/block-order.kz](../corpus/actors/block-order.kz)
+```kurz
+actor Other {
+    pub int Ping() => 1
+}
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+}
+
+actor Boss {
+    pub void Go(Other other) {
+        first = spawn Worker() on crash (c) {
+            print("first's block")
+            stop
+        }
+
+        second = spawn Worker() on crash (c) {
+            print("second's block")
+            stop
+        }
+
+        send this.Queued()
+        send first.Fail()
+        send second.Fail()
+        print(other.Ping())
+        print("go ends")
+    }
+
+    pub void Queued() {
+        print("queued")
+    }
+
+    pub int Ping() => 2
+}
+
+o = spawn Other()
+b = spawn Boss()
+b.Go(o)
+print(b.Ping())
+```
+
+### U29 (decided, §6) The decisions
+
+`restart`, `stop` and `escalate` are the statements of the block that decide, and each does what the
+same word does after `on crash` (U22, U23, U25): `restart` restarts the actor after the growing pause,
+`stop` leaves it stopped, so that a call that waits in its inbox or comes after raises `actor-gone`,
+and `escalate` passes its crash up whole, which at the top level ends the process with the child's
+error line, the text below it, the trace of the child's stack and the exit code 1 (§6, "Policy at
+`spawn`"). A decision ends its path, as `return` ends a function's, and each path of the block ends
+with one or with a `throw` (U32); a path that decides nothing is `missing-return`, as a lambda's
+path that ends with no value is (F3) (§6, the owner, 2026-11-16, #519, comment 6919351399,
+"missing-return error"). `restart` there takes no knobs, the default's pause and no limit, as Akka's
+`Restart` directive carries none, and a knob after it, a type before the parameter and `return` in
+the block are `syntax` (E4); the three words are statements in the block alone, and names elsewhere,
+before `=` in the block among it, as `send` is (U6), and a lambda inside the block decides nothing,
+its words names there *(assumed: as §6 marks it)*. A block can restart, so that its `spawn` keeps the
+copy of its arguments that a restart constructs from, as `on crash restart` keeps it (U22).
+
+Case: [actors/block-stop.kz](../corpus/actors/block-stop.kz)
+```kurz
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash (c) {
+    print("stopped at {c.Place.Line}")
+    stop
+}
+send w.Fail()
+print(w.Ping())
+```
+
+Case: [actors/block-escalate.kz](../corpus/actors/block-escalate.kz)
+```kurz
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+}
+
+actor Boss {
+    mut int n = 0
+
+    pub void Go() {
+        n = n + 1
+        w = spawn Worker() on crash (c) {
+            print("escalating")
+            escalate
+        }
+
+        send w.Fail()
+    }
+
+    pub int Count() => n
+}
+
+b = spawn Boss()
+b.Go()
+print(b.Count())
+```
+
+Case: [actors/block-decides-nothing.kz](../corpus/actors/block-decides-nothing.kz)
+```kurz
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash (c) {
+    if c.Place.Line > 1 {
+        restart
+    }
+}
+print(w.Ping())
+```
+
+Case: [actors/block-restart-knob.kz](../corpus/actors/block-restart-knob.kz)
+```kurz
+actor Worker {
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash (c) {
+    restart after 1s
+}
+print(w.Ping())
+```
+
+### U30 (decided, §5, §6) The crash the block reads
+
+The block's parameter is a value of the standard library's `Crashed<R>`, whose fields are `Reason`,
+what the child threw, of the type `R`, `Place`, the place that raised it, a `Place(string File, int
+Line)`, and `Chain`, the ID of the chain of the message that crashed (§5, the place and the chain ID
+fields of the `Crashed` case beside `Reason`), its 32 hexadecimal digits *(assumed: as §6 marks it,
+the names, the place's type, as Rust's `panic::Location`, and the digits, as OpenTelemetry writes a
+trace-id)*. `R` is the union of every type the child's code can throw, found over the whole program,
+and of the runtime's error type, `RuntimeError(RuntimeKind Kind, string Detail)`, a member of every
+`Reason` (O7; §5, the owner, 2026-10-03), so that a run-time error of chapter 12 reaches the block as
+a `RuntimeError` of its kind, with the detail its error line names; the child's code is its
+construction and its methods, what they run, the construction of each actor they spawn, and the code
+of each actor they spawn under `escalate` or a block, whose crash can pass up to the child, with
+what that block throws (U32) *(assumed: as §5 marks it, the type's name, its kinds and its place,
+and the order of `R`'s cases, the program's own first and the runtime's last)*. `RuntimeError` and
+`RuntimeKind` are names every file sees, as the standard library's `HttpError` is (W1) *(assumed: as
+§6 marks it)*. The thrown value is moved out of the child's heap into the supervisor's, with
+everything it reaches, before the child's heap is freed (O7; §5, the owner, 2026-10-04), and the
+`Crashed` value goes when the block's message ends.
+
+Case: [actors/block-reason.kz](../corpus/actors/block-reason.kz)
+```kurz
+data Lost(int Code)
+
+actor Worker {
+    pub void Lose() {
+        throw Lost(7)
+    }
+
+    pub void Divide(int n) {
+        print(10 / n)
+    }
+
+    pub int Half(int n) => n / 2
+}
+
+w = spawn Worker() on crash (c) {
+    match c.Reason {
+        Lost l => print("lost {l.Code}")
+        RuntimeError e => print(e.Kind)
+    }
+
+    restart
+}
+send w.Lose()
+send w.Divide(0)
+print(w.Half(4))
+```
+
+### U31 (assumed, §6) What the block reads
+
+A block at a `spawn` in an actor's code reads and assigns the fields of that actor, the supervisor,
+as a message of it does, since it runs as one (U28), and takes the variables of the function around
+it that it names by value at the `spawn`, as a lambda takes them (F15), as Rust's `move` closure
+does; a block after an actor's name, where no supervisor is known, reads its parameter and what a
+top-level function reads, and a block in the top-level code reads what it took (§6, assumed there,
+as Akka Typed's `Behaviors.supervise` takes no state of the actor that spawns).
+
+Case: [actors/block-supervisor-state.kz](../corpus/actors/block-supervisor-state.kz)
+```kurz
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+}
+
+actor Boss {
+    mut int crashes = 0
+
+    pub void Go() {
+        name = "first"
+        w = spawn Worker() on crash (c) {
+            crashes = crashes + 1
+            print("{name} {crashes}")
+            stop
+        }
+
+        send w.Fail()
+    }
+
+    pub int Crashes() => crashes
+}
+
+b = spawn Boss()
+b.Go()
+print(b.Crashes())
+```
+
+Case: [actors/block-type.kz](../corpus/actors/block-type.kz)
+```kurz
+string Note(int line) => "type's block at {line}"
+
+actor Worker on crash (c) {
+    print(Note(c.Place.Line))
+    restart
+} {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+w = spawn Worker()
+send w.Fail()
+print(w.Ping())
+```
+
+### U32 (decided, §6) A throw in the block
+
+A throw inside the block is the supervisor's own crash, and the child stays stopped (§6, the owner,
+2026-11-15, #519, comment 6902210646, Q2): the child is ended with the supervisor's other children
+(U21), so that a call that waits in its inbox or comes after raises `actor-gone`, and the
+supervisor's crash goes as any crash goes (U19 to U25). The child's crash writes its log line as at
+`stop` before the supervisor's crash writes its own (U24) *(assumed: as §6 marks it)*.
+
+Case: [actors/block-throw.kz](../corpus/actors/block-throw.kz)
+```kurz
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+actor Boss {
+    pub Worker Go() {
+        kid = spawn Worker() on crash (c) {
+            throw "block fails"
+        }
+
+        send kid.Fail()
+        return kid
+    }
+}
+
+b = spawn Boss()
+w = b.Go()
+print(w.Ping())
+```
+
+### U33 (decided, §6) The block of the top-level code
+
+A block at a `spawn` in the top-level code runs in that code's wait: the wait runs the scheduler in
+place (U18), and it runs a pending block before it goes on, and the end of the top-level code drops a
+pending block and ends its child (U13) (§6, the owner, 2026-11-16, #519, comment 6919351399, "Root's
+wait runs it"). A wait on the call that crashed the child therefore ends with `callee-crashed` (U20)
+before the block runs, and the process ends with that error, the block dropped with no line.
+
+Case: [actors/block-sample.kz](../corpus/actors/block-sample.kz)
+
+Case: [actors/block-dropped.kz](../corpus/actors/block-dropped.kz)
+```kurz
+actor Worker {
+    pub int Fail() {
+        throw "worker fails"
+    }
+}
+
+w = spawn Worker() on crash (c) {
+    print("never")
+    restart
+}
+print(w.Fail())
+```
+
+### U34 (assumed, §6) Pending blocks and the log line
+
+The blocks pending in one supervisor run in the order of the crashes, and a block still pending at
+the supervisor's crash or end is dropped with no line, its child ended with the supervisor's other
+children (U21, U13); while its block is pending, the child takes no message, so that a call to it
+waits in its kept inbox, and a call that waited for it goes on waiting, until the decision (§6, the
+owner, 2026-11-16, #519, comment 6926540546, "Keep: it waits"); and the
+block's own calls run in a chain of their own, as a restart's construction does (U22). The log line
+of a crash that a block decides (U24) is written at the decision, at `restart` and at `stop`, and
+none at `escalate` (U25) (§6, assumed there, as Erlang's supervisor reports a child's exit as it
+acts on it).
+
+Case: [actors/block-order.kz](../corpus/actors/block-order.kz)
 
 ### U35 (decided, §6, §8) Threads
 
