@@ -600,13 +600,13 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (functions.ContainsKey(n.Name) || n.Name is "print" or "eprint")
+        if (functions.ContainsKey(n.Name) || n.Name is "print" or "eprint" || IsFenceName(n.Name))
         {
             Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a function, and no value stands here (F11)");
             return Typed.Error;
         }
 
-        if (Types.ByName.ContainsKey(n.Name) || n.Name is "List" or "Map" or "Bytes")
+        if (Types.ByName.ContainsKey(n.Name) || n.Name is "List" or "Map" or "Bytes" || IsAtomicName(n.Name))
         {
             Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a type, and no value stands here (T10; E4)");
             return Typed.Error;
@@ -659,6 +659,11 @@ public sealed partial class Checker
         if (CheckIntrinsicMember(m) is { } test)
         {
             return test; // R18
+        }
+
+        if (AtomicMemberAsValue(m))
+        {
+            return Typed.Error; // R19
         }
 
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))

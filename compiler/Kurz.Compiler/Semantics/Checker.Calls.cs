@@ -243,6 +243,11 @@ public sealed partial class Checker
                         return CheckPrint(c, n.Name);
                     }
 
+                    if (IsFenceName(n.Name))
+                    {
+                        return CheckFence(c); // R19
+                    }
+
                     if (Types.ByName.TryGetValue(n.Name, out var primitive))
                     {
                         return CheckConversion(primitive, c);
@@ -1487,6 +1492,11 @@ public sealed partial class Checker
             return intrinsic; // R18
         }
 
+        if (CheckAtomicFunction(m, c) is { } view)
+        {
+            return view; // R19: `AtomicLong.FromPtr(p)`
+        }
+
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
         {
             if (IsUnreadName(n.Name) || ProcessNameAsValue(n.Name, n.Line) || UnreadTypeMember(n.Name, m.Member, m.Line))
@@ -1629,6 +1639,11 @@ public sealed partial class Checker
         if (target.Type is VectorType vector)
         {
             return CheckVectorMethod(vector, m, c); // R18
+        }
+
+        if (target.Type is AtomicType atomic)
+        {
+            return CheckAtomicMethod(atomic, m, c); // R19
         }
 
         if (target.Type is ClassType classType)

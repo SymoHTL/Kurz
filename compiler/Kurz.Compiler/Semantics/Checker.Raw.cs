@@ -961,6 +961,11 @@ public sealed partial class Checker
             return CheckListAllocate(c, allocated, "List<T>.Allocate");
         }
 
+        if (type is AtomicType atomic)
+        {
+            return CheckFromPtr(atomic, t.Member, t.Line, c); // R19: `AtomicPtr<T>.FromPtr(p)`
+        }
+
         if (!Types.IsError(type))
         {
             Report(ErrorIds.UnknownName, t.Line, $"`{type}` has no member `{t.Member}` (V10)");

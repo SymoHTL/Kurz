@@ -1436,6 +1436,11 @@ public sealed partial class Checker
             return vector; // R18, where no declaration gives the name
         }
 
+        if (ResolveAtomic(n) is { } atomic)
+        {
+            return atomic; // R19, where no declaration gives the name
+        }
+
         Report(ErrorIds.UnknownName, n.Line, $"no type named `{n.Name}` is visible here (V10)");
         return Types.Error;
     }
@@ -1931,11 +1936,11 @@ public sealed partial class Checker
     /// The names the reference gives: <c>print</c> (A1) and <c>eprint</c> (A17), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c>
     /// (M9), the types of files and sockets and their functions (S2, S8, S9), <c>Environment</c> (S13, S14), <c>Stdin</c> (S22), the hashes' (H1 to H4),
     /// <c>X86</c>, <c>Arm</c>, <c>Vector128</c> and <c>Vector256</c>, which a file's own declaration cannot take, as it cannot take
-    /// <c>Environment</c> (R18, the owner, 2026-11-01), <c>Hint</c> (F18), and <c>Log</c> (P1).
+    /// <c>Environment</c> (R18, the owner, 2026-11-01), <c>Hint</c> (F18), <c>Log</c> (P1), and the atomic types and <c>Fence</c> (R19).
     /// </summary>
     private static bool IsBuiltInName(string name) =>
         name is "print" or "eprint" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" or "Stdin" or "Log" || IsHashName(name)
-        || name is "X86" or "Arm" or "Vector128" or "Vector256" or "Hint";
+        || name is "X86" or "Arm" or "Vector128" or "Vector256" or "Hint" || IsAtomicBuiltIn(name);
 
     /// <summary>
     /// V9: the text of a type's or a function's declaration whose name is declared already; where a type every file sees has the name,
@@ -1948,7 +1953,7 @@ public sealed partial class Checker
         : $"the name `{name}` is declared already (V9)";
 
     /// <summary>The rule that declares each type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
-    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6", ["ParseKind"] = "X7", ["ParseError"] = "X7", ["HexKind"] = "H7", ["HexError"] = "H7", ["TypeKind"] = "T33", ["Stdio"] = "S17", ["ExitStatus"] = "S18", ["ProcessOutput"] = "S18", ["ExitError"] = "S18" };
+    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6", ["ParseKind"] = "X7", ["ParseError"] = "X7", ["HexKind"] = "H7", ["HexError"] = "H7", ["TypeKind"] = "T33", ["Stdio"] = "S17", ["ExitStatus"] = "S18", ["ProcessOutput"] = "S18", ["ExitError"] = "S18", ["Ordering"] = "R19", ["NotExchanged"] = "R19" };
 
     /// <summary>
     /// The types every file sees without declaring them: <c>InvalidUtf8</c>, the case of <c>string.FromUtf8</c> that is not a string
@@ -1964,7 +1969,9 @@ public sealed partial class Checker
     /// type's <c>Parse</c> that is no number (X7), and <c>HexError</c> with its <c>HexKind</c>, the case of <c>Hex.Decode</c> that gives no
     /// bytes (H7; section 12, the owner, 2026-10-31, "Without input"), and <c>TypeKind</c>, the kind of a type that generic code reads
     /// (T33; section 4, assumed with the owner's answer "Kinds + parts" of 2026-11-01), a value for each built-in type named as the
-    /// type and one for each other kind.
+    /// type and one for each other kind, and <c>Ordering</c>, Rust's five orders of an atomic operation, with <c>NotExchanged</c>, the
+    /// case of a compare-exchange that stored nothing, which carries the value the word held (R19; section 6, the owner, 2026-11-17,
+    /// #519, comment 6946657505, answer 1, "Rust's set", the case and its name assumed there).
     /// </summary>
     private static readonly ProgramSyntax BuiltInTypes = BuiltIn(
         SourceText.FromString(
@@ -1995,6 +2002,8 @@ public sealed partial class Checker
                 SByte, Byte, Short, UShort, Int, UInt, Long, ULong, Float, Double, Decimal, Bool, String, Char, Duration, Timestamp,
                 LongDuration, LongTimestamp, Instant, List, Map, Nullable, Data, Enum, Union, Class, Interface, Function, Pointer
             }
+            enum Ordering { Relaxed, Release, Acquire, AcqRel, SeqCst }
+            data NotExchanged<T>(T Value)
             """));
 
     /// <summary>The tree of the built-in types, which reads clean and holds type declarations alone, or the compiler's defect.</summary>

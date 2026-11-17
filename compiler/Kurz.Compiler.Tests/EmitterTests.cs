@@ -1332,4 +1332,64 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.DoesNotContain("@\"table.Dot\" =", program.Ir, StringComparison.Ordinal);
         Ran(Toolchain.Run(toolchain.Build(program, "interface-layout")), 0, ["1", "8", "4"], string.Empty);
     }
+
+    /// <summary>The lines of a program's IR that hold an atomic instruction of the program's own, which the values given mark.</summary>
+    private static List<string> AtomicLines(EmittedProgram program) =>
+        program.Ir.ReplaceLineEndings("\n").Split('\n').Where(l => Regex.IsMatch(l, @"\b(load atomic|store atomic|atomicrmw|cmpxchg|fence) .*\b7000\d\b|^\s*fence ")).ToList();
+
+    [Fact]
+    public void An_atomic_member_with_its_order_written_is_one_llvm_instruction_of_that_order_aligned_to_its_word()
+    {
+        // R19 (section 6, 2026-11-17, comment 6946657505, Q1): Rust's lowering, `Relaxed` LLVM's `monotonic`; the values 70001 to
+        // 70009 mark the program's own instructions among the runtime's
+        const string text = "mut long w = 5\nmut int i = 1\nmut bool b = false\nmut long* slot = &w\na = AtomicLong.FromPtr(&w)\nn = AtomicInt.FromPtr(&i)\n"
+            + "c = AtomicBool.FromPtr(&b)\np = AtomicPtr<long>.FromPtr(&slot)\nraw {\n"
+            + "    a.Store(70001, Ordering.Release)\n    print(a.Swap(70002, Ordering.AcqRel))\n    print(a.FetchAdd(70003, Ordering.Acquire))\n"
+            + "    print(a.FetchSub(70004, Ordering.SeqCst))\n    print(n.FetchAnd(70005, Ordering.Relaxed))\n    print(long(p.FetchOr(70006, Ordering.Relaxed)) - long(&w))\n"
+            + "    print(a.FetchXor(70007, Ordering.Relaxed))\n"
+            + "    match a.CompareExchangeWeak(70008, 70009, Ordering.AcqRel, Ordering.Acquire) {\n        long found => print(found)\n        NotExchanged<long> missed => print(missed.Value)\n    }\n"
+            + "    print(c.Swap(true, Ordering.SeqCst))\n    print(a.Load(Ordering.Relaxed))\n    Fence(Ordering.Acquire)\n}\n";
+        var program = Emit(text, "raw");
+        var lines = AtomicLines(program);
+        var shown = string.Join("\n", lines);
+        string[] expected =
+        [
+            @"store atomic i64 70001, ptr %[\w.]+ release, align 8",
+            @"atomicrmw xchg ptr %[\w.]+, i64 70002 acq_rel, align 8",
+            @"atomicrmw add ptr %[\w.]+, i64 70003 acquire, align 8",
+            @"atomicrmw sub ptr %[\w.]+, i64 70004 seq_cst, align 8",
+            @"atomicrmw and ptr %[\w.]+, i32 70005 monotonic, align 4",
+            @"atomicrmw or ptr %[\w.]+, i64 70006 monotonic, align 8", // an `AtomicPtr`'s bits on the address as an `i64`
+            @"atomicrmw xor ptr %[\w.]+, i64 70007 monotonic, align 8",
+            @"cmpxchg weak ptr %[\w.]+, i64 70008, i64 70009 acq_rel acquire, align 8",
+            @"^\s*fence acquire",
+        ];
+        Assert.True(lines.Count == expected.Length, shown);
+        for (var k = 0; k < expected.Length; k++)
+        {
+            Assert.Matches(expected[k], lines[k]);
+        }
+
+        Assert.Matches(@"atomicrmw xchg ptr %[\w.]+, i8 %[\w.]+ seq_cst, align 1", program.Ir); // a `bool`'s word is a byte
+        Assert.Matches(@"load atomic i64, ptr %[\w.]+ monotonic, align 8", program.Ir);
+        Assert.Matches(@"inttoptr i64 %[\w.]+ to ptr", program.Ir);
+        Ran(Toolchain.Run(toolchain.Build(program, "atomic-orders")), 0, ["70001", "70002", "140005", "1", "0", "70001", "6", "false", "6"], string.Empty);
+    }
+
+    [Fact]
+    public void An_atomic_order_held_in_a_value_is_chosen_when_the_call_runs_and_one_rust_refuses_raises_at_the_call()
+    {
+        // R19: a `switch` over the five values of `Ordering`, each to the instruction of its order, as Rust's `match` on the order;
+        // `Release` and `AcqRel`, which a load does not take, raise `invalid-ordering-at-run-time` at the call's line
+        const string text = "long Read(AtomicLong a, Ordering order) {\n    mut long v = 0\n    raw {\n        v = a.Load(order)\n    }\n\n    return v\n}\n\n"
+            + "mut long w = 70001\nview = AtomicLong.FromPtr(&w)\nprint(Read(view, Ordering.Relaxed))\nprint(Read(view, Ordering.Acquire))\nprint(Read(view, Ordering.SeqCst))\nprint(Read(view, Ordering.AcqRel))\n";
+        var program = Emit(text, "raw");
+        foreach (var order in new[] { "monotonic", "acquire", "seq_cst" })
+        {
+            Assert.Matches($@"load atomic i64, ptr %[\w.]+ {order}, align 8", program.Ir);
+        }
+
+        Assert.Matches(@"switch i8 %[\w.]+, label %[\w.]+ \[ i8 0, label %[\w.]+ i8 1, label %[\w.]+ i8 2, label %[\w.]+ i8 3, label %[\w.]+ i8 4, label %[\w.]+ \]", program.Ir);
+        Ran(Toolchain.Run(toolchain.Build(program, "atomic-order-chosen")), 1, ["70001", "70001", "70001"], "error: invalid-ordering-at-run-time at program.kz:4\n");
+    }
 }
