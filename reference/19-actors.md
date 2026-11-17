@@ -3254,6 +3254,8 @@ acts on it).
 
 Case: [actors/block-crash-order.kz](../corpus/actors/block-crash-order.kz)
 ```kurz
+// `first`'s `Fail` runs before `second`'s, in the order the build's run queue holds them, which no rule of chapter 19 fixes
+
 actor Other {
     pub int Ping() => 1
 }

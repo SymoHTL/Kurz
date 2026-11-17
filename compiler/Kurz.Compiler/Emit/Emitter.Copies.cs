@@ -189,9 +189,9 @@ public sealed partial class Emitter
     /// copy, a case propagated out of a later argument among them, before the region lets go of the copies, so that their <c>weak</c>
     /// references are pointed as a whole call's are and the memo's counts let go of (the runtime's <c>CopyAbort</c>); then the copies
     /// the call had not read yet and held (<see cref="Late"/>) let go of, as the temporaries of the region they would have been. A copy
-    /// whose slot takes it, a field of a construction or a parameter written <c>move</c>, is not held and stays where it was made: no
-    /// code lets go of it at such an exit, as of no value such a slot took from an argument before the one that left, so a construction
-    /// left so keeps one block for each such slot, a copy, a count of a shared block and a new value alike.
+    /// whose slot takes it, a field of a construction, is not held and stays where it was made: no code lets go of it at such an exit,
+    /// as of no value such a slot took from an argument before the one that left, so a construction left so keeps one block for each
+    /// such slot, a copy, a count of a shared block and a new value alike (issue 569).
     /// </summary>
     private void EndSessions(List<(string Value, KurzType Type)> temporaries)
     {
