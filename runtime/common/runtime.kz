@@ -210,6 +210,16 @@ pub void Raise(string id, string file, int line) {
     sys.Exit(1)
 }
 
+// A check of the runtime's own code in a test build that fires (chapter 12, U19): the end of the process with its error line and
+// the exit code 1 wherever it fires, the count of the entries under way raised first, so that the crash takes it as a fault inside
+// the allocator or the scheduler, and no actor's crash runs its policy with a structure the runtime was changing half-changed
+// (design record, section 6, "End the process", against the crash of the actor alone; the site of such a check asking for that end
+// with no count, assumed there).
+pub void RaiseOwn(string id, string file, int line) {
+    sys.Entered()
+    Raise(id, file, line)
+}
+
 // A `throw` (O6): the error line ends with a colon, and the text of the thrown value stands on the
 // line below it, written as it is, with the trace below the text (design record, section 6); inside a
 // message, the crash of the actor that runs it, which keeps that text for its log line (U19, U24).
@@ -4017,10 +4027,10 @@ static mut byte* paused = null
 // top-level code, which ends the process on this stack with the error line of the crash and the trace of
 // this stack (`Escalate`; U34). Nothing in the top-level code, whose raise ends the process, but the log
 // line of the child whose block runs in its wait, written first, as for a `stop` (U32; assumed: S10 of issue
-// 519, comment 6907441402); nor where the count of the entries under way is above 0, a check of the
-// runtime's own code in a test build that fires inside the allocator, the scheduler or the copy of a
-// crossing, which ends the process as a stack fault there does, with the lists those change left as they are
-// (chapter 12; O11); nor where the actor's policy, and its supervisors' on the way up, escalate the
+// 519, comment 6907441402); nor where the count of the entries under way is above 0, a check in a test build
+// that fires inside the allocator, the scheduler or the copy of a crossing, or one of the runtime's own code
+// wherever it fires, which raises the count first (`RaiseOwn`), and which ends the process as a stack fault
+// there does, with the lists those change left as they are (chapter 12; O11); nor where the actor's policy, and its supervisors' on the way up, escalate the
 // crash to the top-level code, which ends the process with this error line and the trace of this stack (U25;
 // design record, section 6, the trace from the stack of the actor that raised).
 void CrashActor(string id, string file, int line, bool hasText, string text) {

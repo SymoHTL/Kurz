@@ -933,10 +933,15 @@ public sealed partial class Emitter
         fn.Block(done);
     }
 
-    /// <summary>An exception of the run-time table (chapter 12) at its line of the file being emitted: the runtime's <c>Raise</c>, which ends the process.</summary>
+    /// <summary>
+    /// An exception of the run-time table (chapter 12) at its line of the file being emitted: the runtime's <c>Raise</c>, which ends the
+    /// process; a check of the runtime's own code, its files and not the standard library's Kurz code above them (O11), which a test
+    /// build keeps, the runtime's <c>RaiseOwn</c>, which ends the process wherever it fires (chapter 12, U19).
+    /// </summary>
     private void Raise(string id, int line)
     {
-        fn.Emit($"call void {RuntimeFunction("Raise")}(%kz.str {StringValue(id)}, %kz.str {StringValue(unit.File)}, i32 {Number(line)})");
+        var own = unit.Runtime && unit.Prefix.StartsWith("rt.", StringComparison.Ordinal);
+        fn.Emit($"call void {RuntimeFunction(own ? "RaiseOwn" : "Raise")}(%kz.str {StringValue(id)}, %kz.str {StringValue(unit.File)}, i32 {Number(line)})");
         fn.Unreachable();
     }
 
