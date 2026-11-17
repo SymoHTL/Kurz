@@ -338,7 +338,10 @@ public sealed partial class Checker
         }
 
         var moves = string.Join(" or ", reaching.Select(s => $"`move {s.Text}` at line {s.Line}{(s.Earlier ? " in an earlier round of the loop" : "")}"));
-        var through = reaching.All(s => s.Text == variable.Name) ? "" : $", which ended every path into the value `{variable.Name}` reaches";
+        var loops = reaching.Select(s => TakingLoop(s.Value, variable)).ToList();
+        var through = reaching.All(s => s.Text == variable.Name) ? "" : loops.All(l => l is not null)
+            ? $", which ended the list the loop at line {string.Join(" and line ", loops.Distinct())} takes"
+            : $", which ended every path into the value `{variable.Name}` reaches";
         var diagnostic = Diagnostic.Error(ErrorIds.UsedAfterMove, line, $"`{variable.Name}` is used after {moves}{through}; `copy` in place of `move` keeps `{variable.Name}`, or `{variable.Name}` is assigned again before this use (U12)");
         Add(diagnostic);
         movedUses.Add((diagnostic, variable, string.Join(",", reaching.Select(s => s.Line).Distinct())));
@@ -454,9 +457,18 @@ public sealed partial class Checker
         return true;
     }
 
-    /// <summary>The variable the list starts from that the loop of <paramref name="variable"/> takes, where the item joins no region that reaches it (Q1 (b), assumed for such an item).</summary>
+    /// <summary>The variable the list starts from that the loop of <paramref name="variable"/> takes, where the item joins no region that reaches it (the owner, 2026-11-17, #561, comment 6945857315, Q1).</summary>
     private VariableSymbol? TakenList(VariableSymbol? variable) =>
         variable is not null && !JoinsRegion(variable.Type) && model.LoopOf(variable) is { } loop ? RootOf(loop.Collection).Root : null;
+
+    /// <summary>
+    /// The line of the loop whose variable a <c>move</c> of <paramref name="moved"/> names, where that loop takes <paramref name="list"/>
+    /// for an item that crosses with no word (<see cref="TakenList"/>), so that an error names the loop that ended the list; else null.
+    /// </summary>
+    private int? TakingLoop(Expression moved, VariableSymbol list) =>
+        Unwrap(moved) is NameExpression n && model.IsVariable(n) && model.VariableOf(n) is var v && ReferenceEquals(TakenList(v), list) && model.LoopOf(v) is { } loop
+            ? loop.Line
+            : null;
 
     /// <summary>The variable a path of fields or items starts from, and whether it starts outside the function: at a parameter not written <c>move</c>, <c>this</c>, a field of it, a static or a captured variable.</summary>
     private (VariableSymbol? Root, bool Outside) RootOf(Expression e) => Unwrap(e) switch
@@ -489,7 +501,9 @@ public sealed partial class Checker
             var read = ReadsOf(a.Value).FirstOrDefault(r => ReferenceEquals(r.Variable, variable) || ReferenceEquals(r.Variable, list) || TagsOf(r.Variable).Overlaps(ends));
             if (read.Variable is not null)
             {
-                var through = ReferenceEquals(read.Variable, variable) ? "" : $", which ended every path into the value `{read.Variable.Name}` reaches";
+                var through = ReferenceEquals(read.Variable, variable) ? "" : TakingLoop(moved.Value, read.Variable) is { } loop
+                    ? $", which ended the list the loop at line {loop} takes"
+                    : $", which ended every path into the value `{read.Variable.Name}` reaches";
                 var diagnostic = Diagnostic.Error(ErrorIds.UsedAfterMove, read.Read.Line, $"`{read.Variable.Name}` is used after `move {MovedText(moved.Value)}` at line {moved.Line}, an argument before it in the same call{through}; `copy` in place of `move` keeps `{read.Variable.Name}`, or this argument is read into a variable before the call (U12, D11)");
                 Add(diagnostic);
                 movedUses.Add((diagnostic, read.Variable, moved.Line.ToString(System.Globalization.CultureInfo.InvariantCulture)));
@@ -606,7 +620,8 @@ public sealed partial class Checker
     /// no word before a parameter written <c>move</c> is <c>move-at-call</c>; <c>move</c> is the send's word however the parameter is
     /// written (section 6, the reading of comment 6668638888), which ends what it sends, <c>move-reachable</c> where the region outside
     /// the function reaches it (the owner, 2026-11-03, issue 156, comment 6603205575; comment 6897778812, Q1 and Q2, for a list a loop takes
-    /// and a value that crosses with no word); a later argument that reads what it ended is <c>used-after-move</c>.
+    /// and a value that crosses with no word, and 2026-11-17, #561, comment 6945857315, Q1, for the list a loop takes of such an item); a
+    /// later argument that reads what it ended is <c>used-after-move</c>.
     /// Whether it reported one.
     /// </summary>
     private bool MessageMove(CallExpression c, int i, bool moveParameter, List<(Argument Argument, VariableSymbol? Variable, ImmutableHashSet<int> Ends)> moves)

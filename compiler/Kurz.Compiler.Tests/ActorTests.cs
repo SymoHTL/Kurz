@@ -359,9 +359,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_moved_instance_is_copied_into_the_receivers_heap_which_keeps_and_changes_it()
     {
-        // U12: `move` hands the instance to the actor, as its copy in the actor's heap (section 6), which the actor keeps in its state past
-        // the message and changes there, under the allocator that makes every freed block inaccessible, after the sender's place of it was
-        // let go of through the test for the empty address (comment 6895076937)
+        // U12: `move` hands the instance to the actor, as its copy in the actor's heap, which the actor keeps in its state past the message
+        // and changes there, under the allocator that makes every freed block inaccessible, after the sender's place of it was let go of
+        // (section 6, the copy and the release at a message assumed on comment 6902210646, Q5) through the test for the empty address (the
+        // point of comment 6897444564 that the answers left standing)
         const string program = """
             class Cart(mut int Items) {
                 pub void Add(int n) {
@@ -620,8 +621,9 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // section 3, U12 (the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big unbuilt"): a round of messages whose
         // arguments are an instance with a list, strings, a list and a map, whose results are a string, a data value with a list of
-        // strings and an instance, a `move` of an instance with its list (section 6) and a lambda that captures a string, each a copy in
-        // the heap it crosses into; across a third round the top-level code's heap and the actor's hold as many blocks as before it
+        // strings and an instance, a `move` of an instance with its list (section 6, assumed on that Q5) and a lambda that captures a string,
+        // each a copy in the heap it crosses into; across a third round the top-level code's heap and the actor's hold as many blocks as
+        // before it
         const string program = """
             class Item(string Name, List<int> Xs)
             data Pair(string A, List<string> B)
@@ -893,9 +895,9 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_loop_that_moves_a_number_or_a_string_into_an_actor_takes_its_list_where_the_items_place_empties()
     {
-        // U12: a loop whose body moves its variable takes its list, an item that crosses with no word among them (section 6, assumed on
-        // comment 6897778812, Q1); a string's place empties at its `move`, and a number's, which has no empty value, stays, the number
-        // counted once more as inline data is
+        // U12: a loop whose body moves its variable takes its list, an item that crosses with no word among them (the owner, 2026-11-17,
+        // #561, comment 6945857315, Q1); a string's place empties at its `move`, and a number's, which has no empty value, stays, with
+        // nothing counted
         const string program = """
             actor Sum {
                 mut int total = 0

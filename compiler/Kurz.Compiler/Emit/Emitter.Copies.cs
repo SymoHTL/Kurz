@@ -424,8 +424,9 @@ public sealed partial class Emitter
                 {
                     // a function value reaches no copy here: the checker refuses one inside what crosses or what a `copy` reaches (U12,
                     // `CrossingOf`), and one given as the argument crosses with its lambda's environment (`CrossingEnvironment`); a handle,
-                    // a hasher, a command or a child process reaches it moved into a message or a `spawn`, whose build limit the checker
-                    // sets aside after `move` (`CrossingErrors`), and the receiver shares it by its count
+                    // a hasher, a command or a child process reaches it in no program the checker reads clean: the checker refuses each
+                    // where it crosses, after `move` as with no word (`not supported`, `SharedByCount` in `CrossingErrors`), since this
+                    // arm would give the receiver a count of a block of the sender's heap, which the sender's restart or end frees
                     var value = fn.Value($"load {Ir(type)}, ptr {from}");
                     Retain(value, type);
                     fn.Emit($"store {Ir(type)} {value}, ptr {into}");

@@ -1057,9 +1057,10 @@ points comment 6895076937 takes as following from §6, which the answers left st
 hash of each key of a map whose keys reach a class instance, by identity, or by the fields its class compares by
 content, `equal by`'s among them (§6, the owner, 2026-11-16, #519, comment 6923513534), which runs no program
 code, since a class declares no `Equals` or `GetHashCode` (K5). Each actor
-having its own heap, a crossing, a `move` among them, gives the receiver a value in its heap that no
-program can tell from a copy, a big one that reaches no class instance shared by pointer under §6's share of a big value (§6, the
-owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share big unbuilt") *(assumed, §6: the share read for a
+having its own heap, a crossing, a `move` among them, gives the receiver a value that no program
+can tell from a copy in its heap, a big one that reaches no class instance shared by pointer under §6's share of a big value, which
+stays decided and unbuilt (§6, the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share
+big unbuilt") *(assumed, §6: the share read for a
 block that reaches no class instance, since every class instance a crossing reaches is copied)*; a `copy` at a call that crosses nothing copies every block on a path to a class
 instance that passes through no function value and no actor's reference, the instance among them, and shares by
 its count every other block *(assumed, §6: the answer read for a call inside one heap)*. A `weak` reference is no
@@ -1086,7 +1087,8 @@ give)*.
 
 A `move` of a value that needs a word to cross ends every path into the value it sends, a value
 that crosses with no word ending the variable it names alone (§6, the owner, 2026-11-15, #519,
-comment 6897778812, Q2): the checker tracks, in each function, every
+comment 6897778812, Q2), but a loop's own variable, whose loop takes its list (this rule, "A `for`
+loop whose body moves its variable"): the checker tracks, in each function, every
 variable that reaches into the value, all of them dead after the `move`, and refuses the `move`
 with `move-reachable` where the value may be reached from outside the function (§6, the owner,
 2026-11-03, issue 156, comment 6603205575). A function's values form regions, as in Swift's
@@ -1095,7 +1097,7 @@ with its fields, the captured variables and the statics form one region outside 
 *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. The top-level code
 is read as a function whose variables are its own, since F16 keeps them from the top-level
 functions, so that they are no statics, and `move` before a value that names no place,
-`f(move Cart(1))`, stands and ends nothing, the call taking the value it made *(assumed, §6: the
+`f(move Cart(1))`, stands where the word fits the parameter, and ends nothing, the call taking the value it made *(assumed, §6: the
 readings of the top-level code and of a value with no place, which no answer named)*. A call merges the regions of all its arguments, written `mut` or not, and its result's, as
 SE-0414 does, since `F(a, b)` can store `b` in a `mut` field of `a`, and an argument that crosses
 with no word merges nothing (§6, 2026-11-15, Q2) *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. A lambda joins the regions of what it
@@ -1109,15 +1111,16 @@ operands' regions; an actor's call and a `spawn` give a region of their own, sin
 crossed; an assignment to a field or an item joins the value's region with the instance's or the
 list's, a field of `this` with the region outside the function; the instance a method is called on
 joins the regions of its call, as an argument does; a field read of a value the function made, a
-construction or a call that keeps nothing, stays in that value's own region; and a value a round of
-a loop makes is new in each round, what earlier rounds made there keeping their own regions
-*(assumed, §6: the checker's readings, which no answer named, comment 6897444564 giving a `match`
+construction or a call whose arguments and receiver merge no region, having none or each crossing
+with no word or written `copy` or `move`, stays in that value's own region; and a value a round of
+a loop makes is new in each round, what earlier rounds made there sharing one region of their own,
+apart from the round's new value *(assumed, §6: the checker's readings, which no answer named, comment 6897444564 giving a `match`
 binding, a call and a field read)*. Branches unite what they
 moved: after an `if`, a `match`, `&&` or `||`, a use is `used-after-move` where any path moved the
 value, and the error names every `move` line that reaches the use *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. In a loop, a `move x` in a
 body that does not assign `x` again before the round ends is `used-after-move` at that `move`,
 moved there in an earlier round; an assignment makes a variable live again, and a variable
-declared in the body, and the variables the loop's head declares, are new each round *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. `move p.A` and `move xs[0]` stand and end `p` or `xs`
+declared in the body is new each round *(assumed, §6: the point of comment 6897444564 that the answers left standing)*, and so are the variables the loop's head declares *(assumed, §6: the checker's reading, which no answer named)*. `move p.A` and `move xs[0]` stand and end `p` or `xs`
 with its whole region, as Swift's regions do, which track no single field, and not as Rust's
 partial move; a `move` of a field of `this`, of a static or of a parameter not written `move` is
 `move-reachable`, and so is the `move` of a variable that aliases one of them *(assumed, §6: the point of comment 6897444564 that the answers left standing)*. A use is any
@@ -1129,7 +1132,7 @@ A `for` loop whose body moves its variable takes its list, as Rust's `for c in c
 it owns: the list is dead after the loop, a use of it there being `used-after-move`, naming the
 line of the `move`, and a list held outside the function, a field of `this` or a parameter not
 written `move`, stays `move-reachable` (§6, the owner, 2026-11-15, #519, comment 6897778812, Q1,
-"Rust: loop takes list"). A loop whose body moves a variable whose value crosses with no word, a
+"Rust: loop takes list"). A loop whose body moves its variable, whose value crosses with no word, a
 number or a string among them, takes its list too, as Rust's `for n in nums` takes a `Vec<i32>`
 (§6, the owner, 2026-11-17, #561, comment 6945857315, Q1, "The loop takes the list"). A parameter written `move` takes an argument written `move`, or one
 written `copy`, since its copy is new, as a parameter written `sending` takes any value in a region
@@ -1150,16 +1153,18 @@ standing before its type, a type
 named `move` before a name is read as the word, and a parameter of a C function's type (R17) takes no
 `move`, which is `syntax`, since C code keeps no count *(assumed, §6: as `mut` and `move` are words
 before an argument, which the round did not ask)*. On one thread a `move` into a parameter copies
-nothing, and of a value whose place the `move` empties, a counted block, changes no count: the
-moved place's count becomes the parameter's, and a variable moved on
+nothing, and of a value whose place has an empty value, an address or a string, which the `move`
+empties, changes no count: the moved place's count becomes the parameter's, and a variable moved on
 some paths alone is let go of through a null test at its end, as rustc keeps a drop flag (§6, the
 owner, 2026-11-15, #519, comment 6895076937) *(assumed, §6: the point of comment 6897444564 that the answers left standing)*; a value whose place a `move` leaves as it was, inline data,
-a fat class reference or a function value, is counted once more *(assumed, §6: the build's reading,
-which no answer named)*. A `move` into a message or a `spawn` copies the value into the receiver's
-heap and lets go of the original, which frees it, and into a `spawn` whose policy can restart the
-supervisor keeps a second copy (U22) *(assumed, §6: on comment 6902210646, Q5, "Copy all, share big
-unbuilt", which narrows to a parameter comment 6895076937, whose answer gave the moved count to
-"the message's or the parameter's" place)*.
+a fat class reference or a function value, has each counted block it holds counted once more
+*(assumed, §6: the build's reading, which no answer named)*. A `move` into a message or a `spawn`
+copies the value into the receiver's heap, as an argument with no word crosses, a big value shared
+by pointer under §6's share of a big value, which no program tells from a copy, and lets go of the
+original, which frees it, and into a `spawn` whose policy can restart the supervisor keeps a second
+copy (U22) *(assumed, §6: on comment 6902210646, Q5, "Copy all, share big unbuilt", the answer given
+after comment 6895076937, which gave the moved count to "the message's or the parameter's" place and
+which Q5 narrows to a parameter)*.
 
 Case: [actors/relay.kz](../corpus/actors/relay.kz)
 
@@ -2159,7 +2164,9 @@ ask)*, and the four, `move-reachable`, `move-at-call`, `used-after-move` and `mu
 stand by argument order in that stage, the error of the argument written first coming first, as
 rustc's borrow check sorts its errors by their place (§6, the owner, 2026-11-15, issue 519,
 comment 6891937666, item 4, option (a), "Rust: by argument order", which named `move-reachable` and
-`mut-in-message`). `mut-in-message` stands at the
+`mut-in-message`); on one argument the checker reads `used-after-move` first, then `move-at-call`,
+then `move-reachable`, the call having the one error *(assumed, §6: the checker's reading, which no
+answer named)*. `mut-in-message` stands at the
 first argument the call writes that fills a `mut` parameter, and on one argument the two never meet,
 an argument written with `move` that fills a `mut` parameter being `mut-at-call` (M7), its own error
 *(assumed: as §6 marks it)*. An argument's own error
@@ -2343,8 +2350,8 @@ process wherever they happen (O11, M9), and so do, on the actor's stack too, a s
 allocator, the scheduler or the copy of a crossing (O11) and, in a test build, a check of the runtime's
 own code wherever it fires, as a stack fault inside the allocator or the scheduler ends it (chapter 12,
 "Run-time errors").
-On Windows an actor's stack overflow ends the process as the system ends it (`compiler/README.md`)
-*(assumed: §6, the points of comment 6899225864 that the answers left standing)*. The words of a
+On Windows the build ends the process at an actor's stack overflow, as the system ends it
+(`compiler/README.md`). The words of a
 policy, `on crash`, say what the supervisor does with the crash (U25 to U27), and an actor whose
 `spawn` and type write none has the default, `on crash restart` (§6).
 
@@ -2811,10 +2818,13 @@ takes in turn, at the top level the end of the process (§6, the owner, 2026-11-
 restart-limit id") *(assumed: as §6 marks it, each crash counted at its time, before its pause, the
 log line of the crash that passes the limit written, as Erlang's supervisor reports a child's exit
 before it shuts down, and at the top level the trace of the top-level code where it waits)*. A `per` actor,
-which is never spawned, that passes the limit ends, and the next call of its key starts a fresh one,
+which is never spawned, takes its limit from its policy, the words after its name (U27), and one that
+passes the limit ends, and the next call of its key starts a fresh one,
 its constructor run again, with no `restart-limit` and no limit across those starts (§6, the owner, 2026-11-17, #561, comment 6945857315,
-Q2, "Key restarts fresh on next call", as Akka's sharding does) *(assumed, §6: the calls queued in it at
-that crash raise `actor-gone`, and that crash writes its log line as any crash does)*. The
+Q2, "Key restarts fresh on next call", as Akka's sharding does) *(assumed, §6: below the limit the
+runtime restarts the `per` actor in place as its policy says, its window counted from its fresh start;
+the calls queued in it at that crash raise `actor-gone`, and that crash writes its log line as any
+crash does)*. The
 duration after `after` is above 0 and at most the cap, the count after `max` an `int` of at least 1
 and the duration after `in` above 0, and a value of another type or past its bound is
 `type-mismatch` (T1), while a literal's own error stands (L10, L14) (§6; `after` past the cap, the

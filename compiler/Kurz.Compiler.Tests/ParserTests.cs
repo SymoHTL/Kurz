@@ -1163,6 +1163,7 @@ public sealed class ParserTests
     [InlineData("void Take(mut move Cart c) {\n}")]
     [InlineData("void Take(mut move c) {\n}")]
     [InlineData("void Take(move mut Cart c) {\n}")]
+    [InlineData("void Take(move mut c) {\n}")]
     [InlineData("Run((mut move c) => print(c))")]
     public void A_parameter_written_both_mut_and_move_is_syntax(string program)
     {
