@@ -1,0 +1,49 @@
+// expect: output
+// | 1
+// | go ends
+// | first's block
+// | second's block
+// | queued
+// | 2
+// rules: U28, U34
+
+actor Other {
+    pub int Ping() => 1
+}
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+}
+
+actor Boss {
+    pub void Go(Other other) {
+        first = spawn Worker() on crash (c) {
+            print("first's block")
+            stop
+        }
+
+        second = spawn Worker() on crash (c) {
+            print("second's block")
+            stop
+        }
+
+        send this.Queued()
+        send first.Fail()
+        send second.Fail()
+        print(other.Ping())
+        print("go ends")
+    }
+
+    pub void Queued() {
+        print("queued")
+    }
+
+    pub int Ping() => 2
+}
+
+o = spawn Other()
+b = spawn Boss()
+b.Go(o)
+print(b.Ping())

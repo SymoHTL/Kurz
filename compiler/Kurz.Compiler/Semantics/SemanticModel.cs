@@ -408,6 +408,7 @@ public sealed class SemanticModel
     private readonly Dictionary<CallExpression, CallExpression?> made = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<AssignOrDeclare, VariableSymbol> assignments = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<LambdaExpression, LambdaInfo> lambdas = new(ReferenceEqualityComparer.Instance);
+    private readonly List<KurzType> crashReasons = [];
     private readonly HashSet<Expression> heldCopies = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Expression> copied = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Expression> waitingArguments = new(ReferenceEqualityComparer.Instance);
@@ -520,6 +521,12 @@ public sealed class SemanticModel
 
     /// <summary>Whether the checker read the lambda.</summary>
     public bool HasLambda(LambdaExpression lambda) => lambdas.ContainsKey(lambda);
+
+    /// <summary>
+    /// U30: the <c>Reason</c> of each block of <c>on crash</c> the checker read, in the order it read them, whose cases a <c>throw</c> names
+    /// to the runtime for the copy into the supervisor's heap; none where the file holds no such block.
+    /// </summary>
+    public IReadOnlyList<KurzType> CrashReasons => crashReasons;
 
     /// <summary>
     /// Whether the expression is a read of a copied type that its expression still holds when something changes the place it was
@@ -708,6 +715,8 @@ public sealed class SemanticModel
     internal void RecordAssignment(AssignOrDeclare assignment, VariableSymbol variable) => assignments[assignment] = variable;
 
     internal void RecordLambda(LambdaExpression lambda, LambdaInfo info) => lambdas[lambda] = info;
+
+    internal void RecordCrashReason(KurzType reason) => crashReasons.Add(reason);
 
     internal void RecordHeldCopy(Expression expression) => heldCopies.Add(expression);
 

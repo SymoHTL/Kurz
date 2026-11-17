@@ -21,6 +21,7 @@ internal static class SyntaxPrinter
         Assignment a => $"(assign {Print(a.Target)} {Print(a.Value)})",
         ExpressionStatement e => Print(e.Expression),
         SendStatement s => $"(send {Print(s.Call)})",
+        DecisionStatement d => $"(decide {d.Word})",
         IfStatement i => $"(if {Print(i.Condition)} {Print(i.Then)}{(i.Else is null ? "" : " else " + Print(i.Else))})",
         WhileStatement w => $"(while {Print(w.Condition)} {Print(w.Body)})",
         ForInStatement f => $"(for {f.Variable}{(f.Second is null ? "" : ", " + f.Second.Name)} in {Print(f.Collection)} {Print(f.Body)}{(f.Arms is null ? "" : " else " + Arms(f.Arms))})",
@@ -173,18 +174,19 @@ internal static class SyntaxPrinter
         UnaryExpression u => $"({Op(u.Operator)} {Print(u.Operand)})",
         BinaryExpression b => $"({Op(b.Operator)} {Print(b.Left)} {Print(b.Right)})",
         RangeExpression r => $"({(r.Inclusive ? ".." : "..<")} {Print(r.Start)} {Print(r.End)})",
+        AttemptExpression a => $"({a.Word} {Print(a.Body)})",
         LambdaExpression l => $"(lambda ({Parameters(l.Parameters)}) {(l.ExpressionBody is not null ? Print(l.ExpressionBody) : Print(l.BlockBody!))})",
         MatchExpression m => $"(match-expression {Print(m.Subject)} {Arms(m.Arms)})",
         WithExpression w => $"(with {Print(w.Target)} {string.Join(", ", w.Assignments.Select(a => a.Field + " = " + Print(a.Value)))})",
         ElseExpression e => $"(else {Print(e.Call)} {Arms(e.Arms)})",
         ParenthesizedExpression p => $"(paren {Print(p.Inner)})",
-        SpawnExpression s => $"(spawn {Print(s.Call)}{(s.Policy is { } policy ? " " + Policy(policy) : s.OnCrashLine == 0 ? "" : $" [on crash {s.OnCrashLine}]")})",
+        SpawnExpression s => $"(spawn {Print(s.Call)}{(s.Policy is { } policy ? " " + Policy(policy) : "")})",
         _ => throw new InvalidOperationException(expression.GetType().Name),
     };
 
     /// <summary>U25, U26: the words of a policy with the line of its <c>on crash</c>, each knob with its value.</summary>
     private static string Policy(CrashPolicy p) =>
-        $"[on crash {p.Line} {p.Word}{(p.After is null ? "" : $" after {Print(p.After)}")}{(p.Max is null ? "" : $" max {Print(p.Max)} in {Print(p.Within!)}")}]";
+        $"[on crash {p.Line} {p.Word}{(p.After is null ? "" : $" after {Print(p.After)}")}{(p.Max is null ? "" : $" max {Print(p.Max)} in {Print(p.Within!)}")}{(p.Block is null ? "" : " " + Print(p.Block))}]";
 
     private static string Quote(string text) => "\"" + text.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
 

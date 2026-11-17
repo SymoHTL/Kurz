@@ -1,0 +1,31 @@
+// expect: output
+// | first 1
+// | 1
+// rules: U31
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+}
+
+actor Boss {
+    mut int crashes = 0
+
+    pub void Go() {
+        name = "first"
+        w = spawn Worker() on crash (c) {
+            crashes = crashes + 1
+            print("{name} {crashes}")
+            stop
+        }
+
+        send w.Fail()
+    }
+
+    pub int Crashes() => crashes
+}
+
+b = spawn Boss()
+b.Go()
+print(b.Crashes())

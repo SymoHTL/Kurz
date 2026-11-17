@@ -121,6 +121,9 @@ public sealed partial class Checker
                 return CheckExpression(p.Inner, expected, keepCases, given);
             case SpawnExpression s:
                 return CheckSpawn(s); // U2
+            case AttemptExpression a:
+                NotSupported(a.Line, $"`{a.Word} {{ ... }}`, the block that keeps a crash to a piece of code (section 6, U28)");
+                return Typed.Error;
             default:
                 throw new InvalidOperationException(expression.GetType().Name);
         }
