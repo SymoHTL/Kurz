@@ -417,7 +417,8 @@ match c {
 }
 ```
 
-The case below prints a value of a generic type derived from the type its parameter names (A3, A5, O7).
+The case below prints a value of a generic type derived from `Plain` through a parameter of type
+`Plain` (A3, A5, O7).
 
 Case: [outcomes/throw-in-text-of-instantiation.kz](../corpus/outcomes/throw-in-text-of-instantiation.kz)
 ```kurz
