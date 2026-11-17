@@ -62,7 +62,11 @@ public sealed partial class Checker
         return pointer is PointerType p ? new AtomicType(Atomic.Ptr, p.Pointee) : Types.Error;
     }
 
-    /// <summary>R19: a member of an atomic type read through its name as a value, <c>AtomicLong.FromPtr</c>, which is called; false for any other read.</summary>
+    /// <summary>
+    /// R19: a member of an atomic type read through its name as a value: <c>AtomicLong.FromPtr</c>, a function of a type, which is called,
+    /// <c>syntax</c>, as a function's name where a value stands is (F11) (the owner, 2026-11-17, #572, comment 6961064484, Q3, "syntax for
+    /// all (Recommended)"), and any other member, which the type has not, <c>unknown-name</c>; false for any other read.
+    /// </summary>
     private bool AtomicMemberAsValue(MemberAccess m)
     {
         if (m.Target is not NameExpression n || !IsAtomicName(n.Name))
@@ -70,9 +74,13 @@ public sealed partial class Checker
             return false;
         }
 
-        Report(ErrorIds.UnknownName, m.Line, m.Member == "FromPtr"
-            ? $"`{n.Name}.FromPtr` is a function, which is called (R19, V10)"
-            : $"`{n.Name}` has no member `{m.Member}`: its view is made by `FromPtr` (R19, V10)");
+        if (m.Member == "FromPtr")
+        {
+            Report(ErrorIds.Syntax, m.Line, $"`{n.Name}.FromPtr` is a function, and no value stands here: it is called, `{n.Name}.FromPtr(p)` (R19, F11)");
+            return true;
+        }
+
+        Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no member `{m.Member}`: its view is made by `FromPtr` (R19, V10)");
         return true;
     }
 

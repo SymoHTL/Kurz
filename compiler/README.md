@@ -2008,8 +2008,8 @@ union's case, and `Fence` a `fence`; a `bool`'s word is a byte that holds 0 or 1
 raises `invalid-ordering-at-run-time` at the call's line with no `switch`; any other is read when the call runs, by a `switch` over the five values of `MemoryOrder`
 to the instruction for each, as Rust's `match` on the order chooses among its intrinsics, and a
 choice Rust refuses raises `invalid-ordering-at-run-time` at the call's line (`Emit/Emitter.Atomics.cs`;
-`EmitterTests` pins the instructions and the choice). A view crossing into an actor is
-`not supported`, as a pointer's crossing is (U12).
+`EmitterTests` pins the instructions and the choice). A view crossing into an actor, or out of one as
+a waiting call's result, is the checker's `pointer-crosses`, as a pointer's crossing is (U12, R19).
 
 ### What the emitter does not emit
 
@@ -2655,7 +2655,8 @@ of P3 and its category of P6), 19 (actors of one machine: U1, U2, U4, U6 to U12,
 others the run's, an actor's body read as a class's, its reference a type of its own, the calls
 through it recorded as messages that wait or not, `CallKind.ActorCall` and `CallKind.ActorSend`, and
 a `send` of its own method inside it recorded as `CallKind.ActorSend`, and of U12 what crosses, by
-the type of the parameter, with `send-needs-word` at an argument and at a waiting call's result, a
+the type of the parameter, with `send-needs-word` at an argument and at a waiting call's result, and
+`pointer-crosses` there where a value reaches a pointer or a view of an atomic type, with any word, a
 function value by the lambda its function shows, and `copy` at any call recorded for the emitter,
 `SemanticModel.IsCopied`, and `move` before an argument, before a parameter's type and in a function
 type, a lambda's parameter whose type is not written taking it from the type the lambda is given for:
@@ -2713,7 +2714,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`, `named-asm-label`, `binary-asm-label`,
 `naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `static-cycle`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, `lane-out-of-range`,
 `equal-by-unknown`, `equals-method`, `mutable-key`, `spawn-required`, `send-result`, `actor-field-public`,
-`mut-in-message`, `send-needs-word`, `used-after-move`, `move-reachable`, `move-at-call`, and
+`mut-in-message`, `send-needs-word`, `used-after-move`, `move-reachable`, `move-at-call`, `pointer-crosses`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
 Over a program the checker read without a diagnostic and the model of `std/`, `Semantics/ThrowSets.cs` computes what code can
@@ -2900,7 +2901,9 @@ function, a `move` of the variable of a loop over anything but a list, and a `mo
 region the checker does not keep (U12); an argument
 or a result of a message or of an actor's constructor, and a value after `copy` at any call, that
 reaches a value of a type parameter, an instance of a class of `std/`, `HttpRequest` and
-`HttpHeaders` among them, a handle of section 12 or a pointer, an argument written `move` only where it
+`HttpHeaders` among them, or a handle of section 12, a value after `copy` at a call that is no message
+that reaches a pointer or a view of an atomic type, which crosses into no actor (`pointer-crosses`,
+U12), an argument written `move` only where it
 reaches a handle, a hasher, a command or a child process, itself or through a field of a class of
 `std/`, whose copy would share the sender's block by its count (U12); `copy` at a call that is no message before a value that
 reaches a function value or an interface's value, which no word makes cross (U12); and a log call

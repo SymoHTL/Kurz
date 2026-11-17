@@ -7,7 +7,8 @@ namespace Kurz.Compiler.Semantics;
 /// reference, an <see cref="ActorType"/>, takes calls of its <c>pub</c> methods as messages: a call waits for its result (U4) and one
 /// after <c>send</c> does not (U6), and a method with a result after <c>send</c> is <c>send-result</c> (U6, U7). Inside the actor its
 /// own methods and fields are direct, as a class's are (U10), and <c>send</c> of its own method is a message (U11). What crosses into a
-/// message and back out of it is read by its type, <c>send-needs-word</c> where it does not cross (U12, <see cref="CrossingOf"/>). What
+/// message and back out of it is read by its type, <c>send-needs-word</c> where it does not cross, <c>pointer-crosses</c> where it reaches
+/// a pointer or a view of an atomic type (U12, <see cref="CrossingOf"/>). What
 /// else an actor can write, and what the build does not make of it, is <c>not supported</c>, each naming its rule
 /// (<c>compiler/README.md</c>).
 /// </summary>
@@ -299,19 +300,21 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// U12: how a value of the type crosses, with why where it does not cross with no word, and the build's limit it reaches, null where
-    /// it reaches none. A type is read through the items of a list, the keys and values of a map, the cases of a union, the fields of a
-    /// data value and of a class, a class derived from it among them (K6), and the target of a <c>weak</c> reference, which crosses where
+    /// U12: how a value of the type crosses, with why where it does not cross with no word, the build's limit it reaches, null where
+    /// it reaches none, and the first pointer or view of an atomic type it reaches, null where it reaches none, which no word makes cross,
+    /// <c>pointer-crosses</c> (the owner, 2026-11-17, #572, comment 6961064484, Q1, "Refuse with an id (Recommended)"). A type is read
+    /// through the items of a list, the keys and values of a map, the cases of a union, the fields of a data value and of a class, a class derived from it among them (K6), and the target of a <c>weak</c> reference, which crosses where
     /// its target does (the owner, 2026-11-15, #519, comment 6896192351, Q3, "Points at the copy"), as Rust's <c>Send</c> is structural:
     /// a <c>mut</c> field needs a word, and an interface's type and a function type are read by their written type and never cross
     /// (comment 6892275110, item 2; comment 6896192351, Q5, "By written type"). A value of a type parameter, a handle of section 12, a
-    /// pointer and a class of <c>std/</c>, which is no class of the file (W1), <c>HttpRequest</c> among them, are the build's limits; a map
+    /// pointer, a view and a class of <c>std/</c>, which is no class of the file (W1), <c>HttpRequest</c> among them, are the build's limits,
+    /// a pointer's and a view's standing where a call that is no message copies them or a block of <c>on crash</c> reads them; a map
     /// whose keys reach a class instance is none, since its copy hashes each key again (the owner, 2026-11-16, #519, comment 6923513534,
     /// "Rehash each key (Recommended)").
     /// </summary>
-    private (ActorCrossing Kind, string? Why, string? Limit) CrossingOf(KurzType type)
+    private (ActorCrossing Kind, string? Why, string? Limit, string? Raw) CrossingOf(KurzType type)
     {
-        var (kind, why, limit) = (ActorCrossing.Crosses, (string?)null, (string?)null);
+        var (kind, why, limit, raw) = (ActorCrossing.Crosses, (string?)null, (string?)null, (string?)null);
         var classes = new HashSet<ClassSymbol>();
         var data = new HashSet<DataSymbol>();
         void Meet(ActorCrossing k, string reason)
@@ -384,7 +387,11 @@ public sealed partial class Checker
                 case TypeParameterType:
                     limit ??= $"a value of the type parameter `{t}`";
                     break;
-                case HandleType or HasherType or CommandType or ChildProcessType or PointerType or AtomicType or CFunctionType: // R19: a view, as the pointer it holds
+                case PointerType or AtomicType: // R19: a view, as the pointer it holds
+                    raw ??= $"{Types.A(t)}";
+                    limit ??= $"{Types.A(t)}";
+                    break;
+                case HandleType or HasherType or CommandType or ChildProcessType or CFunctionType:
                     limit ??= $"{Types.A(t)}";
                     break;
                 default:
@@ -393,7 +400,7 @@ public sealed partial class Checker
         }
 
         Walk(type);
-        return (kind, why, limit);
+        return (kind, why, limit, raw);
     }
 
     /// <summary>
@@ -402,19 +409,19 @@ public sealed partial class Checker
     /// never crosses (a named function is no value, F11) (the owner, 2026-11-15, #519, comment 6896192351, Q5, "By written type"); every other
     /// argument by the slot's type, which a message holds (<see cref="CrossingOf"/>). What a lambda captures crosses with no word or it
     /// does not cross, since no word at the argument makes a function value cross (§6, Q24). Beside the build's limit, the limit that
-    /// stands after <c>move</c> too (<see cref="SharedByCount"/>).
+    /// stands after <c>move</c> too (<see cref="SharedByCount"/>), and the pointer or view it reaches, a capture's among them.
     /// </summary>
-    private (ActorCrossing Kind, string? Why, string? Limit, string? Shared) ArgumentCrossing(Argument a, KurzType slot)
+    private (ActorCrossing Kind, string? Why, string? Limit, string? Shared, string? Raw) ArgumentCrossing(Argument a, KurzType slot)
     {
         if ((Types.NonNull(slot) ?? slot) is FunctionType)
         {
             if (SeenLambda(a.Value) is { } l)
             {
                 model.RecordCrossingLambda(a.Value, l); // whose environment the crossing copies (comment 6902210646, Q5)
-                var (kind, why, limit, shared) = (ActorCrossing.Crosses, (string?)null, (string?)null, (string?)null);
+                var (kind, why, limit, shared, raw) = (ActorCrossing.Crosses, (string?)null, (string?)null, (string?)null, (string?)null);
                 foreach (var captured in model.LambdaOf(l).Captures)
                 {
-                    var (k, w, s) = CrossingOf(captured.Type);
+                    var (k, w, s, r) = CrossingOf(captured.Type);
                     if (k != ActorCrossing.Crosses && kind == ActorCrossing.Crosses)
                     {
                         (kind, why) = (ActorCrossing.Never, $"a lambda that captures `{captured.Name}`, {w}");
@@ -422,14 +429,15 @@ public sealed partial class Checker
 
                     limit ??= s;
                     shared ??= SharedByCount(captured.Type);
+                    raw ??= r is null ? null : $"a lambda that captures `{captured.Name}`, which reaches {r}";
                 }
 
-                return (kind, why, limit, shared);
+                return (kind, why, limit, shared, raw);
             }
         }
 
-        var (crossing, reason, limited) = CrossingOf(slot);
-        return (crossing, reason, limited, SharedByCount(slot));
+        var (crossing, reason, limited, pointer) = CrossingOf(slot);
+        return (crossing, reason, limited, SharedByCount(slot), pointer);
     }
 
     /// <summary>
@@ -477,7 +485,9 @@ public sealed partial class Checker
 
     /// <summary>
     /// U12, U16: the stage of the arguments of a message or of an actor's constructor, after the own error of each argument (E1), in the
-    /// order of U16: <c>send-needs-word</c> of the first argument that does not cross, at its argument, then in the order the arguments are
+    /// order of U16: of the first argument that does not cross, at its argument, <c>pointer-crosses</c> where it reaches a pointer or a view,
+    /// with a word or with none, before its <c>send-needs-word</c>, since no word makes it cross (U12, assumed), else <c>send-needs-word</c>,
+    /// then in the order the arguments are
     /// written, the words of <c>move</c> (<see cref="MessageMove"/>: <c>move-at-call</c>, <c>move-reachable</c> and a later argument's
     /// <c>used-after-move</c>) and <c>mut-in-message</c> of a <c>mut</c> parameter, which <paramref name="mutInMessage"/> reports (the owner,
     /// 2026-11-15, issue 519, comment 6891937666, item 4), and after every argument the build's <c>not supported</c> of the first value it
@@ -504,8 +514,14 @@ public sealed partial class Checker
             }
 
             var a = c.Arguments[i];
-            var (kind, why, limit, shared) = ArgumentCrossing(a, slotType(slot));
+            var (kind, why, limit, shared, raw) = ArgumentCrossing(a, slotType(slot));
             limits[i] = a.Word == ArgumentWord.Move ? shared : limit;
+            if (raw is not null)
+            {
+                Report(ErrorIds.PointerCrosses, a.Line, $"{ArgumentText(a, i)} of `{callee}` reaches {raw}, which crosses into no actor, with a word or with none: a pointer and a view stand on memory the language does not follow (U12, R19)");
+                return true;
+            }
+
             if (kind == ActorCrossing.Never || (kind == ActorCrossing.NeedsWord && a.Word is not (ArgumentWord.Copy or ArgumentWord.Move)))
             {
                 Report(ErrorIds.SendNeedsWord, a.Line, kind == ActorCrossing.NeedsWord
@@ -905,7 +921,13 @@ public sealed partial class Checker
 
         if (!send) // U6: a `send` drops the result, so nothing of it crosses, and its result is `send-result`
         {
-            var (kind, why, limit) = CrossingOf(picked.ReturnType);
+            var (kind, why, limit, raw) = CrossingOf(picked.ReturnType);
+            if (raw is not null)
+            {
+                Report(ErrorIds.PointerCrosses, m.Line, $"`{symbol.Name}.{picked.Name}` gives {Types.A(picked.ReturnType)}, which reaches {raw}, and no pointer or view crosses back to the caller (U12, R19)");
+                return Typed.Error;
+            }
+
             if (kind != ActorCrossing.Crosses)
             {
                 Report(ErrorIds.SendNeedsWord, m.Line, $"`{symbol.Name}.{picked.Name}` gives {Types.A(picked.ReturnType)}, which reaches {why}, and no word can stand at a result to make it cross back to the caller: give a value, a `data` value or an immutable class instance (U12)");

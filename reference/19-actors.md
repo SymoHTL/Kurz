@@ -1156,6 +1156,20 @@ copy (U22) *(assumed, §6: on comment 6902210646, Q5, "Copy all, share big unbui
 after comment 6895076937, which gave the moved count to "the message's or the parameter's" place and
 which Q5 narrows to a parameter)*.
 
+A pointer (R10) and a view of an atomic type (R19) cross into no actor: each is the compile error
+`pointer-crosses`, as Rust refuses a raw pointer, `*mut T` being no `Send` (§6, the owner,
+2026-11-17, #572, comment 6961064484, Q1, "Refuse with an id (Recommended)"), so that a program that
+shares a word between actors passes its address as a `long` and makes the view again on the other
+side, in a `raw` block (§6, the cost of that answer). The error stands at its argument, with `copy`,
+with `move` or with no word, as no clone or move of a `*mut T` makes it `Send`, and so it does for a
+value that reaches one, a collection, a `data` value or a class instance among them, as rustc reads
+`Send` through a struct's fields, and for a lambda the sending function shows that captures one; a
+message's result that reaches one is that error at the line of the call, as rustc asks `Send` of a
+task's output; and of a message's or a constructor's arguments the first that does not cross is
+reported, `pointer-crosses` standing in the stage of `send-needs-word` (U16), and before it in an
+argument that reaches both a pointer and a mutable class instance, since no word makes it cross
+*(assumed in §6: the id, the words, what a value reaches, the result and the stage)*.
+
 Case: [actors/relay.kz](../corpus/actors/relay.kz)
 
 Case: [actors/union-result.kz](../corpus/actors/union-result.kz)
@@ -1289,6 +1303,20 @@ actor Shop {
 s = spawn Shop()
 c = s.Open()
 print(c.Items)
+```
+
+Case: [actors/pointer-crosses.kz](../corpus/actors/pointer-crosses.kz)
+```kurz
+actor Keeper {
+    pub void Keep(long* p) {
+        print(1)
+    }
+}
+
+mut long word = 5
+k = spawn Keeper()
+// a pointer crosses into no actor, with a word or with none (U12)
+k.Keep(&word)
 ```
 
 Case: [actors/copy-mutable.kz](../corpus/actors/copy-mutable.kz)

@@ -1647,7 +1647,11 @@ then zeros *(assumed: as §13 marks them)*. What such a parameter takes
 from a value that is not a constant is open (§14): refused, as Rust refuses it, or chosen at run time
 among the instruction's forms. `Vector128.Create` and `Vector256.Create` take one value, which every
 lane takes, or one for each lane, another count being `argument-mismatch`, its lane type picked as a call's function is (F13, F14), and `GetElement` of an
-index below 0 or past the lanes raises `index-out-of-range` *(assumed: as §13 marks them)*. A file's
+index below 0 or past the lanes raises `index-out-of-range` *(assumed: as §13 marks them)*.
+`Vector128.Create` read as a value is `syntax`, as every function of a type read so is, a name that
+cannot stand as a value (F11), R19's `AtomicLong.FromPtr` and D18's `Plan.From` among them (§6, the
+owner, 2026-11-17, #572, comment 6961064484, Q3, "syntax for all (Recommended)"), and so is an
+intrinsic read as a value, `X86.Sse41.Extract`, a function of its class *(assumed in §6)*. A file's
 own declaration of `X86`, `Arm`, `Vector128` or `Vector256`, at any level, is `redeclared`, as a file's
 own `EnvError` is (S14), while a field takes the name (§13, the owner, 2026-11-01, "redeclared, as
 File").
@@ -1781,6 +1785,12 @@ Case: [memory/intrinsic-create-count.kz](../corpus/memory/intrinsic-create-count
 ```kurz
 // `Create` takes one value, or one for each of the four lanes of an `int` vector (R18)
 print(Vector128.Create(1, 2, 3).GetElement(0))
+```
+
+Case: [memory/intrinsic-function-value.kz](../corpus/memory/intrinsic-function-value.kz)
+```kurz
+// a function of a type is called, and no value (R18, F11)
+print(Vector128.Create)
 ```
 
 Case: [memory/intrinsic-redeclared.kz](../corpus/memory/intrinsic-redeclared.kz)
@@ -1977,11 +1987,12 @@ and `AtomicPtr.FromPtr(p)` takes its `T` from `p`, a `T**`, as T27 infers a type
 does not write, a `p` of another type giving `T` nothing and the call `cannot-infer`; a type
 argument on `AtomicBool`, `AtomicInt`, `AtomicLong` or `Fence`, and a count other than one on
 `AtomicPtr`, is `syntax` (T17, T19, E4); the name of an atomic type or of `Fence` where a value
-stands is `syntax`, as a type's (T10) and a function's (F11) are, and `AtomicLong.FromPtr` read as
-a value is `unknown-name`, as the compiler reads R18's `Vector128.Create` read so, R18 being the
-rule nearest to R19 *(assumed in §6)*. Whether a view crosses into an actor is open, with a
-pointer's crossing, which U12's list of what crosses does not name either (§14); the compiler says
-`not supported` to both (`compiler/README.md`).
+stands is `syntax`, as a type's (T10) and a function's (F11) are *(assumed in §6)*.
+`AtomicLong.FromPtr` read as a value is `syntax` too, as every function of a type read so is, a name
+that cannot stand as a value (F11), R18's `Vector128.Create` and D18's `Plan.From` among them (§6, the
+owner, 2026-11-17, #572, comment 6961064484, Q3, "syntax for all (Recommended)"). A view crosses into no actor, as a pointer does not (U12; §6, the owner,
+2026-11-17, #572, comment 6961064484, Q1, "Refuse with an id (Recommended)"), and either is
+`pointer-crosses`, with a word or with none *(assumed in §6: the id and the words)*.
 
 The members are a set chosen from Rust's, where Rust gives them to the type (§6, Q1), with Rust's parameters: `Load(order)`,
 `Store(val, order)`, `Swap(val, order)`, `CompareExchange(current, new, success, failure)` and
@@ -2173,6 +2184,26 @@ void Take(AtomicLong<int> cell) {
 }
 
 print(2)
+```
+
+Case: [memory/atomic-function-value.kz](../corpus/memory/atomic-function-value.kz)
+```kurz
+// a function of a type is called, and no value (R19, F11)
+print(AtomicLong.FromPtr)
+```
+
+Case: [memory/atomic-crosses.kz](../corpus/memory/atomic-crosses.kz)
+```kurz
+actor Counter(AtomicLong Word) {
+    pub void Show() {
+        print(1)
+    }
+}
+
+mut long word = 5
+// a view crosses into no actor, as the pointer it holds does not (R19, U12)
+c = spawn Counter(AtomicLong.FromPtr(&word))
+c.Show()
 ```
 
 Case: [memory/atomic-invalid-store.kz](../corpus/memory/atomic-invalid-store.kz)
