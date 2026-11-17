@@ -51,18 +51,25 @@ carries the `Case:` line alone.
 // | 1
 // allow: raw                         optional: the grants of a `project.kz` the file takes: raw, native or raw native
 // rules: R7
+
+// expect: throws stack-overflow at 6
+// system: linux                      optional: the one system the case runs on, linux or windows
+// rules: O11
 ```
 
 A case is a single file with no `project.kz`, run with no argument and with nothing on its standard
 input; its `// allow:` line gives it the grants a
 `project.kz` would give its package (R7; §3, the owner, 2026-10-21). The line takes `raw`, `native` or
 `raw native`, in that order, and each compiler's runner of the corpus reads it; a program outside the
-corpus takes no grant from it *(assumed: as §3 marks it)*.
+corpus takes no grant from it *(assumed: as §3 marks it)*. Its `// system:` line, after its `// allow:`
+line, names the one system it runs on, `linux` or `windows`: the runner builds it on the other system and
+does not run it there *(assumed: the fix of T10 of the reading of issue 39, comment 6926929175, which the
+answer of 2026-11-16 on pull request 554, comment 6926986795, gave to the change that follows it)*.
 
 The ids of both kinds are listed in chapter 12. The compiler's test suite parses each file and checks the errors of its
 front end, `syntax`, `semicolon`, `reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, or the absence of any diagnostic, against the header,
 except for `data/flags-match.kz`, whose `syntax` depends on the type of the matched value (D13), whose front end the suite checks for no diagnostic, and which the checker holds to that `syntax` at the line of the `match`;
-it runs every case its front end reads clean through the checker, which must report exactly the errors the header expects, except that it reports no error for a case that expects `asm-refused`, which the build raises, or, for a case whose construct it does not read, `not supported` and no error, as `compiler/README.md` says; and it builds every case that expects a run and that the compiler emits, runs it, and compares what it prints, its exit code and its error line with the header; a case that expects output must end with 0 and write nothing to standard error. A case that expects an error the build raises once clang refuses the program, `asm-refused` (R11, R12), must get no error from the checker, and the suite builds it and holds the build to that error alone, at the header's line. What the other cases print, and any other error that a part the checker does not read raises, are checked only by reading and by the review. `tools/lint_reference.py` keeps the
+it runs every case its front end reads clean through the checker, which must report exactly the errors the header expects, except that it reports no error for a case that expects `asm-refused`, which the build raises, or, for a case whose construct it does not read, `not supported` and no error, as `compiler/README.md` says; and it builds every case that expects a run and that the compiler emits, runs it, and compares what it prints, its exit code and its error line with the header; a case that expects output must end with 0 and write nothing to standard error but, in a case whose `rules:` line names a rule of a crash, the log line of an actor's crash (E3) *(assumed: as E3 marks it)*. A case that expects an error the build raises once clang refuses the program, `asm-refused` (R11, R12), must get no error from the checker, and the suite builds it and holds the build to that error alone, at the header's line. What the other cases print, and any other error that a part the checker does not read raises, are checked only by reading and by the review. `tools/lint_reference.py` keeps the
 reference and the corpus consistent with each other; whether an expectation is right is decided
 by reading it against the rules, and by the review.
 
@@ -101,7 +108,8 @@ and the program ends with the code of an error that ends it.
 Linux alone, and a closed descriptor 2 losing the runtime's own report, as Rust loses its panic message)*.
 
 No case for what it writes: the lines of a case's header are what the program writes to standard
-output, and a case that expects output writes nothing to standard error.
+output, and a case that expects output writes nothing to standard error but, in a case of a crash, the
+log line of an actor's crash (E3) *(assumed: as E3 marks it)*.
 
 Case: [values/eprint-redeclared.kz](../corpus/values/eprint-redeclared.kz)
 ```kurz
