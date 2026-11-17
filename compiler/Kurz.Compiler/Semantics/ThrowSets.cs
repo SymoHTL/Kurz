@@ -9,13 +9,16 @@ namespace Kurz.Compiler.Semantics;
 /// construction, its constructors and every method it declares, with what they reach: a call of a function; of a method, with every
 /// override of it and, through an interface, every implementer's method; a construction of a class or of a <c>data</c> value, with the
 /// defaults and the constructors it runs; a read of a property; a call of a function value, which reaches every lambda of the program
-/// whose type fits; the <c>Text()</c> that <c>print</c>, <c>eprint</c>, a hole of an interpolation and <c>string.Join</c> call on the
-/// types they make text of, and for a generic <c>data</c> type derived from such a type the text of each instantiation of it that the
-/// program builds (section 5, the owner, 2026-11-16); the construction of an actor it spawns, whose throw is its crash (U3); and the code
-/// of an actor it spawns under <c>escalate</c>, whose crash passes up whole (U25). The instantiations a program builds are found as Rust's
-/// monomorphization finds its instances: from the roots, the top-level code and every <c>pub</c> function without type parameters, through
-/// the type arguments each call gives, with the fixed point's edges, a lambda's in the unit that makes it, and each with no type parameter
-/// left. A call through an actor's
+/// whose type fits, and of a value of a C function type, which reaches every function of the C calling convention that a name gives as a
+/// value of that type (R17); the test of <c>Where</c> and the key of <c>SortBy</c>, which they call (M9, X8), where another built-in call
+/// that takes a function value keeps it; the <c>Text()</c> that <c>print</c>, <c>eprint</c>, a hole of an interpolation and
+/// <c>string.Join</c> call on the types they make text of, and for a generic <c>data</c> type derived from such a type the text of each
+/// instantiation of it that the program builds (section 5, the owner, 2026-11-16); the construction of an actor it spawns, whose throw is
+/// its crash (U3); and the code of an actor it spawns under <c>escalate</c>, whose crash passes up whole (U25). The instantiations a
+/// program builds are found as Rust's monomorphization finds its instances: from the roots, the top-level code and every <c>pub</c>
+/// function, a generic one and each actor's <c>pub</c> methods among them, through the type arguments each call gives, with the fixed
+/// point's edges, a lambda's in the unit that makes it, and each with no type parameter left, read again with the text of each
+/// instantiation found until they grow no more. A call through an actor's
 /// reference reaches none of the callee's code, whose crash its caller gets as <c>callee-crashed</c> (U20). The text of a thrown value
 /// adds nothing, since a raise while it is made ends the process (section 6), and <c>==</c>, <c>equal by</c> and a hash run no code of the program, which declares no <c>Equals</c> and no
 /// <c>GetHashCode</c> (K5, K8, D16). A set is in the order of the first <c>throw</c> of each type that the code reaches, the program's
@@ -176,6 +179,9 @@ public sealed class ThrowSets
     /// <summary>A call of a function value of this type, which runs a lambda of the program whose type fits (F11).</summary>
     private sealed record Valued(FunctionType Type);
 
+    /// <summary>A call of a value of this C function type, which runs a function of the C calling convention that a name gives as a value of that type (R17).</summary>
+    private sealed record Native(CFunctionType Type);
+
     /// <summary>The top-level code of a file, the root actor's (O6): a root of what the program builds, as Rust's <c>main</c> is.</summary>
     private sealed record TopLevel(SemanticModel Model);
 
@@ -246,7 +252,10 @@ public sealed class ThrowSets
 
     /// <summary>
     /// Each unit's set made of its own throws and of the sets of the units it runs, and the generic data types it builds made of its own and
-    /// of those the units it runs build, each put through each edge's type arguments, as long as a set grows.
+    /// of those the units it runs build, each put through each edge's type arguments, as long as a set grows. No program the checker reads
+    /// reaches the bound: a thrown or a built type grows only through an edge's type arguments, and a cycle of generic calls whose type
+    /// argument grows, <c>void Deep&lt;T&gt;(T x, int n)</c> calling itself with <c>[x]</c>, is the compile error
+    /// <c>growing-type-argument</c> whether or not a call reaches it (T34).
     /// </summary>
     private void Solve()
     {
@@ -319,36 +328,68 @@ public sealed class ThrowSets
     /// Section 5 (the owner, 2026-11-16, "Each instantiation"): every instantiation of a generic data type that the program builds, as
     /// Rust's monomorphization collects its instances, from the roots through the type arguments each call gives, each with no type
     /// parameter left; read once, before the code of any set, so that the text of each instantiation (<see cref="Each"/>) is read
-    /// after the whole of it is known and a set does not depend on the order of the questions.
+    /// after the whole of it is known and a set does not depend on the order of the questions. The text of an instantiation runs code
+    /// that can build more, a <c>Text()</c> of a type argument among it, so each <see cref="Each"/> unit reads the text of every
+    /// instantiation found, and the roots are solved again, until the list grows no more.
     /// </summary>
     private List<DataType> Instantiations()
     {
         if (instantiations is null)
         {
+            instantiations = [];
             waiting = [];
             var roots = Roots().Select(Discover).ToList();
-            Solve();
-            instantiations = [];
-            foreach (var made in roots.SelectMany(root => root.Built).Where(d => !Open(d)))
+            var eaches = new List<(Each Key, Unit Unit, Walk Walk)>();
+            var read = new List<int>(); // for each of them, how many of the instantiations it read
+            for (var more = true; more;)
             {
-                Add(instantiations, made);
+                Solve();
+                foreach (var made in roots.SelectMany(root => root.Built).Where(d => !Open(d)).ToList())
+                {
+                    Add(instantiations, made);
+                }
+
+                foreach (var (key, unit) in waiting)
+                {
+                    var (model, file) = Site(((Each)key).Data);
+                    eaches.Add(((Each)key, unit, new Walk(this, model, file, unit)));
+                    read.Add(0);
+                }
+
+                more = false;
+                waiting.Clear();
+                for (var i = 0; i < eaches.Count; i++)
+                {
+                    for (; read[i] < instantiations.Count; read[i]++)
+                    {
+                        if (ReferenceEquals(instantiations[read[i]].Symbol, eaches[i].Key.Data))
+                        {
+                            eaches[i].Walk.TextOf(instantiations[read[i]]);
+                            more = true;
+                        }
+                    }
+
+                    foreach (var edge in eaches[i].Unit.Edges.ToList())
+                    {
+                        Discover(edge.Unit); // a unit the text reaches that no read took before, which can build more
+                    }
+                }
+
+                more |= waiting.Count > 0;
             }
 
-            var deferred = waiting;
             waiting = null;
-            foreach (var (key, unit) in deferred)
-            {
-                Read(key, unit);
-            }
         }
 
         return instantiations;
     }
 
     // the roots of what the program builds, as Rust's are `main` and its `pub` items: the top-level code and every `pub` function the
-    // list holds that has no type parameter, since a generic one builds only what a call gives it
-    private IEnumerable<object> Roots() =>
-        Pub().Where(f => f.TypeParameters.Count == 0).Prepend<object>(new TopLevel(program.Model));
+    // list holds, a generic one among them, whose instantiations with every type argument named are built whatever type argument a
+    // call gives it (section 5, comment 6926485802: the list names what a call of it can raise); the list holds each actor's `pub`
+    // methods, which alone take messages (U9), so that what an actor builds is built: its other methods run from its own code alone,
+    // and its construction from a `spawn` that a root reaches
+    private IEnumerable<object> Roots() => Pub().Prepend<object>(new TopLevel(program.Model));
 
     // a type once, at the earliest place that throws it
     private static bool Add(List<Thrown> set, Thrown thrown)
@@ -467,6 +508,13 @@ public sealed class ThrowSets
 
             case Valued v:
                 unit.Edges.AddRange(Lambdas().Where(x => Fits(x.Type, v.Type)).Select(x => new Edge(x.Lambda, null)));
+                break;
+            case Native n:
+                unit.Edges.AddRange(Checkers()
+                    .SelectMany(c => c.Checker.Model.FunctionNames.Where(x => c.Checker.Model.HasType(x.Name) && Types.Same(c.Checker.Model.TypeOf(x.Name).Type, n.Type)))
+                    .Select(x => x.Function)
+                    .Distinct()
+                    .Select(f => new Edge(f, null)));
                 break;
             case TopLevel t:
                 {
@@ -1009,6 +1057,7 @@ public sealed class ThrowSets
 
                 case CallKind.Value:
                     unit.Edges.AddRange(Functions(model.TypeOf(c.Callee).Type).Select(type => new Edge(new Valued(type), null)));
+                    unit.Edges.AddRange(CFunctions(model.TypeOf(c.Callee).Type).Select(type => new Edge(new Native(type), null))); // R17
                     break;
                 case CallKind.Print or CallKind.ErrorPrint:
                     foreach (var argument in c.Arguments)
@@ -1029,8 +1078,10 @@ public sealed class ThrowSets
                     break;
                 case CallKind.ActorCall or CallKind.ActorSend:
                     break; // U20: the callee's code runs in the callee, whose crash its caller gets as `callee-crashed`
-                default:
-                    // M9, X8: a built-in call that takes a function value calls it
+                case CallKind.ListWhere or CallKind.ListSortBy:
+                    // M9, X8: `Where` calls its test and `SortBy` its key for each item; another built-in call that takes a function value,
+                    // `Add` or `Insert` among them, keeps it and runs none of it, so a lambda there brings what its walk gave it, what it
+                    // builds and nothing it throws, and a call of the value it became reaches the lambda
                     foreach (var argument in c.Arguments)
                     {
                         if (argument.Value is LambdaExpression lambda && model.HasLambda(lambda))
@@ -1044,6 +1095,8 @@ public sealed class ThrowSets
                     }
 
                     break;
+                default:
+                    break;
             }
         }
 
@@ -1054,14 +1107,23 @@ public sealed class ThrowSets
             _ => [],
         };
 
+        private static IEnumerable<CFunctionType> CFunctions(KurzType type) => type switch
+        {
+            CFunctionType f => [f],
+            UnionType u => u.Cases.OfType<CFunctionType>(),
+            _ => [],
+        };
+
         // A3, A4, A5, A9, A10: the Text() that the text of a value of the type calls, of the type, of every type derived from it, and of
         // every type its text reads
-        private void Text(KurzType type) => Text(type, new HashSet<object>(ReferenceEqualityComparer.Instance));
+        private void Text(KurzType type) => Text(type, []);
 
         /// <summary>The Text() that the text of a value of an instantiation the program builds calls (section 5).</summary>
         public void TextOf(DataType made) => Text(made);
 
-        private void Text(KurzType type, HashSet<object> seen)
+        // `seen` holds each data type the text read, an instantiation with its type arguments, so that a second instantiation of one
+        // generic type in one text, `Box<int>` and `Box<Quiet>`, is read too (section 5)
+        private void Text(KurzType type, List<DataType> seen)
         {
             switch (type)
             {
@@ -1077,11 +1139,13 @@ public sealed class ThrowSets
                 case DataType d:
                     foreach (var x in sets.AllData().Where(x => x.Chain.Contains(d.Symbol)))
                     {
-                        if (!seen.Add(x))
+                        var read = ReferenceEquals(x, d.Symbol) ? d : new DataType(x, []);
+                        if (seen.Any(s => Types.Same(s, read)))
                         {
                             continue;
                         }
 
+                        seen.Add(read);
                         if (!ReferenceEquals(x, d.Symbol) && x.IsGeneric)
                         {
                             unit.Edges.Add(new Edge(new Each(x), null)); // section 5: the text of each instantiation of it that the program builds

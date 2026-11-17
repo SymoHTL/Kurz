@@ -166,6 +166,31 @@ print(Box(5))
 print(Box("five"))
 ```
 
+The case below prints a value whose field holds an instance whose `Text()` throws (A5, D6, O7).
+
+Case: [outcomes/throw-in-text-of-instantiation.kz](../corpus/outcomes/throw-in-text-of-instantiation.kz)
+```kurz
+data Plain(int N)
+
+data Sub<U>(U X) : Plain
+
+data TextFailed
+
+class Loud(int N) {
+    pub string Text() {
+        throw TextFailed
+    }
+}
+
+void Show(Plain p) {
+    print(p)
+}
+
+print("before")
+Show(Sub<Loud>(1, Loud(2)))
+print("after")
+```
+
 ### A4 (decided, §8) The text of the other values
 
 The other values have a text that is derived from their type, as a `data` value has (A3). A list
@@ -277,6 +302,10 @@ u = User(1, "Ann")
 print(u)
 print("got {u}")
 ```
+
+The case below prints a value that holds an instance of a class whose declared `Text()` throws (A3, D6, O7).
+
+Case: [outcomes/throw-in-text-of-instantiation.kz](../corpus/outcomes/throw-in-text-of-instantiation.kz)
 
 ### A9 (decided, §8) An inherited or a private `Text()`
 

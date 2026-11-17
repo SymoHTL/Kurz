@@ -46,6 +46,7 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         data ENested
         data ESpawn
         data ECallee
+        data EAnswered
         data EEscalate
         data ERestarted
         data ETypeEscalate
@@ -293,11 +294,17 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
             pub void Fail() {
                 throw ECallee
             }
+
+            pub int Get() {
+                throw EAnswered
+            }
         }
 
         void ViaActorCall() {
             a = spawn Answering()
             send a.Fail()
+            x = a.Get()
+            print(x)
         }
 
         actor Escalated {
@@ -664,6 +671,19 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
 
     private static List<string> Raised(string function) => Names(Program.Value.Sets.RaisedBy(Function(function)));
 
+    /// <summary>A program of its own, which the checker reads without a diagnostic, with its sets.</summary>
+    private static (ProgramSyntax Tree, Checker Checker, ThrowSets Sets) Own(string text, params string[] grants)
+    {
+        var diagnostics = new DiagnosticBag();
+        var tree = Parser.Parse(SourceText.FromString("test.kz", text), diagnostics);
+        var checker = Checker.Check(tree, diagnostics, grants, CorpusTests.StdChecker.Value);
+        Assert.Empty(diagnostics.Items);
+        return (tree, checker, new ThrowSets(checker, CorpusTests.StdChecker.Value));
+    }
+
+    private static List<string> RaisedIn((ProgramSyntax Tree, Checker Checker, ThrowSets Sets) own, string function) =>
+        Names(own.Sets.RaisedBy(own.Checker.Model.FunctionOf(own.Tree.Statements.OfType<FunctionDeclaration>().Single(f => f.Name == function))));
+
     [Theory]
     [InlineData("ViaCall", "EDirect")] // a call of a function
     [InlineData("ViaMethod", "EMethod")] // a call of a method
@@ -737,7 +757,8 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     [Fact]
     public void A_call_through_an_actor_s_reference_and_the_text_of_a_thrown_value_add_nothing()
     {
-        // U20: the callee's crash reaches its caller as `callee-crashed`, a runtime error, and none of its code runs in the caller
+        // U20: the callee's crash reaches its caller as `callee-crashed`, a runtime error, and none of its code runs in the caller,
+        // through a call that waits for its reply, `a.Get()`, as through a `send`
         Assert.Equal(["RuntimeError"], Raised("ViaActorCall"));
 
         // section 6: a raise while the text of the thrown value is made ends the process, so `Loud`'s Text() adds nothing
@@ -764,7 +785,9 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         // T33: the copy for `Pair` runs in the place of `ReadAgain`, its loop as one pass for each field
         Assert.Equal(["EReadAgain", "RuntimeError"], Raised("ViaCopy"));
 
-        // a function that reads its type and that no call copies runs nowhere, and its text adds nothing
+        // a function that reads its type and that no call copies runs nowhere, and its text adds nothing, so the list of such a `pub`
+        // function holds the runtime's type alone, as Rust makes no code of a generic function that nothing instantiates (section 5,
+        // the owner, 2026-11-17, #560, comment 6945856976, Q2)
         var listed = Program.Value.Sets.PubFunctions();
         Assert.Equal(["RuntimeError"], Names(listed[Assert.Single(listed.Keys, f => f.Name == "Refuse")]));
     }
@@ -790,16 +813,18 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     [Fact]
     public void The_text_of_a_generic_type_derived_from_the_printed_one_is_the_text_of_each_instantiation_the_program_builds()
     {
-        // section 5, the owner, 2026-11-16, "Each instantiation": the top-level code builds `Sub<int>` and `Sub<Loud>`, and the `pub`
+        // section 5, the owner, 2026-11-16, "Each instantiation": the top-level code builds `Sub<int>` and `Sub<Loud>`, the `pub`
         // function `Listed` builds `Sub<Wrapped>` through the type argument its call gives `Wrap`, and `Sub<Handed>` through the lambda
-        // that `Maker` makes for its type argument, which `Listed` calls as a function value; `Sub<Quiet>` stands in a function no root
-        // reaches and in a generic `pub` function no call gives a type argument, so the program does not build it, as Rust's
-        // monomorphization builds nothing for a function nothing calls and takes no generic function as a root
+        // that `Maker` makes for its type argument, which `Listed` calls as a function value, and the generic `pub` function `Generic`
+        // builds `Sub<Quiet>`, with every type argument named whatever type argument a call gives it, whose `EQuiet` a call of it raises
+        // (section 5, "Compiler lists them"); `Sub<Silent>` stands in a function no root reaches, so the program does not build it, as
+        // Rust's monomorphization builds nothing for a function nothing calls
         const string text = """
             data ELoud
             data EWrapped
             data EHanded
             data EQuiet
+            data ESilent
             data EMade
 
             data Plain(int N)
@@ -830,6 +855,12 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
                 }
             }
 
+            class Silent(int N) {
+                pub string Text() {
+                    throw ESilent
+                }
+            }
+
             void Show(Plain p) {
                 print(p)
             }
@@ -839,7 +870,7 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
             () => Plain Maker<T>(T x) => () => Sub<T>(1, x)
 
             void Unreached() {
-                Show(Sub<Quiet>(1, Quiet(2)))
+                Show(Sub<Silent>(1, Silent(2)))
             }
 
             pub void Generic<T>(T x) {
@@ -873,11 +904,215 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         Assert.Empty(diagnostics.Items);
         var sets = new ThrowSets(checker, CorpusTests.StdChecker.Value);
         FunctionSymbol Named(string name) => checker.Model.FunctionOf(tree.Statements.OfType<FunctionDeclaration>().Single(f => f.Name == name));
-        Assert.Equal(["ELoud", "EWrapped", "EHanded", "RuntimeError"], Names(sets.RaisedBy(Named("Show"))));
+        Assert.Equal(["ELoud", "EWrapped", "EHanded", "EQuiet", "RuntimeError"], Names(sets.RaisedBy(Named("Show"))));
+        var listed = sets.PubFunctions();
+        Assert.Equal(["ELoud", "EWrapped", "EHanded", "EQuiet", "RuntimeError"], Names(listed[Assert.Single(listed.Keys, f => f.Name == "Generic")]));
 
         // F11: the unit that makes a lambda takes what it builds and nothing it throws, which a call of the function value brings
         Assert.Equal(["RuntimeError"], Names(sets.RaisedBy(Named("Deferred"))));
         Assert.Equal(["EMade", "RuntimeError"], Names(sets.RaisedBy(Named("Called"))));
+    }
+
+    [Fact]
+    public void An_instantiation_built_only_in_the_text_of_another_is_built()
+    {
+        // section 5: the text of `Sub<Loud>` runs `Loud`'s Text(), which is no root and builds `Sub<Wrapped>`, so the text of each
+        // instantiation found is read and the roots solved again until the list grows no more
+        const string text = """
+            data EWrapped
+
+            data Plain(int N)
+
+            data Sub<U>(U X) : Plain
+
+            class Wrapped(int N) {
+                pub string Text() {
+                    throw EWrapped
+                }
+            }
+
+            class Loud(int N) {
+                string Text() {
+                    Show(Sub<Wrapped>(1, Wrapped(2)))
+                    return "loud"
+                }
+            }
+
+            pub void Show(Plain p) {
+                print(p)
+            }
+
+            Show(Sub<Loud>(1, Loud(2)))
+
+            """;
+        Assert.Equal(["EWrapped", "RuntimeError"], RaisedIn(Own(text), "Show"));
+    }
+
+    [Fact]
+    public void A_text_reads_each_instantiation_of_one_generic_type_it_holds()
+    {
+        // section 5: `Two` holds a `Box<int>` and a `Box<Quiet>`, and its text reads both, `Quiet`'s Text() through the second
+        const string text = """
+            data EQuiet
+
+            data Box<T>(T V)
+
+            class Quiet(int N) {
+                pub string Text() {
+                    throw EQuiet
+                }
+            }
+
+            data Two(Box<int> A, Box<Quiet> B)
+
+            pub void Show(Two t) {
+                print(t)
+            }
+
+            """;
+        Assert.Equal(["EQuiet", "RuntimeError"], RaisedIn(Own(text), "Show"));
+    }
+
+    [Fact]
+    public void An_instantiation_built_only_in_a_pub_method_of_an_actor_is_built()
+    {
+        // U9, section 5: a message reaches a `pub` method alone, and each is a root of what the program builds, so the text of
+        // `Sub<Shouty>`, built in `Go` alone, is in the actor's `Reason`; `Sub<Hushed>`, built in a method nothing calls, is built nowhere
+        const string text = """
+            data EShouty
+            data EHushed
+
+            data Plain(int N)
+
+            data Sub<U>(U X) : Plain
+
+            class Shouty(int N) {
+                pub string Text() {
+                    throw EShouty
+                }
+            }
+
+            class Hushed(int N) {
+                pub string Text() {
+                    throw EHushed
+                }
+            }
+
+            void Show(Plain p) {
+                print(p)
+            }
+
+            actor Printer {
+                pub void Go() {
+                    Show(Sub<Shouty>(1, Shouty(1)))
+                }
+
+                void Muted() {
+                    Show(Sub<Hushed>(1, Hushed(1)))
+                }
+            }
+
+            printer = spawn Printer()
+            send printer.Go()
+
+            """;
+        var own = Own(text);
+        var printer = own.Checker.Model.ClassOf(own.Tree.Statements.OfType<TypeDeclaration>().Single(t => t.Name == "Printer"));
+        Assert.Equal(["EShouty", "RuntimeError"], Names(own.Sets.ReasonOf(printer)));
+    }
+
+    [Fact]
+    public void A_call_of_a_C_function_value_reaches_the_functions_named_as_values_of_its_type()
+    {
+        // R17: a function of the C calling convention named as a value is a value of a C function type, and a call through it runs such
+        // a function whose type is the value's; `Other`, named as a value of another type, does not fit `Call`'s call
+        const string text = """
+            data EHook
+            data EOther
+
+            extern "C" long Twice(long x) {
+                throw EHook
+            }
+
+            extern "C" int Other(int x) {
+                throw EOther
+            }
+
+            pub void Call() {
+                extern "C" (long) => long f = Twice
+                raw {
+                    print(f(4))
+                }
+            }
+
+            pub void Keep() {
+                extern "C" (int) => int g = Other
+                raw {
+                    print(g(1))
+                }
+            }
+
+            """;
+        var own = Own(text, "raw", "native");
+        Assert.Equal(["EHook", "RuntimeError"], RaisedIn(own, "Call"));
+        Assert.Equal(["EOther", "RuntimeError"], RaisedIn(own, "Keep"));
+    }
+
+    [Fact]
+    public void A_built_in_call_that_keeps_a_lambda_runs_none_of_it()
+    {
+        // M9, X8: `Where` calls its test and `SortBy` its key, while `Add` and `Insert` keep a lambda, whose throw a call of the value it
+        // became brings where it is called
+        const string text = """
+            data EStored
+            data EKey
+
+            int Fail() {
+                throw EStored
+            }
+
+            int Key(int x) {
+                throw EKey
+            }
+
+            pub void Keep() {
+                mut handlers = List<() => int>()
+                handlers.Add(() => Fail())
+                handlers.Insert(0, () => Fail())
+                print(handlers.Count)
+            }
+
+            pub void Run() {
+                mut handlers = List<() => int>()
+                handlers.Add(() => Fail())
+                print(handlers[0]())
+            }
+
+            pub void Sorted() {
+                mut xs = [3, 1]
+                xs.SortBy(x => Key(x))
+                print(xs)
+            }
+
+            """;
+        var own = Own(text);
+        Assert.Equal(["RuntimeError"], RaisedIn(own, "Keep"));
+        Assert.Equal(["EStored", "RuntimeError"], RaisedIn(own, "Run"));
+        Assert.Equal(["EKey", "RuntimeError"], RaisedIn(own, "Sorted"));
+    }
+
+    [Fact]
+    public void The_case_of_a_throw_in_the_text_of_an_instantiation_raises_what_that_text_throws()
+    {
+        // O7, A3, A5, D6: the case's `Show` prints a `Plain` that the top-level code builds as a `Sub<Loud>`, whose text throws
+        // `TextFailed`; the corpus runner does not run the case (`NotEmitted` in `RunTests`)
+        var (header, tree, frontEnd) = CorpusTests.ReadCase("outcomes/throw-in-text-of-instantiation.kz");
+        Assert.Empty(frontEnd.Items);
+        var diagnostics = new DiagnosticBag();
+        var checker = Checker.Check(tree, diagnostics, header.Grants, CorpusTests.StdChecker.Value);
+        Assert.Empty(diagnostics.Items);
+        var show = checker.Model.FunctionOf(tree.Statements.OfType<FunctionDeclaration>().Single(f => f.Name == "Show"));
+        Assert.Equal(["TextFailed", "RuntimeError"], Names(new ThrowSets(checker, CorpusTests.StdChecker.Value).RaisedBy(show)));
     }
 
     [Fact]
@@ -893,6 +1128,12 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         // U25: under `escalate` written at the spawn, or the type's default (U27), the child's crash passes up whole; under the
         // default `restart` it does not
         Assert.Equal(["EEscalate", "ETypeEscalate", "RuntimeError"], Names(Program.Value.Sets.ReasonOf(Actor("Parent"))));
+
+        // section 5, the owner, 2026-11-17, #560, comment 6945856976, Q1: the list of a `pub` function holds what the children it spawns
+        // under `escalate` can pass up, since
+        // that crash can come while a call of it still waits
+        var listed = Program.Value.Sets.PubFunctions();
+        Assert.Equal(["EEscalate", "ETypeEscalate", "RuntimeError"], Names(listed[Assert.Single(listed.Keys, f => f.Name == "Make" && f.Owner?.Name == "Parent")]));
     }
 
     [Fact]

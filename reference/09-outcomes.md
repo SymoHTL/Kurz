@@ -1149,7 +1149,8 @@ Case: [outcomes/else-throw.kz](../corpus/outcomes/else-throw.kz)
 form. It is a statement and can stand wherever one can. As an arm of `else` it can also stand
 alone (O5): a bare `throw` there throws the case value that reached the arm, so the arm
 `NotFound => throw` throws the `NotFound`. A bare `throw` anywhere else is the compile error
-`throw-needs-value`: there is no value it could mean. When a supervisor reads what
+`throw-needs-value`: there is no value it could mean. A bare `throw` in a lambda is one of these, a lambda
+inside an arm of `else` too, since the lambda's body is not the arm *(assumed: as §5 marks it)*. When a supervisor reads what
 was thrown as the `Reason` of a crashed child, its type is the union of everything the
 child's code can throw, found over the whole program (the owner, 2026-10-03, against a fixed type
 that carries the text and the place, and against limiting `throw` to `data` values and text). Where
@@ -1158,7 +1159,11 @@ T19), the union holds what the text of each instantiation of the derived type th
 builds can throw, and an instantiation the program does not build adds nothing, as Rust's
 monomorphization takes every instance a program builds (§5, the owner, 2026-11-16, #556, comment
 6926485802, against what the text of every type that meets the type parameter's limit throws, and
-against `no-text` at the derivation for a type parameter no limit gives a `Text()`). The
+against `no-text` at the derivation for a type parameter no limit gives a `Text()`). An
+instantiation the program builds is one with every type argument named that code reached from the
+top-level code or from a `pub` function constructs, a generic one and each `pub` method of an actor
+among them, with the code the text of such an instantiation runs *(proposed: §5 does not say what
+the program builds)*. The
 run-time errors of chapter 12 are values of one `data` type of the runtime, a member of every
 such union in every build; the place and the chain id are fields of the `Crashed` case beside
 `Reason`, which is this reference's reading of the record's *(assumed)* sentence that the runtime adds
