@@ -1053,14 +1053,14 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   fields are filled, and finds each copied key in the receiver's map, at a message, after `move` at a
   message, which copies the moved map into the receiver's heap by the same copy, and after `copy` at a
   plain call.
-  A `move` before an argument of a call that crosses nothing copies nothing and changes no count
-  (U12): a variable's value leaves its place, which is stored null, or a string of no block, the count
+  A `move` before an argument of a call that crosses nothing copies nothing and, of a value whose
+  place it empties, changes no count (U12): a variable's value leaves its place, which is stored null, or a string of no block, the count
   it held going to the parameter written `move` the argument fills, which its function owns and lets go of where it
   leaves; the item of a loop that takes its list leaves its place in the list the same way where the
-  place has an empty value, a reference or a string, an item of another type staying there, counted
+  place has an empty value, an address or a string, an item of another type staying there, counted
   once more, and the release of a list of an item type such a loop takes, read from every unit's model before the first
   helper is built, tests each item for null, so that the list lets go of every item it still holds
-  and of no moved one; a value of another type, inline or a function value, is counted once more. A
+  and of no moved one; a value of another type, inline, a fat class reference or a function value, is counted once more. A
   place a `move` names is let go of through a test for null, at its scope's end and where an
   assignment replaces it, as rustc keeps a drop flag, and a message's function lets go of no
   argument of a parameter written `move`, which the method owns. A `move` into a message or a `spawn`
@@ -2834,7 +2834,9 @@ function, a `move` of the variable of a loop over anything but a list, and a `mo
 region the checker does not keep (U12); an argument
 or a result of a message or of an actor's constructor, and a value after `copy` at any call, that
 reaches a value of a type parameter, an instance of a class of `std/`, `HttpRequest` and
-`HttpHeaders` among them, a handle of section 12 or a pointer (U12); `copy` at a call that is no message before a value that
+`HttpHeaders` among them, a handle of section 12 or a pointer, an argument written `move` only where it
+reaches a handle, a hasher, a command or a child process, itself or through a field of a class of
+`std/`, whose copy would share the sender's block by its count (U12); `copy` at a call that is no message before a value that
 reaches a function value or an interface's value, which no word makes cross (U12); and a log call
 inside an actor (P8). The refusal of
 the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered
