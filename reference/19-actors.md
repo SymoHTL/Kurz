@@ -2322,6 +2322,9 @@ where U13 drops it.
 
 Case: [actors/deadlock.kz](../corpus/actors/deadlock.kz)
 ```kurz
+// `Left`'s `Ask` waits on `Right`'s `Value` while `Right`'s `Ask` stands ahead of it in `Right`'s inbox, as one thread
+// runs the ready actors first in, first out (U35)
+
 actor Left {
     pub void Ask(Right other) {
         print("left got {other.Value()}")
@@ -3374,3 +3377,5 @@ Case: [actors/block-order.kz](../corpus/actors/block-order.kz)
 Case: [actors/block-supervisor-state.kz](../corpus/actors/block-supervisor-state.kz)
 
 Case: [actors/block-crash-order.kz](../corpus/actors/block-crash-order.kz)
+
+Case: [actors/deadlock.kz](../corpus/actors/deadlock.kz)
