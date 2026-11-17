@@ -205,6 +205,66 @@ print("{f.Customer} {f.Items}")
 print(f == order)
 ```
 
+Case: [actors/copy-map-instance-keys.kz](../corpus/actors/copy-map-instance-keys.kz)
+```kurz
+class Box(mut int N)
+class Tag(string Name, Box Owner)
+data Shelf(Tag First, Map<Tag, int> Counts)
+
+int Found(Map<Box, string> known) {
+    mut found = 0
+    for e in known {
+        if (known[e.Key] ?? "") == e.Value {
+            found = found + 1
+        }
+    }
+
+    return found
+}
+
+string ByBox(Map<Box, string> known, Box a, Box b) => "{known[a] ?? "none"} {known[b] ?? "none"}, {Found(known)} found"
+
+string ByTag(Shelf s) {
+    mut found = 0
+    for e in s.Counts {
+        if (s.Counts[e.Key] ?? 0) == e.Value {
+            found = found + 1
+        }
+    }
+
+    bob = Tag("bob", s.First.Owner)
+    return "{s.Counts[s.First] ?? 0} {s.Counts[bob] ?? 0}, {found} found"
+}
+
+actor Hub {
+    pub string Names(Map<Box, string> known, Box a, Box b) => ByBox(known, a, b)
+
+    pub string Tags(Shelf s) => ByTag(s)
+
+    pub string Moved(Map<Box, string> known) => "{Found(known)} found"
+}
+
+one = Box(1)
+two = Box(2)
+mut names = Map<Box, string>()
+names[one] = "a"
+names[two] = "b"
+box = Box(3)
+ann = Tag("ann", box)
+mut counts = Map<Tag, int>()
+counts[ann] = 3
+counts[Tag("bob", box)] = 4
+h = spawn Hub()
+print(h.Names(copy names, copy one, copy two))
+print(h.Tags(copy Shelf(ann, counts)))
+mut kept = Map<Box, string>()
+kept[Box(5)] = "e"
+kept[Box(6)] = "f"
+print(h.Moved(move kept))
+print(ByBox(copy names, copy one, copy two))
+print(ByTag(copy Shelf(ann, counts)))
+```
+
 ### K13 (decided, §4) Equality across inheritance
 
 What D15 says for `data` holds for classes: instances of different classes are never equal,

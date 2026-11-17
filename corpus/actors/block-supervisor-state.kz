@@ -1,7 +1,10 @@
 // expect: output
 // | first 1
 // | 1
-// rules: U31
+// rules: U28, U31
+
+// `Worker`'s `Fail` runs before `Boss` takes the call the top-level code makes after `Go`, in the order the build's run queue
+// holds them, which no rule of chapter 19 fixes
 
 actor Worker {
     pub void Fail() {

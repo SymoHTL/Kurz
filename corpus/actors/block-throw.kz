@@ -1,5 +1,9 @@
-// expect: throws actor-gone at 25
-// rules: U32
+// expect: throws actor-gone at 35
+// | 0
+// rules: U21, U22, U28, U32
+
+// `Worker`'s `Fail` runs before `Boss` takes the call the top-level code makes after `Go`, in the order the build's run queue
+// holds them, which no rule of chapter 19 fixes
 
 actor Worker {
     pub void Fail() {
@@ -10,7 +14,10 @@ actor Worker {
 }
 
 actor Boss {
+    mut int count = 0
+
     pub Worker Go() {
+        count = count + 1
         kid = spawn Worker() on crash (c) {
             throw "block fails"
         }
@@ -18,8 +25,11 @@ actor Boss {
         send kid.Fail()
         return kid
     }
+
+    pub int Count() => count
 }
 
 b = spawn Boss()
 w = b.Go()
+print(b.Count())
 print(w.Ping())

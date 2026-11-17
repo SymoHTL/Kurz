@@ -1,0 +1,16 @@
+// expect: throws thrown at 13
+// rules: U32, U33
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash (c) {
+    throw "block fails"
+}
+send w.Fail()
+print(w.Ping())

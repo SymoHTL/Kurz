@@ -2,7 +2,7 @@
 // | lost 7
 // | DivideByZero
 // | 2
-// rules: U30
+// rules: U21, U30, U33, U34
 
 data Lost(int Code)
 

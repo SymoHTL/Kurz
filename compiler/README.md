@@ -1056,8 +1056,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   identity or by content as the key's class compares, by the helper a lookup past the bound rehashes with,
   once the run's work list is empty, since a key's hash reads the fields of the instances it reaches and a
   copy the memo gave can still wait there to be filled (`CopyAfter`; section 6, the owner, 2026-11-16, #519,
-  comment 6923513534, "Rehash each key (Recommended)"); it compares no two keys, allocates no block of the
-  receiver's heap beyond the copy of the map's block, and runs no program code, since a key's hash is the
+  comment 6923513534, "Rehash each key (Recommended)"); it compares no two keys, placing its entries again
+  allocates nothing (`MapRehashMark`, `MapRehashPlace`), and it runs no program code, since a key's hash is the
   one the map's type takes, built from the fields its class compares. `corpus/actors/copy-map-instance-keys.kz` sends maps
   keyed by instances that compare by identity and by content, one of whose keys the memo gives before its
   fields are filled, and finds each copied key in the receiver's map, at a message, after `move` at a
@@ -2051,11 +2051,12 @@ crashes in the window in a ring in the supervisor's heap, which grows by doublin
 that finds N there writing its line, ending the actor and crashing the supervisor with `restart-limit`
 at the line of the `spawn`, at the root the end of the process with the trace of the top-level code
 where it waits. The block `on crash (c) { ... }`, after `spawn` and after a type's name, is built
-(U28 to U34): the emitted `spawn` gives the runtime the block's function and the values it took in
-the block of its restart, and keeps the copy of the arguments a restart constructs from; at the
+(U28 to U34): the emitted `spawn` gives the runtime the block's function, made after the `spawn`'s
+arguments ran, as the checker reads the block after them, and the values it took in the block of its restart, and keeps the copy of the arguments a restart constructs from; at the
 crash of an actor whose supervisor's policy is a block, the runtime copies the crash's id and text
-and the thrown value into the supervisor's heap, the value by the crossing copy of its type (U12),
-before the child's heap is freed, keeps the stack the child raised on, leaves the child in a state
+and the thrown value into the supervisor's heap, the value by the crossing copy of its type (U12), a
+thrown `null` holding none, before the child's heap is freed, keeps the stack the child raised on but
+at a stack overflow, which the crash's activation marks, leaves the child in a state
 in which it takes no message, and puts the block's message at the front of the supervisor's inbox,
 after the block messages already there, or, at the top level, on a list that the top-level code's
 wait runs before it goes on; the block's function makes the `Crashed` value from the copies, a
@@ -2069,7 +2070,7 @@ an overflow escalated to the top level writes the trace of the top-level code wh
 the stack the child overflowed on, whose state the signal's stack held, is not kept. What stays `not
 supported` of section 6's supervision: `attempt { ... }` and `retry { ... }`; a block whose child can
 throw a type the crossing copy does not copy (U12), a block in a file read without `std/`, and a block
-whose child's `Reason` grows by what the blocks of the program read, read four times; a policy after
+whose child's `Reason` grows by what the blocks of the program read, read five times, the first and four more; a policy after
 the name of a `per` actor with `per` itself (U1), a block there among it; the crash paths of the ESP32
 models, AVR and WebAssembly, for which the build has no target; and, on Windows, an actor's stack
 overflow, which ends the process as the system ends it whatever the policy (U19); a crash at the root, the top-level code, still ends
@@ -2356,7 +2357,7 @@ ask about it.
   keeps, as section 6 has it ("An actor's reference compares by the actor it names"). Pinned by
   `ActorTests`, the cases `corpus/actors/copy-shared-graph.kz`, `corpus/actors/references-in-list.kz`,
   `corpus/actors/references-map-key.kz` (the hash a crossing keeps), `corpus/actors/send-lambda.kz`
-  and the six of the memo of a call (above), and the line `actor-crossing-fenced` of `ListTests`.
+  and the eight of the memo of a call, and the line `actor-crossing-fenced` of `ListTests`.
 - U12 with section 6: on one thread a `move` into a parameter copies nothing and, of a value whose
   place it empties, changes no count,
   the moved place's count becoming the parameter's, a `move` into a message or a `spawn` copying the
@@ -2543,7 +2544,9 @@ that sit under a rule by its id. Every one is pinned by a test.
   a knob after `restart` and a word after a decision are `syntax` (U28, U29). `attempt` and `retry`
   before a block are an expression of that block, which the checker says `not supported` to (section 6),
   but in the condition, the collection or the subject before the block of an `if`, a `while`, a `for`
-  or a `match` the word is a name, as a struct literal is no condition in Rust. The checker says
+  or a `match` the word is a name, as a struct literal is no condition in Rust, and inside that header's parentheses,
+  brackets, arms and blocks the expression again, as Rust reads a struct literal there (U28; assumed: section 6, comment
+  6847932993, Q10). The checker says
   `not supported` to the clauses but `stack` and a policy, and reads a policy's
   duration and count (U26, `type-mismatch`). `spawn` binds as C#'s `new`, so that `spawn Counter().Get()` calls `Get` on the new
   reference, a name after `spawn` without its `(` is `syntax`, and `send` before what the parser
@@ -2695,13 +2698,16 @@ the owner, 2026-11-17, #560, comment 6945856976, Q2), and a function of a folder
 and one in a lambda is the checker's `throw-needs-value`, in a lambda inside such an arm too (O7; section 5, assumed there). The
 checker reads the sets for the block of `on crash` alone (U30): it reads a program with a block again with the `Reason` of each block's child that the reading before found, the first reading with the runtime's type alone
 and the sets without the blocks' bodies, the blocks' own diagnostics left out of it, until the `Reason`s found are the ones
-read, and says `not supported` to a block whose child's `Reason` still grows at the fourth, so that a block's own errors show
-once the rest of the program reads clean. `ThrowSetTests` holds one thrown type for each of these forms over a fenced
+read, a reading whose errors stand in blocks alone read so too, its sets those of a reading that drops what the blocks report,
+without the bodies of the blocks that reported errors, so that an error a `Reason` that had not settled gave stands only where the
+`Reason`s settle, and says `not supported` to a block whose child's `Reason` still grows at the fifth reading, the first and four
+more, so that a block's own errors show once the rest of the program reads clean. `ThrowSetTests` holds one thrown type for each of these forms over a fenced
 program, over programs of their own the text of each instantiation a program builds, one built only in the text of another or in
 an actor's `pub` method among them, two instantiations of one type in one text, a call of a C function value, built-in calls that
 keep a lambda and the corpus case of a throw in the text of an instantiation, every kind of node of the tree to the table
 `ThrowSets.Kinds`, the walk of every corpus case and of `std/`, a runtime that
-throws nothing, and a kind of `RuntimeKind` for each run-time row of the error table.
+throws nothing, and a kind of `RuntimeKind` for each run-time row of the error table and one for `invalid-argument`
+after them.
 
 ### What the checker does not read
 
@@ -2840,7 +2846,7 @@ actor and every use of its name unread, besides what a class's body does not rea
 an actor's name, `equal by` and a constructor in its body (U1, U2), and its `static-state` for a `static mut` field and one
 whose type is or holds a class (U1), leave it too, while an actor after a class's `:` is `syntax` and the class is read without
 that base (U1); `attempt { ... }` and `retry { ... }` (section 6, U28); a block of `on crash` whose child can throw a type the
-crossing copy does not copy, one in a file read without `std/` and one whose child's `Reason` grows past the fourth reading
+crossing copy does not copy, one in a file read without `std/` and one whose child's `Reason` still grows at the fifth reading
 (U30); `move` before a field of a primary
 constructor, a parameter of a constructor of K14, of a C function's declaration or of a `naked`
 function, a `move` of the variable of a loop over anything but a list, and a `move` of a value whose
