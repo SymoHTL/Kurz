@@ -3758,7 +3758,7 @@ void Wake(byte* state) {
 // actor now: QUEUED cleared, and RUNNING set where neither RUNNING nor BUILDING is, else NOTIFIED set, so that
 // whoever holds it queues it again as it lets go of it (`LetGo`, `ActorBuilt`), as tokio's worker leaves a
 // notified task that runs to the worker that polls it (not checked at source): no two threads run one actor,
-// and no message starts while its constructor runs (U3). A compare-exchange that finds the word changed is
+// and no message starts while its constructor runs (U17). A compare-exchange that finds the word changed is
 // made again on what it found.
 bool Claimed(byte* state) {
     AtomicInt word = StateWord(state)

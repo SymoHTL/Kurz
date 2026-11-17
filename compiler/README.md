@@ -992,7 +992,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   stacks, the one that runs or waits, none while it is idle and none while its constructor runs,
   which runs inside `spawn` and whose defaults read neither `this` nor its methods (K7), while the
   state word's BUILDING marks it, so that no message starts before its `spawn` returns, the block of a
-  child's crash posted while the constructor waits among them (U3, U28), and the life of the record
+  child's crash posted while the constructor waits among them (U17, U28), and the life of the record
   marks it, so that a crash passed up into an actor whose constructor runs at its `spawn` goes on to its spawner (U25, U3). The number
   counts the actors of every type from 1, in the order `ActorNew` makes them (U2). The reference is
   the address of the state, which nothing counts, an actor living to the end of the process: `==` of

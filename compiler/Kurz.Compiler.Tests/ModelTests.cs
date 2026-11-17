@@ -16,7 +16,7 @@ namespace Kurz.Compiler.Tests;
 /// what the runtime no longer does, so that a change of one of those lines, which one thread cannot show, turns it red. The explorer runs every
 /// interleaving of two or three threads, each state once, and finds no lost wake (a message queued or a reply set always leads to the
 /// actor or the waiter running), no two owners of a reply, no two threads holding one actor, no message while its constructor runs
-/// (U3) or before its restart (U22), and no owner of a reply that reads or writes the waiter's frame once it is gone; and it finds each of these broken in a model
+/// (U17) or before its restart (U22), and no owner of a reply that reads or writes the waiter's frame once it is gone; and it finds each of these broken in a model
 /// broken so, the cases of <see cref="Break"/>. Its moves are sequentially consistent: the orders of the runtime's atomic operations,
 /// acquire and release, are the IR's to show (<c>EmitterTests</c>), not the explorer's.
 /// </summary>
@@ -347,7 +347,7 @@ public sealed class ModelTests
     /// <summary>The models of the state word, each of three threads.</summary>
     private static Model[] WordModels(Break broken) =>
     [
-        // a message sent while the actor's constructor runs: it starts once `ActorBuilt` ran (U3)
+        // a message sent while the actor's constructor runs: it starts once `ActorBuilt` ran (U17)
         new("a wake while the constructor runs", Start(3, (Word, Building)),
             [Builder(At(0), broken), Sender("sender", At(1)), Runner("runner", At(2), broken)], Always, WordAtRest),
 
