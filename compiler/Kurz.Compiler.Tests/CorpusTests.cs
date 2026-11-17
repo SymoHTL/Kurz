@@ -287,6 +287,29 @@ public sealed class CorpusTests
     }
 
     [Theory]
+    [InlineData("// expect: output\n// | 1\n// system: linux\n// rules: U19\n\nx\n", "linux", 6)]
+    [InlineData("// expect: throws stack-overflow at 7\n// build: test\n// allow: raw\n// system: windows\n// rules: O11\n\nx\n", "windows", 7)]
+    [InlineData("// expect: output\n// | 1\n// rules: U19\n\nx\n", null, 5)]
+    public void A_system_line_names_the_one_system_the_case_runs_on(string text, string? system, int bodyLine)
+    {
+        // chapter 0: a case whose expectation holds on one system names it, and is built and not run on the other
+        var header = CaseHeader.Parse(text, out var problem);
+        Assert.Null(problem);
+        Assert.Equal((system, bodyLine), (header!.RunsOn, header.BodyLine));
+    }
+
+    [Theory]
+    [InlineData("// expect: output\n// system: macos\n// rules: U19\n\nx\n")]
+    [InlineData("// expect: output\n// system: linux windows\n// rules: U19\n\nx\n")]
+    [InlineData("// expect: output\n// system:\n// rules: U19\n\nx\n")]
+    public void A_system_line_the_header_does_not_take_is_refused_as_such(string text)
+    {
+        // chapter 0: the line takes `linux` or `windows`; another is named as the system line it is, not as a missing rules line
+        Assert.Null(CaseHeader.Parse(text, out var problem));
+        Assert.Equal("the `// system:` line is not `// system: linux` or `// system: windows`", problem);
+    }
+
+    [Theory]
     [InlineData("// expects output\n// rules: V1\n\nx = 4\n")]
     [InlineData("// expect: output\n\nx = 4\n")]
     [InlineData("// expect: output\n// rules: v1\n\nx = 4\n")]

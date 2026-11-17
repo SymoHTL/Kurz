@@ -3336,8 +3336,8 @@ pub string ExitErrorText(ExitError e) {
 // (compiler/README.md, "What the emitter emits"). An actor's reference is the address of its state, which
 // the emitted code constructs, with the actor's record in the 96 bytes in front of it, as a string's block
 // stands in front of its bytes, a multiple of 16 so that the state keeps the alignment of the allocator's
-// block, as Rust's `ArcInner` pads its counts to what it holds: the name of the actor's type, two words the
-// emitted code holds (U2), whether the actor runs (0), waits for its restart (1), ends after its current
+// block, as Rust's `ArcInner` pads its counts to what it holds: the name of the actor's type, whether the
+// actor runs (0), waits for its restart (1), ends after its current
 // message (2), ended (3) (U19, U22), has its constructor run at its `spawn` (4) (U3, U25) or waits for the
 // decision of the block of its policy (5) (U28), the block of its
 // restart, which its supervisor's heap holds (U22), a block that names no function to run where its policy
@@ -3367,7 +3367,8 @@ pub string ExitErrorText(ExitError e) {
 // once the ones above it end, as a nested call returns before its caller goes on.
 //
 // The scheduler's entries that change its records, inboxes, run queue and replies, `ActorNew`, `Enqueue`,
-// `Replied` and `Wait`, and the copy of a crossing, from `CopyUse` to `CopyLeft`, the emitted functions that
+// `MessageHeapNew`, `MessageHeapFree`, `Replied` and `Wait`, and the copy of a crossing, from `CopyUse` to
+// `CopyLeft`, the emitted functions that
 // fill the copies among it, with `CopyOpen` and `CopyAbort`, raise the target's count of the entries under
 // way at their start and lower it at each exit (`sys.Entered`, `sys.Left`), and each side of a switch to an
 // actor's stack saves the count and puts it back when the thread comes back to it, the scheduler's clearing
@@ -3412,13 +3413,16 @@ thread static mut byte* messageHeaps = null
 // no block of it. Built inside a message, it is listed with the running actor, so that the crash of the
 // builder frees it, as a crashed Erlang process takes the message it was building with its heap; the
 // top-level code's is not, its raise ending the process. A heap the system refuses ends the process as a
-// refused allocation does.
+// refused allocation does. The change of the list raises the count of the entries under way, as `Enqueue`
+// does, so that a stack fault between its writes ends the process and is no crash whose walk meets the list
+// half changed (O11).
 pub byte* MessageHeapNew() {
     byte* heap = std.HeapNew(24)
     if heap == null {
         AllocationFailed(24)
     }
 
+    sys.Entered()
     raw {
         byte* first = std.HeapFirst(heap)
         *Ptr<byte*>(first) = null
@@ -3435,17 +3439,20 @@ pub byte* MessageHeapNew() {
         }
     }
 
+    sys.Left()
     return heap
 }
 
 // The heap of its own of a message, taken off the list of the heaps being built where it stands there, and
 // freed whole: after the copy at the message's queueing, at the end of a region a case propagated out of an
 // argument after it left, and at the crash of its builder; nothing for null, the heap of a message that was queued.
+// The change of the list raises the count of the entries under way, as in `MessageHeapNew`.
 pub void MessageHeapFree(byte* heap) {
     if heap == null {
         return
     }
 
+    sys.Entered()
     raw {
         byte* first = std.HeapFirst(heap)
         if *Ptr<byte*>(first + 16) != null {
@@ -3463,6 +3470,7 @@ pub void MessageHeapFree(byte* heap) {
         }
     }
 
+    sys.Left()
     std.HeapFree(heap)
 }
 
@@ -3610,7 +3618,8 @@ pub string ActorText(string name, byte* state) {
 // tokio's `mpsc` channel pushes a value at the tail of its list, so that an inbox keeps the order in
 // which its messages were sent (U5, U15); the actor goes to the end of the run queue where it does not
 // stand there and waits neither for its restart (U22) nor for the decision of its block (U34). A message to
-// an actor that ended is dropped, with what crossed into it, a call's reply set `gone`.
+// an actor that ended is dropped, with what crossed into it, a call's reply set `gone`, which the call's wait
+// raises as `actor-gone` (U20).
 pub void Enqueue(byte* state, byte* message) {
     sys.Entered()
     raw {
@@ -3770,7 +3779,7 @@ void Signal(byte* reply, byte kind) {
 // no `deadlock` (U23). The top-level code runs the block of a child it spawned, which a crash of that child
 // left pending, before each of these (`RootBlock`; U33). A reply set `callee crashed` raises `callee-crashed`
 // at the call's line, the crash of the waiting actor in its turn (U20), and one set `gone` raises
-// `actor-gone` there.
+// `actor-gone` there, a call that waits on an actor that ended (U20).
 pub void Wait(byte* reply, byte* message, string file, int line) {
     sys.Entered()
     raw {
@@ -3783,6 +3792,9 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
                     long now = PauseClock()
                     long due = *Ptr<long>(*Ptr<byte*>(paused - 80) + 32)
                     if now >= due {
+                        // the restart runs the constructor through `Start` and `Run`, which clears the count of the
+                        // entries under way on its way to the actor's stack, so that the count raised here is not the
+                        // constructor's (O11)
                         Restart(paused)
                     } else if runFirst == null {
                         PauseSleep(due - now)
@@ -4009,7 +4021,10 @@ static mut byte* paused = null
 // top-level code, which ends the process on this stack with the error line of the crash and the trace of
 // this stack (`Escalate`; U34). Nothing in the top-level code, whose raise ends the process, but the log
 // line of the child whose block runs in its wait, written first, as for a `stop` (U32; assumed: S10 of issue
-// 519, comment 6907441402); nor where the actor's policy, and its supervisors' on the way up, escalate the
+// 519, comment 6907441402); nor where the count of the entries under way is above 0, a check of the
+// runtime's own code in a test build that fires inside the allocator, the scheduler or the copy of a
+// crossing, which ends the process as a stack fault there does, with the lists those change left as they are
+// (chapter 12; O11); nor where the actor's policy, and its supervisors' on the way up, escalate the
 // crash to the top-level code, which ends the process with this error line and the trace of this stack (U25;
 // design record, section 6, the trace from the stack of the actor that raised).
 void CrashActor(string id, string file, int line, bool hasText, string text) {
@@ -4023,6 +4038,12 @@ void CrashActor(string id, string file, int line, bool hasText, string text) {
                 BlockLogged(rootRunning)
             }
 
+            return
+        }
+
+        long entries = sys.Inside(0)
+        sys.Inside(entries)
+        if entries > 0 {
             return
         }
 
@@ -4114,7 +4135,9 @@ void Crashed(byte* state, byte* header) {
 // ends it (U3, U25). The actor that takes the crash writes the log line (U24), the supervisor that escalated
 // writing none, and restarts after its pause (U22, U23), or ends where its policy is `stop`, where it was to
 // end after its current message or where its supervisor crashed (U25); where its crash passes the limit of
-// its `max N in`, it ends, and its supervisor crashes with `restart-limit` at the line of its `spawn` (U26).
+// its `max N in`, its supervisor crashes with `restart-limit` at the line of its `spawn` (U26), and it ends in
+// that fall, as a child with no activation, its own fall having cleared it, which `EndChildren` ends at once,
+// a call queued to it set `gone`; at the top level the process ends.
 // Where the actor that takes the crash runs and its policy is a block, the crash, the thrown value among it,
 // is copied into that heap, the actor waits for the block's decision, its stack that raised kept, and the
 // block runs as a message of its supervisor, or in the wait of the top-level code (`Pending`; U28, U33).
@@ -4507,9 +4530,10 @@ void EndChildren(byte* state) {
 }
 
 // The pause before the restart of the actor whose reference is `state` (U23), as the record has it: 100 ms,
-// or the first pause its `after` sets, which the block of its knobs holds (U26), at its first crash,
-// and at each crash after it twice the one before, up to 30 s, where it crashes before
-// it ran 30 s since its last restart, else that first pause again; each varied at random by up to 20% either way,
+// or the first pause its `after` sets, which the block of its knobs holds (U26), and which holds 100 ms where
+// `max N in` alone is written (the emitter's `Knobs`), at its first crash, and at each crash after it twice
+// the one before, up to 30 s, where it crashes before it ran 30 s since its last restart, else that first
+// pause again; each varied at random by up to 20% either way,
 // drawn from the thread's generator, as Akka's `BackoffSupervisor` varies its pause by its random factor.
 // The block of the restart holds the pause, the time of the last restart, the time the pause ends and the
 // next actor of the queue of the pauses, in which the actor waits by that time.
