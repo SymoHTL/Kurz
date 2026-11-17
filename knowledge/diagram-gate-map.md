@@ -106,6 +106,7 @@ flowchart TD
         that names a clang release in the command's one-line form. Read: the output of dotnet test, one summary per
         test project, summed, and printed on a red run into a log that takes every character;
         the floor sits above the suite without either corpus theory, so a run that lost one cannot pass.
+        The budget of dotnet test and of kurz --version, with what each job that runs the gate spends outside it, ends before that job's limit (a case of the gate's self-test holds it), so the job is not cut off before the gate prints what it saw.
         Inside the suite: the walk of every corpus case the checker reads clean, red on a node a code generator reads
         that the checker's record (SemanticModel) holds no entry for, or on fewer than 160 cases or 2,900 entries
         walked; and the runtime under runtime/ with the standard library under std/, embedded in the compiler, red
