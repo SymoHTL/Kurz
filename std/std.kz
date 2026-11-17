@@ -14648,6 +14648,7 @@ pub RuntimeError RuntimeErrorOf(string id, string detail) {
         "divide-by-zero" => RuntimeKind.DivideByZero
         "index-out-of-range" => RuntimeKind.IndexOutOfRange
         "reversed-range-at-run-time" => RuntimeKind.ReversedRangeAtRunTime
+        "invalid-ordering-at-run-time" => RuntimeKind.InvalidOrderingAtRunTime
         "stack-overflow" => RuntimeKind.StackOverflow
         "print-failed" => RuntimeKind.PrintFailed
         "allocation-failed" => RuntimeKind.AllocationFailed
