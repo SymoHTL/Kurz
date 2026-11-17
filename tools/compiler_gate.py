@@ -47,7 +47,9 @@ CWD = "compiler"  # the working directory of the command: the dotnet host reads 
 SOLUTION = "Kurz.sln"  # relative to CWD
 CONFIG = "compiler/NuGet.config"
 FLOOR = 1000  # below the tests the suites hold, above what is left without either corpus theory (over 300 cases each): a run that lost a project or a corpus theory cannot pass
-TIMEOUT = 900  # seconds for restore, build and tests together
+TIMEOUT = 1200  # seconds for restore, build and tests together: the Windows job's run took up to 864 s and met 900 twice on 2026-11-17 (runs 43985873704 and 43999911148, both green when run again)
+JOBS = ("compiler-windows.yml", "compiler-arm.yml")  # the workflows whose one job runs this gate alone
+SETUP = 120  # seconds such a job takes before the gate starts: checkout, the cache of LLVM's archive, the SDK (about 95 s on 2026-11-17)
 COMMAND = ["dotnet", "test", SOLUTION, "--nologo", "-c", "Release", "-p:RestoreLockedMode=true", "--disable-build-servers"]
 # the tests of the actors' stacks and of `naked` on 64-bit Arm, which the workflow compiler-arm runs natively (design record,
 # section 2; the owner, 2026-11-15, #519, comment 6892835500, Q8, "GitHub Arm runner job"): the actors, the check of the runtime
@@ -215,6 +217,12 @@ def self_test():
     case("a skipped test is red", 0, GREEN.replace("Skipped:     0", "Skipped:     1"), "skipped")
     case("fewer passed tests than the floor is red", 0, GREEN.replace("Passed:  1263", "Passed:   999"), "floor is")
     cases.append(("the floor is at least 1000 tests", FLOOR >= 1000, FLOOR))
+    limits = {}
+    for name in JOBS:
+        found = re.search(r"^\s+timeout-minutes:\s*(\d+)\s*$", open(os.path.join(kit.ROOT, ".github", "workflows", name), encoding="utf-8").read(), re.M)
+        limits[name] = int(found.group(1)) * 60 if found else 0
+    cases.append(("the budget of the tests and of the version ends before the limit of every job that runs the gate alone, less its setup",
+                  len(limits) == 2 and all(TIMEOUT + VERSION_TIMEOUT + SETUP <= limit for limit in limits.values()), (TIMEOUT, VERSION_TIMEOUT, SETUP, limits)))
     case("no summary line is red: nothing was proven", 0, "Build succeeded.\n", "nothing was proven")
     case("a build failure names its first error", 1, BUILD_ERROR, "CS0019")
     case("a non-zero exit with no failed test is red", 3, GREEN, "exited 3")
