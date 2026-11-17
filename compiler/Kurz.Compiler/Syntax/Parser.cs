@@ -2422,8 +2422,9 @@ public sealed class Parser
                 // expression after it, `f(mut)` or `f(mut, 1)`, is a name (the reading on L12), so a variable of that name is used
                 // without a second error (E1). U12: `copy` and `move`, the contextual words of section 6, are read as `mut` is, so
                 // that `copy(x)` is the word before `(x)` and a variable named `copy` is called as `(copy)(x)`; before a token that
-                // also goes on from a name, `[`, `-`, `*`, `&` and `with`, each is the name, so that `copy[i]` and `copy - 1` read a
-                // variable, and a list written after the word stands in parentheses, `copy ([a])`
+                // also goes on from a name, `[`, `-`, `*`, `&` and `with`, the one core word that does (CoreWords.Syntax; `else` goes on
+                // from a call alone), each is the name, so that `copy[i]` and `copy - 1` read a variable, and a list written after the
+                // word stands in parentheses, `copy ([a])`
                 var word = ArgumentWord.None;
                 if (CanStartExpression(Peek().Kind))
                 {

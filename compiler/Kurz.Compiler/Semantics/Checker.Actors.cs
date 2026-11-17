@@ -305,8 +305,9 @@ public sealed partial class Checker
     /// its target does (the owner, 2026-11-15, #519, comment 6896192351, Q3, "Points at the copy"), as Rust's <c>Send</c> is structural:
     /// a <c>mut</c> field needs a word, and an interface's type and a function type are read by their written type and never cross
     /// (comment 6892275110, item 2; comment 6896192351, Q5, "By written type"). A value of a type parameter, a handle of section 12, a
-    /// pointer, a class of <c>std/</c>, which is no class of the file (W1), <c>HttpRequest</c> among them, and a map whose keys reach a
-    /// class instance, whose hash the copy would not keep, are the build's limits.
+    /// pointer and a class of <c>std/</c>, which is no class of the file (W1), <c>HttpRequest</c> among them, are the build's limits; a map
+    /// whose keys reach a class instance is none, since its copy hashes each key again (the owner, 2026-11-16, #519, comment 6923513534,
+    /// "Rehash each key (Recommended)").
     /// </summary>
     private (ActorCrossing Kind, string? Why, string? Limit) CrossingOf(KurzType type)
     {
@@ -326,7 +327,7 @@ public sealed partial class Checker
             switch (t)
             {
                 case FunctionType:
-                    Meet(ActorCrossing.Never, $"a function value, `{t}`, which crosses only as a lambda the sending function shows, written at the argument or bound to an immutable local variable");
+                    Meet(ActorCrossing.Never, $"a function value, `{t}`, which crosses only as a lambda the sending function shows, the argument itself or bound to an immutable local variable");
                     break;
                 case InterfaceType:
                     Meet(ActorCrossing.Never, $"a value of the interface `{t}`, which may hold a mutable class instance whatever the program puts there");
@@ -356,11 +357,6 @@ public sealed partial class Checker
                     Walk(l.Element);
                     break;
                 case MapType m:
-                    if (ReachesClass(m.Key))
-                    {
-                        limit ??= $"a map whose keys of type `{m.Key}` reach a class instance";
-                    }
-
                     Walk(m.Key);
                     Walk(m.Value);
                     break;
@@ -399,20 +395,6 @@ public sealed partial class Checker
         Walk(type);
         return (kind, why, limit);
     }
-
-    /// <summary>Whether a value of the type holds a class instance, through what a copy walks: a key of a map whose hash the copy keeps (<see cref="CrossingOf"/>).</summary>
-    private static bool ReachesClass(KurzType type) => ReachesClass(type, []);
-
-    private static bool ReachesClass(KurzType type, HashSet<DataSymbol> data) => type switch
-    {
-        ClassType or InterfaceType or WeakRefType => true,
-        ListType l => ReachesClass(l.Element, data),
-        MapType m => ReachesClass(m.Key, data) || ReachesClass(m.Value, data),
-        UnionType u => u.Cases.Any(c => ReachesClass(c, data)),
-        DataType d when data.Add(d.Symbol) => d.Symbol.Fields.Any(f => ReachesClass(SubstituteData(d, f.Type), data)),
-        DataType d => HeldArguments(d).Any(a => ReachesClass(a, data)),
-        _ => false,
-    };
 
     /// <summary>
     /// U12: how the argument crosses into the slot of the type <paramref name="slot"/>: a function value by what it captures where the
@@ -467,9 +449,10 @@ public sealed partial class Checker
     /// U12, U16: the stage of the arguments of a message or of an actor's constructor, after the own error of each argument (E1), in the
     /// order of U16: <c>send-needs-word</c> of the first argument that does not cross, at its argument, then in the order the arguments are
     /// written, the words of <c>move</c> (<see cref="MessageMove"/>: <c>move-at-call</c>, <c>move-reachable</c> and a later argument's
-    /// <c>used-after-move</c>), the build's <c>not supported</c> of a value it does not make cross (<see cref="CrossingOf"/>), and
-    /// <c>mut-in-message</c> of a <c>mut</c> parameter, which <paramref name="mutInMessage"/> reports (the owner, 2026-11-15, issue 519,
-    /// comment 6891937666, item 4); then each <c>move</c> ends what it sends. Whether it reported one.
+    /// <c>used-after-move</c>) and <c>mut-in-message</c> of a <c>mut</c> parameter, which <paramref name="mutInMessage"/> reports (the owner,
+    /// 2026-11-15, issue 519, comment 6891937666, item 4), and after every argument the build's <c>not supported</c> of the first value it
+    /// does not make cross (<see cref="CrossingOf"/>), so that the build's limit hides no error of the language (E1); then each <c>move</c>
+    /// ends what it sends. Whether it reported one.
     /// </summary>
     private bool CrossingErrors(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, bool> slotMove, string callee, Action<int> mutInMessage)
     {
@@ -521,7 +504,10 @@ public sealed partial class Checker
             {
                 return true;
             }
+        }
 
+        for (var i = 0; i < c.Arguments.Count; i++)
+        {
             if (limits[i] is { } limit && c.Arguments[i].Word != ArgumentWord.Move)
             {
                 NotSupported(c.Arguments[i].Line, $"{limit}, crossing into an actor (U12)");
