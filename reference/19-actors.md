@@ -576,36 +576,6 @@ print(d.Total())
 
 Case: [actors/constructor-arguments.kz](../corpus/actors/constructor-arguments.kz)
 
-Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
-```kurz
-actor Child {
-    pub int Ping() => 1
-}
-
-actor Parent {
-    mut Child? kid = null
-
-    pub void Make() {
-        kid = spawn Child()
-    }
-
-    pub Child? Kid() => kid
-
-    pub void Boom() {
-        throw "parent fails"
-    }
-}
-
-p = spawn Parent()
-p.Make()
-kid = p.Kid()
-send p.Boom()
-print(p.Kid() == null)
-if kid != null {
-    print(kid.Ping())
-}
-```
-
 Case: [actors/send-gone.kz](../corpus/actors/send-gone.kz)
 ```kurz
 actor Child {
@@ -635,6 +605,36 @@ send p.Boom()
 print(p.Kid() == null)
 if kid != null {
     send kid.Note(1)
+}
+```
+
+Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
+```kurz
+actor Child {
+    pub int Ping() => 1
+}
+
+actor Parent {
+    mut Child? kid = null
+
+    pub void Make() {
+        kid = spawn Child()
+    }
+
+    pub Child? Kid() => kid
+
+    pub void Boom() {
+        throw "parent fails"
+    }
+}
+
+p = spawn Parent()
+p.Make()
+kid = p.Kid()
+send p.Boom()
+print(p.Kid() == null)
+if kid != null {
+    print(kid.Ping())
 }
 ```
 
@@ -2555,9 +2555,9 @@ Case: [actors/crash-restarts-fresh.kz](../corpus/actors/crash-restarts-fresh.kz)
 
 Case: [actors/crash-children-end.kz](../corpus/actors/crash-children-end.kz)
 
-Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
-
 Case: [actors/send-gone.kz](../corpus/actors/send-gone.kz)
+
+Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
 
 ### U23 (decided, §6) The pause before a restart grows
 
