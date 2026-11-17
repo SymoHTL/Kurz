@@ -371,12 +371,13 @@ public sealed partial class Emitter
                 var takes = owned || TakesSlot(c, info, slot); // U12: a parameter written `move` owns its argument
                 if (Model.IsMove(a))
                 {
-                    // U12: the value goes to a parameter's place with no copy and no count changed (comment 6895076937); across into an
-                    // actor's heap, a copy there, and the moved value let go of, which frees it (section 6, assumed on comment 6902210646, Q5)
+                    // U12: the value goes to a parameter's place with no copy and, of a value whose place it empties, no count changed
+                    // (comment 6895076937); across into an actor's heap, a copy there, and the moved value let go of, which frees it
+                    // (section 6, assumed on comment 6902210646, Q5)
                     var moved = Convert(MovedValue(a), TypeOf(a), type, a.Line, owned: true);
                     if (into is not null && Counted(type))
                     {
-                        // a function value with its environment copied, as an argument with no word crosses (Q5)
+                        // a function value with its environment copied, as an argument with no word crosses (comment 6902210646, Q5)
                         Cross(i, moved, type, CrossingEnvironment(a, type), takes);
 
                         // in a session of more than one copy, the memo holds a count of every block it maps until the session's end
