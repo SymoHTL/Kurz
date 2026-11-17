@@ -48,8 +48,9 @@ public sealed partial class Emitter
     /// restart with a copy of each argument the constructor is given (<see cref="KeptArguments"/>; U22) where the policy restarts, the policy
     /// written after the <c>spawn</c>, else the type's, else <c>on crash restart</c> (U25, U27); <c>escalate</c> keeps the block alone, which
     /// names no function, and <c>stop</c> keeps none (section 6); a block that decides, <c>on crash (c) { ... }</c>, keeps the block of a
-    /// restart, which names the block's function value, made here in the supervisor's heap before the constructor runs, and the function
-    /// that runs it (<see cref="Deciding"/>; U28, U31). While the constructor runs, the runtime names the actor as the one whose
+    /// restart, which names the block's function value, made here in the supervisor's heap after the arguments and before the constructor
+    /// runs, so that the variables it takes by value are taken after the arguments ran, as the checker reads the block after them and as
+    /// it is written, and the function that runs it (<see cref="Deciding"/>; U28, U31). While the constructor runs, the runtime names the actor as the one whose
     /// constructor runs, so that an actor it spawns is its child (the runtime's <c>Building</c>; U13), and its record says that its
     /// constructor runs until <c>ActorBuilt</c>, so that an escalation that reaches it is its spawner's crash (U3, U25).
     /// </summary>
@@ -68,7 +69,6 @@ public sealed partial class Emitter
         var building = fn.Alloca("ptr", "building");
         var side = "null";
         var policy = s.Policy ?? symbol.Declaration.Clauses?.FirstOrDefault(c => c.Policy is not null)?.Policy ?? new CrashPolicy(s.Line, "restart");
-        var decides = policy.Block is { } l ? EmitLambda(l, Model.LambdaOf(l).Type) : null;
         var state = Construct(symbol, s.Call, info, () =>
         {
             var state = fn.Value($"call ptr {RuntimeFunction("ActorNew")}(ptr {heap}, i64 {IrSize(block)}, i64 {stack}, ptr {side}, ptr {ActorName(symbol)})");
@@ -82,7 +82,7 @@ public sealed partial class Emitter
         {
             "restart" => KeptArguments(s.Call, info, symbol, arguments, types, supervisor, policy),
             "escalate" => Escalating(supervisor),
-            "block" => Deciding(KeptArguments(s.Call, info, symbol, arguments, types, supervisor, policy), decides!, policy.Block!, supervisor),
+            "block" => Deciding(KeptArguments(s.Call, info, symbol, arguments, types, supervisor, policy), EmitLambda(policy.Block!, Model.LambdaOf(policy.Block!).Type), policy.Block!, supervisor),
             _ => "null",
         });
         fn.Emit($"call ptr {RuntimeFunction("Building")}(ptr {fn.Value($"load ptr, ptr {building}")})");
@@ -249,7 +249,7 @@ public sealed partial class Emitter
         fn.Emit($"store ptr {BlockEntry(block)}, ptr {fn.Value($"getelementptr {type}, ptr {record}, i32 0, i32 0")}");
         fn.Emit($"call void {RetainEnvironment()}(%kz.fn {decides})");
         fn.Emit($"store %kz.fn {decides}, ptr {fn.Value($"getelementptr {type}, ptr {record}, i32 0, i32 1")}");
-        fn.Emit($"store ptr {record}, ptr {fn.Value($"getelementptr i8, ptr {side}, i64 56")}");
+        fn.Emit($"store ptr {record}, ptr {fn.Value($"getelementptr i8, ptr {side}, i64 56")}"); // the side's eighth field (SideType), at byte 56 on every target, each 64-bit, where the runtime's `RunBlock` reads it
         return side;
     }
 
@@ -287,7 +287,7 @@ public sealed partial class Emitter
             for (var i = 0; i < cases.Count; i++)
             {
                 fn.Block(labels[i]);
-                string? value = null;
+                string? value = cases[i] is NullType ? "zeroinitializer" : null; // a thrown `null` holds no value, which the message holds none of
                 if (cases[i] is not (Semantics.VoidType or NullType))
                 {
                     value = fn.Value($"load {Ir(cases[i])}, ptr {held}");

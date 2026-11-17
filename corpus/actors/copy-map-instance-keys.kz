@@ -4,7 +4,7 @@
 // | 2 found
 // | a b, 2 found
 // | 3 4, 2 found
-// rules: U12
+// rules: K4, U12
 
 class Box(mut int N)
 class Tag(string Name, Box Owner)
