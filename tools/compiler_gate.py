@@ -131,6 +131,13 @@ def judge_version(code, output, error):
     return []
 
 
+def job_limit(text):
+    """The seconds of the one `timeout-minutes` a workflow holds, or 0 where it holds none or more than one: a second job's
+    limit or a step's could stand in for the limit of the job that runs this gate, so the budget case reads neither."""
+    found = re.findall(r"^\s+timeout-minutes:\s*(\d+)\s*$", text, re.M)
+    return int(found[0]) * 60 if len(found) == 1 else 0
+
+
 def judge(code, output, floor=FLOOR):
     """(errors, counts) from the test command's exit code and output. counts = (failed, passed, skipped, total)."""
     summaries = SUMMARY.findall(output)
@@ -223,10 +230,13 @@ def self_test():
     limits = {}
     for name in JOBS:
         path = os.path.join(kit.ROOT, ".github", "workflows", name)  # a workflow that is gone has no limit: red, not a crash
-        found = re.search(r"^\s+timeout-minutes:\s*(\d+)\s*$", open(path, encoding="utf-8").read(), re.M) if os.path.exists(path) else None
-        limits[name] = int(found.group(1)) * 60 if found else 0
+        limits[name] = job_limit(open(path, encoding="utf-8").read()) if os.path.exists(path) else 0
     cases.append(("the budget of the tests and of the version, with what a job spends outside the gate, ends before the limit of every job that runs it",
                   len(limits) == 3 and all(TIMEOUT + VERSION_TIMEOUT + JOBS[name] <= limit for name, limit in limits.items()), (TIMEOUT, VERSION_TIMEOUT, JOBS, limits)))
+    one = "jobs:\n  gates:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 40\n"
+    two = one + "  other:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 90\n"
+    cases.append(("a workflow's one limit is read in seconds", job_limit(one) == 2400, job_limit(one)))
+    cases.append(("a workflow with a second limit, of another job or of a step, has no limit the budget case reads", job_limit(two) == 0, job_limit(two)))
     case("no summary line is red: nothing was proven", 0, "Build succeeded.\n", "nothing was proven")
     case("a build failure names its first error", 1, BUILD_ERROR, "CS0019")
     case("a non-zero exit with no failed test is red", 3, GREEN, "exited 3")
