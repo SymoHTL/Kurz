@@ -4046,7 +4046,7 @@ public sealed class CheckerTests
     }
 
     [Fact]
-    public void The_failure_order_of_a_compare_exchange_is_refused_as_rusts_lint_refuses_it_and_its_success_order_is_not()
+    public void The_failure_order_of_an_atomic_compare_exchange_is_refused_as_rusts_lint_refuses_it_and_its_success_order_is_not()
     {
         Assert.Equal([(ErrorIds.InvalidOrdering, 11)], Errors(Exchange("SeqCst", "Release"), "raw"));
         Assert.Equal([(ErrorIds.InvalidOrdering, 11)], Errors(Exchange("SeqCst", "AcqRel"), "raw"));
@@ -4090,7 +4090,7 @@ public sealed class CheckerTests
     }
 
     [Fact]
-    public void From_ptr_takes_a_pointer_to_the_word_of_its_type()
+    public void From_ptr_of_an_atomic_type_takes_a_pointer_to_its_word()
     {
         Assert.Equal([(ErrorIds.TypeMismatch, 11), (ErrorIds.TypeMismatch, 12)], Errors(Atomics("raw {\n    print(AtomicInt.FromPtr(&w).Load(Ordering.SeqCst))\n    print(*AtomicPtr<int>.FromPtr(&slot).Load(Ordering.SeqCst))\n}"), "raw"));
         Assert.Equal([(ErrorIds.TypeMismatch, 16)], Errors(Atomics("void Take(AtomicPtr<int> x) {\n    raw {\n        print(*x.Load(Ordering.SeqCst))\n    }\n}\n\nTake(p)"), "raw")); // AtomicPtr<long> is no AtomicPtr<int>

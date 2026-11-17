@@ -1392,4 +1392,14 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Matches(@"switch i8 %[\w.]+, label %[\w.]+ \[ i8 0, label %[\w.]+ i8 1, label %[\w.]+ i8 2, label %[\w.]+ i8 3, label %[\w.]+ i8 4, label %[\w.]+ \]", program.Ir);
         Ran(Toolchain.Run(toolchain.Build(program, "atomic-order-chosen")), 1, ["70001", "70001", "70001"], "error: invalid-ordering-at-run-time at program.kz:4\n");
     }
+
+    [Fact]
+    public void An_atomic_order_a_copy_holds_as_its_constant_that_rust_refuses_raises_at_the_call()
+    {
+        // R19: an order no call writes, held as a constant by a copy of a function (T35), is no compile error; the copy that holds
+        // one Rust refuses for a load raises `invalid-ordering-at-run-time` at the call's line, as Rust's `match` on the order panics
+        const string text = "long Read<const Ordering O>(AtomicLong a) {\n    mut long v = 0\n    raw {\n        v = a.Load(O)\n    }\n\n    return v\n}\n\n"
+            + "mut long w = 70001\nview = AtomicLong.FromPtr(&w)\nprint(Read<Ordering.Acquire>(view))\nprint(Read<Ordering.Release>(view))\n";
+        Ran(BuildAndRun(text, "atomic-order-copy", "raw"), 1, ["70001"], "error: invalid-ordering-at-run-time at program.kz:4\n");
+    }
 }
