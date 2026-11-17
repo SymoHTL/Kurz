@@ -1,0 +1,27 @@
+// expect: output
+// | 5
+// | 7
+// | 9
+// | 12
+// | 10
+// | 2
+// | 3
+// | 12
+// allow: raw
+// rules: R19
+
+// a view of a word through a pointer to it: each member reads or writes the word in one step
+mut long word = 5
+counter = AtomicLong.FromPtr(&word)
+raw {
+    print(counter.Load(MemoryOrder.SeqCst))
+    counter.Store(7, MemoryOrder.Release)
+    print(counter.Swap(9, MemoryOrder.AcqRel))
+    print(counter.FetchAdd(3, MemoryOrder.Relaxed))
+    print(counter.FetchSub(2, MemoryOrder.Acquire))
+    print(counter.FetchAnd(6, MemoryOrder.SeqCst))
+    print(counter.FetchOr(1, MemoryOrder.SeqCst))
+    print(counter.FetchXor(15, MemoryOrder.SeqCst))
+    Fence(MemoryOrder.SeqCst)
+}
+print(word)

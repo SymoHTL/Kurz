@@ -374,7 +374,7 @@ public sealed partial class Checker
     private bool Copied(KurzType type, HashSet<DataSymbol> path) => type switch
     {
         PrimitiveType p => p.Kind != Primitive.String,
-        PointerType or CFunctionType or FunctionType or VoidType or ErrorType or EnumType or FlagsType => true,
+        PointerType or AtomicType or CFunctionType or FunctionType or VoidType or ErrorType or EnumType or FlagsType => true, // R19: a view is the pointer it holds
         UnionType u => u.Cases.All(c => Copied(c, path)),
         DataType d => CopiedData(d, path),
         _ => false, // a list, a string, a type parameter

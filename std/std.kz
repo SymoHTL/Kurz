@@ -14614,7 +14614,7 @@ long RegexTimes(long a, long b) {
 // The kinds of the runtime's own errors: one for each run-time error of the reference's chapter 12, in the order of its table, but
 // `thrown`, which is a `throw` of the program and not the runtime's (design record, section 5, assumed there).
 pub enum RuntimeKind {
-    Overflow, DivideByZero, IndexOutOfRange, ReversedRangeAtRunTime, StackOverflow, PrintFailed, AllocationFailed, NotCharBoundary,
+    Overflow, DivideByZero, IndexOutOfRange, ReversedRangeAtRunTime, InvalidOrderingAtRunTime, StackOverflow, PrintFailed, AllocationFailed, NotCharBoundary,
     RandomFailed, Deadlock, CalleeCrashed, ActorGone, RestartLimit, CpuLacksSet, SettingsUnpublished
 }
 
@@ -14648,6 +14648,7 @@ pub RuntimeError RuntimeErrorOf(string id, string detail) {
         "divide-by-zero" => RuntimeKind.DivideByZero
         "index-out-of-range" => RuntimeKind.IndexOutOfRange
         "reversed-range-at-run-time" => RuntimeKind.ReversedRangeAtRunTime
+        "invalid-ordering-at-run-time" => RuntimeKind.InvalidOrderingAtRunTime
         "stack-overflow" => RuntimeKind.StackOverflow
         "print-failed" => RuntimeKind.PrintFailed
         "allocation-failed" => RuntimeKind.AllocationFailed

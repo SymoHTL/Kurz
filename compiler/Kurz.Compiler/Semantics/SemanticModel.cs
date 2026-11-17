@@ -56,6 +56,15 @@ public enum CallKind
     /// <summary><c>SizeOf&lt;T&gt;()</c> (R14); <see cref="CallInfo.Target"/> is the type whose size it is.</summary>
     SizeOf,
 
+    /// <summary><c>AtomicLong.FromPtr(p)</c> (R19), the view of the word at <c>p</c>; <see cref="CallInfo.Target"/> is the atomic type.</summary>
+    AtomicFromPtr,
+
+    /// <summary>A member of a view (R19), named by the call's member; <see cref="CallInfo.Target"/> is the atomic type.</summary>
+    Atomic,
+
+    /// <summary><c>Fence(order)</c> (R19), Rust's <c>fence</c>.</summary>
+    Fence,
+
     /// <summary><c>string.FromRaw(p, n)</c> or <c>List&lt;T&gt;.FromRaw(p, n)</c> (R15); <see cref="CallInfo.Target"/> is the string or list type it makes.</summary>
     FromRaw,
 
