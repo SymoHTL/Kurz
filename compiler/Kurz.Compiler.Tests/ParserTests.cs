@@ -1706,10 +1706,12 @@ public sealed class ParserTests
     [InlineData("w = spawn Worker() on crash (c) {\n    stop = 1\n    print(stop)\n    escalate\n}", "(assign-or-declare w (spawn (call Worker) [on crash 1 block (lambda (c) {(assign-or-declare stop (int 1)) (call print stop) (decide escalate)})]))")]
     [InlineData("w = spawn Worker() on crash (c) {\n    f(() => restart)\n    g(() => {\n        stop\n    })\n    restart\n}", "(assign-or-declare w (spawn (call Worker) [on crash 1 block (lambda (c) {(call f (lambda () restart)) (call g (lambda () {stop})) (decide restart)})]))")]
     [InlineData("w = spawn Worker() on crash (c) {\n    v = spawn Worker() on crash (d) {\n        stop\n    }\n    escalate\n}", "(assign-or-declare w (spawn (call Worker) [on crash 1 block (lambda (c) {(assign-or-declare v (spawn (call Worker) [on crash 2 block (lambda (d) {(decide stop)})])) (decide escalate)})]))")]
+    [InlineData("w = spawn Worker() on crash (c) { stop }", "(assign-or-declare w (spawn (call Worker) [on crash 1 block (lambda (c) {(decide stop)})]))")]
     public void A_decision_is_a_statement_of_the_block_alone(string program, string tree)
     {
         // U29: `restart`, `stop` and `escalate` are statements in the block of `on crash` and names elsewhere, a lambda inside the block
-        // among it, and before `=` in the block, as `send` is a name there (U6); a block inside a block holds its own decisions
+        // among it, and before `=` in the block, as `send` is a name there (U6); a block inside a block holds its own decisions; the `}`
+        // that closes a block written on one line (L5) ends the decision's statement
         Assert.Equal(tree, Tree(program));
     }
 
@@ -1721,7 +1723,7 @@ public sealed class ParserTests
     [InlineData("c = spawn Worker() on crash {\n    stop\n}", 1)] // U28: the parameter in parentheses before the block
     [InlineData("c = spawn Worker() on crash (c) stop", 1)]
     [InlineData("c = spawn Worker() on crash (c) {\n    stop\n}.Get()", 3)] // U25: the block ends the expression
-    [InlineData("if spawn Worker() on crash (c) {\n    x = attempt {\n        f()\n    }\n\n    stop\n} {\n}", 7)] // in a header too, where `attempt` in the block is the form (U28)
+    [InlineData("if spawn Worker() on crash (c) {\n    x = attempt {\n        f()\n    }\n\n    stop\n} {\n}", 7)] // in a header too, where `attempt` in the block is the form (U28), the block ending the expression (U28, U25)
     [InlineData("c = spawn Worker() on crash (c) {\n    restart after 1ms\n}", 2)] // U29: `restart` takes no knobs (assumed: S3)
     [InlineData("c = spawn Worker() on crash (c) {\n    stop now\n}", 2)] // U29: a decision is a statement, which ends there, and text after it is syntax (E4)
     [InlineData("c = spawn Worker() on crash (c) {\n    return\n}", 2)] // U29: the block decides, with no `return` (assumed: S3)
@@ -1747,7 +1749,8 @@ public sealed class ParserTests
         // section 6: `attempt { ... }` and `retry { ... }` parse, for the checker to refuse; before the block of an `if`, a `while`, a `for`
         // or a `match` the word is a name, so that a variable of either name stands in a condition, as a struct literal is no condition in
         // Rust; inside the header's parentheses, brackets, arms and blocks, a lambda's body and the block of `on crash` among them, the
-        // word is the form again, as Rust reads a struct literal there (U28; assumed: section 6, comment 6847932993, Q10)
+        // word is the form again, as Rust reads a struct literal there (U28; section 6, the owner, 2026-11-17, #570, comment 6961064167, Q3,
+        // "Block's words"; the name in the header itself assumed: section 6, comment 6847932993, Q10)
         Assert.Equal(tree, Tree(program));
     }
 
