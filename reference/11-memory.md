@@ -1971,13 +1971,15 @@ memory (§6, the owner, 2026-11-17, #519, comment 6948910734, Q6, "View only (Re
 aligned to its size, as Rust's `from_ptr` requires; `FromPtr` reads nothing, so it needs no `raw`
 block, as `Ptr<T>(x)` needs none (R14) *(assumed in §6)*.
 
-The members are Rust's where Rust gives them to the type, with Rust's parameters (§6, Q1): `Load(order)`,
+The members are Rust's where Rust gives them to the type (§6, Q1), with Rust's parameters: `Load(order)`,
 `Store(val, order)`, `Swap(val, order)`, `CompareExchange(current, new, success, failure)` and
 `CompareExchangeWeak(current, new, success, failure)` on all four, `FetchAdd(val, order)` and
 `FetchSub(val, order)` on `AtomicInt` and `AtomicLong`, and `FetchAnd`, `FetchOr` and `FetchXor` on all
-four, an `AtomicPtr<T>`'s taking a `long` of bits for the address, as Rust's take a `usize`; another
-member is `unknown-name`. `Load` gives the word, `Swap` and the `Fetch` members the value it held
-before, `FetchAdd` and `FetchSub` wrapping as Rust's do, and `Store` nothing. `CompareExchange` gives
+four, an `AtomicPtr<T>`'s taking a `long` of bits for the address, as Rust's take a `usize`
+*(assumed in §6: the parameters, and no `FetchAdd` or `FetchSub` on `AtomicBool` or `AtomicPtr<T>`, as Rust
+has none of those names there)*; another member is `unknown-name`. `Load` gives the word, `Swap` and the
+`Fetch` members the value it held before, `FetchAdd` and `FetchSub` wrapping as Rust's do, and `Store`
+nothing *(assumed in §6)*. `CompareExchange` gives
 a union (O1), the value it found where it stored, or the case `NotExchanged<T>(T Value)` with the value
 it found where it did not, as Rust's `Result<T, T>`, and `CompareExchangeWeak` may not store where the
 word holds `current`, as Rust's may fail spuriously *(assumed in §6)*. A member and `Fence` stand in a

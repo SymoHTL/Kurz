@@ -60,7 +60,7 @@ input; its `// allow:` line gives it the grants a
 corpus takes no grant from it *(assumed: as §3 marks it)*. A case whose output follows one thread's
 order carries the line `// threads: 1`, with which the runner runs it on one thread (U35; §6, the
 owner, 2026-11-17, #519, comment 6946657505, Q5, "// threads: 1 header (Recommended)"), and
-`compiler/README.md` says which runner reads it.
+`compiler/README.md` says whether a runner reads it.
 
 The ids of both kinds are listed in chapter 12. The compiler's test suite parses each file and checks the errors of its
 front end, `syntax`, `semicolon`, `reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, or the absence of any diagnostic, against the header,
