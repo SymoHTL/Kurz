@@ -7561,6 +7561,10 @@ public sealed class CheckerTests
         // each of the two errors names the loop that took the list by its line, 10 and 5, beside the line of the `move`, 11 and 6
         Assert.Contains("line 10", Assert.Single(Check(Say + "names = [\"a\", \"b\"]\nfor s in names {\n    Say(move s)\n}\nprint(names)\n").Diagnostics.Items).Message, StringComparison.Ordinal);
         Assert.Contains("line 5", Assert.Single(Check("void Two(move string s, int n) {\n}\n\nnames = [\"a\"]\nfor s in names {\n    Two(move s, names.Count)\n    break\n}\n").Diagnostics.Items).Message, StringComparison.Ordinal);
+        // two loops over the list on two branches both reach the read after them, which names both loops by their lines, 11 and 15
+        const string Branches = "names = [\"a\", \"b\"]\nif names.Count > 1 {\n    for s in names {\n        Say(move s)\n    }\n} else {\n    for s in names {\n        Say(move s)\n    }\n}\nprint(names)\n";
+        Assert.Equal([(ErrorIds.UsedAfterMove, 19)], Errors(Say + Branches));
+        Assert.Contains("loops at line 11 and line 15", Assert.Single(Check(Say + Branches).Diagnostics.Items).Message, StringComparison.Ordinal);
         Assert.Equal([(ErrorIds.MoveReachable, 11)], Errors(Say + "void All(List<string> names) {\n    for s in names {\n        Say(move s)\n    }\n}\n\nAll([\"a\"])\n"));
         NotSupportedAt(10, "U12", Say + "for n in 0..<2 {\n    Num(move n)\n}\n");
         NotSupportedAt(12, "U12", Say + "mut m = Map<string, string>()\nm[\"a\"] = \"b\"\nfor k, v in m {\n    Say(move k)\n}\n");
@@ -7932,15 +7936,27 @@ public sealed class CheckerTests
         Assert.EndsWith("(U12)", refused.Message, StringComparison.Ordinal);
         Assert.Empty(CheckSeeingStd(Give.Replace("@", "HttpHeaders", StringComparison.Ordinal)).Diagnostics.Items);
 
-        // the walk reads a list's items, a map's values, a union's cases, a `?` among them, a data value's fields, a type argument a data
-        // value met before holds, a class of the file's fields and a weak reference's target, in a list, since no parameter is written `weak`
+        // the walk reads a list's items, a map's keys and values, a union's cases, a `?` among them, a data value's fields, a type argument
+        // a data value met before holds, a class of the file's fields and a weak reference's target, in a list, since no parameter is
+        // written `weak`
         NotSupportedAt(8, "U12", Give.Replace("@", "List<File>", StringComparison.Ordinal));
         NotSupportedAt(8, "U12", Give.Replace("@", "Map<string, Sha256>", StringComparison.Ordinal));
+        NotSupportedAt(8, "U12", Give.Replace("@", "Map<Keeper, int>", StringComparison.Ordinal) + "\nclass Keeper(mut File F)\n"); // a key compared by identity (K4)
         NotSupportedAt(8, "U12", Give.Replace("@", "File?", StringComparison.Ordinal));
         NotSupportedAt(8, "U12", Give.Replace("@", "Holder", StringComparison.Ordinal) + "\ndata Holder(File F)\n");
         NotSupportedAt(8, "U12", Give.Replace("@", "Wrap<Wrap<File>>", StringComparison.Ordinal) + "\ndata Wrap<T>(T A)\n");
         NotSupportedAt(8, "U12", Give.Replace("@", "Keeper", StringComparison.Ordinal) + "\nclass Keeper(File F)\n");
         NotSupportedAt(8, "U12", Give.Replace("@", "List<weak Keeper?>", StringComparison.Ordinal) + "\nclass Keeper(File F)\n");
+
+        // a value of a type parameter, read on its function's text, is the limit after `move` too, since the copy of the function for a
+        // `Sha256` or a `File` would share the sender's block (probed: the sender's crash and restart, then the receiver's call of the
+        // lambda, ended with exit 139 under the fenced allocator): captured by a lambda of a message, held in a list a lambda captures,
+        // and captured by a lambda among a `spawn`'s arguments; a lambda that captures no such value crosses
+        const string Generic = "actor A {\n    pub void Run(() => int f) {\n        print(f())\n    }\n}\n\nint One<T>(T x) => 1\n\n";
+        NotSupportedAt(10, "U12", Generic + "void Give<T>(A a, move T x) {\n    send a.Run(move () => One(x))\n}\n");
+        NotSupportedAt(11, "U12", Generic + "void Give<T>(A a, move T x) {\n    xs = [x]\n    send a.Run(move () => xs.Count)\n}\n");
+        NotSupportedAt(13, "U12", Generic + "actor B(() => int F) {\n}\n\nvoid Start<T>(move T x) {\n    b = spawn B(move () => One(x))\n    print(b)\n}\n");
+        Clean(Generic + "void Give<T>(A a, T x) {\n    n = One(x)\n    send a.Run(move () => n)\n}\n");
     }
 
     [Fact]

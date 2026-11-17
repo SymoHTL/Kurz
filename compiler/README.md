@@ -2898,8 +2898,9 @@ region the checker does not keep (U12); an argument
 or a result of a message or of an actor's constructor, and a value after `copy` at any call, that
 reaches a value of a type parameter, an instance of a class of `std/`, `HttpRequest` and
 `HttpHeaders` among them, a handle of section 12 or a pointer, an argument written `move` only where it
-reaches a handle, a hasher, a command or a child process, itself or through a field of a class of
-`std/`, whose copy would share the sender's block by its count (U12); `copy` at a call that is no message before a value that
+reaches a handle, a hasher, a command or a child process by any path the copy follows, a lambda's capture and
+a field of any class among them, or a value of a type parameter, which the copy of its function for such a type
+argument makes one of them, whose copy would share the sender's block by its count (U12); `copy` at a call that is no message before a value that
 reaches a function value or an interface's value, which no word makes cross (U12); and a log call
 inside an actor (P8). The refusal of
 the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered
