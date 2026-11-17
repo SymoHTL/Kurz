@@ -544,7 +544,7 @@ public sealed partial class Checker
             if (limits[i] is { } limit)
             {
                 NotSupported(c.Arguments[i].Line, c.Arguments[i].Word == ArgumentWord.Move
-                    ? $"{limit} after `move`, crossing into an actor, which this build would share by its count with the sender's heap (U12)"
+                    ? $"{limit} after `move`, crossing into an actor, which this build would share by its count with the sender's heap, as with `copy` or no word (U12)"
                     : $"{limit}, crossing into an actor (U12)");
                 return true;
             }
