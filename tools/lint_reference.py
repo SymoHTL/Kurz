@@ -98,6 +98,10 @@ def parse_case(text):
         if not re.fullmatch(r"// allow: (?:raw(?: native)?|native)", rest[0]):
             return None, "the `// allow:` line is not `// allow: raw`, `// allow: native` or `// allow: raw native`"
         rest = rest[1:]
+    if rest and rest[0].startswith("// system:"):  # the one system the case runs on (chapter 0)
+        if not re.fullmatch(r"// system: (?:linux|windows)", rest[0]):
+            return None, "the `// system:` line is not `// system: linux` or `// system: windows`"
+        rest = rest[1:]
     if len(rest) != 1 or not re.fullmatch(r"// rules: [A-Z]\d+(?:, [A-Z]\d+)*", rest[0]):
         return None, "the header does not end in one `// rules: A1, B2` line"
     if not blank or not body.strip():
@@ -430,6 +434,8 @@ def cases_in(base):
         "a grant line of native alone": (tree(edit(declare, "// rules: V1", "// allow: native\n// rules: V1")), None),
         "a grant line the header does not take": (tree(edit(declare, "// rules: V1", "// allow: network\n// rules: V1")), "the `// allow:` line is not"),
         "a grant line in the order native raw": (tree(edit(declare, "// rules: V1", "// allow: native raw\n// rules: V1")), "the `// allow:` line is not"),
+        "a system line the header takes": (tree(edit(declare, "// rules: V1", "// allow: raw\n// system: linux\n// rules: V1")), None),
+        "a system line the header does not take": (tree(edit(declare, "// rules: V1", "// system: macos\n// rules: V1")), "the `// system:` line is not"),
         "a case without a body": (tree({declare: "// expect: output\n// rules: V1\n"}), "no body"),
         "a case that names an unknown rule": (tree(edit(declare, "// rules: V1", "// rules: V1, V9")), "does not have"),
         "a case not linked from a rule it names": (tree(edit(declare, "// rules: V1", "// rules: V1, V4")), "has no Case line for it"),

@@ -271,7 +271,7 @@ public sealed class ModelTests
 
             s[at + 2] = 0;
             s[at] = 5;
-        }, ["if life == 1 || life == 3 || life == 5 {"]),
+        }, ["if life == 1 || life == 5 {"]),
         new("Ready", "return *Ptr<byte*>(state - 32) != null", _ => true, s => { s[at + 2] = s[Mail] > 0 ? 1 : 0; s[at] = 5; }),
         .. LetGone(at, 5, _ => 0, broken),
     ]);

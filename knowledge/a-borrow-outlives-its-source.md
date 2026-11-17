@@ -95,7 +95,10 @@ where any argument can wait
 (`SemanticModel.CanWait`, read from the checker's `Calls`), the message is built in a heap of its own and
 copied into the callee's heap when it is queued, as Erlang copies a message at its send; a crash of the
 caller before the queueing frees that heap. The fenced programs `actor-crash-wait-fenced` and
-`actor-crash-wait-first-fenced` of `ListTests` hold the crash, and `ActorTests` the end of the callee.
+`actor-crash-wait-first-fenced` of `ListTests` hold the crash, and `actor-end-wait-fenced` the end of the
+callee, which frees its heap whole, its first page with it, since the table of slots and generations of
+section 6 (2026-11-16, comment 6919351399): the copy then goes into the caller's heap, as the runtime's
+`ActorHeap` gives it for a reference that finds no actor, and the queueing raises `actor-gone`.
 
 **Why:** a borrow is a claim about every path from the read to the last use, and the claim was
 checked only for the paths the author thought of. A program that frees nothing never shows the
@@ -116,8 +119,8 @@ count the emitter takes of a read of a copied type that the checker marks as met
 function value beside `Swap(mut f)` (`SemanticModel.IsHeldCopy`, the owner's "Copied", 2026-10-25), and the count
 `SortBy` takes of the list it read while its keys run, and the count a read of a `mut` parameter
 takes where a call after it in the expression can reach the field it names (`Calls` in
-`Semantics/Checker.Reads.cs`), and the heap of its own a message is built in where an argument after a
-crossing one can wait, which no crash or end of the callee frees. A construct
+`Semantics/Checker.Reads.cs`), and the heap of its own a message is built in where any of its arguments
+can wait, which no crash or end of the callee frees. A construct
 that has none takes a count of what it read. A promise of another rule that no code can reach the
 place, F11's for a lambda, is no such name: a later rule can open a way to it, as K2's methods did,
 so every member that runs a program's code while it holds a place is listed (`SortBy`, X8). Each one gets a line in a fenced program of `ListTests`

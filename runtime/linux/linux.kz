@@ -664,6 +664,8 @@ extern "C" void OnFault(int number, void* details, void* context) {
                 Locate()
                 crashing = false
                 extern "C" (byte*, long) => void handler = *Ptr<extern "C" (byte*, long) => void>(overflowPage)
+                // `Out` captures through `TraceBytes`, and every walk writes `error: stack-overflow` and the place or a
+                // note through it, or the line of a stack that could not be walked, so that `captured` is above 8
                 handler(overflowPage + 23, captured - 8)
             }
 

@@ -1,0 +1,30 @@
+// expect: throws actor-gone at 29
+// | true
+// rules: U5, U20, U21, U22
+
+actor Child {
+    pub int Ping() => 1
+}
+
+actor Parent {
+    mut Child? kid = null
+
+    pub void Make() {
+        kid = spawn Child()
+    }
+
+    pub Child? Kid() => kid
+
+    pub void Boom() {
+        throw "parent fails"
+    }
+}
+
+p = spawn Parent()
+p.Make()
+kid = p.Kid()
+send p.Boom()
+print(p.Kid() == null)
+if kid != null {
+    print(kid.Ping())
+}

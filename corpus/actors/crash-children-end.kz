@@ -1,7 +1,7 @@
 // expect: output
 // | child 1 tick 1
 // | true
-// rules: U21
+// rules: U13, U21, U22
 
 actor Child(int N) {
     pub void Tick(int t) {

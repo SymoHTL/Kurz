@@ -64,9 +64,9 @@ public sealed partial class Emitter
             case NameExpression n when Model.IsImplicitField(n, out _, out var field) && field is not null:
                 return ImplicitField(n, field, type); // K7
             case ThisExpression t:
-                return This(t, t.Line); // K7: borrowed, as a parameter is
+                return type is ActorType ? Reference(This(t, t.Line)) : This(t, t.Line); // K7: borrowed, as a parameter is; U10: inside an actor, as a value, its reference
             case SpawnExpression s:
-                return EmitActorSpawn(s); // U2's reference, with no count: an actor ends with its supervisor (section 6), here with the process
+                return EmitActorSpawn(s); // U2's reference, with no count: a reference whose actor ended finds no actor (section 6)
             case NameExpression n when Model.IsVariable(n):
                 {
                     var stored = Sub(Model.VariableOf(n).Type);
@@ -861,7 +861,10 @@ public sealed partial class Emitter
 
         if (from is FunctionType ff && to is FunctionType tf && !Types.SameMoves(ff, tf))
         {
-            // U12: the function would borrow an argument its caller hands over as the callee's (Q4 of comment 6657251688)
+            // U12: the function would borrow an argument its caller hands over as the callee's (Q4 of comment 6657251688); a nullable
+            // function type or a union that holds one reaches this check through its case: a function value given for `((move Cart) =>
+            // void)?` is converted into that case below (`Convert` of the value for the case), and a nullable one through
+            // `ConvertUnion`, which converts each case
             throw Unsupported(line, "a function value whose parameter is not written `move` where its type writes `move`, which the build does not wrap (U12, F11)");
         }
 
@@ -1058,7 +1061,7 @@ public sealed partial class Emitter
             case HasherType:
                 return StringValue(type.Text); // H6: the name of its type and nothing of its state
             case ActorType:
-                return fn.Value($"call %kz.str {RuntimeFunction("ActorText")}(%kz.str {StringValue(type.Text)}, ptr {value})"); // U2: `Counter#1`
+                return fn.Value($"call %kz.str {RuntimeFunction("ActorText")}(%kz.str {StringValue(type.Text)}, i64 {fn.Value($"extractvalue %kz.actor {value}, 1")})"); // U2: `Counter#1`, of the number
             case ListType list:
                 return ListText(value, list, line);
             case MapType map:

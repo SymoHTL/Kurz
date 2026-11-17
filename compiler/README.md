@@ -409,7 +409,9 @@ entry serves, the second in the thread's own heap and the third in the heap it i
 process where the entry gives null (the owner, 2026-10-24, "Null, runtime ends it"), as Rust's `GlobalAlloc::alloc`
 returns null and leaves the end of the process to a caller, which its documentation encourages to
 call `handle_alloc_error`. The entry serves a heap (record, section 3): the one the runtime's `Run` sets before each
-switch to an actor's stack and puts back after it, the running actor's, else the thread's own, which
+switch to an actor's stack and puts back after it, the running actor's, which a waiting call sets
+aside while it waits (`Wait`); the new actor's, while `spawn` runs its constructor and the defaults
+of its body; the heap of a copy's session, from `CopyUse` to `CopyLeft`; else the thread's own, which
 holds what the top-level code allocates and what lives as long as the process ("The runtime"). A heap
 takes its memory in pages, its first page sized to what it holds first, from 256 bytes, each later page
 twice the size of the one before it, up to 65536 bytes, and larger, the smallest power of two that holds
@@ -985,8 +987,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   whether a take found it held and left the entry to its holder (NOTIFIED) and whether its constructor
   runs (BUILDING), as tokio's task state keeps RUNNING and NOTIFIED bits (not checked at source), the
   block of its restart, which its supervisor's heap holds, null where it does not restart (U22), its
-  supervisor, null for the top-level code (U13), its heap, the actor spawned before it, by which the runtime's
-  `EndActors` reaches every actor, the size of the stack its messages run on, 2 MiB or what its
+  supervisor, null for the top-level code (U13), its heap, the index of its slot in the runtime's
+  table of the process (below), the size of the stack its messages run on, 2 MiB or what its
   `stack` clause sets (U1), the actor's number, the first and the last
   message of its inbox, the actor after it in the run queue, and the activation at the top of its
   stacks, the one that runs or waits, none while it is idle and none while its constructor runs,
@@ -995,10 +997,20 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   child's crash posted while the constructor waits among them (U17, U28), and the life of the record
   marks it, so that a crash passed up into an actor whose constructor runs at its `spawn` goes on to its spawner (U25, U3). The number
   counts the actors of every type from 1, in the order `ActorNew` makes them (U2). The reference is
-  the address of the state, which nothing counts, an actor living to the end of the process: `==` of
-  two references compares the two addresses, `this` as a value inside an actor is the address of its
-  own state (U2, U10), and the runtime's `ActorText` makes the text of a reference, the name of the
-  actor's type, `#` and its number, `Counter#1` (U2). The constructor and the defaults of
+  two words, 16 bytes, the index of the actor's slot in the runtime's table of the process and the
+  actor's number, which nothing counts (section 6, the owner, 2026-11-16, comment 6919351399, "Erlang:
+  id + generation"; the two words assumed there): a slot holds the address of the state and the
+  number, the end of an actor clears the number from its slot and frees its heap whole, its first page
+  with it, the next `spawn` takes the slot freed last again, and a call or a `send` through a reference
+  whose number its slot no longer holds finds no actor and raises `actor-gone` at its line (the
+  runtime's `Lookup`, `ActorHeap` and `Enqueue`; U6, U20); the table's pages double from 64 slots and
+  never move, their directory in the thread's own heap (assumed in section 6). `==` of two references
+  compares their numbers, a reference's hash as a map's key is its number's, `this` as a value inside
+  an actor is the reference its record holds (U2, U10), and the runtime's `ActorText` makes the text of
+  a reference from its number, the name of the actor's type, `#` and its number, `Counter#1`, all three
+  as before the end of an actor that ended (U2; assumed in section 6). A `spawn` past the largest `long`
+  ends the process with `allocation-failed`, naming the bytes of the actor's record and its state (U2;
+  assumed in section 6). The constructor and the defaults of
   the body run inside `spawn`, so that what they print comes before what the spawner prints after it
   (U3). A call through a reference, a `send` and a `send` of the actor's own method (U11) make a
   message, one block of the receiver's heap, as actix packs a message and the sender of its reply into one
@@ -1067,18 +1079,20 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   A `move` before an argument of a call that crosses nothing copies nothing and changes no count
   (U12): a variable's value leaves its place, which is stored null, or a string of no block, the count
   it held going to the parameter written `move` the argument fills, which its function owns and lets go of where it
-  leaves; the item of a loop that takes its list leaves its place in the list the same way, and the
-  release of a list of an item type such a loop takes, read from every unit's model before the first
+  leaves; the item of a loop that takes its list leaves its place in the list the same way where the
+  place has an empty value, a reference or a string, an item of another type staying there, counted
+  once more, and the release of a list of an item type such a loop takes, read from every unit's model before the first
   helper is built, tests each item for null, so that the list lets go of every item it still holds
   and of no moved one; a value of another type, inline or a function value, is counted once more. A
   place a `move` names is let go of through a test for null, at its scope's end and where an
   assignment replaces it, as rustc keeps a drop flag, and a message's function lets go of no
   argument of a parameter written `move`, which the method owns. A `move` into a message or a `spawn`
   copies the value into the receiver's heap, in the call's session, as an argument with no word
-  crosses, and lets go of the moved value, which frees it (section 6). A function value whose parameter is
+  crosses, a function value with a copy of its lambda's environment, and lets go of the moved value,
+  which frees it (section 6). A function value whose parameter is
   not written `move` where its type writes it, and a loop that takes a list of `weak` references,
-  are the emitter's `not supported`. `ActorTests` pins a moved instance that the receiver changes and
-  keeps, a `move` into an actor that copies into its heap and frees the original where `copy` frees
+  are the emitter's `not supported`. `ActorTests` pins a moved instance whose copy the receiver changes and
+  keeps, a moved lambda whose environment the receiver's heap holds, a `move` into an actor that copies into its heap and frees the original where `copy` frees
   nothing, and the allocations equal
   to the frees on a branch, in a loop that takes its list, after a reassignment and through a
   parameter written `move`; the line `actor-move-fenced` of `ListTests` a branch, a loop that takes
@@ -2024,7 +2038,8 @@ lists every case the checker reads in full and the emitter does not emit, 3 of t
 checker says `not supported` to are held by the checker's theory and not built. The handler of a
 stack overflow is built on Linux and not on Windows, where a stack overflow
 ends the program as the system ends it and not with its error line (section 6), so there
-`outcomes/stack-overflow.kz` is built and not run, the one case the runner lists so. On Windows the
+`outcomes/stack-overflow.kz` and `actors/crash-overflow-restarts.kz`, whose `system:` line names Linux,
+are built and not run (chapter 0). On Windows the
 runtime's `Start` sets the guarantee of the main thread's stack, the room the system keeps on it for
 the handling of its overflow, to 0x5000 bytes, 20 KiB of the 1 MiB the linker reserves for it, as
 Rust's standard library does at its start, and a program whose request the system refuses carries on
@@ -2062,7 +2077,7 @@ heap of its own (`MessageHeapNew`) and at its queueing copied by that copy into 
 then, its own heap freed, as Erlang builds a message in the sender's heap and copies it into the
 receiver's at its send: the wait lets the actor crash, which frees or empties the heap taken before it,
 that the arguments and the message would have gone into (U21), or end (U13), and where it ended the copy
-is dropped as any message to an ended actor; the crash of the actor whose code builds it frees that heap
+goes into its caller's heap and its queueing raises `actor-gone` (`ActorHeap`; U6, U20); the crash of the actor whose code builds it frees that heap
 with its own. Where no argument can wait, the message is built in its actor's heap. The words of a policy after
 `spawn` and after a type's name, the type's default, which a `spawn`'s own wins over (U25 to U27), are
 built: the emitted `spawn` gives the runtime its policy in the block of its restart, which a `stop`
@@ -2105,9 +2120,7 @@ a call of its own chain; the swap by which a crash unhooks a reply reads the mes
 waits on, which the callee frees once it answered, so that on threads of their own that message has to
 stay while either can reach it, as tokio's `oneshot` keeps its state in an `Arc` (not checked at
 source), which is not built, where on the one thread the crash reads the reply's word first and no
-answer comes between; an actor that ended keeps its first page to the end of the process, so that
-a call that still reaches it raises `actor-gone`, where section 6 frees the page at the end through a
-table of slots and generations (2026-11-16), which is not built; and the copies a crashed message made of the
+answer comes between; and the copies a crashed message made of the
 arguments of a call it had not sent yet, in the callee's heap where no argument could wait, and the heap of a `spawn` whose arguments it was still
 evaluating, stay in their heaps until those are freed. A message has 2 MiB of
 stack where its clause sets no other size, where a message on Linux had the main thread's 8 MiB
@@ -2115,8 +2128,11 @@ while messages ran on it, and a server whose actors hold many stacks at once, tw
 of mappings, `vm.max_map_count`, raised past its default of 65,530, as section 6 says; a recursion
 past a message's stack is its actor's crash on Linux, the log line naming `stack-overflow` at its
 line, but inside the allocator or the scheduler it ends the process with its error line and the exit
-code 1 (O11): the allocator's entries that change a heap, the scheduler's that change its records,
-inboxes, run queue and replies, and the copy of a crossing from `CopyUse` to `CopyLeft`, the emitted
+code 1 (O11), as a check of the runtime's own code does in a test build, there or outside them, its
+site raising the count below before it raises (`RaiseOwn`; chapter 12), where a check of the standard
+library's code outside them is its actor's crash (section 6, assumed there): the
+allocator's entries that change a heap, the scheduler's that change its records, inboxes, run queue
+and replies, the list of the heaps of messages among them, and the copy of a crossing from `CopyUse` to `CopyLeft`, the emitted
 functions that fill its copies among it, raise the count per thread of section 6 and lower it at their
 exit, and the scheduler and a parked activation save it around each switch and put it back, the
 scheduler clearing it on its way to an actor; the error line names the allocator's own line where the
@@ -2130,14 +2146,23 @@ that the switch of Windows on Arm is assembled
 (`EmitterTests.The_switch_of_every_target_and_architecture_is_assembled_by_clang_for_its_machine`)
 and runs nowhere; a call waits with no bound, where section 6 bounds it by 5 seconds (`call-timeout`);
 and an inbox grows with no bound, where section 13 spills it at 64 MB, until the allocator ends the
-process with `allocation-failed`. An actor and its state live to the end of the process, which is
+process with `allocation-failed`. An actor's record and the place of its state live to the end of the
+process, the state built again at each restart (U22), which is
 section 6's end of an actor in a program the build takes: an actor ends with its supervisor, the
 actor that spawned it (the owner, 2026-10-30), at the root the top-level code, which ends with the
 process, and no actor stops but a child of a supervisor that crashed, one whose policy stops it at its
 crash and one whose crash passes its limit (U25, U26). Every actor's blocks come from
 its own heap (section 3, "The runtime"), and the end of the top-level code frees every actor's heap
-whole before the process exits (`EndActors`), as the end of an actor frees its heap (U13); a crossing
-copies every counted block it reaches, so that no actor holds a block of another's heap (U12). Of
+whole before the process exits, the table and the run queue walked (`EndActors`; U13, and the record's
+section 6, assumed: the end of the root actor read as the end of every actor it stops, whose heap section 3
+frees whole), as the end of an
+actor frees its heap whole at once, its first page and its slot with it, or, where it stands in the run
+queue, when the scheduler takes it off (`EndActor`, `RunOne`; U13; section 6, assumed there); the end
+ends the actor's children from the last slot of the table down, and a child that waits in its current
+message keeps no word of the supervisor whose end freed it, its crash after the wait taken by its own
+end (`EndChildren`; section 6, assumed there); a crossing
+copies every counted block it reaches, so that no actor holds a count of a block of another's heap, a
+reference to an actor naming its slot and its number (U12). Of
 the heaps two things are not built: the share of a big value by pointer outside every heap, which
 section 6 decides, every big value crossing as a copy, and the sweep of section 13, every block
 being freed at its last count (the owner, 2026-11-15, #519, comment 6902210646, Q5, "Copy all, share
@@ -2379,7 +2404,8 @@ ask about it.
   `ActorTests`, the cases `corpus/actors/copy-shared-graph.kz`, `corpus/actors/references-in-list.kz`,
   `corpus/actors/references-map-key.kz` (the hash a crossing keeps), `corpus/actors/send-lambda.kz`
   and the six of the memo of a call (above), and the line `actor-crossing-fenced` of `ListTests`.
-- U12 with section 6: on one thread a `move` into a parameter copies nothing and changes no count,
+- U12 with section 6: on one thread a `move` into a parameter copies nothing and, of a value whose
+  place it empties, changes no count,
   the moved place's count becoming the parameter's, a `move` into a message or a `spawn` copying the
   value into the receiver's heap and freeing the original, and a place a `move` names is let go of through a
   test for null, as rustc keeps a drop flag *(assumed in section 6, "What a `move` ends, and where it
@@ -2634,11 +2660,13 @@ type, a lambda's parameter whose type is not written taking it from the type the
 SE-0414 does, a tag for each place that makes a value, the tag 0 for the region outside the function,
 a parameter not written `move`, `this` with its fields, a captured variable and a static, and the
 links a call, an assignment to a field or an item, a `with`, a lambda's captures and a binding of
-`match` or `else` make between them, joined where `Known` is joined, after an `if`, a `match`, `&&`,
-`||` and a loop's rounds until both stand still; a value that crosses with no word joins none. A
+`match` or `else` make between them, joined where `Known` is joined, after an `if`, a `match`, an
+`else`, `&&` and `||`, whose join keeps the moves of the right side, and a loop's rounds until both
+stand still; a value that crosses with no word joins none. A
 `move` ends the variable it names and every variable its region reaches, on the paths that reach a
 later read, which is `used-after-move` at the read, naming each `move`'s line; a loop whose body
-moves its variable takes its list; a `move` of what the region outside reaches is `move-reachable`,
+moves either of its variables takes its list, whatever its item, and one the build cannot take, over
+a range, a map or a list of a type parameter's items, is `not supported`; a `move` of what the region outside reaches is `move-reachable`,
 and a word that does not fit a plain call's parameter `move-at-call`, in U16's order; a block that
 ends an arm of `match` or `else` gives the arm's value the region of its last expression, its own
 variables' regions read as they stood at the block's end, as rustc reads a block's tail. The model
@@ -2692,22 +2720,36 @@ throw, and for each `pub` function what a call of it can raise, each set ending 
 what each throws itself with the sets of the units it runs, through the type arguments of each call. A unit runs what its calls
 pick, every override of a method and, through an interface, every implementer's; the constructors, the defaults and the base a
 construction runs; the fields of a `data` body that a construction or a `with` computes; the method a property's read calls; every
-lambda whose type fits a call of a function value, and a lambda a built-in call takes; the `Text()` that `print`, `eprint`, an
-interpolation's hole and `string.Join` call, through the fields, items and cases of the type, and of a generic `data` type derived
-from it through each instantiation of it that the program builds (the owner, 2026-11-16); the construction of an actor it spawns; and
+lambda whose type fits a call of a function value, and every function of the C calling convention that a name gives as a value of
+the C function type a call names (R17); a function value a built-in call takes, which it calls, as `Where` calls its test and
+`SortBy` its key (M9, X8), but for `Add` and `Insert`, which keep it (M9, X11) and bring what the lambda builds and nothing it
+throws, so that a kind of built-in call no arm of the walk names counts as calling it; the `Text()` that `print`, `eprint`, an interpolation's hole and `string.Join` call, through the fields, items and cases of
+the type, each instantiation of one generic type among them, and of a generic `data` type derived from it through each
+instantiation of it that the program builds (the owner, 2026-11-16); the construction of an actor it spawns; and
 the code of an actor it spawns under `escalate` or a block, with the block's body, which runs as a message of the
 actor whose code spawns (U32), a type's block among it. The instantiations are found as Rust's monomorphization finds its instances: the
 fixed point joins the generic `data` types each unit constructs with those of the units it runs, through the same type arguments, and
 with those of the lambdas it makes, as Rust collects a closure's instance in the instance of the function that makes it, and the
-program builds those that the sets of its roots, the top-level code and the `pub` functions without type parameters, hold with
-every type argument named. A call through an actor's reference reaches nothing of the callee's
-code, the text of a thrown value adds nothing, and a function of a folder of the runtime throws nothing. A bare `throw` throws the
-case its arm of `else` took. The checker reads the sets for the block of `on crash` alone (U30): it reads a program with a block
-again with the `Reason` of each block's child that the reading before found, the first reading with the runtime's type alone
+program builds those that the sets of its roots, the top-level code and the `pub` functions, a generic one and each actor's `pub`
+methods among them, which alone take messages (U9), hold with every type argument named, the text of each instantiation found read
+and the roots solved again until they grow no more. A set holds every type a run can throw, but for two lists of `pub`
+functions, which can miss what a call raises (section 5): that of one that reads its type and that no call copies, which names
+nothing its text throws (Q2), and a package's, which names nothing a caller's instantiation throws ("Keep the program view").
+A set can hold more: every override of
+the method a call names and every implementer through an interface, every lambda and every function of the C calling convention
+whose type fits a call of a value, the text of every derived type without type parameters, built or not, and, in the list of a
+`pub` function, what the children it spawns under `escalate` or a block can pass up (section 5, the owner, 2026-11-17, #560, comment 6945856976, Q1); an instantiation the
+program does not build adds nothing. A call through an actor's reference reaches nothing of the callee's
+code, the text of a thrown value adds nothing, a function that reads its type and that no call copies adds nothing (section 5,
+the owner, 2026-11-17, #560, comment 6945856976, Q2), and a function of a folder of the runtime throws nothing. A bare `throw` throws the case its arm of `else` took,
+and one in a lambda is the checker's `throw-needs-value`, in a lambda inside such an arm too (O7; section 5, assumed there). The
+checker reads the sets for the block of `on crash` alone (U30): it reads a program with a block again with the `Reason` of each block's child that the reading before found, the first reading with the runtime's type alone
 and the sets without the blocks' bodies, the blocks' own diagnostics left out of it, until the `Reason`s found are the ones
 read, and says `not supported` to a block whose child's `Reason` still grows at the fourth, so that a block's own errors show
 once the rest of the program reads clean. `ThrowSetTests` holds one thrown type for each of these forms over a fenced
-program, the text of each instantiation a program builds over a program of its own, every kind of node of the tree to the table
+program, over programs of their own the text of each instantiation a program builds, one built only in the text of another or in
+an actor's `pub` method among them, two instantiations of one type in one text, a call of a C function value, built-in calls that
+keep a lambda and the corpus case of a throw in the text of an instantiation, every kind of node of the tree to the table
 `ThrowSets.Kinds`, the walk of every corpus case and of `std/`, a runtime that
 throws nothing, and a kind of `RuntimeKind` for each run-time row of the error table.
 

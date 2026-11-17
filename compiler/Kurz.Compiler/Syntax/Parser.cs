@@ -1542,7 +1542,13 @@ public sealed class Parser
     {
         var start = Current;
         var mut = MatchKeyword("mut");
-        var move = !mut && MoveWord(); // U12: `move` before the type, or before an untyped lambda parameter, read as `mut` is
+        var move = MoveWord(); // U12: `move` before the type, or before an untyped lambda parameter, read as `mut` is
+        if ((mut && move) || (At(TokenKind.Name) && Current.Text == "move" && Peek().IsKeyword("mut")))
+        {
+            // U12: a parameter takes one of `mut` and `move`, `syntax` for both, in either order (assumed, section 6)
+            throw new ParseError(start.Line, "a parameter takes one of `mut` and `move`, not both (U12)");
+        }
+
         TypeSyntax? type = null;
         if (typesOptional && At(TokenKind.Name) && Peek().Kind is TokenKind.Comma or TokenKind.RightParen)
         {
