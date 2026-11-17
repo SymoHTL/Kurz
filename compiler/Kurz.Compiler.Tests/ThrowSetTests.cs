@@ -1061,8 +1061,8 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     [Fact]
     public void A_built_in_call_that_keeps_a_lambda_runs_none_of_it()
     {
-        // M9, X8: `Where` calls its test and `SortBy` its key, while `Add` and `Insert` keep a lambda, whose throw a call of the value it
-        // became brings where it is called
+        // M9, X8: `Where` calls its test and `SortBy` its key, while `Add` (M9) and `Insert` (X11) keep a lambda, whose throw a call of the
+        // value it became brings where it is called
         const string text = """
             data EStored
             data EKey
@@ -1102,6 +1102,27 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void A_built_in_call_no_arm_names_counts_as_calling_the_function_value_it_takes()
+    {
+        // a kind of built-in call that takes a function value and that the walk names neither as one that calls it nor as one that keeps
+        // it, `Hint.BlackBox`, which gives the value back (F18), counts as calling it, so that a kind nobody classified counts what the
+        // function throws, too much rather than too little
+        const string text = """
+            data EBoxed
+
+            int Fail() {
+                throw EBoxed
+            }
+
+            () => int Deferred() => () => Fail()
+
+            pub () => int Boxed() => Hint.BlackBox(Deferred())
+
+            """;
+        Assert.Equal(["EBoxed", "RuntimeError"], RaisedIn(Own(text), "Boxed"));
+    }
+
+    [Fact]
     public void The_case_of_a_throw_in_the_text_of_an_instantiation_raises_what_that_text_throws()
     {
         // O7, A3, A5, D6: the case's `Show` prints a `Plain` that the top-level code builds as a `Sub<Loud>`, whose text throws
@@ -1130,8 +1151,8 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         Assert.Equal(["EEscalate", "ETypeEscalate", "RuntimeError"], Names(Program.Value.Sets.ReasonOf(Actor("Parent"))));
 
         // section 5, the owner, 2026-11-17, #560, comment 6945856976, Q1: the list of a `pub` function holds what the children it spawns
-        // under `escalate` can pass up, since
-        // that crash can come while a call of it still waits
+        // under `escalate` or a block that decides can pass up, and what such a block throws, since such a crash can come while a call of
+        // it still waits; this test holds the half of `escalate`
         var listed = Program.Value.Sets.PubFunctions();
         Assert.Equal(["EEscalate", "ETypeEscalate", "RuntimeError"], Names(listed[Assert.Single(listed.Keys, f => f.Name == "Make" && f.Owner?.Name == "Parent")]));
     }

@@ -4,8 +4,9 @@ An actor is an object with private state and an inbox, which handles one message
 of its method through its reference is a message (§6, "Actors"). This chapter holds the actors of
 one machine and what a program writes of them: an actor's declaration, `spawn`, the call that waits
 for its result, `send`, and what crosses into a message, the crash of an actor, its restart by
-the default policy and its log line (U19 to U24), the words of a policy (U25 to U27) and the block
-of a policy (U28 to U34). The scheduler, the stacks, deadlocks but the calls a waiting actor lets in (U17)
+the default policy and its log line (U19 to U24), the words of a policy (U25 to U27), the block of a policy (U28
+to U34) and the threads that run the actors (U35). The scheduler but its threads, the stacks, deadlocks but the
+calls a waiting actor lets in (U17)
 and the wait of the top-level code that nothing can end (U18), the clauses after an actor's name but
 the stack's and the policy's (U1, U27) and the actors of other machines (§6, §7) have no rule here, and `compiler/README.md` says what the compiler builds of the rules here.
 
@@ -605,6 +606,36 @@ send p.Boom()
 print(p.Kid() == null)
 if kid != null {
     send kid.Note(1)
+}
+```
+
+Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
+```kurz
+actor Child {
+    pub int Ping() => 1
+}
+
+actor Parent {
+    mut Child? kid = null
+
+    pub void Make() {
+        kid = spawn Child()
+    }
+
+    pub Child? Kid() => kid
+
+    pub void Boom() {
+        throw "parent fails"
+    }
+}
+
+p = spawn Parent()
+p.Make()
+kid = p.Kid()
+send p.Boom()
+print(p.Kid() == null)
+if kid != null {
+    print(kid.Ping())
 }
 ```
 
@@ -2261,9 +2292,11 @@ print(b.Get(2))
 
 ### U18 (decided, §6) A wait of the top-level code that nothing can end
 
-The top-level code's call that waits runs the scheduler in place on the main thread's stack, each
-message on a stack of its own (U1, U17), until its reply is set, and never parks, as tokio's `block_on` runs its runtime on the thread that
-calls it *(assumed in §6)*. A wait of it that finds nothing left to run ends the process with
+The top-level code's call that waits sleeps on the main thread until its reply is set, while the
+worker threads run the actors' messages, each on a stack of its own (U1, U17, U35), as tokio's
+`block_on` waits on the thread that calls it beside its runtime's workers (§6, the owner,
+2026-11-17, #519, comment 6946657505, Q3, "tokio block_on (Recommended)"). A wait of it that finds nothing
+left to run, on any thread *(assumed in §6)*, ends the process with
 `error: deadlock at <file>:<n>`, the line of that call, and the exit code 1, so that two actors that
 call each other from different chains and wait for each other, on one thread, do not hang silently
 (§6, "Deadlocks"; the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level
@@ -2308,7 +2341,8 @@ is the crash of the root actor, which ends the process with the exit code 1, the
 trace, as before (§6). `allocation-failed`, `random-failed` and a fault outside a guard page end the
 process wherever they happen (O11, M9), and so do, on the actor's stack too, a stack fault inside the
 allocator, the scheduler or the copy of a crossing (O11) and, in a test build, a check of the runtime's
-own code, as a stack fault inside the allocator or the scheduler does (chapter 12, "Run-time errors").
+own code wherever it fires, as a stack fault inside the allocator or the scheduler ends it (chapter 12,
+"Run-time errors").
 On Windows an actor's stack overflow ends the process as the system ends it (`compiler/README.md`)
 *(assumed: §6, the points of comment 6899225864 that the answers left standing)*. The words of a
 policy, `on crash`, say what the supervisor does with the crash (U25 to U27), and an actor whose
@@ -2386,8 +2420,8 @@ waiting actor in its turn, and so on up the chain to the top-level code, whose c
 process (§6, "The exception kills the caller as well"). A call whose caller crashed, where the callee
 runs on another thread than its caller, runs to its end, and its result goes nowhere (§6); on one
 thread a caller that waits crashes only through a call of its own chain, which its callee waits on, so that the callee then crashes with `callee-crashed` too.
-A call that waits on an actor that ended, a child whose supervisor crashed (U21), raises
-`actor-gone` there (§6). An actor that ends frees its memory at once, and the slot its reference holds
+A call that waits on an actor that ended, among them a child whose supervisor crashed (U21), one
+its policy stopped (U25) and one past its limit (U26), raises `actor-gone` there (§6). An actor that ends frees its memory at once, and the slot its reference holds
 then holds no actor of that number (U2), so that a call through the reference reaches no later actor of
 that slot and raises `actor-gone` (§6, the owner, 2026-11-16, #519, comment 6919351399, "Erlang: id +
 generation"), as a `send` does (U6).
@@ -2407,34 +2441,6 @@ print("after")
 Case: [actors/crash-waiter-chain.kz](../corpus/actors/crash-waiter-chain.kz)
 
 Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
-```kurz
-actor Child {
-    pub int Ping() => 1
-}
-
-actor Parent {
-    mut Child? kid = null
-
-    pub void Make() {
-        kid = spawn Child()
-    }
-
-    pub Child? Kid() => kid
-
-    pub void Boom() {
-        throw "parent fails"
-    }
-}
-
-p = spawn Parent()
-p.Make()
-kid = p.Kid()
-send p.Boom()
-print(p.Kid() == null)
-if kid != null {
-    print(kid.Ping())
-}
-```
 
 ### U21 (decided, §6) The inbox is kept, and the crashed instance's heap goes
 
@@ -2661,6 +2667,8 @@ Case: [actors/crash-children-end.kz](../corpus/actors/crash-children-end.kz)
 
 Case: [actors/send-gone.kz](../corpus/actors/send-gone.kz)
 
+Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
+
 Case: [actors/block-escalate.kz](../corpus/actors/block-escalate.kz)
 
 Case: [actors/block-throw.kz](../corpus/actors/block-throw.kz)
@@ -2673,9 +2681,9 @@ of 30 s since the last restart with no crash, as Akka's backoff supervisor waits
 2026-10-30, "100 ms doubling to 30 s"; the variation drawn from the thread's generator and one
 clock of the runtime, the taken points of comment 6899225864). What doubles is the pause before its
 variation, the cap holds that pause before it is varied, so that a pause reaches 36 s, and the run of
-30 s counts from the start of the last restart *(assumed: readings of the build, which the answer of
-2026-10-30 did not give)*. While a pause runs, a wait of the top-level code that finds nothing else to
-run sleeps until it ends, and raises no `deadlock` (U18)
+30 s counts from the start of the last restart *(assumed: as §6 marks them, readings of the build
+that the answer of 2026-10-30 did not give)*. While a pause runs, a wait of the top-level code that
+finds nothing else to run sleeps until it ends, and raises no `deadlock` (U18)
 (§6, the taken points of comment 6899225864). A corpus case crashes at most three times, about
 0.7 s of pauses, unless it writes `after 1ms` (U26) *(assumed: as §6 marks it)*. The case below holds
 the wait that sleeps and raises no `deadlock`, and prints what a restart with no pause prints too; the
@@ -2796,7 +2804,8 @@ owner, 2026-10-30, "100 ms doubling to 30 s" and "No limit, as Akka"). The limit
 the policy restarts in a window of that duration that slides with each crash, as Erlang's
 `supervisor` keeps the times of its restarts within its period (`can_restart`), and the crash that
 finds N earlier crashes its policy restarted in the window, one exactly a window old among them
-*(assumed: a reading of the build, which the answers did not give)*, passes it: the actor ends, and its
+*(assumed: as §6 marks it, a reading of the build that the answers did not give)*, passes it: the
+actor ends, and its
 supervisor crashes with `restart-limit` at the line of the `spawn`, which the supervisor's own policy
 takes in turn, at the top level the end of the process (§6, the owner, 2026-11-15, #519, comment 6902210646, Q4, "Erlang:
 restart-limit id") *(assumed: as §6 marks it, each crash counted at its time, before its pause, the
@@ -3283,3 +3292,24 @@ print(b.Ping())
 ```
 
 Case: [actors/block-reason.kz](../corpus/actors/block-reason.kz)
+
+### U35 (decided, §6, §8) Threads
+
+The actors' messages run on the scheduler's worker threads, as many as the cores the process may use,
+a container's CPU quota counted, where neither the line `threads = 4` of a `deploy` block in
+`project.kz` nor the environment variable `KURZ_THREADS`, read at the start, sets their count, and
+`KURZ_THREADS` wins over the line (§6, §8, the owner, 2026-11-17, #519, comment 6946657505, Q4,
+"Both" and "threads = N line (Recommended)"), the line standing in a `deploy` block *(assumed in
+§6)*. A value of the line that is not a whole number above 0 is the compile error `threads-line`,
+and one of `KURZ_THREADS` ends the start with an error line and the id `threads-variable` *(assumed
+in §6: both ids, and the end of the start)*. The main thread runs the top-level code alone, and
+sleeps while it waits (U18; §6, Q3). A message parked in a wait goes on on the thread that parked it,
+and an actor between messages moves to any thread (§6, the owner, 2026-11-17, #519, comment
+6946657505, Q2, "Stays on its thread (Recommended)"). A message that runs on another thread when the
+top-level code ends runs to its end or its wait, a wait then dropped as a parked message is (U13), and
+the process ends after it; a supervisor that is running acts on its child's crash once its own message
+ends or waits (U22) *(assumed in §6)*.
+
+No case: a case is a single file with no `project.kz` (chapter 0) and gives its program no
+environment, as `log-filter`'s place in chapter 12 says, and the thread that runs a message shows in
+no output.

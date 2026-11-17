@@ -319,6 +319,39 @@ public sealed record VectorType(KurzType Lane, int Bits) : KurzType
     public override int GetHashCode() => HashCode.Combine(nameof(VectorType), Lane, Bits);
 }
 
+/// <summary>The atomic types of R19, each Rust's type of <c>core::sync::atomic</c> for the word it views.</summary>
+public enum Atomic
+{
+    Bool,
+    Int,
+    Long,
+    Ptr,
+}
+
+/// <summary>
+/// <c>AtomicBool</c>, <c>AtomicInt</c>, <c>AtomicLong</c> or <c>AtomicPtr&lt;T&gt;</c> (R19): a view of a word through a pointer, as
+/// Rust's <c>AtomicI64::from_ptr</c> gives one (design record, section 6, the owner, 2026-11-17, #519, comment 6946657505, answer 1,
+/// "Rust's set"), laid out as the pointer it holds; <paramref name="Pointee"/> is the <c>T</c> of <c>AtomicPtr&lt;T&gt;</c>, whose word
+/// is a <c>T*</c>, and null for the others.
+/// </summary>
+public sealed record AtomicType(Atomic Kind, KurzType? Pointee = null) : KurzType
+{
+    public override string Text => Kind == Atomic.Ptr ? $"AtomicPtr<{Pointee!.Text}>" : "Atomic" + Kind;
+
+    /// <summary>The type of the word the view reads and writes: a <c>bool</c>, an <c>int</c>, a <c>long</c> or a <c>T*</c>.</summary>
+    public KurzType Word => Kind switch
+    {
+        Atomic.Bool => Types.Bool,
+        Atomic.Int => Types.Int,
+        Atomic.Long => Types.Long,
+        _ => new PointerType(Pointee!),
+    };
+
+    public bool Equals(AtomicType? other) => other is not null && Kind == other.Kind && (Kind != Atomic.Ptr || Types.Same(Pointee!, other.Pointee!));
+
+    public override int GetHashCode() => HashCode.Combine(nameof(AtomicType), Kind);
+}
+
 /// <summary>A type parameter inside the generic function or type that declares it (T19).</summary>
 public sealed record TypeParameterType(TypeParameterSymbol Symbol) : KurzType
 {
@@ -563,6 +596,7 @@ public static class Types
             (CFunctionType x, CFunctionType y) => AllSame(x.Parameters, y.Parameters) && Same(x.Result, y.Result),
             (TypeParameterType x, TypeParameterType y) => ReferenceEquals(x.Symbol, y.Symbol),
             (VectorType x, VectorType y) => x.Bits == y.Bits && Same(x.Lane, y.Lane),
+            (AtomicType x, AtomicType y) => x.Kind == y.Kind && (x.Kind != Atomic.Ptr || Same(x.Pointee!, y.Pointee!)), // R19
             _ => false,
         };
     }
@@ -894,6 +928,12 @@ public static class Types
                     return pointee is ErrorType ? Error : new PointerType(pointee);
                 }
 
+            case AtomicType { Kind: Atomic.Ptr } a:
+                {
+                    var pointee = Substitute(a.Pointee!, map);
+                    return pointee is ErrorType ? Error : new AtomicType(Atomic.Ptr, pointee); // R19
+                }
+
             case CFunctionType f:
                 {
                     var parameters = f.Parameters.Select(p => Substitute(p, map)).ToList();
@@ -918,6 +958,7 @@ public static class Types
             UnionType u => u.Cases.Any(c => Mentions(c, parameter)),
             FunctionType f => f.Parameters.Any(p => Mentions(p, parameter)) || Mentions(f.Result, parameter),
             PointerType p => Mentions(p.Pointee, parameter),
+            AtomicType { Pointee: { } pointee } => Mentions(pointee, parameter), // R19
             CFunctionType f => f.Parameters.Any(p => Mentions(p, parameter)) || Mentions(f.Result, parameter),
             _ => false,
         };

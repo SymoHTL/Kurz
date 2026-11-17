@@ -125,7 +125,8 @@ public sealed class Toolchain : IDisposable
 /// A case the checker says <c>not supported</c> to is held by the checker's theory in <see cref="CorpusTests"/> and is not built here; a
 /// case the checker reads and the emitter does not lay out is in <see cref="NotEmitted"/>, with the construct the emitter names; and a
 /// case it lays out whose <c>system:</c> line names another system than this machine's is built and not run (<see cref="NotRun"/>,
-/// chapter 0). Neither list holds a stale entry. A case is built with the grants of its <c>allow:</c> line, and as its <c>build:</c> line says, else
+/// chapter 0). <see cref="NotEmitted"/> holds no stale entry, and a <c>system:</c> line stands only on a case that expects a run and
+/// that the emitter lays out. A case is built with the grants of its <c>allow:</c> line, and as its <c>build:</c> line says, else
 /// as the test build, the default. A floor holds the count of cases run. Every case that is run runs a second time under an allocator that makes
 /// every block it frees inaccessible (<see cref="ListTests.Fenced"/>), so that a block the counting frees while a value still holds
 /// it ends that run with the system's signal; a case that allocator cannot hold is in <see cref="NotFenced"/>, with why, and is
@@ -148,7 +149,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             ? CrashLine().Replace(written, string.Empty) : written;
 
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the cases whose <c>system:</c> line names Linux, the stack overflows', nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls, the reads of standard input and running a program. The number for Linux is the count measured in the gates image, with no margin, so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156). The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 589 : 716;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 594 : 721;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -217,11 +218,18 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         .Concat(OperatingSystem.IsWindows() ? CommandCases.Select(c => KeyValuePair.Create(c, Emitter.CommandNotOnWindows)) : []).ToDictionary(StringComparer.Ordinal);
 
     /// <summary>
-    /// Whether the case whose header is <paramref name="header"/> is built and not run on this machine: its <c>system:</c> line names the
-    /// other system (chapter 0), as the cases of a stack overflow name Linux, whose raise is the handler's of a fault (design record,
-    /// section 6), which the runtime installs on Linux alone, an actor's overflow ending the process on Windows (U19, compiler/README.md).
+    /// Whether the case whose header is <paramref name="header"/> is built and not run on this machine: its <c>system:</c> line names a
+    /// system other than this machine's (chapter 0), as the cases of a stack overflow name Linux, whose raise is the handler's of a fault
+    /// (design record, section 6), which the runtime installs on Linux alone, an actor's overflow ending the process on Windows (U19,
+    /// compiler/README.md).
     /// </summary>
-    private static bool NotRun(CaseHeader header) => header.RunsOn is { } system && system != (OperatingSystem.IsWindows() ? "windows" : "linux");
+    private static bool NotRun(CaseHeader header) => NotRun(header, Host);
+
+    /// <summary>Whether the case is built and not run on a machine whose system the <c>system:</c> line calls <paramref name="host"/>: on every system but the one it names, one the line has no name for, null, among them (chapter 0).</summary>
+    private static bool NotRun(CaseHeader header, string? host) => header.RunsOn is { } system && system != host;
+
+    /// <summary>This machine's system as a <c>system:</c> line names it, null where the line has no name for it (chapter 0).</summary>
+    private static string? Host => OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsLinux() ? "linux" : null;
 
     /// <summary>Cases run under the plain allocator alone, each with why the fenced one cannot hold them.</summary>
     private static readonly Dictionary<string, string> NotFenced = new(StringComparer.Ordinal)
@@ -402,6 +410,20 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             var header = Header(relativePath);
             Assert.True(header.Expectation != Expectation.Error && !NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed as run under the plain allocator alone ({why}), and the plain run does not run it");
         }
+
+        // a `system:` line stands on a case that expects a run and that the emitter lays out, where it keeps a run from the other system
+        var named = 0;
+        foreach (var relativePath in CorpusTests.CaseFiles())
+        {
+            var header = Header(relativePath);
+            if (header.RunsOn is { } system)
+            {
+                named++;
+                Assert.True(header.Expectation != Expectation.Error && Emit(relativePath, header).Program is not null, $"{relativePath}: its `system:` line names {system}, and the case is no run the emitter lays out");
+            }
+        }
+
+        Assert.True(named >= 2, $"only {named} cases name a system");
     }
 
     [Fact]
@@ -435,6 +457,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             Assert.False(NotRun(header with { RunsOn = here }));
             Assert.True(NotRun(header with { RunsOn = there }));
             Assert.False(NotRun(header with { RunsOn = null }));
+            Assert.True(NotRun(header, null)); // a machine of a system the line has no name for runs no case that names one
         }
     }
 }

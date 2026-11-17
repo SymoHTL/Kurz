@@ -330,10 +330,11 @@ public sealed class ThrowSets
     /// <summary>
     /// Section 5 (the owner, 2026-11-16, "Each instantiation"): every instantiation of a generic data type that the program builds, as
     /// Rust's monomorphization collects its instances, from the roots through the type arguments each call gives, each with no type
-    /// parameter left; read once, before the code of any set, so that the text of each instantiation (<see cref="Each"/>) is read
-    /// after the whole of it is known and a set does not depend on the order of the questions. The text of an instantiation runs code
-    /// that can build more, a <c>Text()</c> of a type argument among it, so each <see cref="Each"/> unit reads the text of every
-    /// instantiation found, and the roots are solved again, until the list grows no more.
+    /// parameter left; read before the code of any set, and read again with each text: the text of an instantiation runs code that can
+    /// build more, a <c>Text()</c> of a type argument among it, so each <see cref="Each"/> unit reads the text of every instantiation as
+    /// it is found, and the roots are solved again, until the list grows no more. The order of the reads does not change what the list
+    /// and the sets hold, since both only grow and each <see cref="Each"/> unit has read every instantiation of its type before the
+    /// method returns, so that a set does not depend on the order of the questions.
     /// </summary>
     private List<DataType> Instantiations()
     {
@@ -344,6 +345,13 @@ public sealed class ThrowSets
             var roots = Roots().Select(Discover).ToList();
             var eaches = new List<(Each Key, Unit Unit, Walk Walk)>();
             var read = new List<int>(); // for each of them, how many of the instantiations it read
+
+            // the loop ends: a text that builds a larger instantiation of the type it is read for, as a `Text()` of `Wrap<T>` that builds a
+            // `Wrap<List<T>>` would, is the body of a generic `data` type or a generic class, which the checker says `not supported` to
+            // (D16, T19; the rows `data W<T>` and `class Box<T>` of `CheckerTests.A_part_of_a_data_body_the_checker_does_not_read_is_not_supported_at_its_line`
+            // and `A_part_of_a_class_the_checker_does_not_read_is_not_supported`), so a text read here is that of a type without type
+            // parameters, or reaches through an instantiation's type arguments the texts of its fields' types, which build one fixed set
+            // whichever instantiation is read, and the type arguments of a call grow no more than `Solve` lets them (T34)
             for (var more = true; more;)
             {
                 Solve();
@@ -389,9 +397,9 @@ public sealed class ThrowSets
 
     // the roots of what the program builds, as Rust's are `main` and its `pub` items: the top-level code and every `pub` function the
     // list holds, a generic one among them, whose instantiations with every type argument named are built whatever type argument a
-    // call gives it (section 5, comment 6926485802: the list names what a call of it can raise); the list holds each actor's `pub`
-    // methods, which alone take messages (U9), so that what an actor builds is built: its other methods run from its own code alone,
-    // and its construction from a `spawn` that a root reaches
+    // call gives it (section 5, the owner, 2026-11-17, #560, comment 6952257456, "(b) As built (Recommended)"); the list holds each
+    // actor's `pub` methods, which alone take messages (U9), so that what an actor builds is built: its other methods run from its own
+    // code alone, and its construction from a `spawn` that a root reaches
     private IEnumerable<object> Roots() => Pub().Prepend<object>(new TopLevel(program.Model));
 
     // a type once, at the earliest place that throws it
@@ -1081,10 +1089,14 @@ public sealed class ThrowSets
                     break;
                 case CallKind.ActorCall or CallKind.ActorSend:
                     break; // U20: the callee's code runs in the callee, whose crash its caller gets as `callee-crashed`
-                case CallKind.ListWhere or CallKind.ListSortBy:
-                    // M9, X8: `Where` calls its test and `SortBy` its key for each item; another built-in call that takes a function value,
-                    // `Add` or `Insert` among them, keeps it and runs none of it, so a lambda there brings what its walk gave it, what it
-                    // builds and nothing it throws, and a call of the value it became reaches the lambda
+                case CallKind.ListAdd or CallKind.ListInsert:
+                    // M9, X11: `Add` and `Insert` keep the function value they take and run none of it, so a lambda there brings what its
+                    // walk gave it, what it builds and nothing it throws, and a call of the value it became reaches the lambda
+                    break;
+                default:
+                    // M9, X8: a built-in call that takes a function value calls it, as `Where` calls its test and `SortBy` its key for each
+                    // item, but `Add` and `Insert` above, so that a kind no arm names counts what the function throws, too much rather than
+                    // too little
                     foreach (var argument in c.Arguments)
                     {
                         if (argument.Value is LambdaExpression lambda && model.HasLambda(lambda))
@@ -1097,8 +1109,6 @@ public sealed class ThrowSets
                         }
                     }
 
-                    break;
-                default:
                     break;
             }
         }

@@ -47,7 +47,7 @@ internal static class Lower
         NullType => "{}", // N1: one value, of no size
         EnumType e => $"i{EnumBits(e.Symbol).ToString(CultureInfo.InvariantCulture)}",
         FlagsType => "i32", // D13, D19: the bits of its names, 31 at most, below the sign of an `int`
-        PointerType or CFunctionType or ListType or MapType or HandleType or HasherType or CommandType or ChildProcessType => "ptr",
+        PointerType or CFunctionType or ListType or MapType or HandleType or HasherType or CommandType or ChildProcessType or AtomicType => "ptr", // R19: a view holds the pointer to its word
         ActorType => "%kz.actor", // U2: the index of the actor's slot and its number (section 6)
         UnionType u when Types.NonNull(u) is CFunctionType => "ptr", // R17: its `null` is the address 0 (Layout.Niche)
         UnionType u when Types.NonNull(u) is FunctionType => "%kz.fn", // N1: its `null` is the pair of no code and no environment (Layout.Niche)
@@ -81,6 +81,7 @@ internal static class Lower
             or Primitive.Duration or Primitive.Timestamp or Primitive.LongDuration or Primitive.LongTimestamp or Primitive.Instant,
         VoidType or NullType or EnumType or FlagsType or HandleType or HasherType or CommandType or ChildProcessType or VectorType or ActorType => true,
         PointerType p => Supported(p.Pointee),
+        AtomicType a => a.Pointee is null || Supported(a.Pointee), // R19
         CFunctionType f => f.Parameters.All(Supported) && Supported(f.Result),
         _ => false,
     };

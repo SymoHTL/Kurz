@@ -1306,7 +1306,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `/dev/urandom`, opened with `O_CLOEXEC` at its first read and kept open, where the system refuses
   `getrandom` with `ENOSYS` or `EPERM`, the process keeping to the file from then on, or where the
   pool is not ready, `EAGAIN`; the two flags and the descriptor are plain `static mut`s where Rust
-  keeps `AtomicBool`s and a `OnceLock`, Kurz having no atomic form, and the runtime runs one thread.
+  keeps `AtomicBool`s and a `OnceLock`, the runtime's code using no atomic type (R19), and the runtime runs one thread.
   Where Rust panics, with any other error of `getrandom`, an open or a read of the file that fails or
   a file that ends first, `Random` gives false and the first write into the thread's first map ends
   the program with `random-failed` before it takes a block (M9; the owner, 2026-10-30, "End with an
@@ -1461,7 +1461,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   what it gathered of each pipe, the bytes its `File` read ahead first, back to that `File`'s buffer, which is made again with
   more room than its 8 KiB where they need it, so that a later read takes them before the rest of the pipe. The wait never
   waits on a reader's lock: at each wake of its poll `Drive` tries each lock it does not hold yet through the emitter's
-  `try.reader`, which it gets as a C function (R17), since Kurz has no atomic form, and which reads the bytes ahead only once it
+  `try.reader`, which it gets as a C function (R17), since the runtime's code uses no atomic type (R19), and which reads the bytes ahead only once it
   took the lock; a pipe is polled from the wake that took its lock, the next wake comes within 4 ms while another holder holds
   one, and the emitter lets go of each lock the runtime took once the bytes are taken or given back, so that `Timeout(d)`
   bounds the whole call and a read through the `File` on another thread waits for the call only while the call holds its lock
@@ -1537,7 +1537,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the line together in a buffer of its thread and hands it to one write call on standard error, the
   line of the lines dropped before it in the same write; a refused write counts the line as dropped,
   and after a line the system took in part, the next write starts with a line feed. The count of the
-  lines dropped and the flag of a line cut short are plain `static mut`s, Kurz having no atomic form,
+  lines dropped and the flag of a line cut short are plain `static mut`s, the runtime's code using no atomic type (R19),
   and the runtime starts no thread: two threads a program starts through C (R16) that log at once race on
   them, as the runtime's comment on them says. The corpus's runner
   takes `KURZ_LOG` away from every case it runs. `LogTests` pins what no case can: the layout of a line
@@ -1975,6 +1975,20 @@ XCR0 says the system saves, `xgetbv` run only under OSXSAVE, an alternative bit 
 row whose bits give LLVM's answer on that machine and not on another is held by its reading of LLVM
 alone.
 
+The atomic types of R19 (section 6), on every target: a view is the pointer `FromPtr` was given, and
+each member is one LLVM instruction on the word it points to, aligned to the word's size, as Rust's
+`core::sync::atomic` lowers them: `Load` a `load atomic`, `Store` a `store atomic`, `Swap` an
+`atomicrmw xchg`, `FetchAdd`, `FetchSub`, `FetchAnd`, `FetchOr` and `FetchXor` an `atomicrmw` of
+`add`, `sub`, `and`, `or` and `xor`, an `AtomicPtr<T>`'s on the address as an `i64`,
+`CompareExchange` and `CompareExchangeWeak` a `cmpxchg` and a `cmpxchg weak`, whose pair gives the
+union's case, and `Fence` a `fence`; a `bool`'s word is a byte that holds 0 or 1, as Rust's
+`AtomicBool` holds a `u8`. An order written at the call is the instruction's own, `Relaxed` LLVM's
+`monotonic`; any other is read when the call runs, by a `switch` over the five values of `MemoryOrder`
+to the instruction for each, as Rust's `match` on the order chooses among its intrinsics, and a
+choice Rust refuses raises `invalid-ordering-at-run-time` at the call's line (`Emit/Emitter.Atomics.cs`;
+`EmitterTests` pins the instructions and the choice). A view crossing into an actor is
+`not supported`, as a pointer's crossing is (U12).
+
 ### What the emitter does not emit
 
 A program that uses one of these gets one `not supported` at the construct's line, in the
@@ -2015,7 +2029,9 @@ reads the guarantee in force on Windows and on Linux compiles the program alone.
 Of section 6 the emitter builds the actors of one thread, each message run to its end or to a wait that parks it (Q1 (a), the
 answers of 2026-11-14, issue 519, comment 6880404917), and no case shows
 where a program it builds differs from the section: every actor runs on the one thread the runtime
-runs, each message on a stack of its own ("The runtime"), and messages run only while the top-level
+runs, each message on a stack of its own ("The runtime"), with no worker thread, no line `threads`
+and no `KURZ_THREADS` read (U35), and the top-level code's wait runs the scheduler in place on the
+main thread's stack (U18), and messages run only while the top-level
 code waits for a call's result, one message of each actor in turn, so that a `send` made after the
 last call that waits does not run, and a message parked in a wait when the top-level code ends does
 not go on (U13); of section 6's deadlocks the build makes layer 1 (U17) and the `deadlock` of a wait
@@ -2030,7 +2046,9 @@ each waiting caller `callee-crashed` (U20), ends the actor's children after thei
 to 30 s, run by the top-level code's wait, which sleeps while only a pause is left (U22, U23); the
 emitted `spawn` keeps a copy of the constructor's arguments in the spawner's heap and makes the
 function that constructs the state again from them, and each call site of a message gets a table
-of the function that runs it and the one that copies it into a new heap. A message any of whose
+of the function that runs it and the one that copies it into a new heap. No case carries chapter 0's
+line `// threads: 1`, which neither the corpus runner nor `tools/lint_reference.py` reads: the lint
+refuses a header that holds it. A message any of whose
 arguments can wait, one that runs a call anywhere in it, is built in a
 heap of its own (`MessageHeapNew`) and at its queueing copied by that copy into the heap its actor has
 then, its own heap freed, as Erlang builds a message in the sender's heap and copies it into the
@@ -2084,7 +2102,9 @@ while messages ran on it, and a server whose actors hold many stacks at once, tw
 of mappings, `vm.max_map_count`, raised past its default of 65,530, as section 6 says; a recursion
 past a message's stack is its actor's crash on Linux, the log line naming `stack-overflow` at its
 line, but inside the allocator or the scheduler it ends the process with its error line and the exit
-code 1 (O11), as a check of the runtime's own code there does in a test build (chapter 12): the
+code 1 (O11), as a check of the runtime's own code does in a test build, there or outside them, its
+site raising the count below before it raises (`RaiseOwn`; chapter 12), where a check of the standard
+library's code outside them is its actor's crash (section 6, assumed there): the
 allocator's entries that change a heap, the scheduler's that change its records, inboxes, run queue
 and replies, the list of the heaps of messages among them, and the copy of a crossing from `CopyUse` to `CopyLeft`, the emitted
 functions that fill its copies among it, raise the count per thread of section 6 and lower it at their
@@ -2593,7 +2613,7 @@ a `weak` reference, the end at a write into a list or a map that a variable hold
 M9 for lists and maps, and M11), 7 (classes: K1 to K20, for a class with its primary constructor or none and the constructors of its body,
 its base class in both forms, its interfaces, its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `virtual`, `override` and `prot` among them, `this`, `==` and `equal by`,
 and an interface with the signatures of its methods, a value of one and a call through it), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
-flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4, R8) and, for a field whose type can hold a function value, by the lambdas of the program (R9), a class of `std/` the prelude names (W1) being a step of a ring of the file only through such a field, since its other fields name no class of the file and `std/`'s checker judges its own, and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
+flow), 11's raw forms (R7, R10 to R17, R19), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4, R8) and, for a field whose type can hold a function value, by the lambdas of the program (R9), a class of `std/` the prelude names (W1) being a step of a ring of the file only through such a field, since its other fields name no class of the file and `std/`'s checker judges its own, and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
 and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11, S13 to S22 and S25; S12's grants, `env`'s
@@ -2677,9 +2697,9 @@ what each throws itself with the sets of the units it runs, through the type arg
 pick, every override of a method and, through an interface, every implementer's; the constructors, the defaults and the base a
 construction runs; the fields of a `data` body that a construction or a `with` computes; the method a property's read calls; every
 lambda whose type fits a call of a function value, and every function of the C calling convention that a name gives as a value of
-the C function type a call names (R17); the test of `Where` and the key of `SortBy`, which they call (M9, X8), where another
-built-in call that takes a lambda, `Add` or `Insert` among them, keeps it, which brings what the lambda builds and nothing it
-throws; the `Text()` that `print`, `eprint`, an interpolation's hole and `string.Join` call, through the fields, items and cases of
+the C function type a call names (R17); a function value a built-in call takes, which it calls, as `Where` calls its test and
+`SortBy` its key (M9, X8), but for `Add` and `Insert`, which keep it (M9, X11) and bring what the lambda builds and nothing it
+throws, so that a kind of built-in call no arm of the walk names counts as calling it; the `Text()` that `print`, `eprint`, an interpolation's hole and `string.Join` call, through the fields, items and cases of
 the type, each instantiation of one generic type among them, and of a generic `data` type derived from it through each
 instantiation of it that the program builds (the owner, 2026-11-16); the construction of an actor it spawns; and
 the code of an actor it spawns under `escalate` or a block, with the block's body, which runs as a message of the
@@ -2688,7 +2708,10 @@ fixed point joins the generic `data` types each unit constructs with those of th
 with those of the lambdas it makes, as Rust collects a closure's instance in the instance of the function that makes it, and the
 program builds those that the sets of its roots, the top-level code and the `pub` functions, a generic one and each actor's `pub`
 methods among them, which alone take messages (U9), hold with every type argument named, the text of each instantiation found read
-and the roots solved again until they grow no more. A set holds every type a run can throw, and can hold more: every override of
+and the roots solved again until they grow no more. A set holds every type a run can throw, but for two lists of `pub`
+functions, which can miss what a call raises (section 5): that of one that reads its type and that no call copies, which names
+nothing its text throws (Q2), and a package's, which names nothing a caller's instantiation throws ("Keep the program view").
+A set can hold more: every override of
 the method a call names and every implementer through an interface, every lambda and every function of the C calling convention
 whose type fits a call of a value, the text of every derived type without type parameters, built or not, and, in the list of a
 `pub` function, what the children it spawns under `escalate` or a block can pass up (section 5, the owner, 2026-11-17, #560, comment 6945856976, Q1); an instantiation the

@@ -1,0 +1,12 @@
+// expect: throws invalid-ordering-at-run-time at 11
+// | 5
+// allow: raw
+// rules: R19
+
+mut long word = 5
+counter = AtomicLong.FromPtr(&word)
+MemoryOrder order = MemoryOrder.Release
+raw {
+    print(counter.Load(MemoryOrder.Relaxed))
+    print(counter.Load(order))
+}

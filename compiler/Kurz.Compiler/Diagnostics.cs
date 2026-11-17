@@ -132,6 +132,7 @@ public static class ErrorIds
     public const string NakedBody = "naked-body";
     public const string IntrinsicUnguarded = "intrinsic-unguarded";
     public const string LaneOutOfRange = "lane-out-of-range";
+    public const string InvalidOrdering = "invalid-ordering";
     public const string NativeNotAllowed = "native-not-allowed";
     public const string NativeType = "native-type";
     public const string AsmOperand = "asm-operand";
@@ -195,6 +196,7 @@ public static class ErrorIds
     public const string IndexOutOfRange = "index-out-of-range";
     public const string NotCharBoundary = "not-char-boundary";
     public const string ReversedRangeAtRunTime = "reversed-range-at-run-time";
+    public const string InvalidOrderingAtRunTime = "invalid-ordering-at-run-time";
     public const string StackOverflow = "stack-overflow";
 }
 

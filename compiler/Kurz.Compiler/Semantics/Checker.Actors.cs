@@ -389,7 +389,7 @@ public sealed partial class Checker
                 case TypeParameterType:
                     limit ??= $"a value of the type parameter `{t}`";
                     break;
-                case HandleType or HasherType or CommandType or ChildProcessType or PointerType or CFunctionType:
+                case HandleType or HasherType or CommandType or ChildProcessType or PointerType or AtomicType or CFunctionType: // R19: a view, as the pointer it holds
                     limit ??= $"{Types.A(t)}";
                     break;
                 default:

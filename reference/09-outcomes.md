@@ -1162,7 +1162,8 @@ monomorphization takes every instance a program builds (§5, the owner, 2026-11-
 against `no-text` at the derivation for a type parameter no limit gives a `Text()`). An
 instantiation the program builds is one with every type argument named that code reached from the
 top-level code or from a `pub` function constructs, a generic one and each `pub` method of an actor
-among them, with the code the text of such an instantiation runs *(proposed: §5 does not say what
+among them, but in a function that reads its type and that no call copies, which runs nowhere (§5),
+with the code the text of such an instantiation runs *(proposed: §5 does not say what
 the program builds)*. The
 run-time errors of chapter 12 are values of one `data` type of the runtime, a member of every
 such union in every build; the place and the chain id are fields of the `Crashed` case beside

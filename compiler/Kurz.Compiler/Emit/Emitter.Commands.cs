@@ -260,7 +260,7 @@ public sealed partial class Emitter
 
     /// <summary>
     /// S19: the helper the runtime calls at each wake of a <c>WaitWithOutput()</c>'s poll, through its address, to try the lock of the
-    /// reader at <c>%a0</c> once and never wait on it, since Kurz has no atomic form of its own: -1 where another holder holds it, else
+    /// reader at <c>%a0</c> once and never wait on it, since the runtime's code uses no atomic type (R19): -1 where another holder holds it, else
     /// the lock held, as <see cref="LockReader"/> takes a free one, and the count of the bytes the reader holds ahead of the program,
     /// whose address it writes at <c>%a1</c>, read only once the lock is held, so that no other holder takes them or replaces the
     /// buffer they sit in (S16; the owner, 2026-11-12, issue 174, comment 6821985043, "Try the lock inside the poll").
