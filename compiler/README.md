@@ -1327,7 +1327,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `/dev/urandom`, opened with `O_CLOEXEC` at its first read and kept open, where the system refuses
   `getrandom` with `ENOSYS` or `EPERM`, the process keeping to the file from then on, or where the
   pool is not ready, `EAGAIN`; the two flags and the descriptor are plain `static mut`s where Rust
-  keeps `AtomicBool`s and a `OnceLock`, the runtime's code using no atomic type for them (R19), and the runtime runs one thread.
+  keeps `AtomicBool`s and a `OnceLock`, and the runtime runs one thread.
   Where Rust panics, with any other error of `getrandom`, an open or a read of the file that fails or
   a file that ends first, `Random` gives false and the first write into the thread's first map ends
   the program with `random-failed` before it takes a block (M9; the owner, 2026-10-30, "End with an
@@ -1482,7 +1482,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   what it gathered of each pipe, the bytes its `File` read ahead first, back to that `File`'s buffer, which is made again with
   more room than its 8 KiB where they need it, so that a later read takes them before the rest of the pipe. The wait never
   waits on a reader's lock: at each wake of its poll `Drive` tries each lock it does not hold yet through the emitter's
-  `try.reader`, which it gets as a C function (R17), since the runtime's code tries no lock through an atomic type (R19), and which reads the bytes ahead only once it
+  `try.reader`, which it gets as a C function (R17), the runtime's code reaching the lock through none of R19's types, and which reads the bytes ahead only once it
   took the lock; a pipe is polled from the wake that took its lock, the next wake comes within 4 ms while another holder holds
   one, and the emitter lets go of each lock the runtime took once the bytes are taken or given back, so that `Timeout(d)`
   bounds the whole call and a read through the `File` on another thread waits for the call only while the call holds its lock
@@ -1558,7 +1558,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the line together in a buffer of its thread and hands it to one write call on standard error, the
   line of the lines dropped before it in the same write; a refused write counts the line as dropped,
   and after a line the system took in part, the next write starts with a line feed. The count of the
-  lines dropped and the flag of a line cut short are plain `static mut`s, the runtime's code using no atomic type for them (R19),
+  lines dropped and the flag of a line cut short are plain `static mut`s,
   and the runtime starts no thread: two threads a program starts through C (R16) that log at once race on
   them, as the runtime's comment on them says. The corpus's runner
   takes `KURZ_LOG` away from every case it runs. `LogTests` pins what no case can: the layout of a line
@@ -2000,11 +2000,12 @@ The atomic types of R19 (section 6), on every target: a view is the pointer `Fro
 each member is one LLVM instruction on the word it points to, aligned to the word's size, as Rust's
 `core::sync::atomic` lowers them: `Load` a `load atomic`, `Store` a `store atomic`, `Swap` an
 `atomicrmw xchg`, `FetchAdd`, `FetchSub`, `FetchAnd`, `FetchOr` and `FetchXor` an `atomicrmw` of
-`add`, `sub`, `and`, `or` and `xor`, an `AtomicPtr<T>`'s on the address as an `i64`,
+`add`, `sub`, `and`, `or` and `xor`, an `AtomicPtr<T>`'s `FetchAnd`, `FetchOr` and `FetchXor` on the address as an `i64`,
 `CompareExchange` and `CompareExchangeWeak` a `cmpxchg` and a `cmpxchg weak`, whose pair gives the
 union's case, and `Fence` a `fence`; a `bool`'s word is a byte that holds 0 or 1, as Rust's
-`AtomicBool` holds a `u8`. An order written at the call is the instruction's own, `Relaxed` LLVM's
-`monotonic`; any other is read when the call runs, by a `switch` over the five values of `MemoryOrder`
+`AtomicBool` holds a `u8`. An order written at the call, or held by a copy of a function as its constant
+(T35), is the instruction's own, `Relaxed` LLVM's `monotonic`, and a copy's constant that Rust refuses
+raises `invalid-ordering-at-run-time` at the call's line with no `switch`; any other is read when the call runs, by a `switch` over the five values of `MemoryOrder`
 to the instruction for each, as Rust's `match` on the order chooses among its intrinsics, and a
 choice Rust refuses raises `invalid-ordering-at-run-time` at the call's line (`Emit/Emitter.Atomics.cs`;
 `EmitterTests` pins the instructions and the choice). A view crossing into an actor is
@@ -2052,8 +2053,10 @@ answers of 2026-11-14, issue 519, comment 6880404917), and no case shows
 where a program it builds differs from the section: every actor runs on the one thread the runtime
 runs, each message on a stack of its own ("The runtime"), its state word and the replies of its
 calls changed by atomic operations that hold on any number of threads ("What the emitter emits"), with no worker thread, no line `threads`
-and no `KURZ_THREADS` read (U35), and the top-level code's wait runs the scheduler in place on the
-main thread's stack (U18), and messages run only while the top-level
+and no `KURZ_THREADS` read (U35), so that a program started with a `KURZ_THREADS` that U35 refuses, `0`
+among them, runs on the one thread with no error line, and the compiler reads no `project.kz`, so no line
+of one reaches it, and the top-level code's wait runs the scheduler in place on the
+main thread's stack, where U18 has the main thread sleep beside the worker threads, and messages run only while the top-level
 code waits for a call's result, one message of each actor in turn, so that a `send` made after the
 last call that waits does not run, and a message parked in a wait when the top-level code ends does
 not go on (U13); of section 6's deadlocks the build makes layer 1 (U17) and the `deadlock` of a wait
@@ -2070,8 +2073,8 @@ to 30 s, run by the top-level code's wait, which sleeps while only a pause is le
 emitted `spawn` keeps a copy of the constructor's arguments in the spawner's heap and makes the
 function that constructs the state again from them, and each call site of a message gets a table
 of the function that runs it and the one that copies it into a new heap. No case carries chapter 0's
-line `// threads: 1`, which neither the corpus runner nor `tools/lint_reference.py` reads: the lint
-refuses a header that holds it. A message any of whose
+line `// threads: 1`, which the corpus runner does not read and `tools/lint_reference.py` refuses as a
+header line it does not know (chapter 0). A message any of whose
 arguments can wait, one that runs a call anywhere in it, is built in a
 heap of its own (`MessageHeapNew`) and at its queueing copied by that copy into the heap its actor has
 then, its own heap freed, as Erlang builds a message in the sender's heap and copies it into the
