@@ -185,7 +185,7 @@ pub void Release(byte* p, long bytes) {
 // What `Random` keeps for the process, as Rust's standard library keeps it in two `static` `AtomicBool`s
 // read and written with `Relaxed` order and a `OnceLock<File>`: whether `getrandom` takes the flag
 // `GRND_INSECURE`, whether the system refused `getrandom` itself, and the descriptor of `/dev/urandom`,
-// -1 where it is not open. The runtime's code uses no atomic type (R19), so they are plain `static mut`s: the runtime starts
+// -1 where it is not open. The runtime's code uses no atomic type for them (R19), so they are plain `static mut`s: the runtime starts
 // no thread, and two threads a program starts through C (R16) that ask for random bytes at once, each
 // thread's first map among them, race on them, where Rust's atomics and `OnceLock` do not.
 static mut bool insecureTaken = true

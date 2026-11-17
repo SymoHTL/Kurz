@@ -414,8 +414,9 @@ public sealed partial class Emitter
     /// or, inside it, as <c>this</c> (U11), then the arguments, each a copy of its own in the actor's heap where it holds a block (U12,
     /// <see cref="Crossed"/>; comment 6902210646, Q5), stored into a block of that heap that the message's function frees once it ran; the block goes to the end of the actor's inbox (U5, U15), or of its side list, where it is a
     /// call of the chain the actor waits in (U17). A call that waits (U4), wherever it stands, passes a reply in its own frame, the one-shot
-    /// slot of section 6, a byte the message's function sets once the result stands beside it, the activation that waits on it and the
-    /// heap the caller allocates in, which the result is copied into, and
+    /// slot of section 6, a word the message's function sets once the result stands beside it, the activation that waits on it, which the
+    /// runtime's <c>ReplyWaiter</c> stores before <c>Enqueue</c> queues the message, so that whoever answers it on any thread finds it there,
+    /// and the heap the caller allocates in, which the result is copied into, and
     /// the runtime's <c>Wait</c>, given the call's place for its <c>deadlock</c>, runs messages until it is set in the top-level code and
     /// parks the running message's activation on its stack inside a message, which no other code reaches while it is parked but the calls
     /// of its chain, its actor's own methods; the result is then the caller's, a temporary of its region as any call's result is. A
@@ -477,12 +478,13 @@ public sealed partial class Emitter
 
         var result = f.ReturnType;
         var reply = fn.Alloca(Reply(result), "reply");
-        fn.Emit($"store i8 0, ptr {reply}");
+        fn.Emit($"store i32 0, ptr {reply}");
         if (!Types.IsVoid(result))
         {
             fn.Emit($"store ptr {fn.Value($"call ptr {StdFunction("HeapCurrent")}()")}, ptr {fn.Value($"getelementptr {Reply(result)}, ptr {reply}, i32 0, i32 2")}");
         }
 
+        fn.Emit($"call void {RuntimeFunction("ReplyWaiter")}(ptr {reply})"); // the waiter before the message is queued
         fn.Emit($"store ptr {reply}, ptr {MessageField(message, block, 2)}");
         block = Queued();
         fn.Emit($"call void {RuntimeFunction("Enqueue")}(ptr {actor}, ptr {block})");
@@ -494,17 +496,19 @@ public sealed partial class Emitter
     /// U4, U6: the function of the messages of the method <paramref name="f"/>, which the runtime calls with the actor's state and the
     /// message, made at its first use and named outside the program's functions, so that a trace leaves its frame out as it leaves the
     /// runtime's: the method called on the state with the arguments the message holds, which it lets go of after the call; where the
-    /// message has a reply, the result moved beside it, a copy of its own in the caller's heap where it holds a block, the method's let go
-    /// of (U12; comment 6902210646, Q5), and the runtime's <c>Replied</c>, which sets its byte and wakes the activation that
+    /// message has a reply, which it takes off the message by the runtime's atomic swap, <c>ReplyTaken</c>, after the method returned, the
+    /// result moved beside it, a copy of its own in the caller's heap where it holds a block, the method's let go
+    /// of (U12; comment 6902210646, Q5), and the runtime's <c>Replied</c>, which sets its word and wakes the activation that
     /// waits on it, as tokio's <c>oneshot::Sender::send</c> stores the value and then wakes the receiver; then the message's block freed.
-    /// A call whose caller crashed while it ran has no reply any more, the runtime having unhooked it, and its result is let go of (U20).
+    /// A call whose caller crashed while it ran has no reply any more, the runtime having taken it by the same swap at the crash, and its
+    /// result is let go of (U20).
     /// </summary>
     private string MessageRun(FunctionSymbol f) => Helper($"message.{f.Owner!.Name}.{f.Name}.{Number(f.Line)}", "void", ["ptr", "ptr"], () =>
     {
         var message = MessageType(f);
         var arguments = f.Parameters.Select((p, i) => (p.Type, Value: fn.Value($"load {Ir(p.Type)}, ptr {MessageField(message, "%a1", 5 + i)}"))).ToList();
         var result = CallOn(f, "%a0", new ClassType(f.Owner!), arguments.Select(a => $"{Ir(a.Type)} {a.Value}"));
-        var reply = fn.Value($"load ptr, ptr {MessageField(message, "%a1", 2)}");
+        var reply = fn.Value($"call ptr {RuntimeFunction("ReplyTaken")}(ptr %a1)"); // the swap that makes this function its one owner
         if (!Types.IsVoid(f.ReturnType))
         {
             // U20: the reply of a call whose caller crashed is unhooked, and the result goes nowhere
@@ -599,10 +603,11 @@ public sealed partial class Emitter
 
     /// <summary>
     /// The IR type of the reply of a call that waits, as tokio's <c>oneshot</c> holds its state, its receiver's task and its value: the
-    /// byte set once the result stands, the activation that waits on it, which the runtime's <c>Wait</c> sets, then, for a method with a
-    /// result, the heap of the caller, which the result is copied into (U12), and the result.
+    /// word set once the result stands, an <c>i32</c> that the runtime stores with release and loads with acquire, the activation that
+    /// waits on it, which the runtime's <c>ReplyWaiter</c> sets, then, for a method with a result, the heap of the caller, which the
+    /// result is copied into (U12), and the result.
     /// </summary>
-    private string Reply(KurzType result) => Types.IsVoid(result) ? "{ i8, ptr }" : $"{{ i8, ptr, ptr, {Ir(result)} }}";
+    private string Reply(KurzType result) => Types.IsVoid(result) ? "{ i32, ptr }" : $"{{ i32, ptr, ptr, {Ir(result)} }}";
 
     private string MessageField(string message, string block, int index) => fn.Value($"getelementptr {message}, ptr {block}, i32 0, i32 {Number(index)}");
 

@@ -1292,7 +1292,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `/dev/urandom`, opened with `O_CLOEXEC` at its first read and kept open, where the system refuses
   `getrandom` with `ENOSYS` or `EPERM`, the process keeping to the file from then on, or where the
   pool is not ready, `EAGAIN`; the two flags and the descriptor are plain `static mut`s where Rust
-  keeps `AtomicBool`s and a `OnceLock`, the runtime's code using no atomic type (R19), and the runtime runs one thread.
+  keeps `AtomicBool`s and a `OnceLock`, the runtime's code using no atomic type for them (R19), and the runtime runs one thread.
   Where Rust panics, with any other error of `getrandom`, an open or a read of the file that fails or
   a file that ends first, `Random` gives false and the first write into the thread's first map ends
   the program with `random-failed` before it takes a block (M9; the owner, 2026-10-30, "End with an
@@ -1447,7 +1447,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   what it gathered of each pipe, the bytes its `File` read ahead first, back to that `File`'s buffer, which is made again with
   more room than its 8 KiB where they need it, so that a later read takes them before the rest of the pipe. The wait never
   waits on a reader's lock: at each wake of its poll `Drive` tries each lock it does not hold yet through the emitter's
-  `try.reader`, which it gets as a C function (R17), since the runtime's code uses no atomic type (R19), and which reads the bytes ahead only once it
+  `try.reader`, which it gets as a C function (R17), since the runtime's code tries no lock through an atomic type (R19), and which reads the bytes ahead only once it
   took the lock; a pipe is polled from the wake that took its lock, the next wake comes within 4 ms while another holder holds
   one, and the emitter lets go of each lock the runtime took once the bytes are taken or given back, so that `Timeout(d)`
   bounds the whole call and a read through the `File` on another thread waits for the call only while the call holds its lock
@@ -1523,7 +1523,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the line together in a buffer of its thread and hands it to one write call on standard error, the
   line of the lines dropped before it in the same write; a refused write counts the line as dropped,
   and after a line the system took in part, the next write starts with a line feed. The count of the
-  lines dropped and the flag of a line cut short are plain `static mut`s, the runtime's code using no atomic type (R19),
+  lines dropped and the flag of a line cut short are plain `static mut`s, the runtime's code using no atomic type for them (R19),
   and the runtime starts no thread: two threads a program starts through C (R16) that log at once race on
   them, as the runtime's comment on them says. The corpus's runner
   takes `KURZ_LOG` away from every case it runs. `LogTests` pins what no case can: the layout of a line
