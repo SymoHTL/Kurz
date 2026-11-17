@@ -2596,6 +2596,27 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `mut-in-message`, `send-needs-word`, `used-after-move`, `move-reachable`, `move-at-call`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
+Over a program the checker read without a diagnostic and the model of `std/`, `Semantics/ThrowSets.cs` computes what code can
+throw (section 5 of the record): for each actor its `Reason`, every type its construction, its constructors and its methods can
+throw, and for each `pub` function what a call of it can raise, each set ending with the runtime's error type, `RuntimeError` of
+`std/`. A unit of code is a function, a constructor, a lambda or what a construction runs, and a fixed point over the units joins
+what each throws itself with the sets of the units it runs, through the type arguments of each call. A unit runs what its calls
+pick, every override of a method and, through an interface, every implementer's; the constructors, the defaults and the base a
+construction runs; the fields of a `data` body that a construction or a `with` computes; the method a property's read calls; every
+lambda whose type fits a call of a function value, and a lambda a built-in call takes; the `Text()` that `print`, `eprint`, an
+interpolation's hole and `string.Join` call, through the fields, items and cases of the type, and of a generic `data` type derived
+from it through each instantiation of it that the program builds (the owner, 2026-11-16); the construction of an actor it spawns; and
+the code of an actor it spawns under `escalate`. The instantiations are found as Rust's monomorphization finds its instances: the
+fixed point joins the generic `data` types each unit constructs with those of the units it runs, through the same type arguments, and
+with those of the lambdas it makes, as Rust collects a closure's instance in the instance of the function that makes it, and the
+program builds those that the sets of its roots, the top-level code and the `pub` functions without type parameters, hold with
+every type argument named. A call through an actor's reference reaches nothing of the callee's
+code, the text of a thrown value adds nothing, and a function of a folder of the runtime throws nothing. A bare `throw` throws the
+case its arm of `else` took. No build reads the sets: `ThrowSetTests` holds one thrown type for each of these forms over a fenced
+program, the text of each instantiation a program builds over a program of its own, every kind of node of the tree to the table
+`ThrowSets.Kinds`, the walk of every corpus case and of `std/`, a runtime that
+throws nothing, and a kind of `RuntimeKind` for each run-time row of the error table.
+
 ### What the checker does not read
 
 A program that uses one of these gets `not supported` at the construct's line and no error that

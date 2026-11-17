@@ -568,10 +568,24 @@ public sealed class SemanticModel
 
     public FunctionSymbol FunctionOf(FunctionDeclaration declaration) => functions.TryGetValue(declaration, out var f) ? f : throw Missing($"function `{declaration.Name}`", declaration.Line);
 
+    /// <summary>Whether the checker read the function's declaration in this file, and made its symbol.</summary>
+    internal bool HasFunction(FunctionDeclaration declaration) => functions.ContainsKey(declaration);
+
+    /// <summary>The symbol of every function the checker read in this file, the methods of its classes and the copies of T33 among them.</summary>
+    internal IEnumerable<FunctionSymbol> Functions => functions.Values;
+
     /// <summary>The symbol of a declaration of a block of C functions (R16).</summary>
     public FunctionSymbol CFunctionOf(ExternFunction declaration) => cFunctions.TryGetValue(declaration, out var f) ? f : throw Missing($"C function `{declaration.Name}`", declaration.Line);
 
     public DataSymbol DataTypeOf(TypeDeclaration declaration) => dataTypes.TryGetValue(declaration, out var d) ? d : throw Missing($"type `{declaration.Name}`", declaration.Line);
+
+    /// <summary>The symbol of every data type the file declares.</summary>
+    internal IEnumerable<DataSymbol> DataTypes => dataTypes.Values;
+
+    /// <summary>The statements of the file's top level, in their order: the code of the root actor (O6), declarations among them.</summary>
+    internal IReadOnlyList<Statement> TopLevel { get; private set; } = [];
+
+    internal void RecordTopLevel(IReadOnlyList<Statement> statements) => TopLevel = statements;
 
     /// <summary>
     /// Whether the member is read in a chain of <c>?.</c> (N5): it is read only where the chain did not stop, from the value of the type
