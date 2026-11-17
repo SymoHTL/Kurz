@@ -401,16 +401,17 @@ public sealed partial class Checker
     /// checker sees its lambda (<see cref="SeenLambda"/>), and by its written type otherwise, so that any other value of a function type
     /// never crosses (a named function is no value, F11) (the owner, 2026-11-15, #519, comment 6896192351, Q5, "By written type"); every other
     /// argument by the slot's type, which a message holds (<see cref="CrossingOf"/>). What a lambda captures crosses with no word or it
-    /// does not cross, since no word at the argument makes a function value cross (§6, Q24).
+    /// does not cross, since no word at the argument makes a function value cross (§6, Q24). Beside the build's limit, the limit that
+    /// stands after <c>move</c> too (<see cref="SharedByCount"/>).
     /// </summary>
-    private (ActorCrossing Kind, string? Why, string? Limit) ArgumentCrossing(Argument a, KurzType slot)
+    private (ActorCrossing Kind, string? Why, string? Limit, string? Shared) ArgumentCrossing(Argument a, KurzType slot)
     {
         if ((Types.NonNull(slot) ?? slot) is FunctionType)
         {
             if (SeenLambda(a.Value) is { } l)
             {
                 model.RecordCrossingLambda(a.Value, l); // whose environment the crossing copies (comment 6902210646, Q5)
-                var (kind, why, limit) = (ActorCrossing.Crosses, (string?)null, (string?)null);
+                var (kind, why, limit, shared) = (ActorCrossing.Crosses, (string?)null, (string?)null, (string?)null);
                 foreach (var captured in model.LambdaOf(l).Captures)
                 {
                     var (k, w, s) = CrossingOf(captured.Type);
@@ -420,13 +421,42 @@ public sealed partial class Checker
                     }
 
                     limit ??= s;
+                    shared ??= SharedByCount(captured.Type);
                 }
 
-                return (kind, why, limit);
+                return (kind, why, limit, shared);
             }
         }
 
-        return CrossingOf(slot);
+        var (crossing, reason, limited) = CrossingOf(slot);
+        return (crossing, reason, limited, SharedByCount(slot));
+    }
+
+    /// <summary>
+    /// U12: the first handle of section 12, hasher, command or child process that a value of the type holds, read as
+    /// <see cref="CrossingOf"/> reads a type, through a class of <c>std/</c>'s fields too, <c>HttpRequest</c>'s body among them; null where it
+    /// holds none. The build copies none of them: its copy keeps the sender's block and counts it once more (<c>Emit/Emitter.Copies.cs</c>),
+    /// so that the receiver would hold a count of a block of the sender's heap, which the sender's restart or end frees, and the build's
+    /// <c>not supported</c> stands for such a value after <c>move</c> as with no word (<see cref="CrossingErrors"/>).
+    /// </summary>
+    private string? SharedByCount(KurzType type)
+    {
+        var classes = new HashSet<ClassSymbol>();
+        var data = new HashSet<DataSymbol>();
+        string? First(IEnumerable<KurzType> types) => types.Select(Find).FirstOrDefault(s => s is not null);
+        string? Find(KurzType t) => t switch
+        {
+            HandleType or HasherType or CommandType or ChildProcessType => Types.A(t),
+            WeakRefType w => Find(w.Target),
+            ListType l => Find(l.Element),
+            MapType m => First([m.Key, m.Value]),
+            UnionType u => First(u.Cases),
+            DataType d when data.Add(d.Symbol) => First(d.Symbol.Fields.Select(f => SubstituteData(d, f.Type))),
+            DataType d => First(HeldArguments(d)),
+            ClassType c when classes.Add(c.Symbol) => First(classDeclared.Where(x => x.HasBaseOrIs(c.Symbol)).Prepend(c.Symbol).SelectMany(k => k.Fields).Select(f => f.Type)),
+            _ => null,
+        };
+        return Find(type);
     }
 
     /// <summary>
@@ -451,8 +481,8 @@ public sealed partial class Checker
     /// written, the words of <c>move</c> (<see cref="MessageMove"/>: <c>move-at-call</c>, <c>move-reachable</c> and a later argument's
     /// <c>used-after-move</c>) and <c>mut-in-message</c> of a <c>mut</c> parameter, which <paramref name="mutInMessage"/> reports (the owner,
     /// 2026-11-15, issue 519, comment 6891937666, item 4), and after every argument the build's <c>not supported</c> of the first value it
-    /// does not make cross (<see cref="CrossingOf"/>), so that the build's limit hides no error of the language (E1); then each <c>move</c>
-    /// ends what it sends. Whether it reported one.
+    /// does not make cross (<see cref="CrossingOf"/>; after <c>move</c>, <see cref="SharedByCount"/>), so that the build's limit hides no error
+    /// of the language (E1); then each <c>move</c> ends what it sends. Whether it reported one.
     /// </summary>
     private bool CrossingErrors(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, bool> slotMove, string callee, Action<int> mutInMessage)
     {
@@ -474,8 +504,8 @@ public sealed partial class Checker
             }
 
             var a = c.Arguments[i];
-            var (kind, why, limit) = ArgumentCrossing(a, slotType(slot));
-            limits[i] = limit;
+            var (kind, why, limit, shared) = ArgumentCrossing(a, slotType(slot));
+            limits[i] = a.Word == ArgumentWord.Move ? shared : limit;
             if (kind == ActorCrossing.Never || (kind == ActorCrossing.NeedsWord && a.Word is not (ArgumentWord.Copy or ArgumentWord.Move)))
             {
                 Report(ErrorIds.SendNeedsWord, a.Line, kind == ActorCrossing.NeedsWord
@@ -508,9 +538,14 @@ public sealed partial class Checker
 
         for (var i = 0; i < c.Arguments.Count; i++)
         {
-            if (limits[i] is { } limit && c.Arguments[i].Word != ArgumentWord.Move)
+            // the build's limit; after `move` it stands only for a handle, a hasher, a command or a child process, which the copy would
+            // share by its count, a block of the sender's heap that the sender's restart or end frees (`SharedByCount`), and is set
+            // aside for the rest, which the move's copy brings whole into the receiver's heap or which holds no counted block
+            if (limits[i] is { } limit)
             {
-                NotSupported(c.Arguments[i].Line, $"{limit}, crossing into an actor (U12)");
+                NotSupported(c.Arguments[i].Line, c.Arguments[i].Word == ArgumentWord.Move
+                    ? $"{limit} after `move`, crossing into an actor, which this build would share by its count with the sender's heap, as with `copy` or no word (U12)"
+                    : $"{limit}, crossing into an actor (U12)");
                 return true;
             }
         }
