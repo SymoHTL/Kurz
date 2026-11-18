@@ -1039,8 +1039,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   whose model takes every interleaving of a lookup of each of two actors while a third thread frees the first's
   slot and takes it for the second, but for the life of the table's directory and pages; and the futex's wait and wake
   (`sys.LockWait`, `sys.LockWake`), of Rust's futex shape (not checked at source). The models' moves are
-  sequentially consistent, so that the orders of the atomic operations are read in the emitted IR
-  (`EmitterTests`), not by the models. These hold only while one thread runs every program (U35): the run queue,
+  sequentially consistent, so that the orders of the atomic operations are the ones the runtime's source writes,
+  each of which `EmitterTests` holds to one instruction of the IR of that order
+  (`An_atomic_member_with_its_order_written_is_one_llvm_instruction_of_that_order_aligned_to_its_word`), and no model
+  reads them. These hold only while one thread runs every program (U35), each a reading of the code that no run on
+  more than one thread checks (inferred): the run queue,
   a plain `static mut` (`Queue`, `RunOne`); the life of the table's directory and pages, each made in the own
   heap of the thread whose take made it, the main thread's (`SlotTake`, `Lookup`); the life of an actor a sender
   reads by a plain load after its push

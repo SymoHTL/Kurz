@@ -33,5 +33,6 @@ holds the five rows: `first`, `lambda`, `capture`, `default` and `constructor`. 
 `default` and `constructor` are each red under the mutation of their own enqueue or emission (579's
 description, "Tests"); `first`, whose line the lambda's mutation passed, is red under the mutation that gives
 a lambda that reads no variable the line 0 in its enqueue (`Origin = origin` to 0 in `Emitter.Lambdas.cs`), run
-on 2026-11-18 on the tree of 581's squash `3993b7ee`, which turned `first`, `lambda`, `default` and
+on 2026-11-18 on the tree of pull request 584's commit `dc1fe751`, whose `Emitter.Lambdas.cs` is that of
+581's squash `3993b7ee`, which turned `first`, `lambda`, `default` and
 `constructor` red.
