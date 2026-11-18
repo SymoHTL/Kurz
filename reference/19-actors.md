@@ -4246,7 +4246,12 @@ its constructor and its name where a value stands are `syntax` (E4), as a class'
 each text naming the `per node` form *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. A field named through its name is `not-visible`, as one
 named through a reference is (U8), and a method named through it with no call, and its name called as
 a function, `Cache()`, are `not supported` *(assumed: a reading of the build, proposed with this record and not put to the owner)*. `per` with other words than `node` has no rule here
-(U1), and `compiler/README.md` says what the build does with it.
+(U1), and the build says `not supported` at the clause: to `per cluster` with a text of its own, "the clause `per cluster`
+after an actor's name, one actor in the cluster, which needs the directory of section 7 (U1, U51)" *(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*, and to `per` written
+twice, `per node per node`, to `per` with any other words, `per caller` among them, and to a clause beside `per node` that
+U1 gives no rule, `per node inbox drop`, with the text the build gives every clause it does not read, which names the
+clause's own word, "the clause `per` after an actor's name (U1)" and "the clause `inbox` after an actor's name (U1)" *(assumed: a reading of the build, proposed with this record and not put to the owner)*; `compiler/README.md` says what the build does
+with it.
 
 Case: [actors/per-node.kz](../corpus/actors/per-node.kz)
 ```kurz
@@ -4275,6 +4280,27 @@ AddTwo()
 w = spawn Worker()
 w.Work()
 print(Counter.Get())
+```
+
+Case: [actors/per-node-before-arguments.kz](../corpus/actors/per-node-before-arguments.kz)
+```kurz
+actor Cache per node {
+    int first = Started()
+
+    pub int Get(int n) => first + n
+}
+
+int Started() {
+    print("started")
+    return 1
+}
+
+int Argument() {
+    print("argument")
+    return 2
+}
+
+print(Cache.Get(Argument()))
 ```
 
 Case: [actors/per-node-spawned.kz](../corpus/actors/per-node-spawned.kz)
@@ -4323,11 +4349,11 @@ A `per node` actor starts at the first message that names it, a call or a `send`
 top-level code, a function, another actor or itself, and a program that names it nowhere starts none,
 as Orleans activates a grain at its first call (not checked at source) and C#'s `Lazy<T>` makes its value
 at the first read of its `Value` (§13) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*; a `send` starts it as a call does *(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*. Its constructor and its fields' defaults run on
-the first caller's stack, as `spawn`'s do (U3), an actor they spawn its child,
-which a crash of it ends (U21), and a throw there is that caller's crash, under the
+the first caller's stack, as `spawn`'s do (U3), and a throw there is that caller's crash, under the
 caller's own policy: the half-built actor ends, the calls of other actors queued behind its start get
 `actor-gone`, and the first message after that starts it again, as Rust's `OnceLock::get_or_init`
-leaves its cell empty after a panic in its function (checked 2026-11-18: its documentation, "the cell remains uninitialized") *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. The crash names the line of the throw, as a
+leaves its cell empty after a panic in its function (checked 2026-11-18: its documentation, "the cell remains uninitialized") *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. An actor its defaults spawn is its child, which a
+crash of it ends, as at a `spawn` (U3, U21) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. The crash names the line of the throw, as a
 throw in a constructor at `spawn` does *(assumed: a reading of the build, proposed with this record and not put to the owner)*. Messages that reach it while it is built wait in its
 inbox for its start, and a message to it from the code its own start runs, a default that calls a
 function that calls `Cache.Get()`, waits for a start that waits for it, which the top-level code's
@@ -4457,8 +4483,8 @@ The words of a policy after a `per node` actor's name are its policy, which runs
 top-level code (U53) (§6, "Policy at `spawn`", the owner, 2026-11-13, #519, comment 6847932993, Q15):
 with none, or with `on crash restart`, a crash restarts it in place with fresh state and its inbox kept
 (U21, U22), and past the limit of `max N in` it ends and the first message after that starts a fresh
-one, its constructor run again, with no `restart-limit` (U26; §6, the owner, 2026-11-17, #561, comment
-6945857315, Q2, "Key restarts fresh on next call") *(assumed, §6: the calls queued in it at the crash
+one, its constructor run again, with no `restart-limit`, as the key of a `per` type does past its limit (U26; §6, the owner, 2026-11-17, #561, comment
+6945857315, Q2, "Key restarts fresh on next call") *(assumed: the one actor of a `per node` type read as the key of comment 6945857315, Q2; the product pass, comment 6983506072)* *(assumed, §6: the calls queued in it at the crash
 that passes the limit raise `actor-gone`)*. `on crash stop` ends it so: the calls queued in it get
 `actor-gone`, and the first message after that starts a fresh one *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. A fresh start begins the pause
 and the window of its policy again, as §6 counts the window from a fresh start *(assumed: a reading of the build, proposed with this record and not put to the owner)*. The block
