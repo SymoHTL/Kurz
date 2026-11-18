@@ -991,9 +991,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   which a sender appends to by one atomic swap of its end and a release store of the link and which the
   thread that holds the actor moves into the inbox and the side list of the activation that waits in the
   message's chain, the blocks to the front of the inbox, at its take, at `Ready`, at its crash's fall and at its
-  end, as a child's thread moves its supervisor's, with no hold of it, where the child's crash escalates through
-  the supervisor (`Fall`) or ends it as the crash's taker (`EndActor`), a move of a child's thread that holds
-  only while one thread runs every program (U35) (the runtime's `Pushed`, `Popped`, `Moved`; section 6), the name of its type and two words the emitted code holds (U2),
+  end, and which a child's thread moves on its supervisor, with no hold of it, where the child's crash escalates
+  through the supervisor (`Fall`) or ends it as the crash's taker (`EndActor`), as the list of what holds only
+  while one thread runs every program names that move (U35; the runtime's `Pushed`, `Popped`, `Moved`; section 6), the name of its type and two words the emitted code holds (U2),
   whether it runs, waits for its restart or ended (U19, U22), an `int`,
   and beside it the actor's state word, an `int` reached only through `AtomicInt` (R19), whose bits say
   whether a thread holds the actor (RUNNING), whether an entry of it stands in the run queue (QUEUED),
