@@ -71,11 +71,13 @@ public sealed class CheckerTests
     [InlineData("print(s.Take(move xs) within Bound(xs))", "used-after-move")]
     [InlineData("print(s.Take(copy xs) within Bound(xs))", null)]
     [InlineData("print(s.Take(move xs) within Bound([3]))\nprint(xs.Count)", "used-after-move")]
+    [InlineData("print(s.Both(move xs, s.Take([3]) within Bound(xs)))", "used-after-move")]
     public void The_bound_of_a_calls_clause_runs_after_its_arguments_and_reads_no_variable_they_moved(string tail, string? id)
     {
         // U39, U12, F12: the bound runs after the call's arguments, as a later argument does, so a read of what an argument moved is
-        // `used-after-move` at the read's line
-        var program = "actor Store {\n    pub int Take(List<int> items) => items.Count\n}\n\nduration Bound(List<int> ys) {\n    print(ys.Count)\n    return 1s\n}\n\ns = spawn Store()\nxs = [1, 2]\n" + tail;
+        // `used-after-move` at the read's line, and so is a read in the clause of a call that a later argument makes
+        var program = "actor Store {\n    pub int Take(List<int> items) => items.Count\n\n    pub int Both(List<int> items, int n) => items.Count + n\n}\n\n" +
+            "duration Bound(List<int> ys) {\n    print(ys.Count)\n    return 1s\n}\n\ns = spawn Store()\nxs = [1, 2]\n" + tail;
         Assert.Equal(id is null ? [] : [(id, program.Split('\n').Length)], Errors(program));
     }
 
@@ -83,12 +85,15 @@ public sealed class CheckerTests
     [InlineData("print(s.Take(xs, Count(mut xs)))", "changed-while-held")]
     [InlineData("print(s.Take(xs, 1) within Grow(mut xs))", "changed-while-held")]
     [InlineData("mut zs = [3]\nprint(s.Take(xs, 1) within Grow(mut zs))", null)]
+    [InlineData("mut zs = [3]\nprint(s.Take(xs, 1) within Pair(zs, Count(mut zs)))", "changed-while-held")]
     public void The_bound_of_a_calls_clause_changes_nothing_its_arguments_still_hold(string tail, string? id)
     {
         // U39, M7, F12: the bound runs after the call's arguments, as a later argument does, so a change it makes of a value an argument
-        // still holds is `changed-while-held` at the bound's line, as one an argument makes is
+        // still holds is `changed-while-held` at the bound's line, as one an argument makes is, and the bound's own parts are read as a
+        // call's are
         var program = "actor Store {\n    pub int Take(List<int> items, int n) => items.Count + n\n}\n\nint Count(mut List<int> ys) {\n    ys.Add(3)\n    return 1\n}\n\n" +
-            "duration Grow(mut List<int> ys) {\n    ys.Add(3)\n    return 1s\n}\n\ns = spawn Store()\nmut xs = [1, 2]\n" + tail;
+            "duration Grow(mut List<int> ys) {\n    ys.Add(3)\n    return 1s\n}\n\nduration Pair(List<int> ys, int n) {\n    print(ys.Count + n)\n    return 1s\n}\n\n" +
+            "s = spawn Store()\nmut xs = [1, 2]\n" + tail;
         Assert.Equal(id is null ? [] : [(id, program.Split('\n').Length)], Errors(program));
     }
 
