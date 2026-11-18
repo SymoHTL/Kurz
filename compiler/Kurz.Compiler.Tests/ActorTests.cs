@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Kurz.Compiler.Build;
+using Kurz.Compiler.Emit;
 using Kurz.Compiler.Text;
 using Xunit;
 
@@ -583,7 +584,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// in the heap the entry serves and one less at the free of a block of the heap, read by the program through
     /// <c>HttpServer.HeapLive()</c>, the count of the heap its code allocates in (design record, section 3).
     /// </summary>
-    private static readonly Lazy<CheckedRuntime> HeapBlocks = new(() => ListTests.Edited(
+    private static readonly Lazy<CheckedRuntime> HeapBlocks = new(() => HeapBlocksFor(Builder.HostTarget!.Value));
+
+    /// <summary>As <see cref="HeapBlocks"/>, the runtime and the standard library of <paramref name="target"/>.</summary>
+    private static CheckedRuntime HeapBlocksFor(Target target) => ListTests.EditedFor(target, [
         ("std/std.kz", "pub byte* Allocate(long size) {\n    mut byte* p = null\n", """
             pub byte* Allocate(long size) {
                 mut byte* p = null
@@ -615,7 +619,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
                     return n
                 }
 
-            """)));
+            """)]);
 
     [Fact]
     public void Each_heap_gives_back_every_block_of_its_crossings_results_and_moves()
@@ -4664,6 +4668,19 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // ---- the deadlines of the calls (U36 to U45; the owner, 2026-10-30, "Deadline on chain ID"; #519, comments 6967147952, 6967625156)
 
     /// <summary>A function that holds the thread for <c>d</c> with no call and no wait, as the cases of timeouts hold it.</summary>
+    /// <summary>
+    /// S11: the build for Windows of <paramref name="text"/>, a program that reads the clock to hold its thread or to time a wait, says
+    /// <c>not supported</c> at that read, which this checks on every system, on <paramref name="windows"/> where it is given, else on
+    /// the runtime of Windows; whether this machine is Windows, where such a test holds that refusal alone, its run not built.
+    /// </summary>
+    private static bool ClockRefusedOnWindows(string text, CheckedRuntime? windows = null)
+    {
+        var refused = Builder.Compile(SourceText.FromString("program.kz", text), [], windows ?? Builder.CheckRuntime(Target.Windows), testBuild: true);
+        Assert.Null(refused.Program);
+        Assert.Equal(Emitter.ProcessNotOnWindows, Assert.Single(refused.Diagnostics.Items).Message);
+        return OperatingSystem.IsWindows();
+    }
+
     private const string Hold = """
         void Hold(duration d) {
             instant start = instant.Now
@@ -4825,6 +4842,11 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(s.Notes())
 
             """;
+        if (ClockRefusedOnWindows(text))
+        {
+            return;
+        }
+
         Ran(BuildAndRun(text, toolchain.Runtime, "actor-deadline-sends"), 0, ["0", "sent", "0"], "");
     }
 
@@ -4880,6 +4902,11 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print("{left} {ownLeft} {store.Notes()}")
 
             """;
+        if (ClockRefusedOnWindows(text, HeapBlocksFor(Target.Windows)))
+        {
+            return;
+        }
+
         Ran(BuildAndRun(text, HeapBlocks.Value, "actor-deadline-drop-blocks"), 0, ["0 0 0"], "");
     }
 
@@ -4927,6 +4954,11 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(slow.Slow())
 
             """;
+        if (ClockRefusedOnWindows(text))
+        {
+            return;
+        }
+
         var run = BuildAndRun(text, toolchain.Runtime, "actor-deadline-queued");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["A#4 crashed: call-timeout at program.kz:27"], crashes);
@@ -4972,6 +5004,11 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(xs.Go(ys, ws))
 
             """;
+        if (ClockRefusedOnWindows(text))
+        {
+            return;
+        }
+
         var run = BuildAndRun(text, toolchain.Runtime, "actor-deadline-side");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Y#2 crashed: call-timeout at program.kz:26", "X#1 crashed: callee-crashed at program.kz:15"], crashes);
@@ -5021,6 +5058,11 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             """;
+        if (ClockRefusedOnWindows(text))
+        {
+            return;
+        }
+
         var run = BuildAndRun(text, short_, "actor-deadline-no-chain");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Phoenix#2 crashed: thrown \"fail\" at program.kz:26"], crashes);
@@ -5055,6 +5097,11 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             """;
+        if (ClockRefusedOnWindows(text))
+        {
+            return;
+        }
+
         var run = BuildAndRun(text, toolchain.Runtime, "actor-deadline-root-block");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Kid#2 crashed: thrown \"kid\" at program.kz:12"], crashes);
@@ -5095,6 +5142,11 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(start.Elapsed < 700ms)
 
             """;
+        if (ClockRefusedOnWindows(text))
+        {
+            return;
+        }
+
         var run = BuildAndRun(text, toolchain.Runtime, "actor-deadline-timer");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["B#1 crashed: thrown \"b\" at program.kz:3", "A#2 crashed: call-timeout at program.kz:12"], crashes);
@@ -5136,6 +5188,11 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(start.Elapsed < 700ms)
 
             """;
+        if (ClockRefusedOnWindows(text))
+        {
+            return;
+        }
+
         var run = BuildAndRun(text, toolchain.Runtime, "actor-deadline-timers-two");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["B#1 crashed: thrown \"b\" at program.kz:3", "A#2 crashed: call-timeout at program.kz:12",
@@ -5158,7 +5215,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             """;
-        var run = BuildAndRun(callee + """
+        const string waiting = callee + """
             actor A {
                 pub int Go(C c) {
                     mut r = 0
@@ -5174,7 +5231,13 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             caller = spawn A()
             print(caller.Go(worker))
 
-            """, toolchain.Runtime, "actor-deadline-crashed");
+            """;
+        if (ClockRefusedOnWindows(waiting))
+        {
+            return;
+        }
+
+        var run = BuildAndRun(waiting, toolchain.Runtime, "actor-deadline-crashed");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["C#1 crashed: thrown \"c\" at program.kz:9", "A#2 crashed: call-timeout at program.kz:16"], crashes);
         Ran((run.Code, run.Output, rest), 1, [], "error: callee-crashed at program.kz:25\n");
@@ -5228,6 +5291,11 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             """;
+        if (ClockRefusedOnWindows(text))
+        {
+            return;
+        }
+
         Ran(BuildAndRun(text, toolchain.Runtime, "actor-deadline-within"), 1, ["1", "1"], "error: call-timeout at program.kz:33\n");
     }
 }
