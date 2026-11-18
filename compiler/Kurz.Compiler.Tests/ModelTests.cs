@@ -797,9 +797,7 @@ public sealed class ModelTests
         new("Popped", "*Ptr<byte*>(queue + 8) = next\n            first = next", _ => true, s =>
         {
             s[Out] = s[at + 2];
-            s[at + 1] = s[at + 2];
-            s[at + 2] = s[Link + s[at + 1]];
-            s[at] = s[at + 2] == Null ? 3 : 7;
+            s[at] = 1; // the load of the new first node's link is a move of its own, the first's
         }),
         new("Popped", "if first != AtomicPtr<byte>.FromPtr(Ptr<byte*>(queue)).Load(MemoryOrder.Acquire) {", _ => true,
             s => { s[at] = s[at + 1] != s[In] ? 0 : 4; }, ["Pushed(queue, stub)"]),
@@ -853,7 +851,7 @@ public sealed class ModelTests
     private static int LockAt(int n) => LockShared + n * Own;
 
     /// <summary>
-    /// A thread that takes the lock once and lets go of it (<c>Lock</c>, <c>Unlock</c>), as Rust's futex mutex: the compare-exchange from
+    /// A thread that takes the lock once and lets go of it (<c>Lock</c>, <c>Unlock</c>), as Rust's futex mutex (not checked at source): the compare-exchange from
     /// 0 to 1, the spin, abstracted to one load, a second compare-exchange where the spin found 0, then the swap of 2 where the word
     /// found is not 2, the wait on the word while it holds 2 (<c>sys.LockWait</c>, asleep until a wake), the spin and the swap again;
     /// the end of the hold swaps 0 in and wakes one sleeper where it found 2 (<c>sys.LockWake</c>, lost where none sleeps).
@@ -1187,12 +1185,16 @@ public sealed class ModelTests
         [
             ("EndChildren", "HeldAlone(at)", "EndActor(at)", "LetGo(at, false)"),
             ("EndChildren", "HeldAlone(at)", "*Ptr<byte*>(at - 80) = null", "LetGo(at, false)"),
+            ("EndChildren", "HeldAlone(at)", "*Ptr<byte*>(at - 72) = null", "LetGo(at, false)"),
             ("Decided", "HeldAlone(child)", "Pause(child)", "LetGo(child, false)"),
             ("Decided", "HeldAlone(child)", "EndActor(child)", "LetGo(child, false)"),
         ]);
     }
 
-    /// <summary>Each text <c>Access</c> of the function <c>Function</c> stands between the text <c>Take</c> and the text <c>End</c>.</summary>
+    /// <summary>
+    /// Each text <c>Access</c> of the function <c>Function</c> stands between the text <c>Take</c> and the text <c>End</c>: after the
+    /// first take, and before the first end after that take, so that an end between the take and the access is no hold.
+    /// </summary>
     private static void Held((string Function, string Take, string Access, string End)[] held)
     {
         foreach (var (function, take, access, end) in held)
@@ -1200,7 +1202,7 @@ public sealed class ModelTests
             var body = Body(function);
             var taken = body.IndexOf(take, StringComparison.Ordinal);
             var at = body.IndexOf(access, StringComparison.Ordinal);
-            Assert.True(taken >= 0 && at > taken && body.IndexOf(end, at, StringComparison.Ordinal) > at,
+            Assert.True(taken >= 0 && at > taken && body.IndexOf(end, taken, StringComparison.Ordinal) > at,
                 $"`{function}` holds no `{access}` between `{take}` and `{end}`");
         }
     }

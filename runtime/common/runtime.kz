@@ -17,9 +17,11 @@ thread static mut long room = 0
 // its word (R19) and the runtime's code takes the address of no `static` (R10, R13): the lock of standard
 // output, at 0, and of standard error, at 4, each an `int` that `Lock` takes, the lock of the table of the
 // slots, at 8, of the queue of the pauses, at 12, and of the blocks the top-level code's wait runs, at 16, the
-// count of the actors spawned, at 24 (`ActorNew`), and the table of every block's message, at 32, null until
-// the first block (`BlockTable`). The start makes it in the thread's own heap, while the main thread is the one
-// thread of the process, so that every thread reads one address that no thread changes; where the system
+// count of the actors spawned, at 24 (`ActorNew`), and the table of every block's message, at 32 (`BlockTable`),
+// whose first word holds the function that runs a block (`BlockRun`) from the moment the block of the words is
+// made (`SharedCleared`), and whose second, at 40, the function that copies one, stays null, as no block is copied.
+// The start makes it in the thread's own heap, while the main thread is the one thread of the process, so that
+// its address is written at most once, by the one thread, before any other thread runs; where the system
 // refuses it there, the first `spawn` makes it, before any actor runs (`Shared`), so that a program the
 // system gives no memory ends at its own first allocation, as it did, and the one thread takes no lock until then.
 static mut byte* sharedWords = null
@@ -66,8 +68,8 @@ byte* Shared() {
 // The lock whose word is at `word` taken, as Rust's standard library takes its `Mutex` on a futex
 // (`library/std/src/sys/sync/mutex/futex.rs`, not checked at source): 0 free, 1 taken, 2 taken with a thread
 // that may sleep on it;
-// a compare-exchange from 0 to 1 with acquire, and where it fails, a spin of up to 100 loads while the word
-// holds 1, then a swap to 2 with acquire, the thread put to sleep while the word holds 2 (`sys.LockWait`) and
+// a compare-exchange from 0 to 1 with acquire, and where it fails, a spin of one load and up to 100 more while the
+// word holds 1 (`LockSpun`), then a swap to 2 with acquire, the thread put to sleep while the word holds 2 (`sys.LockWait`) and
 // the spin and the swap made again after each wake, until a swap finds the word 0. The hold raises the count
 // of the entries under way (`sys.Entered`) until `Unlock`, so that a stack fault while it holds the lock ends
 // the process and leaves no lock taken behind an actor's crash (O11).
@@ -108,8 +110,8 @@ int LockTried(AtomicInt lock) {
     return found
 }
 
-// The word of the lock `lock` once it holds no 1, or after 100 loads that found 1, as Rust's `spin` loads it
-// (not checked at source).
+// The word of the lock `lock` once it holds no 1, or after 101 loads that found 1, one load and up to 100 more,
+// as Rust's `spin` loads it (not checked at source).
 int LockSpun(AtomicInt lock) {
     mut int spins = 100
     raw {
@@ -3546,7 +3548,9 @@ pub string ExitErrorText(ExitError e) {
 // that a stack fault inside the scheduler or the allocator ends the process and one in an actor's code is
 // that actor's crash (design record, section 6, "End the process"; O11).
 
-// The first and the last actor of the run queue.
+// The first and the last actor of the run queue, plain `static`s with no lock and no atomic operation, which hold
+// while one thread runs every program (U35): a waker on another thread would change them (`Wake`, `Queue`) while
+// the thread that runs the actors takes the first off (`RunOne`).
 static mut byte* runFirst = null
 static mut byte* runLast = null
 
@@ -3557,11 +3561,18 @@ static mut byte* runLast = null
 // cleared or given to an actor spawned since, whose number is larger, finds no actor (`Lookup`), as Erlang's
 // table of processes finds none for a pid whose serial no longer matches. The slots stand in pages that never
 // move, 64 slots the first and each page twice the one before, as tokio's slab grows, a slot's page found from
-// the bit length of its index plus 64, each made at the first slot it gives, in the thread's own heap, so that a
-// lookup never meets a page moved under it; the directory holds a page for every bit length an index can have.
+// the bit length of its index plus 64, each made at the first slot it gives, in the own heap of the thread whose
+// take makes it (`AllocateOwn`), so that a lookup never meets a page moved under it. The directory, `slotPages`,
+// holds a page for every bit length an index can have, 64 words: the first take makes it under the lock of the
+// table, in the own heap of that take's thread, the main thread's while one thread runs every program (U35), and
+// nothing moves, grows or frees it while the process runs, so that a lookup reads it with no lock and finds it
+// made, since an index it reads was given by a take after the directory was stored, and reaches the lookup
+// through a reference that take made or through `slotsUsed` read under the lock (inferred).
 // A free slot is taken again first, the one freed last first, as slotmap's free list takes them; `slotsUsed`
 // counts the slots ever taken (section 6, assumed there). A take and a free of a slot, and the read of
-// `slotsUsed`, hold the lock of the table (`Lock`), and a lookup holds none: it reads the slot's number, its
+// `slotsUsed`, hold the lock of the table (`Lock`), but for the end of the process, the one free made once only
+// the main thread is left (U35), which clears each slot with plain stores and no lock (`EndActors`); a lookup holds
+// none: it reads the slot's number, its
 // state and its number again, each load with acquire, against the take's and the free's stores with release,
 // which write the number after the state and the state after the number, so that a lookup that finds the
 // same number twice found the state that number names, as a seqlock's reader checks its sequence again.
@@ -4007,7 +4018,10 @@ pub string ActorText(string name, long number) {
 // on the actor's queue of many senders by one atomic swap (`Pushed`), which reads nothing of the actor but the
 // queue, and the thread that holds the actor moves it at its next take to the side list of the activation that
 // waits in its chain, or to the end of the inbox (`Moved`); the actor is woken (`Wake`) where it waits neither
-// for its restart (U22) nor for the decision of its block (U34). A call or a
+// for its restart (U22) nor for the decision of its block (U34), which the sender reads from the actor's life by
+// a plain load after the push, a word the thread that holds the actor writes with plain stores (`Fall`,
+// `Restart`, `Decided`): the read holds while one thread runs every program (U35), and on more than one it would
+// race those stores, as `Post`'s read of its supervisor's life would. A call or a
 // `send` to an actor that ended raises `actor-gone` at its line `line` of the file `file`, the message and what
 // crossed into it staying in the heap the running code allocates in (`ActorHeap`) (U6, U20; design record,
 // section 6, the owner, 2026-11-16, #519, comments 6919351399 and 6923513534), before its deadline is
@@ -4102,8 +4116,9 @@ void Pushed(byte* queue, byte* message) {
 
 // The first message of the queue of many senders at `queue` taken off it by its one holder, as that intrusive queue
 // of many producers and one consumer (`Pushed`) pops one (not checked at source): null where the queue holds none, and where a sender's swap stands before its link, which that sender's
-// wake follows (`Enqueue`), so that the holder takes the message at its next turn. A message taken has its link
-// cleared, which its sender set before the holder could take it.
+// wake follows (`Enqueue`, `Post`), so that the holder takes the message at its next turn. A message taken has its link
+// cleared, which the push that followed the message stored before the holder could take it, a sender's or the
+// stub's (`Pushed`).
 byte* Popped(byte* queue) {
     raw {
         byte* stub = queue + 16
@@ -4144,6 +4159,9 @@ byte* Popped(byte* queue) {
 // of the chain the actor's top activation waits in to the end of that activation's side list (layer 1; section
 // 6, "One-shot reply slot"), every other message to the end of the inbox, as tokio's `mpsc` channel pushes a
 // value at the tail of its list (not checked at source), so that an inbox keeps the order in which its messages were sent (U5, U15).
+// `Fall` and `EndActor` move them on a supervisor that the thread does not hold too, where a child's crash
+// escalates through it or ends it as the crash's taker (`Fell`): that holds while one thread runs every program
+// (U35), and on more than one it would make the thread a second consumer of a queue of one consumer.
 void Moved(byte* state) {
     raw {
         mut byte* block = Popped(state - 120)
@@ -5548,7 +5566,12 @@ void EndActor(byte* state) {
 // holds an actor (`HeldAlone`), the child, where its holder did not end it meanwhile, ended at once or its policy
 // and its supervisor cleared, and let go (`LetGo`), which frees the record of a child that ended where no entry of
 // it stands in the run queue. The child whose crash the thread takes is held by the thread already (`holding`),
-// and acted on under that hold, which `Run` lets go of once the crash was taken.
+// and acted on under that hold, which `Run` lets go of once the crash was taken. Three of these acts hold while
+// one thread runs every program (U35), and not on more than one: the test of which actors are children reads the
+// child's supervisor and its life by plain loads before any hold, and reads only the life again under it; the bit
+// is set before the hold, so that the child's holder could end the child and its `LetGo` free the record this
+// thread then holds; and the thread that takes a child's crash holds that child and then each of its siblings,
+// so that two threads that each hold one sibling would each wait on the other's hold.
 void EndChildren(byte* state) {
     raw {
         mut long index = SlotsUsed() - 1
@@ -5688,7 +5711,9 @@ void HeldAlone(byte* state) {
 // chain of its own and no deadline (U45; assumed: T9 of comment 6967625156); the runtime runs it,
 // and no message of the supervisor does (section 6, assumed there), the thread holding the actor (RUNNING in
 // its state word, `HeldAlone`) outside the run queue, where an entry of it can still stand, before the actor
-// runs again. A crash there is the actor's own (U3).
+// runs again. A crash there is the actor's own (U3). The take off the queue of the pauses lets go of that
+// queue's lock before this hold, and the life is not read again under it, which holds while one thread runs
+// every program (U35): on more than one, the end of the actor's supervisor could end and free it in that gap.
 void Restart(byte* state) {
     HeldAlone(state)
     raw {
@@ -5789,7 +5814,7 @@ thread static mut long decision = 0
 // The blocks the top-level code's wait runs, in the order of the crashes, a list as an inbox is (`Append`),
 // in the own heap of the thread that posted the first, null until then, which a thread's `Post` changes and the
 // main thread's wait takes from under the lock of the root's blocks (`RootLock`), so that a block posted on any
-// thread reaches the main thread; the one that runs there, null where none does; and the block whose escalation
+// thread reaches the main thread at its following turn, since `Post` wakes nothing; the one that runs there, null where none does; and the block whose escalation
 // ends the process on the stack its child raised on (`Escalate`).
 static mut byte* rootBlocks = null
 thread static mut byte* rootRunning = null
@@ -5901,8 +5926,10 @@ byte* RootHeap() {
 // The message `message` of a block to the supervisor whose state is `parent`: on its queue of the blocks
 // (`Pushed`), which its holder moves to the front of its inbox, after the blocks already there (`Moved`), so that
 // it runs after the current message and before the queued ones in the order of the crashes, and the supervisor
-// woken where it can run it (`Wake`; U28, U34); for the top-level code, null, at the end of the blocks its wait
-// runs (U33).
+// woken where it can run it (`Wake`; U28, U34), which its life says, read by a plain load after the push, as
+// `Enqueue` reads it, and which holds while one thread runs every program (U35); for the top-level code, null, at
+// the end of the blocks its wait runs (U33), which wakes nothing, so that the main thread's wait finds the block
+// at its following turn.
 void Post(byte* parent, byte* message) {
     raw {
         if parent == null {
@@ -5998,8 +6025,9 @@ void RootBlock(byte* message) {
 // The decision `word` of the block of the message `message` acted on for the actor whose state is
 // `child`, as the words of a policy act (U29): `restart` restarts it after its pause and `stop` ends it,
 // each after the crash's log line, written at the decision (U34; assumed: S10 of comment 6907441402), the
-// stack it raised on given back to the pool and the message freed, each under the child's hold (`HeldAlone`,
-// `LetGo`), as one actor acts on another (`EndChildren`); `escalate` crashes the supervisor (`Escalate`).
+// stack it raised on given back to the pool and the message freed; the restart and the end alone run under the
+// child's hold (`HeldAlone`, `LetGo`), as one actor acts on another (`EndChildren`); `escalate` crashes the
+// supervisor (`Escalate`).
 void Decided(byte* child, byte* message, long word) {
     raw {
         if word == 3 {

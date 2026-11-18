@@ -417,15 +417,16 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void The_lock_word_s_wait_and_wake_call_futex_by_its_number_on_each_architecture_and_windows_waits_on_the_address()
     {
-        // section 2, round 20, "Dir per arch": `futex` is 202 on x86-64 and 98 on AArch64, where 202 is `accept`, so each Linux
+        // section 2, round 20, "Dir per arch": `futex` is 202 on x86-64, and 98 on AArch64, where 202 is `accept`, so each Linux
         // architecture's file gives the lock word's wait and wake with its own number, which every program reaches through the lock of
-        // its streams (`Print`); Windows waits by `WaitOnAddress` on the 4 bytes of the word with no time limit (`INFINITE`) and wakes by
-        // `WakeByAddressSingle`, as Rust's futex does there
+        // its streams (`Print`): the wait by `FUTEX_WAIT_PRIVATE` (128) while the word holds the value the lock gives it, 2, with no time
+        // limit, and the wake of one by `FUTEX_WAKE_PRIVATE` (129); Windows waits by `WaitOnAddress` on the 4 bytes of the word with no
+        // time limit (`INFINITE`) and wakes by `WakeByAddressSingle`, as Rust's futex does there
         const string windowsWait = @"@WaitOnAddress\(ptr %[\w.]+, ptr %[\w.]+, i64 4, i32 -1\)";
         foreach (var (target, arch, wait, wake) in new[]
         {
-            (Target.Linux, Arch.X64, @"@syscall\(i64 202, ptr %", @"@syscall\(i64 202, ptr %"),
-            (Target.Linux, Arch.Arm64, @"@syscall\(i64 98, ptr %", @"@syscall\(i64 98, ptr %"),
+            (Target.Linux, Arch.X64, @"@syscall\(i64 202, ptr %[\w.]+, i64 128, i64 %[\w.]+, i64 0\)", @"@syscall\(i64 202, ptr %[\w.]+, i64 129, i64 1\)"),
+            (Target.Linux, Arch.Arm64, @"@syscall\(i64 98, ptr %[\w.]+, i64 128, i64 %[\w.]+, i64 0\)", @"@syscall\(i64 98, ptr %[\w.]+, i64 129, i64 1\)"),
             (Target.Windows, Arch.X64, windowsWait, @"@WakeByAddressSingle\(ptr %"),
             (Target.Windows, Arch.Arm64, windowsWait, @"@WakeByAddressSingle\(ptr %"),
         })
@@ -438,17 +439,87 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             {
                 var body = Regex.Match(ir, $@"^define [^\n]*@""?rt\.sys\.{function}\b[^\n]*\n(.*?)\n\}}", RegexOptions.Multiline | RegexOptions.Singleline);
                 Assert.True(body.Success, $"{target} {arch}: no `{function}` in the module");
-                Assert.Matches(call, body.Groups[1].Value);
+                Assert.True(Regex.IsMatch(body.Groups[1].Value, call), $"{target} {arch}: no `{call}` in `{function}`:\n{body.Groups[1].Value}");
             }
 
+            // the value the wait sleeps on, which the lock gives it: 2, taken with a thread that may sleep (`Lock`)
+            var locked = Regex.Match(ir, @"^define [^\n]*@""rt\.common\.Lock\.[0-9]+""\([^\n]*\n(.*?)\n\}", RegexOptions.Multiline | RegexOptions.Singleline);
+            Assert.True(locked.Success, $"{target} {arch}: no `Lock` in the module");
+            Assert.True(Regex.IsMatch(locked.Groups[1].Value, @"@""?rt\.sys\.LockWait\b[^\n(]*\(ptr %[\w.]+, i32 2\)"), $"{target} {arch}: `Lock` waits on no 2:\n{locked.Groups[1].Value}");
             Assert.Equal(target == Target.Linux ? 2 : 0, Regex.Count(ir, @"@syscall\(i64 (202|98), ")); // no other number of the two
         }
     }
 
     [Fact]
+    public void A_directory_s_creation_reads_st_mode_at_the_byte_of_its_architecture_s_struct_stat()
+    {
+        // S8, section 2, round 20, "Dir per arch": `Directory.Create` takes a directory that is there by the type in `st_mode`, at byte
+        // 24 of x86-64's `struct stat` and at byte 16 of AArch64's, the kernel's generic one, where 24 is `st_uid`; each Linux
+        // architecture's file gives the byte (`StatModeAt`), the emitted call passes it to `CreateDirectories`, and `IsDirectory` reads
+        // the mode at the byte it was given
+        const string text = "void | IoError Make() {\n    Directory.Create(\"made\")\n}\n\nMake() else {\n    IoError e => print(e)\n}\n";
+        foreach (var (arch, at) in new[] { (Arch.X64, 24), (Arch.Arm64, 16) })
+        {
+            var cpu = arch == Arch.X64 ? Cpu.Baseline : Cpu.ArmBaseline;
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], Builder.CheckRuntime(Target.Linux, arch), true, cpu: () => cpu);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var ir = compilation.Program.Ir.ReplaceLineEndings("\n");
+            string Body(string function)
+            {
+                var defined = Regex.Match(ir, $@"^define [^\n]*@""?{function}\b[^\n]*\n(.*?)\n\}}", RegexOptions.Multiline | RegexOptions.Singleline);
+                Assert.True(defined.Success, $"{arch}: no `{function}` in the module");
+                return defined.Groups[1].Value;
+            }
+
+            var given = Body(@"rt\.sys\.StatModeAt");
+            Assert.True(Regex.IsMatch(given, $@"\bi64 {at}\b") && !Regex.IsMatch(given, $@"\bi64 {40 - at}\b"), $"{arch}: `StatModeAt` gives no {at}:\n{given}");
+            var made = Body(@"f\.Make\.[0-9]+");
+            Assert.True(Regex.IsMatch(made, @"(%[\w.]+) = call i64 @""?rt\.sys\.StatModeAt\b[^\n(]*\(\)[^\n]*\n(?:[^\n]*\n)*?[^\n]*call i64 @""?rt\.sys\.CreateDirectories\b[^\n(]*\(ptr %[\w.]+, i64 %[\w.]+, i64 \1\)"),
+                $"{arch}: `CreateDirectories` is not given what `StatModeAt` gave:\n{made}");
+            // the mode loaded from the pointer the parameter's own load offsets, since a literal offset is a value too (`sext i32 24
+            // to i64`), so that no operand of a pointer's offset is a constant
+            var read = Body(@"rt\.sys\.IsDirectory");
+            Assert.True(Regex.IsMatch(read, @"store i64 %p1, ptr (%[\w.]+)\b[^\n]*\n(?:[^\n]*\n)*?[^\n]*?(%[\w.]+) = load i64, ptr \1\b[^\n]*\n(?:[^\n]*\n)*?[^\n]*?(%[\w.]+) = getelementptr i8, ptr %[\w.]+, i64 \2\b[^\n]*\n(?:[^\n]*\n)*?[^\n]*load i32, ptr \3\b"),
+                $"{arch}: `IsDirectory` reads `st_mode` at no byte its parameter gave:\n{read}");
+        }
+    }
+
+    [Fact]
+    public void A_function_of_sys_that_neither_file_or_both_give_is_named_with_both_files()
+    {
+        // round 20, "Dir per arch": a call on a file finds the runtime's function in the target's file or in the architecture's, which the
+        // folder `sys` reads beside it (`SysFunction`); where neither gives it, the error names both files and the function, and where both
+        // do, which the runtime's check refuses as `redeclared` (V9), it names each declaration by its file and line, where `.Single` named
+        // neither
+        const string linux = "runtime/linux/linux.kz", x64 = "runtime/linux/x86-64/x86-64.kz";
+        var program = SourceText.FromString("program.kz", "print(Environment.Args().Count)\n");
+        CheckedRuntime Edited(string path, Func<string, string> edit, List<string> errors)
+        {
+            var files = Runtime.Files.Select(f => f.Path == path ? new RuntimeFile(f.Path, Encoding.UTF8.GetBytes(edit(Encoding.UTF8.GetString(f.Bytes).ReplaceLineEndings("\n")))) : f).ToList();
+            Assert.NotEqual(Runtime.Files.Select(f => f.Bytes), files.Select(f => f.Bytes)); // the file did change
+            return Runtime.Check(files, Target.Linux, Arch.X64, errors);
+        }
+
+        Assert.NotNull(Builder.Compile(program, [], Builder.CheckRuntime(Target.Linux, Arch.X64), true, cpu: () => Cpu.Baseline).Program); // the positive control
+
+        var errors = new List<string>();
+        var missing = Edited(linux, t => t.Replace("pub int Arguments(", "int Arguments(", StringComparison.Ordinal), errors);
+        Assert.Empty(errors); // only a program's call reaches `Arguments`, so that the check finds nothing missing
+        var none = Assert.Throws<InvalidOperationException>(() => Builder.Compile(program, [], missing, true, cpu: () => Cpu.Baseline));
+        Assert.True(none.Message.Contains(linux, StringComparison.Ordinal) && none.Message.Contains(x64, StringComparison.Ordinal) && none.Message.Contains("`Arguments`", StringComparison.Ordinal), none.Message);
+
+        var declared = Encoding.UTF8.GetString(Runtime.Files.Single(f => f.Path == linux).Bytes).ReplaceLineEndings("\n").Split('\n').ToList().FindIndex(l => l.StartsWith("pub int Arguments(", StringComparison.Ordinal)) + 1;
+        var twice = Edited(x64, t => t + "\npub int Arguments(int skip) => skip\n", errors);
+        var again = Encoding.UTF8.GetString(Runtime.Files.Single(f => f.Path == x64).Bytes).ReplaceLineEndings("\n").Split('\n').Length + 1;
+        Assert.Contains(errors, e => e.StartsWith($"{x64}:{again}: redeclared: ", StringComparison.Ordinal)); // the check refuses it
+        var both = Assert.Throws<InvalidOperationException>(() => Builder.Compile(program, [], twice, true, cpu: () => Cpu.Baseline));
+        Assert.True(declared > 0 && both.Message.Contains($"{linux}:{declared}", StringComparison.Ordinal) && both.Message.Contains($"{x64}:{again}", StringComparison.Ordinal) && both.Message.Contains("`Arguments`", StringComparison.Ordinal), both.Message);
+    }
+
+    [Fact]
     public void Random_s_words_on_linux_are_each_thread_s_own()
     {
-        // section 6 (assumed: each thread's own, as Rust's `ThreadRng` is one per thread): the two flags and the descriptor `Random` keeps
+        // section 6 (assumed: each thread's own, as the `rand` crate's `ThreadRng` is one per thread, not checked at source): the two flags and the descriptor `Random` keeps
         // on Linux are the thread's local storage, since an atomic view takes the address of its word (R19) and no `static` gives one
         foreach (var arch in new[] { Arch.X64, Arch.Arm64 })
         {
@@ -1528,7 +1599,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // section 6, R19: a sender puts its message on the actor's queue by one swap of its end with acquire and release, after a
         // relaxed store of the message's link, and stores the link of the end it found with release, which the holder loads with
-        // acquire (`Pushed`, `Popped`, an intrusive queue of many producers and one consumer); the lock of the shared words is Rust's futex mutex, a compare-exchange from 0
+        // acquire (`Pushed`, `Popped`, an intrusive queue of many producers and one consumer, not checked at source); the lock of the shared words is of the shape of Rust's futex mutex (not checked at source), a compare-exchange from 0
         // to 1 with acquire, relaxed where it fails, relaxed loads in its spin, a swap of 2 with acquire, and its end a swap of 0 with
         // release before the wake (`LockTried`, `LockSpun`, `Lock`, `Unlock`); the count of the actors is one relaxed add (`ActorNew`); a
         // slot is set with release, its state before its number, cleared with release, its number before its link, and looked up with
