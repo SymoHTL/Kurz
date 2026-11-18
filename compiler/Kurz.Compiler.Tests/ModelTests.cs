@@ -582,7 +582,7 @@ public sealed class ModelTests
                 {
                     s[Returned] = 1;
                     s[Gone] = 1;
-                    s[at] = 4;
+                    s[at] = 5;
                     return;
                 }
 
