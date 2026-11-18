@@ -464,6 +464,19 @@ public sealed partial class Emitter
     }
 
     /// <summary>
+    /// U39, U19: whether the bound of a call's clause can raise with no call in it, an index out of range or an operator's
+    /// <c>overflow</c> or <c>divide-by-zero</c> (chapter 12), which crashes the actor whose code runs it: anything but a literal, its sign
+    /// included, or a read of a name, either in brackets; a bound that runs a call, a name that runs a property's among them, can wait
+    /// (<see cref="SemanticModel.CanWait"/>).
+    /// </summary>
+    private static bool Raises(Expression bound) => bound switch
+    {
+        ParenthesizedExpression p => Raises(p.Inner),
+        IntegerLiteral or RealLiteral or UnitLiteral or UnaryExpression { Operand: IntegerLiteral or RealLiteral or UnitLiteral } or NameExpression => false,
+        _ => true,
+    };
+
+    /// <summary>
     /// U4, U6, U11: a call of an actor's method as a message: the actor's reference, read first, or, inside it, made from <c>this</c>
     /// (U11), then the arguments, each a copy of its own in the actor's heap where it holds a block (U12,
     /// <see cref="Crossed"/>; comment 6902210646, Q5), stored into a block of that heap that the message's function frees once it ran; the block goes to the end of the actor's inbox (U5, U15), or of its side list, where it is a
@@ -482,7 +495,10 @@ public sealed partial class Emitter
     /// that the arguments and the message would go into (U21), or end (U13): the message is then built in a heap of its own, made for it (the runtime's
     /// <c>MessageHeapNew</c>), and at its queueing copied into the heap the actor has then by the function of its call site that copies it
     /// after a crash, its own heap then freed, as Erlang builds a message in the sender's heap and copies it into the receiver's at its
-    /// send. Where no argument can wait, the message is built in the actor's heap, and nothing runs between the read of that heap and the
+    /// send. So is a message whose clause's bound can raise with no call in it (<see cref="Raises"/>), which runs after the message is
+    /// built: its raise crashes the actor whose code builds the message before its queueing, and that crash frees the heap of its own with
+    /// the message and the copies of its arguments (the runtime's <c>Fall</c>), which the actor's heap would keep unqueued to the actor's
+    /// end. Where no argument can wait, the message is built in the actor's heap, and nothing runs between the read of that heap and the
     /// queueing that could end the actor. Where the actor ended, the message is built or copied in the heap the caller allocates in (the
     /// runtime's <c>ActorHeap</c>), and its queueing raises <c>actor-gone</c> at the call's line, a <c>send</c>'s too (the runtime's
     /// <c>Enqueue</c>; U6, U20; section 6, the owner, 2026-11-16, #519, comments 6919351399 and 6923513534).
@@ -497,7 +513,7 @@ public sealed partial class Emitter
             NameExpression n => Reference(This(n, n.Line)),
             _ => throw new InvalidOperationException($"a message through `{c.Callee.GetType().Name}` at line {c.Line}"),
         };
-        var own = c.Arguments.Select(a => a.Value).Concat(c.Clause()).Any(Model.CanWait) ? fn.Value($"call ptr {RuntimeFunction("MessageHeapNew")}()") : null;
+        var own = c.Arguments.Select(a => a.Value).Concat(c.Clause()).Any(Model.CanWait) || c.Clause().Any(Raises) ? fn.Value($"call ptr {RuntimeFunction("MessageHeapNew")}()") : null;
         var left = own is null ? null : HeapBegun(own, "MessageHeapFree");
         var heap = own ?? fn.Value($"call ptr {RuntimeFunction("ActorHeap")}({ReferenceWords(actor)})");
         var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => Default(f.Declaration!.Parameters[j].Default, owners[f]), cConvention: false, owned: true, into: heap);

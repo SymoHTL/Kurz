@@ -3440,7 +3440,8 @@ pub byte* ActorHeapNew(long size) {
 // builds the message, so that a crash of that actor frees them (`Crashed`).
 thread static mut byte* messageHeaps = null
 
-// The heap of its own a message is built in where any of its arguments can wait, which
+// The heap of its own a message is built in where any of its arguments or the bound of its call's clause
+// can wait, or that bound can raise with no call in it (`Emitter.EmitMessage`), which
 // the copy at its queueing leaves and the emitted code then frees, as Erlang copies a message into the
 // receiver's heap at its send (U12, U21): a crash or an end of the actor it goes to, during that wait, frees
 // no block of it. Built inside a message, it is listed with the running actor, so that the crash of the
