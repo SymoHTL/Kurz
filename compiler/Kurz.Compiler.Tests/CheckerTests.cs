@@ -7165,6 +7165,7 @@ public sealed class CheckerTests
         Assert.Equal(["second", "first"], model.Tests.Select(t => t.Name));
         Assert.All(model.Tests, t => Assert.Equal(Types.Void, model.TestOf(t).ReturnType));
         Assert.All(model.Tests, t => Assert.Same(t.Body, model.TestOf(t).Declaration!.BlockBody));
+        Assert.All(model.Tests, t => Assert.Same(model.TestOf(t), model.FunctionOf(model.TestOf(t).Declaration!))); // the function a code generator reads
 
         var topLevel = tree.Statements.OfType<AssertionStatement>().ToList();
         var paren = model.AssertionOf(topLevel[0]);
@@ -7223,6 +7224,7 @@ public sealed class CheckerTests
         // open, once at their line, in a test or not; the duration's variables count as read (E1) (assumed: D7 of issue 586, comment
         // 6992687784, and F20 of comment 6993110710)
         NotSupportedAt(1, "Y8", "test cluster 3 seed 42 {\n    a = spawn Store()\n    split 2 | 3\n    check a.Count() == 1\n}");
+        Assert.Empty(Check("test cluster 3 seed 42 {\n}").Checker.Model.Tests); // no test of `kurz test`
         NotSupportedAt(2, "Y9", "test \"a\" {\n    mock Clock with FakeClock\n}");
         NotSupportedAt(1, "Y9", "mock Clock with FakeClock");
         NotSupportedAt(3, "Y10", "test \"a\" {\n    d = 1s\n    advance d\n}");

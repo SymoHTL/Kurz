@@ -1111,6 +1111,15 @@ public sealed class ParserTests
         Assert.IsType<VariableDeclaration>(tree.Statements[^1]);
     }
 
+    [Fact]
+    public void A_mock_whose_type_no_with_follows_is_no_mock()
+    {
+        // Y9: `mock` is the statement where a type, `with` and a type follow it; `mock Clock FakeClock` declares `Clock` of a type named
+        // `mock`, and the name after it is `syntax` (L18; assumed: D2 of issue 586, comment 6992687784)
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("mock Clock FakeClock").Distinct());
+        Assert.StartsWith("(mock ", Tree("mock Clock with FakeClock"));
+    }
+
     [Theory]
     [InlineData("check a.Count == 2", "a.Count == 2")]
     [InlineData("check a.Count==2", "a.Count==2")]
@@ -1131,11 +1140,11 @@ public sealed class ParserTests
     {
         // Y8 with section 13: `test cluster N seed S { ... }` is read to the end of its block, nothing in it parsed, so that the checker
         // says `not supported` once at its line (assumed: D7 of issue 586, comment 6992687784)
-        var program = "test cluster 3 seed 42 {\n    a = spawn Store()\n    split 2 | 3\n    check a.Count() == 1\n}\nint x = 1";
+        var program = "test cluster 3 seed 42 {\n    a = spawn Store()\n    split 2 | 3\n    if a.Count() > 0 {\n        heal\n    }\n\n    check a.Count() == 1\n}\nint x = 1";
         var (tree, diagnostics) = Parse(program);
         Assert.Empty(diagnostics.Items);
         Assert.Equal("(test-cluster {}) (declare int x (int 1))", SyntaxPrinter.Print(tree));
-        Assert.Equal(5, Assert.IsType<TestDeclaration>(tree.Statements[0]).Body.EndLine);
+        Assert.Equal(9, Assert.IsType<TestDeclaration>(tree.Statements[0]).Body.EndLine);
     }
 
     [Theory]

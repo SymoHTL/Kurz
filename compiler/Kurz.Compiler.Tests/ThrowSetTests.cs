@@ -80,6 +80,7 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         data EComparedText
         data EKeyedText
         data ECheckText
+        data ECheckCall
 
         void Direct() {
             throw EDirect
@@ -618,6 +619,14 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
             check a == CheckedSide(1)
         }
 
+        bool CheckedCall() {
+            throw ECheckCall
+        }
+
+        void ViaCheckCondition() {
+            check CheckedCall()
+        }
+
         data Picked(int N)
 
         bool KeepPicked(Picked p) {
@@ -737,6 +746,7 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     [InlineData("ViaUnionText", "EUnionText")] // the Text() of a case of a union (A4)
     [InlineData("ViaWeakText", "EWeakText")] // the Text() of the target of a `weak` field of a data type without its own Text() (A3, R3)
     [InlineData("ViaCheck", "ECheckText")] // the Text() of each side of a comparison whose failure a `check` shows (Y6, F10)
+    [InlineData("ViaCheckCondition", "ECheckCall")] // the condition of a `check` (Y6)
     [InlineData("ViaSpawn", "ESpawn")] // the construction of an actor a spawn makes, whose throw is the spawner's crash (U3)
     [InlineData("ViaClause", "EClause")] // the bound of a call's clause, which runs in the caller (U39)
     [InlineData("ViaGeneric", "EGeneric")] // a throw of a type parameter, with the type argument the call gives it (T19)
