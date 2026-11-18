@@ -2537,9 +2537,9 @@ print(c.Done())
 
 Case: [actors/timeout-chain-nested.kz](../corpus/actors/timeout-chain-nested.kz)
 ```kurz
-// `Ask` holds the thread past the 100 ms of the chain's root, so its call `S.Get()`, which takes the time its chain has left
-// in place of its own 5 seconds, raises `call-timeout` in `Front`, its crash, which prints nothing after it, and the
-// top-level code's call, whose callee crashed once its deadline had passed, raises `call-timeout` too
+// `Ask` holds the thread past the 100 ms of the chain's root, so its call `S.Get()`, which takes the time its chain has left,
+// raises `call-timeout` in `Front`, its crash, and the top-level code's call, whose callee crashed once its deadline had
+// passed, raises `call-timeout` too
 
 // the thread held for `d`, with no call and no wait
 void Hold(duration d) {
@@ -2555,9 +2555,7 @@ actor Store {
 actor Front(Store S) {
     pub int Ask() {
         Hold(150ms)
-        n = S.Get()
-        print("asked {n}")
-        return n
+        return S.Get()
     }
 }
 
