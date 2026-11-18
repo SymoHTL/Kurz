@@ -1,0 +1,6 @@
+// expect: output
+// | 4
+// rules: U40
+
+within = 3
+print(within + 1)

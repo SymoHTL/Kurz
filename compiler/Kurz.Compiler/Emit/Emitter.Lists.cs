@@ -114,6 +114,7 @@ public sealed partial class Emitter
         {
             regionSessions.Remove(regions[^1]);
             regionHeaps.Remove(regions[^1]);
+            regionBlocks.Remove(regions[^1]);
             regions.RemoveAt(regions.Count - 1);
         }
     }
@@ -173,6 +174,7 @@ public sealed partial class Emitter
         }
 
         EndHeaps(temporaries);
+        EndWithin(temporaries);
     }
 
     private void LetGoOf(List<(string Slot, KurzType Type)> variables)

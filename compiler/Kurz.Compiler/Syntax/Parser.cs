@@ -587,6 +587,11 @@ public sealed class Parser
                 return ParseDecision(); // U29: a decision of the block; the words stay names elsewhere, and before `=` there too, as `send` does (U6)
             }
 
+            if (token.Text == "within" && TryWithin(out var within))
+            {
+                return within!; // U38: the block `within d { ... }`; the word stays a name elsewhere (U40)
+            }
+
             if (token.Text == "const" && Peek() is { Kind: TokenKind.Name, Text: "assert" } && Peek(2).Kind == TokenKind.LeftParen
                 && !BodyFollowsTheParentheses())
             {
@@ -1786,6 +1791,29 @@ public sealed class Parser
         }
 
         return clauses;
+    }
+
+    /// <summary>
+    /// U38, U40: <c>within d { ... }</c>, the word, its bound read as the condition of an <c>if</c> is (<see cref="Header"/>), and a block
+    /// that opens on the line where the bound ends, as C1 has an <c>if</c>'s; tried, so that where no block follows the bound the word
+    /// is a name, <c>within(3)</c> a call and <c>within + 1</c> a sum, as <c>on crash</c>, <c>attempt</c> and <c>vouch</c> are words
+    /// only where they stand (section 6, comment 6847932993, Q10). False, with the cursor back where it was, when no block follows.
+    /// </summary>
+    private bool TryWithin(out Statement? statement)
+    {
+        var word = Current;
+        Expression? bound = null;
+        var ok = Try(() =>
+        {
+            Advance();
+            bound = Header();
+            if (!At(TokenKind.LeftBrace) && !BraceOnNextLine())
+            {
+                throw Fail("the block of `within`");
+            }
+        });
+        statement = ok ? new WithinStatement(word.Line, bound!, ParseBlockAfter(tokens[index - 1].Line, "`within`")) : null;
+        return ok;
     }
 
     /// <summary><c>send c.Add(1)</c> (U6): the call that follows is the statement's; anything but a call there is <c>syntax</c> (U14).</summary>

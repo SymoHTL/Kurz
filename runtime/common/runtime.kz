@@ -3369,9 +3369,10 @@ pub string ExitErrorText(ExitError e) {
 // actor that ends frees its heap whole, that first page with it (`EndActor`). An
 // actor stands in the run queue where an actor stands after it or it is the last, as an intrusive list
 // tells its members by their links. A message is a block the emitted code makes: the message after it in
-// its list, the table of its call site, the function that runs it and the one that copies it into another
-// heap (U21), its reply, null after `send`, its chain ID, 16 bytes, and its arguments; the function that
-// runs it frees it.
+// its list, the table of its call site, the function that runs it, the one that copies it into another
+// heap (U21) and the one that drops it unrun (U37), its reply, null after `send`, its chain ID, 16 bytes, its
+// deadline, the largest `long` for none (`Never`), the deadline of the `within` block that runs while the
+// message runs, 0 for none (U38), and its arguments; the function that runs it frees it.
 //
 // A message runs in an activation, which lives in the header of a stack of the actor's own that the
 // thread switches to and back from (design record, section 6, "Own stack"), below. A call that waits
@@ -3778,7 +3779,15 @@ pub string ActorText(string name, long number) {
 // (U22) nor for the decision of its block (U34). A call or a
 // `send` to an actor that ended raises `actor-gone` at its line `line` of the file `file`, the message and what
 // crossed into it staying in the heap the running code allocates in (`ActorHeap`) (U6, U20; design record,
-// section 6, the owner, 2026-11-16, #519, comments 6919351399 and 6923513534).
+// section 6, the owner, 2026-11-16, #519, comments 6919351399 and 6923513534), as an answer that stands
+// before its deadline is read (U36). The message is stamped with its deadline too (U37): a `send` carries
+// the running message's, none in the top-level code (section 6, comment 6880404917, Q13; assumed: T9 of
+// comment 6967625156); a call the smaller of that deadline and its own bound, the deadline of the `within`
+// block that runs, else the default bound from now, 5 seconds (U36, U38, U44; assumed: T8 of that comment), which
+// its reply holds too, for its wait (`Wait`). A message whose deadline passed at its queueing is dropped
+// unqueued (`Discard`), and a call raises `call-timeout` at its line, the crash of the actor that makes it,
+// while a `send` raises nothing (U37, U45; assumed: T1 of comment 6967147952, T10 of comment 6967625156), as
+// tonic's client fails a call whose deadline passed and a send on tokio's channel reads no deadline.
 pub void Enqueue(long index, long number, byte* message, string file, int line) {
     sys.Entered()
     byte* state = Lookup(index, number)
@@ -3789,15 +3798,49 @@ pub void Enqueue(long index, long number, byte* message, string file, int line) 
 
     raw {
         *Ptr<byte*>(message) = null
+        long now = PauseClock()
+        mut long deadline = Never()
+        mut long block = rootBlock
         if running == null {
             NewChain(message + 24)
         } else {
             *Ptr<long>(message + 24) = *Ptr<long>(running + 344)
             *Ptr<long>(message + 32) = *Ptr<long>(running + 352)
+            byte* from = *Ptr<byte*>(running + 328)
+            deadline = *Ptr<long>(from + 40)
+            block = *Ptr<long>(from + 48)
+        }
+
+        byte* reply = *Ptr<byte*>(message + 16)
+        if reply != null {
+            mut long own = block
+            if own == 0 {
+                own = Due(now, sys.DefaultBound())
+            }
+
+            if own < deadline {
+                deadline = own
+            }
+
+            *Ptr<long>(reply + 16) = deadline
+            *Ptr<byte*>(reply + 24) = null
+            *Ptr<byte*>(reply + 32) = null
+        }
+
+        *Ptr<long>(message + 40) = deadline
+        *Ptr<long>(message + 48) = 0
+        if deadline <= now {
+            Discard(message)
+            sys.Left()
+            if reply != null {
+                Raise("call-timeout", file, line)
+            }
+
+            return
         }
 
         byte* top = *Ptr<byte*>(state - 8)
-        if top != null && *Ptr<byte*>(message + 16) != null && *Ptr<long>(message + 24) == *Ptr<long>(top + 344) && *Ptr<long>(message + 32) == *Ptr<long>(top + 352) {
+        if top != null && reply != null && *Ptr<long>(message + 24) == *Ptr<long>(top + 344) && *Ptr<long>(message + 32) == *Ptr<long>(top + 352) {
             Append(top + 376, message)
         } else {
             Append(state - 32, message)
@@ -3970,8 +4013,8 @@ void Queue(byte* state) {
 }
 
 // Whether the actor whose state is `state` has a message that can go on: a call of its chain on the
-// side list of its top activation, that activation's reply set, or, where it is idle, a message in its
-// inbox.
+// side list of its top activation, that activation's reply set or its deadline passed at the scheduler's
+// turn (`Waited`), or, where it is idle, a message in its inbox.
 bool Ready(byte* state) {
     raw {
         byte* top = *Ptr<byte*>(state - 8)
@@ -3980,7 +4023,7 @@ bool Ready(byte* state) {
         }
 
         byte* reply = *Ptr<byte*>(top + 360)
-        return *Ptr<byte*>(top + 376) != null || (reply != null && ReplyState(reply) != 0)
+        return *Ptr<byte*>(top + 376) != null || (reply != null && (ReplyState(reply) != 0 || Waited(reply)))
     }
 }
 
@@ -4016,7 +4059,8 @@ pub byte* ReplyTaken(byte* message) {
 
 // The word of the reply `reply`, loaded with acquire, so that what its owner stored before the word's release
 // store, the result among it, is the waiter's to read: 0 while no answer stands, 1 once the result stands, 2
-// where its callee crashed (U20), 3 where the actor that was to answer ended.
+// where its callee crashed (U20), 3 where the actor that was to answer ended, 4 where its message was dropped
+// at its deadline (U37).
 int ReplyState(byte* reply) {
     raw {
         return AtomicInt.FromPtr(Ptr<int>(reply)).Load(MemoryOrder.Acquire)
@@ -4049,7 +4093,8 @@ pub void Replied(byte* reply) {
 }
 
 // The reply `reply` of a call, which its owner took (`ReplyTaken`), set to `kind` with no result: 2 where its
-// callee crashed (U20), 3 where the actor that was to answer ended; the waiter and its actor read before the
+// callee crashed (U20), 3 where the actor that was to answer ended, 4 where its message was dropped at its
+// deadline (`Dropped`; U37); the waiter and its actor read before the
 // word's release store, and the activation that waits on it woken as `Replied` wakes it, where its actor
 // neither waits for its restart or for the decision of its block nor ended, as C#'s `TaskCompletionSource` is
 // set faulted.
@@ -4068,6 +4113,203 @@ void Signal(byte* reply, int kind) {
                 Wake(state)
             }
         }
+    }
+}
+
+// ---- the deadlines of the calls (U36 to U45) ----------------------------------------------------------------
+
+// The deadline of none, the largest `long`, which no clock reaches (U37).
+long Never() => 9223372036854775807
+
+// The deadline `bound` nanoseconds after `now`, the bound rounded up to whole milliseconds (U36): `now` for a
+// bound of zero or less, a deadline that has passed (U40; assumed: T4 of comment 6967147952), and none where it
+// would pass the largest time the clock holds, as Tokio's `timeout` falls back on a far future where its sum
+// overflows (U40).
+long Due(long now, long bound) {
+    if bound <= 0 {
+        return now
+    }
+
+    mut long milliseconds = bound / 1000000
+    if bound % 1000000 != 0 {
+        milliseconds = milliseconds + 1
+    }
+
+    if milliseconds > (Never() - now) / 1000000 {
+        return Never()
+    }
+
+    return now + milliseconds * 1000000
+}
+
+// The earlier of two deadlines.
+long Earliest(long a, long b) {
+    if a < b {
+        return a
+    }
+
+    return b
+}
+
+// The clock the scheduler read at its turn, which the deadlines of the activations that wait and of the
+// messages it takes are held to (`Waited`, `RunOne`), and the deadline of the `within` block of the top-level
+// code that runs, 0 for none (U38); a running message's stands in the message (`Enqueue`).
+thread static mut long tick = 0
+thread static mut long rootBlock = 0
+
+// The entry of a `within` block (U38): its deadline, `bound` from now (`Due`), the smaller of it and the
+// deadline of the block it stands in (U38, assumed), set for the running code, the top-level code's or the
+// running message's, and the deadline it replaces, which its exit puts back (`BlockExit`); the emitted code calls
+// it at the block's entry, and `BlockExit` at every way out of the block that goes on running.
+pub long BlockEnter(long bound) {
+    mut long before = 0
+    raw {
+        if running == null {
+            before = rootBlock
+        } else {
+            before = *Ptr<long>(*Ptr<byte*>(running + 328) + 48)
+        }
+
+        mut long deadline = Due(PauseClock(), bound)
+        if before != 0 && before < deadline {
+            deadline = before
+        }
+
+        BlockExit(deadline)
+    }
+
+    return before
+}
+
+// The exit of a `within` block (U38): the deadline its entry replaced, `before`, set again for the running
+// code; its entry sets its own deadline through it too.
+pub void BlockExit(long before) {
+    raw {
+        if running == null {
+            rootBlock = before
+        } else {
+            *Ptr<long>(*Ptr<byte*>(running + 328) + 48) = before
+        }
+    }
+}
+
+// The timers of the thread: the replies of the activations that wait inside a message with a deadline, from the
+// earliest deadline on, each reply holding the one before it at 24 and the one after it at 32, as Tokio's timer
+// keeps its entries in lists through the entries themselves (not checked at source); a reply leaves them where
+// its wait ends and at the fall of its actor (`Fall`), so that none outlives the frame that holds it. An
+// insertion walks from the latest deadline back, which a deadline of 5 seconds from now passes at once.
+thread static mut byte* timers = null
+thread static mut byte* timersLast = null
+
+// The reply `reply` of an activation that parks among the timers, after every reply whose deadline is not later,
+// where it has a deadline.
+void TimerAdd(byte* reply) {
+    raw {
+        long deadline = *Ptr<long>(reply + 16)
+        if deadline == Never() {
+            return
+        }
+
+        mut byte* before = timersLast
+        while before != null && *Ptr<long>(before + 16) > deadline {
+            before = *Ptr<byte*>(before + 24)
+        }
+
+        mut byte* after = timers
+        if before != null {
+            after = *Ptr<byte*>(before + 32)
+            *Ptr<byte*>(before + 32) = reply
+        } else {
+            timers = reply
+        }
+
+        *Ptr<byte*>(reply + 24) = before
+        *Ptr<byte*>(reply + 32) = after
+        if after != null {
+            *Ptr<byte*>(after + 24) = reply
+        } else {
+            timersLast = reply
+        }
+    }
+}
+
+// The reply `reply` taken off the timers, where it stands among them.
+void TimerRemove(byte* reply) {
+    raw {
+        byte* before = *Ptr<byte*>(reply + 24)
+        byte* after = *Ptr<byte*>(reply + 32)
+        if before == null && timers != reply {
+            return
+        }
+
+        if before != null {
+            *Ptr<byte*>(before + 32) = after
+        } else {
+            timers = after
+        }
+
+        if after != null {
+            *Ptr<byte*>(after + 24) = before
+        } else {
+            timersLast = before
+        }
+
+        *Ptr<byte*>(reply + 24) = null
+        *Ptr<byte*>(reply + 32) = null
+    }
+}
+
+// The first deadline of the timers, none where none stands.
+long Next() {
+    raw {
+        if timers == null {
+            return Never()
+        }
+
+        return *Ptr<long>(timers + 16)
+    }
+}
+
+// The timers whose deadline passed at `now` fired, the earliest first: each reply taken off them, and the
+// actor of the activation that waits on it woken, which goes on where that activation is its top (`Waited`);
+// the timer owns no reply and sets no word, so that the activation's own fall unhooks its reply (`Wait`).
+void Fire(long now) {
+    raw {
+        while timers != null && *Ptr<long>(timers + 16) <= now {
+            byte* reply = timers
+            TimerRemove(reply)
+            Wake(*Ptr<byte*>(*Ptr<byte*>(reply + 8) + 320))
+        }
+    }
+}
+
+// Whether the deadline of the reply `reply` passed at the scheduler's turn.
+bool Waited(byte* reply) {
+    raw {
+        return *Ptr<long>(reply + 16) <= tick
+    }
+}
+
+// The message `message`, whose deadline passed before its callee took it, dropped (U37; assumed: T3 of comment
+// 6967147952): its reply, where it has one, taken off it by the swap the callee takes it by (`ReplyTaken`) and
+// set `dropped`, which wakes its waiter, whose wait raises `call-timeout` (`Wait`), and the message let go of.
+void Dropped(byte* message) {
+    raw {
+        byte* reply = ReplyTaken(message)
+        if reply != null {
+            Signal(reply, 4)
+        }
+
+        Discard(message)
+    }
+}
+
+// The message `message` let go of unrun, by the third function of its call site's table, which lets go of its
+// arguments and frees its block.
+void Discard(byte* message) {
+    raw {
+        extern "C" (byte*) => void drop = *Ptr<extern "C" (byte*) => void>(*Ptr<byte*>(message + 8) + 16)
+        drop(message)
     }
 }
 
@@ -4091,15 +4333,36 @@ void Signal(byte* reply, int kind) {
 // left pending, before each of these (`RootBlock`; U33). A reply set `callee crashed` raises `callee-crashed`
 // at the call's line, the crash of the waiting actor in its turn (U20), and one set `gone` raises
 // `actor-gone` there, a call that waits on an actor that ended (U20).
+//
+// A call waits until its deadline, which its reply holds (`Enqueue`; U36, U37). The top-level code reads the
+// clock at each turn of its loop and leaves the loop where the deadline passed with no answer set, the
+// scheduler's tick the clock it read, and before anything else in the turn it fires the timers of the
+// activations that wait (`Fire`); with nothing left to run it raises `deadlock` all the same, with timers that
+// stand (U18, U42; assumed: T6 of comment 6967625156), and a restart's pause sleeps to the first of its end, the
+// first timer and the deadline. Inside a message the activation's reply joins the thread's timers while it
+// parks (`TimerAdd`), and the activation goes on where its deadline passed at the scheduler's turn (`Waited`),
+// its reply leaving the timers at every way out (`TimerRemove`). The reply's word is read once after the wait, and
+// an answer set before that read is the call's result (U36), the header then naming no reply. A call that left
+// its wait with no answer raises `call-timeout` at its line, the crash of the waiting actor in its turn, whose
+// fall unhooks the reply, which the header still names (`Fall`; U20); so does a reply set `dropped` (`Dropped`),
+// and a reply set `callee crashed` or `gone` once the call's own deadline passed (U43; assumed: T7 of comment
+// 6967625156), as tonic reports a call's own deadline.
 pub void Wait(byte* reply, byte* message, string file, int line) {
     sys.Entered()
     raw {
         if running == null {
+            long deadline = *Ptr<long>(reply + 16)
             while ReplyState(reply) == 0 {
+                long now = PauseClock()
+                if deadline <= now {
+                    break
+                }
+
+                tick = now
+                Fire(now)
                 if rootBlocks != null && *Ptr<byte*>(rootBlocks) != null {
                     RootBlock()
                 } else if paused != null {
-                    long now = PauseClock()
                     long due = *Ptr<long>(*Ptr<byte*>(paused - 80) + 32)
                     if now >= due {
                         // the restart runs the constructor through `Start` and `Run`, which clears the count of the
@@ -4107,7 +4370,7 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
                         // constructor's (O11)
                         Restart(paused)
                     } else if runFirst == null {
-                        PauseSleep(due - now)
+                        PauseSleep(Earliest(Earliest(due, deadline), Next()) - now)
                     } else {
                         RunOne()
                     }
@@ -4123,20 +4386,29 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
             byte* header = running
             *Ptr<byte*>(header + 360) = reply
             *Ptr<byte*>(header + 432) = message
+            TimerAdd(reply)
             byte* heap = std.HeapUse(null)
-            while ReplyState(reply) == 0 {
+            while ReplyState(reply) == 0 && !Waited(reply) {
                 long entries = sys.Inside(0)
                 sys.Switch(header, threadSide)
                 sys.Inside(entries)
             }
 
+            TimerRemove(reply)
             std.HeapUse(heap)
-            *Ptr<byte*>(header + 360) = null
-            *Ptr<byte*>(header + 432) = null
         }
 
         sys.Left()
         int kind = ReplyState(reply)
+        if kind != 0 && running != null {
+            *Ptr<byte*>(running + 360) = null
+            *Ptr<byte*>(running + 432) = null
+        }
+
+        if kind == 0 || kind == 4 || (kind != 1 && *Ptr<long>(reply + 16) <= PauseClock()) {
+            Raise("call-timeout", file, line)
+        }
+
         if kind == 2 {
             Raise("callee-crashed", file, line)
         }
@@ -4155,7 +4427,9 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
 // record freed here, the first page of its heap (`EndActor`). The thread holds the actor from the take
 // of its entry (`Claimed`), which a thread that holds it already, or its constructor, refuses, to the end of
 // its turn (`LetGo`, in `Run` where it runs); a passed-over actor is let go at once and not queued again for
-// its own inbox.
+// its own inbox. A message whose deadline passed at the scheduler's turn is dropped at its take, from the inbox
+// and from the side list, before the next is taken (`Dropped`; U37), and a top activation whose deadline
+// passed goes on (`Waited`).
 void RunOne() {
     raw {
         byte* state = runFirst
@@ -4182,18 +4456,28 @@ void RunOne() {
 
         byte* top = *Ptr<byte*>(state - 8)
         if top == null {
-            if *Ptr<byte*>(state - 32) != null {
-                Start(state, Taken(state - 32), null)
-                return
+            while *Ptr<byte*>(state - 32) != null {
+                byte* message = Taken(state - 32)
+                if *Ptr<long>(message + 40) > tick {
+                    Start(state, message, null)
+                    return
+                }
+
+                Dropped(message)
             }
         } else {
             byte* reply = *Ptr<byte*>(top + 360)
-            if *Ptr<byte*>(top + 376) != null {
-                Start(state, Taken(top + 376), top)
-                return
+            while *Ptr<byte*>(top + 376) != null {
+                byte* message = Taken(top + 376)
+                if *Ptr<long>(message + 40) > tick {
+                    Start(state, message, top)
+                    return
+                }
+
+                Dropped(message)
             }
 
-            if reply != null && ReplyState(reply) != 0 {
+            if reply != null && (ReplyState(reply) != 0 || Waited(reply)) {
                 Run(state, top)
                 return
             }
@@ -4367,7 +4651,7 @@ void CrashActor(string id, string file, int line, bool hasText, string text) {
     raw {
         byte* header = running
         if header == null {
-            if rootRunning != null && *Ptr<long>(rootRunning + 160) == 0 {
+            if rootRunning != null && *Ptr<long>(rootRunning + 176) == 0 {
                 BlockLogged(rootRunning)
             }
 
@@ -4618,7 +4902,8 @@ void Ends(bool hasText, byte* id, long idCount, byte* file, long fileCount, long
 
 // The fall of the actor whose state is `state` at its crash, `header` its top activation, null where it
 // has none (U19, U21). Each activation of the actor, from the top down, has its open copy sessions ended
-// (`CopyAbort`); where it waits and its reply's word is 0, the reply is taken off the message it waits on by
+// (`CopyAbort`); where it waits, its reply leaves the timers (`TimerRemove`); where its reply's word is 0, which
+// a wait that its deadline ended leaves (`Wait`), the reply is taken off the message it waits on by
 // the swap the callee takes it by (`ReplyTaken`), so that the callee runs to its end and its reply goes
 // nowhere, and where the callee took it first, the callee owns it and writes into the activation's frame,
 // whose stack stays out of the pool while the word is 0; the call it runs, whose reply it takes the same
@@ -4653,6 +4938,10 @@ void Fall(byte* state, byte* header, byte* kept) {
             }
 
             byte* waited = *Ptr<byte*>(at + 360)
+            if waited != null {
+                TimerRemove(waited)
+            }
+
             if waited != null && ReplyState(waited) == 0 && ReplyTaken(*Ptr<byte*>(at + 432)) == null {
                 while ReplyState(waited) == 0 {
                 }
@@ -4665,7 +4954,7 @@ void Fall(byte* state, byte* header, byte* kept) {
             }
 
             if *Ptr<byte*>(taken + 8) == blockTable {
-                if *Ptr<long>(taken + 160) == 0 {
+                if *Ptr<long>(taken + 176) == 0 {
                     BlockLogged(taken)
                 }
 
@@ -4980,7 +5269,8 @@ void HeldAlone(byte* state) {
 // The restart of the actor whose state is `state`, the first of the queue of the pauses, whose pause
 // ended (U22): its constructor run again in an activation of its own, before any message of its inbox, on a
 // copy of the kept arguments of its `spawn` (section 6, Q13), by the function the first word of the block of
-// its restart names, which takes the block as a message's table and the actor's heap; the runtime runs it,
+// its restart names, which takes the block as a message's table and the actor's heap, in a message with a
+// chain of its own and no deadline (U45; assumed: T9 of comment 6967625156); the runtime runs it,
 // and no message of the supervisor does (section 6, assumed there), the thread holding the actor (RUNNING in
 // its state word, `HeldAlone`) outside the run queue, where an entry of it can still stand, before the actor
 // runs again. A crash there is the actor's own (U3).
@@ -4991,16 +5281,19 @@ void Restart(byte* state) {
         paused = *Ptr<byte*>(side + 40)
         *Ptr<int>(state - 88) = 0
         *Ptr<long>(side + 24) = PauseClock()
-        byte* message = AllocateIn(*Ptr<byte*>(state - 64), 40)
+        byte* message = AllocateIn(*Ptr<byte*>(state - 64), 56)
         *Ptr<byte*>(message) = null
         *Ptr<byte*>(message + 8) = side
         *Ptr<byte*>(message + 16) = null
         NewChain(message + 24)
+        *Ptr<long>(message + 40) = Never()
+        *Ptr<long>(message + 48) = 0
         Start(state, message, null)
     }
 }
 
-// The clock every pause reads (U23): the system's monotonic clock, in nanoseconds, 0 where it cannot be read.
+// The clock every pause and every deadline reads (U23, U36): the system's monotonic clock, in nanoseconds, 0
+// where it cannot be read.
 long PauseClock() {
     mut long now = 0
     if !sys.MonotonicNow(mut now) {
@@ -5010,7 +5303,8 @@ long PauseClock() {
     return now
 }
 
-// The sleep of the top-level code until a restart's pause ends, `nanoseconds` from now (U23).
+// The sleep of the top-level code until a restart's pause ends, or a deadline before it passes, `nanoseconds`
+// from now (U23, U36).
 void PauseSleep(long nanoseconds) {
     sys.Sleep(nanoseconds)
 }
@@ -5110,53 +5404,56 @@ pub void Decide(long word) {
 
 // The message of the block of the policy of the actor whose state is `taker`, made in the heap `above`
 // of its supervisor (U28): the message after it, the blocks' table, no reply, a chain of its own, as a
-// restart's message has (U34; assumed: S11 of comment 6907441402), the actor, its stack that raised, `kept`,
+// restart's message has (U34; assumed: S11 of comment 6907441402), with no deadline and no block's (U37,
+// U38), the actor, its stack that raised, `kept`,
 // null for none, then a copy of the crash's id and its count, the file, a constant of the emitted code, and
 // its count, the line, whether the text stands below the error line, a copy of the text and its count, the
 // chain of the activation `header` that crashed, the number of the thrown value's type, one more, 0 for none,
 // the copy of that value, made by `copy` from `slot`, null where `copy` is null, as for a thrown `null`,
 // which holds no value, and that copy's function, and whether the block escalated the crash (`Escalate`),
-// 168 bytes.
+// 184 bytes.
 byte* Pending(byte* taker, byte* above, byte* kept, byte* header, bool hasText, byte* id, long idCount, byte* file, long fileCount, long line, byte* from, long count, long number, byte* slot, byte* copy) {
     raw {
-        byte* message = AllocateIn(above, 168)
+        byte* message = AllocateIn(above, 184)
         *Ptr<byte*>(message) = null
         *Ptr<byte*>(message + 8) = BlockTable()
         *Ptr<byte*>(message + 16) = null
         NewChain(message + 24)
-        *Ptr<byte*>(message + 40) = taker
-        *Ptr<byte*>(message + 48) = kept
-        *Ptr<byte*>(message + 56) = Copied(id, idCount, above)
-        *Ptr<long>(message + 64) = idCount
-        *Ptr<byte*>(message + 72) = file
-        *Ptr<long>(message + 80) = fileCount
-        *Ptr<long>(message + 88) = line
-        *Ptr<long>(message + 96) = 0
+        *Ptr<long>(message + 40) = Never()
+        *Ptr<long>(message + 48) = 0
+        *Ptr<byte*>(message + 56) = taker
+        *Ptr<byte*>(message + 64) = kept
+        *Ptr<byte*>(message + 72) = Copied(id, idCount, above)
+        *Ptr<long>(message + 80) = idCount
+        *Ptr<byte*>(message + 88) = file
+        *Ptr<long>(message + 96) = fileCount
+        *Ptr<long>(message + 104) = line
+        *Ptr<long>(message + 112) = 0
         if hasText {
-            *Ptr<long>(message + 96) = 1
+            *Ptr<long>(message + 112) = 1
         }
 
-        *Ptr<byte*>(message + 104) = Copied(from, count, above)
-        *Ptr<long>(message + 112) = count
-        *Ptr<long>(message + 120) = 0
-        *Ptr<long>(message + 128) = 0
+        *Ptr<byte*>(message + 120) = Copied(from, count, above)
+        *Ptr<long>(message + 128) = count
+        *Ptr<long>(message + 136) = 0
+        *Ptr<long>(message + 144) = 0
         if header != null {
-            *Ptr<long>(message + 120) = *Ptr<long>(header + 344)
-            *Ptr<long>(message + 128) = *Ptr<long>(header + 352)
+            *Ptr<long>(message + 136) = *Ptr<long>(header + 344)
+            *Ptr<long>(message + 144) = *Ptr<long>(header + 352)
         }
 
-        *Ptr<long>(message + 136) = number
-        *Ptr<byte*>(message + 144) = null
-        *Ptr<byte*>(message + 152) = copy
-        *Ptr<long>(message + 160) = 0
+        *Ptr<long>(message + 152) = number
+        *Ptr<byte*>(message + 160) = null
+        *Ptr<byte*>(message + 168) = copy
+        *Ptr<long>(message + 176) = 0
         if number != 0 && copy != null {
-            extern "C" (byte*, byte*) => byte* made = *Ptr<extern "C" (byte*, byte*) => byte*>(message + 152)
+            extern "C" (byte*, byte*) => byte* made = *Ptr<extern "C" (byte*, byte*) => byte*>(message + 168)
             mut byte* into = above
             if into == null {
                 into = RootHeap()
             }
 
-            *Ptr<byte*>(message + 144) = made(slot, into)
+            *Ptr<byte*>(message + 160) = made(slot, into)
         }
 
         return message
@@ -5257,7 +5554,7 @@ extern "C" void BlockRun(byte* state, byte* message) {
 // child's side, its eighth word on every target, each 64-bit, where the emitter's `Deciding` writes it.
 void RunBlock(byte* message) {
     raw {
-        byte* child = *Ptr<byte*>(message + 40)
+        byte* child = *Ptr<byte*>(message + 56)
         byte* side = *Ptr<byte*>(child - 80)
         extern "C" (byte*, byte*) => void entry = *Ptr<extern "C" (byte*, byte*) => void>(*Ptr<byte*>(side + 56))
         decision = 0
@@ -5267,13 +5564,17 @@ void RunBlock(byte* message) {
 }
 
 // The first block the top-level code's wait runs, taken off its list and run on the top-level code's
-// stack (U33).
+// stack (U33), with no deadline of a `within` block of the top-level code over its calls, as a block's
+// message has none (U45; assumed: T9 of comment 6967625156).
 void RootBlock() {
     raw {
         byte* message = Taken(rootBlocks)
         byte* before = rootRunning
+        long within = rootBlock
         rootRunning = message
+        rootBlock = 0
         RunBlock(message)
+        rootBlock = within
         rootRunning = before
     }
 }
@@ -5291,17 +5592,17 @@ void Decided(byte* child, byte* message, long word) {
 
         BlockLogged(message)
         BlockLeft(message)
-        long idCount = *Ptr<long>(message + 64)
-        long count = *Ptr<long>(message + 112)
+        long idCount = *Ptr<long>(message + 80)
+        long count = *Ptr<long>(message + 128)
         if idCount > 0 {
-            std.Free(*Ptr<byte*>(message + 56), idCount)
+            std.Free(*Ptr<byte*>(message + 72), idCount)
         }
 
         if count > 0 {
-            std.Free(*Ptr<byte*>(message + 104), count)
+            std.Free(*Ptr<byte*>(message + 120), count)
         }
 
-        std.Free(message, 168)
+        std.Free(message, 184)
         if word == 1 {
             *Ptr<int>(child - 88) = 1
             Pause(child)
@@ -5319,9 +5620,9 @@ void Decided(byte* child, byte* message, long word) {
 // from the stack of the actor that raised).
 void Escalate(byte* message) {
     raw {
-        *Ptr<long>(message + 160) = 1
+        *Ptr<long>(message + 176) = 1
         byte* header = running
-        byte* kept = *Ptr<byte*>(message + 48)
+        byte* kept = *Ptr<byte*>(message + 64)
         if header == null || Taker(*Ptr<byte*>(header + 320)) == null {
             escalated = message
             if kept == null {
@@ -5338,21 +5639,21 @@ void Escalate(byte* message) {
         }
 
         BlockLeft(message)
-        thrownNumber = *Ptr<long>(message + 136)
-        thrownSlot = *Ptr<byte*>(message + 144)
-        thrownCopy = *Ptr<byte*>(message + 152)
+        thrownNumber = *Ptr<long>(message + 152)
+        thrownSlot = *Ptr<byte*>(message + 160)
+        thrownCopy = *Ptr<byte*>(message + 168)
         *Ptr<long>(header + 448) = 1
-        if *Ptr<long>(message + 96) != 0 {
+        if *Ptr<long>(message + 112) != 0 {
             *Ptr<long>(header + 448) = 2
         }
 
-        *Ptr<byte*>(header + 456) = *Ptr<byte*>(message + 56)
-        *Ptr<long>(header + 464) = *Ptr<long>(message + 64)
-        *Ptr<byte*>(header + 472) = *Ptr<byte*>(message + 72)
-        *Ptr<long>(header + 480) = *Ptr<long>(message + 80)
-        *Ptr<long>(header + 488) = *Ptr<long>(message + 88)
-        *Ptr<byte*>(header + 496) = *Ptr<byte*>(message + 104)
-        *Ptr<long>(header + 504) = *Ptr<long>(message + 112)
+        *Ptr<byte*>(header + 456) = *Ptr<byte*>(message + 72)
+        *Ptr<long>(header + 464) = *Ptr<long>(message + 80)
+        *Ptr<byte*>(header + 472) = *Ptr<byte*>(message + 88)
+        *Ptr<long>(header + 480) = *Ptr<long>(message + 96)
+        *Ptr<long>(header + 488) = *Ptr<long>(message + 104)
+        *Ptr<byte*>(header + 496) = *Ptr<byte*>(message + 120)
+        *Ptr<long>(header + 504) = *Ptr<long>(message + 128)
         sys.Switch(header, threadSide)
     }
 }
@@ -5363,14 +5664,14 @@ void Escalate(byte* message) {
 void EndsEscalated() {
     raw {
         byte* m = escalated
-        Ends(*Ptr<long>(m + 96) != 0, *Ptr<byte*>(m + 56), *Ptr<long>(m + 64), *Ptr<byte*>(m + 72), *Ptr<long>(m + 80), *Ptr<long>(m + 88), *Ptr<byte*>(m + 104), *Ptr<long>(m + 112))
+        Ends(*Ptr<long>(m + 112) != 0, *Ptr<byte*>(m + 72), *Ptr<long>(m + 80), *Ptr<byte*>(m + 88), *Ptr<long>(m + 96), *Ptr<long>(m + 104), *Ptr<byte*>(m + 120), *Ptr<long>(m + 128))
     }
 }
 
 // The log line of the crash that the block's message `message` decides on, for its child (U24).
 void BlockLogged(byte* message) {
     raw {
-        Logged(*Ptr<byte*>(message + 40), *Ptr<byte*>(message + 56), *Ptr<long>(message + 64), *Ptr<byte*>(message + 72), *Ptr<long>(message + 80), *Ptr<long>(message + 88), *Ptr<long>(message + 96) != 0, *Ptr<byte*>(message + 104), *Ptr<long>(message + 112))
+        Logged(*Ptr<byte*>(message + 56), *Ptr<byte*>(message + 72), *Ptr<long>(message + 80), *Ptr<byte*>(message + 88), *Ptr<long>(message + 96), *Ptr<long>(message + 104), *Ptr<long>(message + 112) != 0, *Ptr<byte*>(message + 120), *Ptr<long>(message + 128))
     }
 }
 
@@ -5378,9 +5679,9 @@ void BlockLogged(byte* message) {
 // message keeps one (U34).
 void BlockLeft(byte* message) {
     raw {
-        byte* kept = *Ptr<byte*>(message + 48)
+        byte* kept = *Ptr<byte*>(message + 64)
         if kept != null {
-            *Ptr<byte*>(message + 48) = null
+            *Ptr<byte*>(message + 64) = null
             Give(kept)
         }
     }

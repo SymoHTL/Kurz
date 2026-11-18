@@ -5,7 +5,7 @@ of its method through its reference is a message (§6, "Actors"). This chapter h
 one machine and what a program writes of them: an actor's declaration, `spawn`, the call that waits
 for its result, `send`, and what crosses into a message, the crash of an actor, its restart by
 the default policy and its log line (U19 to U24), the words of a policy (U25 to U27), the block of a policy (U28
-to U34) and the threads that run the actors (U35). The scheduler but its threads, the stacks, deadlocks but the
+to U34), the threads that run the actors (U35) and the bounds of the calls that wait (U36 to U45). The scheduler but its threads, the stacks, deadlocks but the
 calls a waiting actor lets in (U17)
 and the wait of the top-level code that nothing can end (U18), the clauses after an actor's name but
 the stack's and the policy's (U1, U27) and the actors of other machines (§6, §7) have no rule here, and `compiler/README.md` says what the compiler builds of the rules here.
@@ -2319,7 +2319,7 @@ left to run, on any thread *(assumed in §6)*, ends the process with
 call each other from different chains and wait for each other, on one thread, do not hang silently
 (§6, "Deadlocks"; the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level
 wait"). A call that waits in a function the top-level code called is the top-level code's, at its
-own line. A loop of actors the top-level code never waits on stays until the end of the program,
+own line. A deadline of a call that waits in a message is nothing left to run (U42). A loop of actors the top-level code never waits on stays until the end of the program,
 where U13 drops it.
 
 Case: [actors/deadlock.kz](../corpus/actors/deadlock.kz)
@@ -2436,7 +2436,8 @@ print(s.Name())
 A call that waits on an actor that crashes before it answers, while it runs the call's message or a
 message below it in the chain, raises `callee-crashed` at the line of that call, as Erlang's
 `gen_server:call` exits its caller, and the cause stands in the callee's log line (U24) (the owner,
-2026-11-15, #519, comment 6902210646, Q1, "Erlang: callee-crashed"). That raise is the crash of the
+2026-11-15, #519, comment 6902210646, Q1, "Erlang: callee-crashed"), and a caller whose own deadline passed too raises
+`call-timeout` (U43). That raise is the crash of the
 waiting actor in its turn, and so on up the chain to the top-level code, whose crash ends the
 process (§6, "The exception kills the caller as well"). A call whose caller crashed, where the callee
 runs on another thread than its caller, runs to its end, and its result goes nowhere (§6); on one
@@ -2462,6 +2463,62 @@ print("after")
 Case: [actors/crash-waiter-chain.kz](../corpus/actors/crash-waiter-chain.kz)
 
 Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
+
+Case: [actors/timeout-crashed.kz](../corpus/actors/timeout-crashed.kz)
+```kurz
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Worker {
+    pub int Work() {
+        Hold(300ms)
+        throw "late"
+    }
+}
+
+w = spawn Worker()
+within 100ms {
+    print(w.Work())
+}
+```
+
+Case: [actors/timeout-carried.kz](../corpus/actors/timeout-carried.kz)
+```kurz
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Ticker {
+    pub int Ping() => 1
+}
+
+actor Worker(Ticker T) {
+    pub int Work() {
+        Hold(200ms)
+        return T.Ping()
+    }
+}
+
+actor Front(Worker W) {
+    pub int Go() {
+        within 100ms {
+            return W.Work()
+        }
+    }
+}
+
+t = spawn Ticker()
+w = spawn Worker(t)
+f = spawn Front(w)
+print(f.Go())
+```
 
 ### U21 (decided, §6) The inbox is kept, and the crashed instance's heap goes
 
@@ -2693,6 +2750,98 @@ Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
 Case: [actors/block-escalate.kz](../corpus/actors/block-escalate.kz)
 
 Case: [actors/block-throw.kz](../corpus/actors/block-throw.kz)
+
+Case: [actors/timeout-callee-crash.kz](../corpus/actors/timeout-callee-crash.kz)
+```kurz
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Ticker {
+    pub int Ping() => 1
+}
+
+actor Store(Ticker T) {
+    mut int count = 0
+
+    pub void Work() {
+        count = count + 1
+        print("work starts")
+        Hold(1200ms)
+        print("ping {T.Ping()}")
+    }
+
+    pub int Count() => count
+}
+
+actor Front(Store S) {
+    pub void Start() {
+        send S.Work()
+    }
+}
+
+t = spawn Ticker()
+s = spawn Store(t)
+f = spawn Front(s)
+within 1s {
+    f.Start()
+}
+print(s.Count())
+```
+
+Case: [actors/timeout-capped.kz](../corpus/actors/timeout-capped.kz)
+```kurz
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Store {
+    mut int gets = 0
+
+    pub void Busy() {
+        Hold(300ms)
+    }
+
+    pub int Get() {
+        gets = gets + 1
+        return gets
+    }
+
+    pub int Gets() => gets
+}
+
+actor Front(Store S) {
+    mut int asked = 0
+
+    pub void Start() {
+        send this.Ask()
+    }
+
+    pub void Ask() {
+        asked = asked + 1
+        within 2s {
+            print("got {S.Get()}")
+        }
+    }
+
+    pub int Asked() => asked
+}
+
+s = spawn Store()
+f = spawn Front(s)
+within 100ms {
+    f.Start()
+}
+send s.Busy()
+print(f.Asked())
+print(s.Gets())
+```
 
 ### U23 (decided, §6) The pause before a restart grows
 
@@ -3387,3 +3536,249 @@ Case: [actors/block-supervisor-state.kz](../corpus/actors/block-supervisor-state
 Case: [actors/block-crash-order.kz](../corpus/actors/block-crash-order.kz)
 
 Case: [actors/deadlock.kz](../corpus/actors/deadlock.kz)
+
+### U36 (decided, §6) A call that waits has a bound
+
+Every call through a reference that waits has a bound, 5 seconds where no `within` names another (U38, U39), as Elixir's
+`GenServer.call` waits 5 seconds by default (§6, "Every call has a timeout"). A call past its bound raises `call-timeout` in the
+caller, at the line of that call, with no parameter (§6, the owner, 2026-10-30, "Deadline on chain ID"; the id: the owner,
+2026-11-13, #519, comment 6847932993, Q8, "These ids (Recommended)"). The caller cannot handle it: the raise is the crash of the
+actor that waits (U19), each caller that waits on that actor up the chain crashing in its turn, and in the top-level code it ends
+the process with the error line, the trace and the exit code 1 (§6, "A caller cannot handle a callee's crash, timeout or
+unreachability"). The top-level code's calls have the same bound *(assumed: as "Every call has a timeout" reads, T2 of comment
+6967147952)*. A bound is counted on the monotonic clock in whole milliseconds, a part of a millisecond rounded up *(assumed: as
+comment 6967147952 took it with no question)*. An answer set before the caller reads its deadline is the call's result, as
+Tokio's `Timeout::poll` polls its future before its timer (not checked at source) and Erlang's `receive` takes a message that
+stands before its `after` *(assumed in §6)*, so that in a case marked `// threads: 1` (U35), where a caller reads its deadline
+between messages alone, a callee that runs past the bound and answers with no call and no wait after the deadline gives the call
+its result.
+
+Case: [actors/timeout-default.kz](../corpus/actors/timeout-default.kz)
+```kurz
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Worker {
+    pub void Slow() {
+        Hold(5200ms)
+        print("slow done")
+    }
+
+    pub int Get() => 1
+}
+
+w = spawn Worker()
+send w.Slow()
+print(w.Get())
+```
+
+### U37 (decided, §6) The deadline of the chain
+
+The chain ID carries a deadline, the one of the call at the chain's root: a call made inside the chain gets the time left, a call
+or a wait past the deadline raises `call-timeout` in the caller (U36), and an inbox drops a message whose deadline passed before
+its callee starts it (§6, the owner, 2026-10-30, "Deadline on chain ID", against a fixed timeout for each call with no cancel, and
+against an explicit token as a parameter, as C#'s `CancellationToken`). A `send` of the chain carries the chain's deadline and
+waits in the inbox behind the message it was sent from (U17) (§6, the owner, 2026-11-14, #519, comment 6880404917, Q13). A
+message whose chain's deadline passes while it runs goes on, nothing interrupting it: its first call or wait past the deadline
+raises `call-timeout` in it, the crash of its actor, which its supervisor handles (U22) *(assumed: T1 of comment 6967147952)*,
+and a message that makes neither runs to its end, its result going nowhere, as the call of a caller that crashed runs (§6, the
+owner, 2026-10-30, "Run it, drop the reply"). The inbox drops a message with no line *(assumed: T3 of comment 6967147952)*: a
+`send` has no caller that waits, and the caller of a call raises `call-timeout` (U36). The deadline a call's own message carries
+is U44's, and the deadline of a chain that no call starts is U45's.
+
+Case: [actors/timeout-callee-crash.kz](../corpus/actors/timeout-callee-crash.kz)
+
+Case: [actors/timeout-capped.kz](../corpus/actors/timeout-capped.kz)
+
+### U38 (decided, §6) The block `within`
+
+`within d { ... }` is a statement whose entry sets one deadline, `d` from then, for every call inside it, each call taking the
+smaller of that deadline and the time its chain has left, so that ten calls in a row share the block's time, as Kotlin's
+`withTimeout` and a C# `CancellationTokenSource(TimeSpan)` passed down bind a group of calls (§6, the owner, 2026-11-13, #519,
+comment 6850539879, "One deadline for the block (Recommended)", against `d` for each call). The deadline binds every call and
+every wait made while the block runs, in the functions it calls too, as Tokio's `timeout` cancels its future with every wait in
+it, and a `send` in the block carries the chain's own deadline (U37); the deadline is set at the block's entry and put back at
+every way out of the block *(assumed in §6, 2026-11-13)*. A block inside another takes the smaller of its own deadline and the
+enclosing block's, as Tokio's outer `timeout` still ends a future that holds an inner one (not checked at source) *(assumed in
+§6)*.
+
+Case: [actors/timeout-block.kz](../corpus/actors/timeout-block.kz)
+```kurz
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Store {
+    pub int Get() => 1
+}
+
+// a call that the block's deadline binds, in a function the block calls
+int Ask(Store store) => store.Get()
+
+s = spawn Store()
+within 100ms {
+    print(s.Get())
+    Hold(150ms)
+    print(Ask(s))
+}
+```
+
+Case: [actors/timeout-capped.kz](../corpus/actors/timeout-capped.kz)
+
+### U39 (decided, §6) A clause on a call and on a declaration, and their order
+
+A clause on a call, `store.Get(id) within 2s`, bounds that call, and a clause on a method's declaration,
+`pub User Get(int id) within 2s`, bounds every call of the method through a reference, set by the callee for every caller, as a
+gRPC service's default (§6, the owner, 2026-11-13, #519, comment 6847932993, Q11, "All three and 1 wins over 2 and 2 wins over
+3"). Where more than one form names a bound for one call, the block's bound wins over the call's clause and the call's clause
+over the declaration's, and every bound stays capped by the time the chain has left (U37) *(assumed in §6: the reading of the
+answer's words, said back on 2026-11-13)*. Where a clause may stand, and what its operand may be, are open (U41).
+
+No case: the compiler builds no clause on a call or on a declaration.
+
+### U40 (assumed, §6) The word `within` and the bound's value
+
+`within` is a word only where it stands, as `on crash`, `attempt` and `vouch` are, so that a variable may be named `within`
+(§6, the owner, 2026-11-13, #519, comment 6847932993, Q10, "Any order + contextual (Recommended)") *(assumed in §6: `within`
+among those words)*. The bound is a `duration`, and a value of another type there is `type-mismatch` *(proposed: the forms of §6
+write a duration and name no other type)*. A bound of zero or less sets a deadline that has passed, so that each call it bounds
+raises `call-timeout` at once and no id of its own is added, as Tokio's `timeout(Duration::ZERO, f)` elapses at its first wait
+(not checked at source) *(assumed: T4 of comment 6967147952)*. A bound whose deadline would pass the largest time the clock holds
+sets no deadline, as Tokio's `timeout` falls back on a far future where its sum overflows (not checked at source) *(assumed in
+§6)*.
+
+Case: [actors/timeout-zero.kz](../corpus/actors/timeout-zero.kz)
+```kurz
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+print(s.Get())
+within 0s {
+    print(s.Get())
+}
+```
+
+Case: [actors/within-name.kz](../corpus/actors/within-name.kz)
+```kurz
+within = 3
+print(within + 1)
+```
+
+Case: [actors/within-not-duration.kz](../corpus/actors/within-not-duration.kz)
+```kurz
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+within 2 {
+    print(s.Get())
+}
+```
+
+### U41 (open) Where a clause stands, and its operand
+
+Nobody chose these, and §6 does not settle them:
+
+- A clause on a call that is no call of an actor's method that waits, a function's, a class's method's, or an actor's own method
+  called inside it (§6, 2026-11-13, Q14, "Direct call"): (a) a block around that one call, as Tokio's `timeout` wraps any future;
+  (b) `syntax`, as `send` before what is no call of an actor's method is (U14); (c) `type-mismatch`. Lean: (b).
+- A clause on a call after `send`: (a) `syntax`, as `tokio::spawn` and Elixir's `cast` take no bound; (b) the deadline of the
+  message it sends. Lean: (a).
+- A clause on the declaration of a method that is no message, a class's method, a function, or an actor's method without `pub`:
+  (a) `syntax`; (b) allowed, holding where a message runs the method. Lean: (a), with a `pub` method's clause holding no direct call
+  of it inside its actor, as a gRPC service's default holds its remote calls alone.
+- The operand of a call's clause: (a) a unary expression, as a constant type parameter's default is read (T35), so that
+  `a.F() within d * 2` reads as `(a.F() within d) * 2`, a computed bound standing in parentheses, and the clause standing before a
+  postfix `else` (O5); (b) the rest of the expression. Rust has no such form. Lean: (a).
+- The operand of a declaration's clause: (a) a duration literal alone, any other operand `syntax`, as the knobs of a policy are
+  (U26); (b) a constant `duration`; (c) an expression over the parameters, which the caller reads. Lean: (a).
+
+### U42 (assumed, §6) A wait of the top-level code with no message to run while a deadline stands
+
+A deadline of a call that waits in a message is nothing left to run (U18): a wait of the top-level code that finds no message to
+run and no restart's pause ends the process with `deadlock` at once, as U18 reads, and the deadline of a call parked in a message
+passes only while other messages run or a restart's pause runs, the top-level code then sleeping to the first of that pause, its
+own deadline and the earliest deadline of a parked call *(assumed: detection first, as U18 (2026-11-15) was chosen after
+"Deadline on chain ID" (2026-10-30) and §6's layer 3, "Instant runtime detection", leaves to the timeout what detection cannot
+see, T6 of comment 6967625156)*, against a timer counted as work, as Tokio's runtime sleeps to its earliest timer (not checked
+at source), under which no program would reach `deadlock`. So [actors/deadlock.kz](../corpus/actors/deadlock.kz) ends as
+`deadlock` at once, though the calls of `Left` and `Right` wait under their deadlines.
+
+Case: [actors/deadlock.kz](../corpus/actors/deadlock.kz)
+
+### U43 (assumed, §6) A caller whose callee crashed or ended once the caller's deadline had passed
+
+A call that waits gets `callee-crashed` where its callee crashed (U20) and `actor-gone` where it ended; where the caller's own
+deadline passed too before it reads the answer, it raises `call-timeout`, its own deadline, as a gRPC client of Rust (tonic)
+reports its own deadline (not checked at source), so that a chain of three calls whose third passed the chain's deadline ends at
+the top-level code as `call-timeout` *(assumed: as §6 names `call-timeout` "a call past its bound or its chain's deadline", T7 of
+comment 6967625156)*, against `callee-crashed` or `actor-gone` as U20 reads, the timeout standing in the log line of the actor
+that raised it (U24). An answer set before the caller reads its deadline is the call's result (U36).
+
+Case: [actors/timeout-crashed.kz](../corpus/actors/timeout-crashed.kz)
+
+### U44 (assumed, §6) The deadline a call's message carries
+
+A call's message carries the call's own deadline, the smaller of its bound (U36, U38) and the time its chain has left (U37), and
+the callee's calls and its inbox read it, as a gRPC client of Rust (tonic) sends its call's timeout (not checked at source), so
+that a short bound on one call ends the callee's calls past it, with the callee's crash (U37) *(assumed: as §6 has a block's
+deadline bind every wait made while the block runs, T8 of comment 6967625156)*, against the deadline of the chain's root, the
+caller's shorter bound holding its own wait alone, as an actor that Tokio spawned runs on after its caller's `timeout` ended.
+
+Case: [actors/timeout-carried.kz](../corpus/actors/timeout-carried.kz)
+
+### U45 (assumed, §6) A chain that no call starts, and a `send` past its deadline
+
+A chain that a `send` of the top-level code starts (U17), the chain of a restart (U22) and the chain of a policy's block (U28)
+carry no deadline, each call the chain makes bounded on its own (U36), as `tokio::spawn` and Elixir's `cast` carry none (not
+checked at source): a `send` inside a `within` of the top-level code carries none either, and a block that runs in the wait of
+the top-level code (U33) calls under no deadline of that code's `within` *(assumed: T9 of comment 6967625156)*. A `send` made
+past its chain's deadline raises nothing: its message is dropped with no line (U37), as a send on Tokio's channel reads no
+deadline (not checked at source) *(assumed: T10 of comment 6967625156)*, against `call-timeout` at the `send`, `send` read as a
+call.
+
+Case: [actors/timeout-send.kz](../corpus/actors/timeout-send.kz)
+```kurz
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Ticker {
+    mut int ticks = 0
+
+    pub void Tick() {
+        ticks = ticks + 1
+    }
+
+    pub int Ticks() => ticks
+}
+
+actor Front(Ticker T) {
+    pub int Go() {
+        Hold(200ms)
+        send T.Tick()
+        return 1
+    }
+}
+
+t = spawn Ticker()
+f = spawn Front(t)
+within 100ms {
+    print(f.Go())
+}
+
+print(t.Ticks())
+```

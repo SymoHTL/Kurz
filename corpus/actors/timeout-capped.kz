@@ -1,0 +1,53 @@
+// expect: output
+// | 0
+// | 0
+// threads: 1
+// rules: U37, U38, U22
+
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Store {
+    mut int gets = 0
+
+    pub void Busy() {
+        Hold(300ms)
+    }
+
+    pub int Get() {
+        gets = gets + 1
+        return gets
+    }
+
+    pub int Gets() => gets
+}
+
+actor Front(Store S) {
+    mut int asked = 0
+
+    pub void Start() {
+        send this.Ask()
+    }
+
+    pub void Ask() {
+        asked = asked + 1
+        within 2s {
+            print("got {S.Get()}")
+        }
+    }
+
+    pub int Asked() => asked
+}
+
+s = spawn Store()
+f = spawn Front(s)
+within 100ms {
+    f.Start()
+}
+send s.Busy()
+print(f.Asked())
+print(s.Gets())

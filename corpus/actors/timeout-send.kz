@@ -1,0 +1,38 @@
+// expect: output
+// | 1
+// | 0
+// threads: 1
+// rules: U45
+
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Ticker {
+    mut int ticks = 0
+
+    pub void Tick() {
+        ticks = ticks + 1
+    }
+
+    pub int Ticks() => ticks
+}
+
+actor Front(Ticker T) {
+    pub int Go() {
+        Hold(200ms)
+        send T.Tick()
+        return 1
+    }
+}
+
+t = spawn Ticker()
+f = spawn Front(t)
+within 100ms {
+    print(f.Go())
+}
+
+print(t.Ticks())

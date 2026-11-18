@@ -732,6 +732,10 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                 case SendStatement send:
                     Expression(send.Call); // U6: the call, a message nobody waits for
                     break;
+                case WithinStatement within:
+                    Expression(within.Bound); // U38: the bound, then the block it bounds
+                    Block(within.Body);
+                    break;
                 case IfStatement i:
                     Expression(i.Condition);
                     Block(i.Then);

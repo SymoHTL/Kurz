@@ -102,6 +102,7 @@ public sealed class ThrowSets
         [typeof(RawBlock)] = "its body",
         [typeof(UseStatement)] = "no code",
         [typeof(SendStatement)] = "its call's arguments",
+        [typeof(WithinStatement)] = "its bound and its body",
         [typeof(DecisionStatement)] = "no code: the runtime acts on the decision",
         [typeof(AsmStatement)] = "its operands, and the function a sym operand names",
         [typeof(ConstAssertStatement)] = "no code: the compiler reads it",
@@ -881,6 +882,10 @@ public sealed class ThrowSets
                     break;
                 case SendStatement send:
                     Call(send.Call);
+                    break;
+                case WithinStatement w:
+                    Expression(w.Bound);
+                    Statement(w.Body);
                     break;
                 case AsmStatement a:
                     foreach (var operand in a.Operands)

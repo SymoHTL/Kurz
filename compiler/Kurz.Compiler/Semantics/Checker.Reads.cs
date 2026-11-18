@@ -230,6 +230,7 @@ public sealed partial class Checker
         ReturnStatement { Value: { } v } => Muts(v),
         ThrowStatement { Value: { } v } => Muts(v),
         RawBlock r => Muts(r.Body),
+        WithinStatement w => Muts(w.Bound).Concat(Muts(w.Body)),
         _ => [],
     };
 

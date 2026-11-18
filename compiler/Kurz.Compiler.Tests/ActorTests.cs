@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Text;
 using Xunit;
@@ -1967,9 +1968,11 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// U23: the runtime whose clock of the pauses is a count of its own, 0 at the start, which its sleep moves on by the time asked, with
     /// that time written on standard output as <c>pause &lt;ms&gt;</c> where <paramref name="print"/> holds, and which
-    /// <c>eprint("advance")</c> moves on by 31 s, a full cap and a second, so that no pause takes time.
+    /// <c>eprint("advance")</c> moves on by 31 s, a full cap and a second, so that no pause takes time. Its calls have no default bound,
+    /// since the deadlines read that clock too (U36), which the pauses move on by minutes in no time.
     /// </summary>
     private static CheckedRuntime StoodIn(bool print) => ListTests.Edited(
+        ("runtime/common/runtime.kz", "own = Due(now, sys.DefaultBound())", "own = Never()"),
         ("runtime/common/runtime.kz", "    mut long now = 0\n    if !sys.MonotonicNow(mut now) {\n        return 0\n    }\n\n    return now\n",
             "    mut long now = 0\n    raw {\n        now = standIn\n    }\n\n    return now\n"),
         ("runtime/common/runtime.kz", "void PauseSleep(long nanoseconds) {\n    sys.Sleep(nanoseconds)\n}",
@@ -4656,5 +4659,438 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Worker#1 crashed: index-out-of-range at program.kz:4"], crashes);
         Ran((run.Code, run.Output, rest), 1, ["IndexOutOfRange at 4"], "error: actor-gone at program.kz:15\n");
+    }
+
+    // ---- the deadlines of the calls (U36 to U45; the owner, 2026-10-30, "Deadline on chain ID"; #519, comments 6967147952, 6967625156)
+
+    /// <summary>A function that holds the thread for <c>d</c> with no call and no wait, as the cases of timeouts hold it.</summary>
+    private const string Hold = """
+        void Hold(duration d) {
+            instant start = instant.Now
+            while start.Elapsed < d {
+            }
+        }
+
+        """;
+
+    [Fact]
+    public void Every_target_gives_a_call_the_same_default_bound_of_5_seconds()
+    {
+        // U36: the default bound is the runtime's `DefaultBound` of the target, the one Linux's sockets take (S9), and Windows's holds
+        // the same 5 seconds, so that the two never part
+        string Bound(string path)
+        {
+            var text = Encoding.UTF8.GetString(Runtime.Files.Single(f => f.Path == path).Bytes);
+            var found = Regex.Matches(text, @"^pub long DefaultBound\(\) => (\d+)$", RegexOptions.Multiline);
+            Assert.True(found.Count == 1, $"{path} declares `pub long DefaultBound()` {found.Count} times");
+            return found[0].Groups[1].Value;
+        }
+
+        Assert.Equal(["5000000000", "5000000000"], new[] { Bound("runtime/linux/linux.kz"), Bound("runtime/windows/windows.kz") });
+        var common = Encoding.UTF8.GetString(Runtime.Files.Single(f => f.Path == "runtime/common/runtime.kz").Bytes);
+        Assert.Contains("own = Due(now, sys.DefaultBound())", common, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_deadline_is_a_bound_from_now_in_whole_milliseconds_rounded_up_and_none_past_the_clock()
+    {
+        // U36, U40: a part of a millisecond rounds up, a bound of zero or less is a deadline that has passed, `now` itself (T4 of comment
+        // 6967147952), and a deadline past the largest time is none, the largest `long`
+        var printed = ListTests.Edited(("runtime/common/runtime.kz", "pub void Finish() {\n    EndActors()\n",
+            "pub void Finish() {\n    Print(1, \"{Due(1000, 1)} {Due(1000, 1000000)} {Due(1000, 1500000)} {Due(1000, 0)} {Due(1000, -1)}\", \"\", 0)\n" +
+            "    Print(1, \"{Due(1000, 9223372036854775807)} {Due(9223372036854775000, 5000000000)} {Due(9223372030000000000, 5000000000)}\", \"\", 0)\n    EndActors()\n"));
+        Ran(BuildAndRun("print(0)\n", printed, "actor-deadline-due"), 0,
+            ["0", "1001000 1001000 2001000 1000 1000", "9223372036854775807 9223372036854775807 9223372035000000000"], "");
+    }
+
+    [Fact]
+    public void The_timers_keep_their_deadlines_in_order_and_none_outlives_its_wait()
+    {
+        // U36, U37: 300 activations park at once, each with a deadline of its own `within` block in an order no insertion at either end
+        // keeps, and the runtime checks the order of its timers at each insertion; every wait takes its reply off them, and so does the
+        // fall of an actor whose parked activation waits below a call of its chain that throws (U17, U20), so that none is left at the end
+        var timers = ListTests.Edited(
+            ("runtime/common/runtime.kz", "            timersLast = reply\n        }\n    }\n}\n",
+                "            timersLast = reply\n        }\n\n        mut byte* at = timers\n        while at != null && *Ptr<byte*>(at + 32) != null {\n" +
+                "            if *Ptr<long>(at + 16) > *Ptr<long>(*Ptr<byte*>(at + 32) + 16) || *Ptr<byte*>(*Ptr<byte*>(at + 32) + 24) != at {\n" +
+                "                Print(2, \"timers out of order\", \"\", 0)\n            }\n\n            at = *Ptr<byte*>(at + 32)\n        }\n    }\n}\n"),
+            ("runtime/common/runtime.kz", "pub void Finish() {\n    EndActors()\n",
+                "pub void Finish() {\n    mut long left = 0\n    raw {\n        mut byte* at = timers\n        while at != null {\n            left = left + 1\n" +
+                "            at = *Ptr<byte*>(at + 32)\n        }\n    }\n\n    Print(2, \"timers {left}\", \"\", 0)\n    EndActors()\n"));
+        const string text = """
+            actor Sink {
+                pub int Get() => 1
+            }
+
+            actor Waiter {
+                mut int got = 0
+
+                pub void Go(Sink s, int n) {
+                    mut d = 1s
+                    for k in 0..<n {
+                        d = d + 1ms
+                    }
+
+                    within d {
+                        got = s.Get()
+                    }
+                }
+            }
+
+            actor Bouncer {
+                pub int Ask(Crasher c) => c.Boom()
+            }
+
+            actor Crasher {
+                pub void Go(Bouncer b) {
+                    me = this
+                    within 2s {
+                        print(b.Ask(me))
+                    }
+                }
+
+                pub int Boom() {
+                    throw "boom"
+                }
+            }
+
+            sink = spawn Sink()
+            bouncer = spawn Bouncer() on crash restart after 1ms
+            crasher = spawn Crasher() on crash restart after 1ms
+            send crasher.Go(bouncer)
+            mut waiters = [spawn Waiter()]
+            for i in 1..<300 {
+                waiters.Add(spawn Waiter())
+            }
+
+            for i in 0..<299 {
+                send waiters[i].Go(sink, i * 7919 % 300)
+            }
+
+            waiters[299].Go(sink, 299 * 7919 % 300)
+            print("done")
+
+            """;
+        var run = BuildAndRun(text, timers, "actor-timers-order");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Crasher#3 crashed: thrown \"boom\" at program.kz:33", "Bouncer#2 crashed: callee-crashed at program.kz:21"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["done"], "timers 0\n");
+    }
+
+    [Fact]
+    public void A_send_past_its_chains_deadline_is_dropped_with_no_raise_and_so_is_one_whose_deadline_passes_in_the_inbox()
+    {
+        // U37: a `send` carries its chain's deadline (comment 6880404917, Q13); one queued before it passed, behind a message that holds
+        // the callee past it, is dropped at its take with no line (T3 of comment 6967147952); one made after it passed raises nothing and
+        // is dropped (U45, T10 of comment 6967625156), so that the message that sent it goes on
+        const string text = Hold + """
+            actor Store {
+                mut int notes = 0
+
+                pub void Busy() {
+                    Hold(300ms)
+                }
+
+                pub void Note() {
+                    notes = notes + 1
+                }
+
+                pub int Notes() => notes
+            }
+
+            actor Front(Store S) {
+                pub void Early() {
+                    send S.Busy()
+                    send S.Note()
+                }
+
+                pub void Late() {
+                    Hold(150ms)
+                    send S.Note()
+                    print("sent")
+                }
+            }
+
+            s = spawn Store()
+            f = spawn Front(s)
+            within 100ms {
+                f.Early()
+            }
+
+            print(s.Notes())
+            within 100ms {
+                f.Late()
+            }
+
+            print(s.Notes())
+
+            """;
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-deadline-sends"), 0, ["0", "sent", "0"], "");
+    }
+
+    [Fact]
+    public void A_message_dropped_past_its_deadline_gives_back_the_blocks_of_its_arguments()
+    {
+        // U37, section 3: the inbox drops a message past its deadline through the third function of its call site's table, which lets go
+        // of its arguments, a string and a list, and frees it, so that across a round of such drops the heaps of both actors and the
+        // top-level code's hold as many blocks as before it, and no dropped message ran
+        const string text = Hold + """
+            actor Store {
+                mut int notes = 0
+
+                pub void Busy() {
+                    Hold(300ms)
+                }
+
+                pub void Note(string s, List<int> xs) {
+                    notes = notes + s.Bytes.Count + xs.Count
+                }
+
+                pub int Notes() => notes
+
+                pub long Live() => HttpServer.HeapLive()
+            }
+
+            actor Front(Store S) {
+                pub void Early(int r) {
+                    send S.Busy()
+                    send S.Note("note {r}", [r, 2])
+                }
+
+                pub long Live() => HttpServer.HeapLive()
+            }
+
+            long Round(Store s, Front f, int r) {
+                within 100ms {
+                    f.Early(r)
+                }
+
+                return s.Live() + f.Live()
+            }
+
+            store = spawn Store()
+            front = spawn Front(store)
+            Round(store, front, 0)
+            Round(store, front, 1)
+            own = HttpServer.HeapLive()
+            held = Round(store, front, 2)
+            ownHeld = HttpServer.HeapLive() - own
+            left = Round(store, front, 3) - held
+            ownLeft = HttpServer.HeapLive() - own - ownHeld
+            print("{left} {ownLeft} {store.Notes()}")
+
+            """;
+        Ran(BuildAndRun(text, HeapBlocks.Value, "actor-deadline-drop-blocks"), 0, ["0 0 0"], "");
+    }
+
+    [Fact]
+    public void A_chain_that_no_call_starts_has_no_deadline()
+    {
+        // U45, T9 of comment 6967625156: the chain of a `send` of the top-level code and the restart's chain carry no deadline, each call
+        // they make bounded on its own; under a default bound of 100 ms, a call made after 300 ms of such a chain's work answers
+        var short_ = ListTests.Edited(("runtime/linux/linux.kz", "pub long DefaultBound() => 5000000000", "pub long DefaultBound() => 100000000"));
+        const string text = Hold + """
+            actor Ticker {
+                pub int Ping() => 1
+            }
+
+            actor Slow(Ticker T) {
+                pub void Work() {
+                    Hold(300ms)
+                    print("work {T.Ping()}")
+                }
+            }
+
+            int Warm(Ticker t) {
+                Hold(300ms)
+                return t.Ping()
+            }
+
+            actor Phoenix(Ticker T) {
+                mut int pings = Warm(T)
+
+                pub void Fail() {
+                    throw "fail"
+                }
+
+                pub int Pings() => pings
+            }
+
+            ticker = spawn Ticker()
+            phoenix = spawn Phoenix(ticker) on crash restart after 1ms
+            slow = spawn Slow(ticker)
+            send slow.Work()
+            send phoenix.Fail()
+            within 10s {
+                print(phoenix.Pings())
+            }
+
+            """;
+        var run = BuildAndRun(text, short_, "actor-deadline-no-chain");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Phoenix#2 crashed: thrown \"fail\" at program.kz:26"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["work 1", "1"], "");
+    }
+
+    [Fact]
+    public void A_block_that_runs_in_the_wait_of_the_top_level_code_calls_under_no_deadline_of_its_within()
+    {
+        // U33, U45, T9 of comment 6967625156: the block's call after 300 ms answers though the `within` of the top-level call it runs in
+        // has passed; the top-level call, whose message the inbox dropped meanwhile, raises `call-timeout` at its line
+        const string text = Hold + """
+            actor Ticker {
+                pub int Ping() => 1
+            }
+
+            actor Kid {
+                pub void Fail() {
+                    throw "kid"
+                }
+            }
+
+            t = spawn Ticker()
+            k = spawn Kid() on crash (c) {
+                Hold(300ms)
+                print("block {t.Ping()}")
+                restart
+            }
+            send k.Fail()
+            within 200ms {
+                print(t.Ping())
+            }
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-deadline-root-block");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Kid#2 crashed: thrown \"kid\" at program.kz:12"], crashes);
+        Ran((run.Code, run.Output, rest), 1, ["block 1"], "error: call-timeout at program.kz:24\n");
+    }
+
+    [Fact]
+    public void A_wait_inside_a_message_ends_at_its_deadline_while_a_pause_runs()
+    {
+        // U36, U37: `A` waits on `B`, whose restart's pause of 1 s runs; the top-level code, with nothing else to run, sleeps to the
+        // first of that pause, its own deadline and the first timer, so that `A`'s wait ends at 200 ms with `call-timeout` at its line,
+        // the crash of `A`, and the call queued behind it answers well before the pause ends
+        const string text = """
+            actor B {
+                pub void Fail() {
+                    throw "b"
+                }
+
+                pub int Get() => 1
+            }
+
+            actor A {
+                pub void Go(B b) {
+                    within 200ms {
+                        print("got {b.Get()}")
+                    }
+                }
+
+                pub int After() => 2
+            }
+
+            paused = spawn B() on crash restart after 1s
+            waiting = spawn A() on crash restart after 1ms
+            send paused.Fail()
+            start = instant.Now
+            send waiting.Go(paused)
+            print(waiting.After())
+            print(start.Elapsed < 700ms)
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-deadline-timer");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["B#1 crashed: thrown \"b\" at program.kz:3", "A#2 crashed: call-timeout at program.kz:12"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["2", "true"], "");
+    }
+
+    [Fact]
+    public void A_caller_whose_callee_crashed_after_the_callers_deadline_raises_call_timeout()
+    {
+        // U43, T7 of comment 6967625156: `C` throws after the deadline of `A`'s call passed, and `A` raises `call-timeout` at its call,
+        // not `callee-crashed`, so that the top-level code, whose deadline stands, raises `callee-crashed`; the top-level code whose
+        // callee throws after its deadline raises `call-timeout`
+        const string callee = Hold + """
+            actor C {
+                pub int Work() {
+                    Hold(300ms)
+                    throw "c"
+                }
+            }
+
+            """;
+        var run = BuildAndRun(callee + """
+            actor A {
+                pub int Go(C c) {
+                    mut r = 0
+                    within 100ms {
+                        r = c.Work()
+                    }
+
+                    return r
+                }
+            }
+
+            worker = spawn C()
+            caller = spawn A()
+            print(caller.Go(worker))
+
+            """, toolchain.Runtime, "actor-deadline-crashed");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["C#1 crashed: thrown \"c\" at program.kz:9", "A#2 crashed: call-timeout at program.kz:16"], crashes);
+        Ran((run.Code, run.Output, rest), 1, [], "error: callee-crashed at program.kz:25\n");
+        run = BuildAndRun(callee + """
+            worker = spawn C()
+            within 100ms {
+                print(worker.Work())
+            }
+
+            """, toolchain.Runtime, "actor-deadline-crashed-top");
+        (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["C#1 crashed: thrown \"c\" at program.kz:9"], crashes);
+        Ran((run.Code, run.Output, rest), 1, [], "error: call-timeout at program.kz:14\n");
+    }
+
+    [Fact]
+    public void A_within_puts_its_deadline_back_at_every_way_out_and_an_inner_one_keeps_the_smaller()
+    {
+        // U38: the deadline a `within` replaced stands again after a `continue`, a `break` and a `return` out of it, so that a call 100 ms
+        // later answers; a block inside one whose deadline is earlier keeps that deadline (U38, assumed)
+        const string text = Hold + """
+            actor Store {
+                pub int Get() => 1
+            }
+
+            int Inside(Store s) {
+                within 50ms {
+                    return s.Get()
+                }
+            }
+
+            store = spawn Store()
+            for i in 0..<2 {
+                within 50ms {
+                    if i == 0 {
+                        continue
+                    }
+
+                    break
+                }
+            }
+
+            print(Inside(store))
+            Hold(100ms)
+            print(store.Get())
+            within 100ms {
+                within 10s {
+                    Hold(150ms)
+                    print(store.Get())
+                }
+            }
+
+            """;
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-deadline-within"), 1, ["1", "1"], "error: call-timeout at program.kz:33\n");
     }
 }

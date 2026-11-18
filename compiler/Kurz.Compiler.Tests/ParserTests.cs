@@ -1768,6 +1768,31 @@ public sealed class ParserTests
         Assert.Equal(tree, Tree(program));
     }
 
+    [Theory]
+    [InlineData("within d {\n    f()\n}", "(within d {(call f)})")]
+    [InlineData("within 2s {\n}", "(within (unit 2s) {})")]
+    [InlineData("within (d) {\n}", "(within (paren d) {})")]
+    [InlineData("within a.B {\n    within 1s {\n    }\n}", "(within (. a B) {(within (unit 1s) {})})")]
+    [InlineData("within = 3", "(assign-or-declare within (int 3))")]
+    [InlineData("within(3)", "(call within (int 3))")]
+    [InlineData("within.F()", "(call (. within F))")]
+    [InlineData("x = within + 1", "(assign-or-declare x (+ within (int 1)))")]
+    [InlineData("if within {\n}", "(if within {})")]
+    public void A_within_is_its_block_and_a_name_where_no_block_follows_its_bound(string program, string tree)
+    {
+        // U38, U40: `within d { ... }` is a statement, its bound read as the condition of an `if` is; where no block follows the bound
+        // the word is a name, a variable, a call or a member's target, as `attempt` is a name outside its form (section 6, comment
+        // 6847932993, Q10)
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Fact]
+    public void The_block_of_a_within_on_the_next_line_is_braces_required()
+    {
+        // U38, C1: the block opens on the line where the bound ends, as an `if`'s does, and still parses
+        Assert.Equal([(ErrorIds.BracesRequired, 1)], Errors("within d\n{\n    f()\n}"));
+    }
+
     [Fact]
     public void An_actor_without_its_body_is_braces_required()
     {

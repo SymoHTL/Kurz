@@ -16,9 +16,10 @@ namespace Kurz.Compiler.Emit;
 /// process frees every heap (U13). A call through a reference, or after <c>send</c>, is a message, one block of the heap of the actor it
 /// goes to, as actix packs a message and the sender of its reply into one envelope: the
 /// message after it in its list, which the runtime's <c>Enqueue</c> sets, the table of its call site, the function that runs it and the
-/// one that copies it into the heap of an actor's new instance (U21), the reply its caller waits on, null
-/// after <c>send</c>, as a message of a tokio actor carries a <c>oneshot</c> sender or none, the chain ID, 16 bytes, which
-/// <c>Enqueue</c> stamps (section 6, "Deadlocks", layer 1), then the arguments, each holding a count of its own
+/// one that copies it into the heap of an actor's new instance (U21) and the one that drops it unrun (U37), the reply its caller
+/// waits on, null after <c>send</c>, as a message of a tokio actor carries a <c>oneshot</c> sender or none, the chain ID, 16 bytes,
+/// and its deadline and that of the <c>within</c> block that runs while it runs, which <c>Enqueue</c> stamps (section 6, "Deadlocks",
+/// layer 1; U37, U38), then the arguments, each holding a count of its own
 /// (<see cref="EmitMessage"/>). The function of a method's messages calls the method on the state, as actix's
 /// <c>EnvelopeProxy::handle</c> calls the handler on the actor (<see cref="MessageRun"/>).
 /// </summary>
@@ -28,6 +29,10 @@ public sealed partial class Emitter
     // took its heap or the message was queued, which the region's end, or a jump out of it, frees where a case propagated out of an argument
     // after it left one (EndHeaps)
     private readonly Dictionary<List<(string Value, KurzType Type)>, List<(string Slot, string Free)>> regionHeaps = new(ReferenceEqualityComparer.Instance);
+
+    // the deadline that the `within` block whose statement is the region replaced, which the region's end, or a jump out of it, puts
+    // back (EndWithin)
+    private readonly Dictionary<List<(string Value, KurzType Type)>, string> regionBlocks = new(ReferenceEqualityComparer.Instance);
 
     // the global of each actor type's name, for the log line of a crash (U24), declared once for its type
     private readonly Dictionary<ClassSymbol, string> actorNames = [];
@@ -228,7 +233,7 @@ public sealed partial class Emitter
                 }
             }
 
-            fn.Emit($"call void {StdFunction("Free")}(ptr %a1, i64 40)");
+            fn.Emit($"call void {StdFunction("Free")}(ptr %a1, i64 56)"); // the restart's message (the runtime's `Restart`)
             fn.Return(null);
         });
 
@@ -275,8 +280,8 @@ public sealed partial class Emitter
             string Word(int offset, string ir) => fn.Value($"load {ir}, ptr {fn.Value($"getelementptr i8, ptr %a1, i64 {Number(offset)}")}");
             string Text(int at, int count) => fn.Value($"call %kz.str {RuntimeFunction("TextAt")}(ptr {Word(at, "ptr")}, i64 {Word(count, "i64")})");
 
-            var number = Word(136, "i64");
-            var held = Word(144, "ptr");
+            var number = Word(152, "i64");
+            var held = Word(160, "ptr");
             var slot = fn.Alloca(Ir(reason), "reason");
             IReadOnlyList<KurzType> cases = reason is Semantics.UnionType u ? u.Cases : [reason];
             var labels = cases.Select(_ => fn.Label("case")).ToList();
@@ -299,8 +304,8 @@ public sealed partial class Emitter
             }
 
             fn.Block(runtime);
-            var id = Text(56, 64);
-            var detail = Text(104, 112);
+            var id = Text(72, 80);
+            var detail = Text(120, 128);
             var errorType = new DataType(error, []);
             var made = fn.Value($"call {Ir(errorType)} {StdFunction("RuntimeErrorOf")}(%kz.str {id}, %kz.str {detail})");
             Release(id, Types.String);
@@ -309,10 +314,10 @@ public sealed partial class Emitter
             fn.Branch(done);
 
             fn.Block(done);
-            var file = fn.Value($"call %kz.str {RuntimeFunction("TextAt")}(ptr {Word(72, "ptr")}, i64 {Word(80, "i64")})");
-            var line = fn.Value($"trunc i64 {Word(88, "i64")} to i32");
+            var file = fn.Value($"call %kz.str {RuntimeFunction("TextAt")}(ptr {Word(88, "ptr")}, i64 {Word(96, "i64")})");
+            var line = fn.Value($"trunc i64 {Word(104, "i64")} to i32");
             var where = Make(place, [file, line]);
-            var chain = fn.Value($"call %kz.str {RuntimeFunction("ChainText")}(ptr {fn.Value("getelementptr i8, ptr %a1, i64 120")})");
+            var chain = fn.Value($"call %kz.str {RuntimeFunction("ChainText")}(ptr {fn.Value("getelementptr i8, ptr %a1, i64 136")})");
             var c = Make(crashed, [fn.Value($"load {Ir(reason)}, ptr {slot}"), where, chain]);
             fn.Emit($"call void {fn.Value($"extractvalue %kz.fn {decides}, 0")}(ptr {fn.Value($"extractvalue %kz.fn {decides}, 1")}, {Ir(crashed)} {c})");
             Release(c, crashed);
@@ -437,6 +442,28 @@ public sealed partial class Emitter
     }
 
     /// <summary>
+    /// U38: <c>within d { ... }</c>, its bound read, then its deadline set by the runtime's <c>BlockEnter</c>, which gives the deadline it
+    /// replaced, then its body; the end of the statement's region, and every jump out of it, a <c>return</c>, a <c>break</c>, a
+    /// <c>continue</c> or a case propagated out, puts that deadline back (<see cref="EndWithin"/>), as Kotlin's <c>withTimeout</c> ends its
+    /// scope on every way out; a crash ends the activation with it, and a <c>throw</c> in the top-level code the process.
+    /// </summary>
+    private void EmitWithin(WithinStatement w)
+    {
+        var bound = EmitExpression(w.Bound);
+        regionBlocks[regions[^1]] = fn.Value($"call i64 {RuntimeFunction("BlockEnter")}(i64 {bound})");
+        EmitBlock(w.Body);
+    }
+
+    /// <summary>At the end of the region of a <c>within</c> block's statement, or a jump out of it, the deadline its entry replaced set again.</summary>
+    private void EndWithin(List<(string Value, KurzType Type)> temporaries)
+    {
+        if (regionBlocks.TryGetValue(temporaries, out var before))
+        {
+            fn.Emit($"call void {RuntimeFunction("BlockExit")}(i64 {before})");
+        }
+    }
+
+    /// <summary>
     /// U4, U6, U11: a call of an actor's method as a message: the actor's reference, read first, or, inside it, made from <c>this</c>
     /// (U11), then the arguments, each a copy of its own in the actor's heap where it holds a block (U12,
     /// <see cref="Crossed"/>; comment 6902210646, Q5), stored into a block of that heap that the message's function frees once it ran; the block goes to the end of the actor's inbox (U5, U15), or of its side list, where it is a
@@ -478,11 +505,11 @@ public sealed partial class Emitter
         var run = MessageRun(f);
         var copy = MessageCopy(f, CopiesInto(c, info, f.Parameters.Select(p => p.Type).ToList()));
         var table = $"@\"message.table.{Number(++actorSites)}\"";
-        module.Global($"{table} = private unnamed_addr constant [2 x ptr] [ptr {run}, ptr {copy}]");
+        module.Global($"{table} = private unnamed_addr constant [3 x ptr] [ptr {run}, ptr {copy}, ptr {MessageDrop(f)}]");
         fn.Emit($"store ptr {table}, ptr {MessageField(message, block, 1)}");
         for (var i = 0; i < arguments.Count; i++)
         {
-            fn.Emit($"store {arguments[i]}, ptr {MessageField(message, block, 5 + i)}");
+            fn.Emit($"store {arguments[i]}, ptr {MessageField(message, block, MessageArguments + i)}");
         }
 
         // a message built in a heap of its own: copied into the actor's heap of the moment it is queued, its own heap freed
@@ -512,7 +539,7 @@ public sealed partial class Emitter
         fn.Emit($"store i32 0, ptr {reply}");
         if (!Types.IsVoid(result))
         {
-            fn.Emit($"store ptr {fn.Value($"call ptr {StdFunction("HeapCurrent")}()")}, ptr {fn.Value($"getelementptr {Reply(result)}, ptr {reply}, i32 0, i32 2")}");
+            fn.Emit($"store ptr {fn.Value($"call ptr {StdFunction("HeapCurrent")}()")}, ptr {fn.Value($"getelementptr {Reply(result)}, ptr {reply}, i32 0, i32 {Number(ReplyHeap)}")}");
         }
 
         fn.Emit($"call void {RuntimeFunction("ReplyWaiter")}(ptr {reply})"); // the waiter before the message is queued
@@ -520,7 +547,7 @@ public sealed partial class Emitter
         block = Queued();
         fn.Emit($"call void {RuntimeFunction("Enqueue")}({ReferenceWords(actor)}, ptr {block}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
         fn.Emit($"call void {RuntimeFunction("Wait")}(ptr {reply}, ptr {block}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
-        return Types.IsVoid(result) ? "void" : fn.Value($"load {Ir(result)}, ptr {fn.Value($"getelementptr {Reply(result)}, ptr {reply}, i32 0, i32 3")}");
+        return Types.IsVoid(result) ? "void" : fn.Value($"load {Ir(result)}, ptr {fn.Value($"getelementptr {Reply(result)}, ptr {reply}, i32 0, i32 {Number(ReplyHeap + 1)}")}");
     }
 
     /// <summary>
@@ -537,7 +564,7 @@ public sealed partial class Emitter
     private string MessageRun(FunctionSymbol f) => Helper($"message.{f.Owner!.Name}.{f.Name}.{Number(f.Line)}", "void", ["ptr", "ptr"], () =>
     {
         var message = MessageType(f);
-        var arguments = f.Parameters.Select((p, i) => (p.Type, Value: fn.Value($"load {Ir(p.Type)}, ptr {MessageField(message, "%a1", 5 + i)}"))).ToList();
+        var arguments = f.Parameters.Select((p, i) => (p.Type, Value: fn.Value($"load {Ir(p.Type)}, ptr {MessageField(message, "%a1", MessageArguments + i)}"))).ToList();
         var result = CallOn(f, "%a0", new ClassType(f.Owner!), arguments.Select(a => $"{Ir(a.Type)} {a.Value}"));
         var reply = fn.Value($"call ptr {RuntimeFunction("ReplyTaken")}(ptr %a1)"); // the swap that makes this function its one owner
         if (!Types.IsVoid(f.ReturnType))
@@ -561,14 +588,14 @@ public sealed partial class Emitter
                 // no function value reaches here, since a call that waits on a method whose result does not cross with no word, a
                 // function type among them, is `send-needs-word` at the call, and a `send` of a method with a result is `send-result`
                 // (U6; `Checker.Actors.cs`, the stage of the result)
-                var heap = fn.Value($"load ptr, ptr {fn.Value($"getelementptr {Reply(f.ReturnType)}, ptr {reply}, i32 0, i32 2")}");
+                var heap = fn.Value($"load ptr, ptr {fn.Value($"getelementptr {Reply(f.ReturnType)}, ptr {reply}, i32 0, i32 {Number(ReplyHeap)}")}");
                 var crossed = Crossed(result, f.ReturnType, heap); // in a session of its own, not the call's
                 Release(result, f.ReturnType);
                 result = crossed;
             }
 
             // a method with a result takes no `send` (U6, U7)
-            fn.Emit($"store {Ir(f.ReturnType)} {result}, ptr {fn.Value($"getelementptr {Reply(f.ReturnType)}, ptr {reply}, i32 0, i32 3")}");
+            fn.Emit($"store {Ir(f.ReturnType)} {result}, ptr {fn.Value($"getelementptr {Reply(f.ReturnType)}, ptr {reply}, i32 0, i32 {Number(ReplyHeap + 1)}")}");
             fn.Emit($"call void {RuntimeFunction("Replied")}(ptr {reply})");
             fn.Branch(joined);
             fn.Block(joined);
@@ -598,7 +625,7 @@ public sealed partial class Emitter
     /// U21: the function that copies a message of the method <paramref name="f"/>, made at its call site, into the heap of the actor's new
     /// instance after a crash, which the runtime calls with the message and that heap, and into the actor's heap at the queueing of a
     /// message built in a heap of its own (<see cref="EmitMessage"/>): a block of that heap with the message's table,
-    /// reply and chain ID, and a copy of each argument, every counted block it reaches copied there in one session (U12, Q2), a function
+    /// reply, chain ID and deadlines, and a copy of each argument, every counted block it reaches copied there in one session (U12, Q2), a function
     /// value by the environment of its lambda (<paramref name="copiesInto"/>); the message's own block goes with the crashed heap, or with
     /// the message's own heap.
     /// </summary>
@@ -607,7 +634,7 @@ public sealed partial class Emitter
         var message = MessageType(f);
         var moved = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr %a1, i64 {IrSize(message)})");
         fn.Emit($"store ptr null, ptr {MessageField(message, moved, 0)}");
-        foreach (var (index, type) in new[] { (1, "ptr"), (2, "ptr"), (3, "i64"), (4, "i64") })
+        foreach (var (index, type) in new[] { (1, "ptr"), (2, "ptr"), (3, "i64"), (4, "i64"), (5, "i64"), (6, "i64") })
         {
             fn.Emit($"store {type} {fn.Value($"load {type}, ptr {MessageField(message, "%a0", index)}")}, ptr {MessageField(message, moved, index)}");
         }
@@ -616,14 +643,14 @@ public sealed partial class Emitter
         for (var i = 0; i < f.Parameters.Count; i++)
         {
             var type = f.Parameters[i].Type;
-            var value = fn.Value($"load {Ir(type)}, ptr {MessageField(message, "%a0", 5 + i)}");
+            var value = fn.Value($"load {Ir(type)}, ptr {MessageField(message, "%a0", MessageArguments + i)}");
             if (Counted(type))
             {
-                CrossInto(MessageField(message, moved, 5 + i), value, type, session, "%a1", copiesInto[i]); // U12: into the place the method reads
+                CrossInto(MessageField(message, moved, MessageArguments + i), value, type, session, "%a1", copiesInto[i]); // U12: into the place the method reads
                 continue;
             }
 
-            fn.Emit($"store {Ir(type)} {value}, ptr {MessageField(message, moved, 5 + i)}");
+            fn.Emit($"store {Ir(type)} {value}, ptr {MessageField(message, moved, MessageArguments + i)}");
         }
 
         fn.Return($"ptr {moved}");
@@ -631,17 +658,47 @@ public sealed partial class Emitter
 
     /// <summary>
     /// The IR type of a message of the method: the message after it in its list, the function that runs it, the reply, the chain ID as two
-    /// words, then the arguments.
+    /// words, the deadline and the deadline of the <c>within</c> block that runs while it runs (U37, U38), then the arguments, from the
+    /// field <see cref="MessageArguments"/> on.
     /// </summary>
-    private string MessageType(FunctionSymbol f) => $"{{ ptr, ptr, ptr, i64, i64{string.Concat(f.Parameters.Select(p => ", " + Ir(p.Type)))} }}";
+    private string MessageType(FunctionSymbol f) => $"{{ ptr, ptr, ptr, i64, i64, i64, i64{string.Concat(f.Parameters.Select(p => ", " + Ir(p.Type)))} }}";
+
+    /// <summary>The field of a message's first argument (<see cref="MessageType"/>), after the runtime's seven words.</summary>
+    private const int MessageArguments = 7;
 
     /// <summary>
     /// The IR type of the reply of a call that waits, as tokio's <c>oneshot</c> holds its state, its receiver's task and its value: the
     /// word set once the result stands, an <c>i32</c> that the runtime stores with release and loads with acquire, the activation that
-    /// waits on it, which the runtime's <c>ReplyWaiter</c> sets, then, for a method with a result, the heap of the caller, which the
-    /// result is copied into (U12), and the result.
+    /// waits on it, which the runtime's <c>ReplyWaiter</c> sets, the call's deadline and the replies before and after it among the
+    /// thread's timers, which the runtime's <c>Enqueue</c> and <c>Wait</c> set (U36), then, for a method with a result, the heap of the
+    /// caller, which the result is copied into (U12), the field <see cref="ReplyHeap"/>, and the result after it.
     /// </summary>
-    private string Reply(KurzType result) => Types.IsVoid(result) ? "{ i32, ptr }" : $"{{ i32, ptr, ptr, {Ir(result)} }}";
+    private string Reply(KurzType result) => Types.IsVoid(result) ? "{ i32, ptr, i64, ptr, ptr }" : $"{{ i32, ptr, i64, ptr, ptr, ptr, {Ir(result)} }}";
+
+    /// <summary>The field of the caller's heap in a reply (<see cref="Reply"/>), the result's the one after it.</summary>
+    private const int ReplyHeap = 5;
+
+    /// <summary>
+    /// U37: the function that drops a message of the method <paramref name="f"/> unrun, the third of its call site's table, which the
+    /// runtime calls with the message where its deadline passed at its queueing or before its callee took it (the runtime's
+    /// <c>Discard</c>): every argument that holds a count let go of, a parameter written <c>move</c> among them, whose method never took
+    /// it, and the message's block freed, as <see cref="MessageRun"/> frees it.
+    /// </summary>
+    private string MessageDrop(FunctionSymbol f) => Helper($"message.drop.{f.Owner!.Name}.{f.Name}.{Number(f.Line)}", "void", ["ptr"], () =>
+    {
+        var message = MessageType(f);
+        for (var i = 0; i < f.Parameters.Count; i++)
+        {
+            var type = f.Parameters[i].Type;
+            if (Counted(type))
+            {
+                Release(fn.Value($"load {Ir(type)}, ptr {MessageField(message, "%a0", MessageArguments + i)}"), type);
+            }
+        }
+
+        fn.Emit($"call void {StdFunction("Free")}(ptr %a0, i64 {IrSize(message)})");
+        fn.Return(null);
+    });
 
     private string MessageField(string message, string block, int index) => fn.Value($"getelementptr {message}, ptr {block}, i32 0, i32 {Number(index)}");
 

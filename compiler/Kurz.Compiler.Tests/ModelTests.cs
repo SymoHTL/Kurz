@@ -16,7 +16,8 @@ namespace Kurz.Compiler.Tests;
 /// what the runtime no longer does, so that a change of one of those lines, which one thread cannot show, turns it red. The explorer runs every
 /// interleaving of two or three threads, each state once, and finds no lost wake (a message queued or a reply set always leads to the
 /// actor or the waiter running), no two owners of a reply, no two threads holding one actor, no message while its constructor runs
-/// (U17) or before its restart (U22), and no owner of a reply that reads or writes the waiter's frame once it is gone; and it finds each of these broken in a model
+/// (U17) or before its restart (U22), and no owner of a reply that reads or writes the waiter's frame once it is gone, the timer that fires at
+/// a call's deadline among them, which wakes the waiter and owns no reply (U36, U37); and it finds each of these broken in a model
 /// broken so, the cases of <see cref="Break"/>. Its moves are sequentially consistent: the orders of the runtime's atomic operations,
 /// acquire and release, are the IR's to show (<c>EmitterTests</c>), not the explorer's.
 /// </summary>
@@ -57,6 +58,18 @@ public sealed class ModelTests
 
         /// <summary>A restart holds the actor by its compare-exchange whether a take holds it or not.</summary>
         RestartHoldsNothing,
+
+        /// <summary><c>Dropped</c> takes the reply of a message past its deadline and sets no word and wakes nothing.</summary>
+        DropSignalsNothing,
+
+        /// <summary><c>Fire</c> takes the reply off the timers at its deadline and wakes nothing.</summary>
+        TimerWakesNothing,
+
+        /// <summary>A wait that its deadline ended gives the waiter's stack back at once, with no unhook of its reply.</summary>
+        TimeoutLeavesAtOnce,
+
+        /// <summary><c>Fall</c> gives the waiter's stack back with its reply still among the timers.</summary>
+        TimerKeptPastFrame,
     }
 
     /// <summary>
@@ -143,11 +156,12 @@ public sealed class ModelTests
     // threads that hold it, whether its constructor ended, whether a message started while it ran; then the reply's: whether the
     // message names the reply, whether the message is queued, whether the reply names its waiter, the reply's word, the owners of the
     // reply, whether the waiter's frame is gone, whether the waiter parked, returned or crashed, and whether an owner of the reply read
-    // or wrote the frame once it was gone; and the actor's life, 1 while it waits for its restart. Each strand's words follow: its
-    // place, the word it read, what `Ready` gave, a register.
+    // or wrote the frame once it was gone; the actor's life, 1 while it waits for its restart; whether the reply stands among the timers,
+    // and whether the call's deadline passed at the scheduler's turn. Each strand's words follow: its place, the word it read, what
+    // `Ready` gave, a register.
     private const int Word = 0, Entries = 1, Mail = 2, Holders = 3, Built = 4, Early = 5;
     private const int Hook = 6, Published = 7, Waiter = 8, Answer = 9, Owners = 10, Gone = 11, Parked = 12, Returned = 13, Crashed = 14;
-    private const int Touched = 15, Life = 16, Shared = 17, Own = 4;
+    private const int Touched = 15, Life = 16, Listed = 17, Due = 18, Shared = 19, Own = 4;
 
     /// <summary>A first state: the shared words zero but those given, each strand at its place 0 but those given.</summary>
     private static int[] Start(int strands, params (int Word, int Value)[] set)
@@ -259,7 +273,7 @@ public sealed class ModelTests
     private static Strand Runner(string name, int at, Break broken) => new(name, at,
     [
         .. Taken(at, 0, 3, broken),
-        new("RunOne", "Start(state, Taken(state - 32), null)", _ => true, s =>
+        new("RunOne", "Start(state, message, null)", _ => true, s =>
         {
             if (s[Mail] > 0 && s[Life] == 0)
             {
@@ -398,7 +412,7 @@ public sealed class ModelTests
             new("Ready", "ReplyState(reply) != 0", _ => true, s => { s[at + 2] = s[Answer] != 0 ? 1 : 0; s[at] = 4; }),
             .. LetGone(at, 4, Then, broken),
             .. Taken(at, 7, 10, broken),
-            new("RunOne", "if reply != null && ReplyState(reply) != 0", _ => true, s =>
+            new("RunOne", "if reply != null && (ReplyState(reply) != 0 || Waited(reply))", _ => true, s =>
             {
                 if (s[Crashed] == 0 && s[Answer] != 0)
                 {
@@ -482,23 +496,29 @@ public sealed class ModelTests
     /// <summary>
     /// The crash of the waiter's actor while its activation is parked: the hold of the actor by the crash, from a state word no thread
     /// holds (<c>Fell</c>, as the record's default of a crash through the state word has it, which the build makes on its one thread);
-    /// where the reply's word is 0 (<c>Fall</c>), the take of the reply (<c>ReplyTaken</c>), and where the callee took it first, the wait
-    /// for its word (<c>Fall</c>); then the stack given back, the activation gone, and the end of the hold (<c>LetGo</c>).
+    /// the reply taken off the timers (<c>Fall</c>); where the reply's word is 0 (<c>Fall</c>), the take of the reply
+    /// (<c>ReplyTaken</c>), and where the callee took it first, the wait for its word (<c>Fall</c>); then the stack given back, the
+    /// activation gone, and the end of the hold (<c>LetGo</c>).
     /// </summary>
     private static Strand Crash(int at, Break broken)
     {
-        var wait = 2 + Takes(broken);
+        var wait = 3 + Takes(broken);
         var lost = broken == Break.CrashLeavesAtOnce ? wait + 1 : wait;
         return new("crash", at,
         [
-            new("Fell", null, s => s[Parked] != 0 && s[Returned] == 0 && (s[Word] & (Running | Building)) == 0, s =>
+            new("Fell", null, s => s[Parked] != 0 && s[Returned] == 0 && s[Crashed] == 0 && (s[Word] & (Running | Building)) == 0, s =>
             {
                 s[Word] |= Running;
                 s[Holders]++;
                 s[at] = 1;
             }),
-            new("Fall", "ReplyState(waited) == 0", _ => true, s => { s[at] = s[Answer] != 0 ? wait + 1 : 2; }),
-            .. Took(at, 2, wait + 1, lost, _ => true, broken),
+            new("Fall", "TimerRemove(waited)", _ => true, s =>
+            {
+                s[Listed] = broken == Break.TimerKeptPastFrame ? s[Listed] : 0;
+                s[at] = 2;
+            }),
+            new("Fall", "ReplyState(waited) == 0", _ => true, s => { s[at] = s[Answer] != 0 ? wait + 1 : 3; }),
+            .. Took(at, 3, wait + 1, lost, _ => true, broken),
             new("Fall", "while ReplyState(waited) == 0", s => s[Answer] != 0, s => { s[at] = wait + 1; }),
             new("Fall", "Give(at)", _ => true, s =>
             {
@@ -510,6 +530,127 @@ public sealed class ModelTests
             .. LetGone(at, wait + 2, _ => -1, broken),
         ]);
     }
+
+    /// <summary>
+    /// The waiter of a call with a deadline, whose thread holds its actor at the start: the reply's waiter stored (<c>ReplyWaiter</c>), the
+    /// message queued (<c>Enqueue</c>), the reply among the timers (<c>TimerAdd</c>), the loop's test of the reply's word and of the
+    /// deadline (<c>Wait</c>), and where neither holds the activation parked: <c>Ready</c> and the end of the hold, then the takes of the
+    /// actor's entries, each resuming the activation where the word is set or the deadline passed (<c>RunOne</c>), which tests again.
+    /// Out of the loop: the reply off the timers (<c>TimerRemove</c>) and its word read once; where it is set the wait returns, and else
+    /// the deadline's <c>call-timeout</c> is the actor's crash, whose fall unhooks the reply as <see cref="Crash"/> does, the waiter's thread
+    /// holding the actor; then the stack given back and the end of the hold.
+    /// </summary>
+    private static Strand TimedWaiting(int at, Break broken)
+    {
+        var wait = 15 + Takes(broken);
+        var give = wait + 1;
+        int Then(int[] s) => s[Returned] != 0 || s[Crashed] != 0 ? -1 : 8;
+        return new("waiter", at,
+        [
+            new("ReplyWaiter", "*Ptr<byte*>(reply + 8) = running", _ => true, s => { s[Waiter] = 1; s[at] = 1; }),
+            new("Enqueue", "Append(state - 32, message)", _ => true, s => { s[Published] = 1; s[at] = 2; }),
+            new("Wait", "TimerAdd(reply)", _ => true, s => { s[Listed] = 1; s[at] = 3; }),
+            new("Wait", "while ReplyState(reply) == 0 && !Waited(reply)", _ => true, s =>
+            {
+                if (s[Answer] != 0 || s[Due] != 0)
+                {
+                    s[at] = 12;
+                    return;
+                }
+
+                s[Parked] = 1;
+                s[at] = 4;
+            }),
+            new("Ready", "ReplyState(reply) != 0 || Waited(reply)", _ => true, s => { s[at + 2] = s[Answer] != 0 || s[Due] != 0 ? 1 : 0; s[at] = 5; }),
+            .. LetGone(at, 5, Then, broken),
+            .. Taken(at, 8, 11, broken),
+            new("RunOne", "if reply != null && (ReplyState(reply) != 0 || Waited(reply))", _ => true, s =>
+            {
+                if (s[Crashed] == 0 && (s[Answer] != 0 || s[Due] != 0))
+                {
+                    s[at] = 3;
+                    return;
+                }
+
+                s[at + 2] = 0;
+                s[at] = 5;
+            }),
+            new("Wait", "TimerRemove(reply)", _ => true, s => { s[Listed] = 0; s[at] = 13; }),
+            new("Wait", "int kind = ReplyState(reply)", _ => true, s =>
+            {
+                if (s[Answer] != 0)
+                {
+                    s[Returned] = 1;
+                    s[Gone] = 1;
+                    s[at] = 4;
+                    return;
+                }
+
+                s[at] = broken == Break.TimeoutLeavesAtOnce ? give : 14;
+            }),
+            new("Fall", "ReplyState(waited) == 0", _ => true, s => { s[at] = s[Answer] != 0 ? give : 15; }),
+            .. Took(at, 15, give, wait, _ => true, broken),
+            new("Fall", "while ReplyState(waited) == 0", s => s[Answer] != 0, s => { s[at] = give; }),
+            new("Fall", "Give(at)", _ => true, s =>
+            {
+                s[Crashed] = 1;
+                s[Gone] = 1;
+                s[at + 2] = 0;
+                s[at] = 5;
+            }),
+        ]);
+    }
+
+    /// <summary>
+    /// The callee of a call with a deadline, once its message is queued: the scheduler's test of the message's deadline at its take
+    /// (<c>RunOne</c>); before it, the run, the take of the reply (<c>ReplyTaken</c>) and, where it owns it, <c>Replied</c>, as
+    /// <see cref="Callee"/> has them; past it, the drop (<c>Dropped</c>): the take of the reply, and where it owns it, <c>Signal</c>: the
+    /// waiter read, then the release store of the word <c>dropped</c>, then the wake of the waiter's actor.
+    /// </summary>
+    private static Strand TimedCallee(int at, Break broken)
+    {
+        var takes = Takes(broken);
+        var answer = 1 + takes;
+        var drop = answer + 5;
+        var signal = drop + takes;
+        return new("callee", at,
+        [
+            new("RunOne", "if *Ptr<long>(message + 40) > tick", s => s[Published] != 0, s => { s[at] = s[Due] != 0 ? drop : 1; }, ["Dropped(message)"]),
+            .. Took(at, 1, answer, -1, _ => true, broken),
+            new("Replied", "byte* waiter = *Ptr<byte*>(reply + 8)", _ => true, s => { s[Touched] |= s[Gone]; s[at + 1] = s[Waiter]; s[at] = answer + 1; }),
+            new("Replied", ".Store(1, MemoryOrder.Release)", _ => true, s => { s[Touched] |= s[Gone]; s[Answer] = 1; s[at] = answer + 2; }),
+            new("Replied", "Wake(state)", _ => true, s => { s[at] = s[at + 1] != 0 ? answer + 3 : -1; }),
+            .. Woken(at, answer + 3, -1),
+            .. Took(at, drop, broken == Break.DropSignalsNothing ? -1 : signal, -1, _ => true, broken),
+            new("Signal", "byte* waiter = *Ptr<byte*>(reply + 8)", _ => true, s => { s[Touched] |= s[Gone]; s[at + 1] = s[Waiter]; s[at] = signal + 1; }),
+            new("Signal", ".Store(kind, MemoryOrder.Release)", _ => true, s => { s[Touched] |= s[Gone]; s[Answer] = 4; s[at] = signal + 2; }),
+            new("Signal", "Wake(state)", _ => true, s => { s[at] = s[at + 1] != 0 ? signal + 3 : -1; }),
+            .. Woken(at, signal + 3, -1),
+        ]);
+    }
+
+    /// <summary>
+    /// The timer of the call's deadline: the clock past it at a turn of the scheduler (<c>Wait</c>), then the timers fired
+    /// (<c>Fire</c>): where the reply stands among them, it is taken off them and its waiter read, one move under the timers' owner, and
+    /// the waiter's actor woken; the timer owns no reply.
+    /// </summary>
+    private static Strand Timer(int at, Break broken) => new("timer", at,
+    [
+        new("Wait", "tick = now", _ => true, s => { s[Due] = 1; s[at] = 1; }),
+        new("Fire", "TimerRemove(reply)", _ => true, s =>
+        {
+            if (s[Listed] == 0)
+            {
+                s[at] = -1;
+                return;
+            }
+
+            s[Listed] = 0;
+            s[Touched] |= s[Gone];
+            s[at] = broken == Break.TimerWakesNothing ? -1 : 2;
+        }, ["while timers != null && *Ptr<long>(timers + 16) <= now"]),
+        .. Woken(at, 2, -1),
+    ]);
 
     /// <summary>What a state of the reply's models in which no thread can move keeps.</summary>
     private static string? ReplyAtRest(int[] s) =>
@@ -525,6 +666,18 @@ public sealed class ModelTests
         // the waiter's actor crashes while its activation is parked, the callee answering meanwhile
         new("a call, its answer and the crash of its waiter", Start(3, (Word, Running), (Holders, 1), (Built, 1), (Hook, 1)),
             [Waiting(At(0), broken), Callee(At(1), broken), Crash(At(2), broken)], Always, ReplyAtRest),
+
+        // a call with a deadline: its callee answers, or drops its message past the deadline, while the timer fires (U36, U37)
+        new("a call, its answer or its drop, and its deadline", Start(3, (Word, Running), (Holders, 1), (Built, 1), (Hook, 1)),
+            [TimedWaiting(At(0), broken), TimedCallee(At(1), broken), Timer(At(2), broken)], Always, ReplyAtRest),
+
+        // a call whose message no callee takes: the timer alone wakes its waiter (U36)
+        new("a call no callee takes, and its deadline", Start(2, (Word, Running), (Holders, 1), (Built, 1), (Hook, 1)),
+            [TimedWaiting(At(0), broken), Timer(At(1), broken)], Always, ReplyAtRest),
+
+        // the waiter's actor crashes while its activation is parked with a deadline, the timer firing meanwhile (U20, U36)
+        new("a deadline and the crash of the waiter's actor", Start(3, (Word, Running), (Holders, 1), (Built, 1), (Hook, 1)),
+            [TimedWaiting(At(0), broken), Timer(At(1), broken), Crash(At(2), broken)], Always, ReplyAtRest),
     ];
 
     private static Model[] Models(Break broken) => [.. WordModels(broken), .. ReplyModels(broken)];
@@ -553,6 +706,10 @@ public sealed class ModelTests
     [InlineData(Break.WaiterReadAfterStore, "a call and its answer", "once it was gone")]
     [InlineData(Break.CrashLeavesAtOnce, "a call, its answer and the crash of its waiter", "once it was gone")]
     [InlineData(Break.RestartHoldsNothing, "a take while a restart starts", "two threads hold the actor")]
+    [InlineData(Break.DropSignalsNothing, "a call, its answer or its drop, and its deadline", "a lost wake")]
+    [InlineData(Break.TimeoutLeavesAtOnce, "a call, its answer or its drop, and its deadline", "once it was gone")]
+    [InlineData(Break.TimerWakesNothing, "a call no callee takes, and its deadline", "a lost wake")]
+    [InlineData(Break.TimerKeptPastFrame, "a deadline and the crash of the waiter's actor", "once it was gone")]
     public void The_explorer_finds_each_break_of_a_model_in_the_model_it_breaks(Break broken, string name, string what)
     {
         // each break found in the model it breaks, with the moves that reach it: the explorer's own red proof
