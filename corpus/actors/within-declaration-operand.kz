@@ -1,0 +1,9 @@
+// expect: error syntax at 5
+// rules: U41
+
+actor Store {
+    pub int Get() within 1s + 1s => 1
+}
+
+s = spawn Store()
+print(s.Get())

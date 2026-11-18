@@ -110,7 +110,17 @@ public sealed partial class Checker
     private Typed CallResult(CallExpression c, KurzType? expected)
     {
         var result = CalleeResult(c, expected);
-        return result.IsError || !PlainCallWords(c) ? result : Typed.Error;
+        if (!result.IsError && PlainCallWords(c))
+        {
+            result = Typed.Error;
+        }
+
+        if (c.Within is { } bound)
+        {
+            CallClause(c, bound, result);
+        }
+
+        return result;
     }
 
     /// <summary>

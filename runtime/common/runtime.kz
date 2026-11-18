@@ -3779,16 +3779,20 @@ pub string ActorText(string name, long number) {
 // (U22) nor for the decision of its block (U34). A call or a
 // `send` to an actor that ended raises `actor-gone` at its line `line` of the file `file`, the message and what
 // crossed into it staying in the heap the running code allocates in (`ActorHeap`) (U6, U20; design record,
-// section 6, the owner, 2026-11-16, #519, comments 6919351399 and 6923513534), as an answer that stands
-// before its deadline is read (U36). The message is stamped with its deadline too (U37): a `send` carries
+// section 6, the owner, 2026-11-16, #519, comments 6919351399 and 6923513534), before its deadline is
+// compared, so that a call past its deadline to an actor that ended raises `actor-gone` (U43; assumed: T14 of
+// comment 6972461413). The message is stamped with its deadline too (U37): a `send` carries
 // the running message's, none in the top-level code (section 6, comment 6880404917, Q13; assumed: T9 of
 // comment 6967625156); a call the smaller of that deadline and its own bound, the deadline of the `within`
-// block that runs, else the default bound from now, 5 seconds (U36, U38, U44; assumed: T8 of that comment), which
+// block that runs, else `bound` from now where `bounded`, the bound of the call's clause or of its method's
+// declaration (U39; the block over the call's clause over the declaration's, assumed in section 6), else the
+// default bound from now, 5 seconds (U36, U38, U44; assumed: T8 of that comment), which
 // its reply holds too, for its wait (`Wait`). A message whose deadline passed at its queueing is dropped
 // unqueued (`Discard`), and a call raises `call-timeout` at its line, the crash of the actor that makes it,
 // while a `send` raises nothing (U37, U45; assumed: T1 of comment 6967147952, T10 of comment 6967625156), as
-// tonic's client fails a call whose deadline passed and a send on tokio's channel reads no deadline.
-pub void Enqueue(long index, long number, byte* message, string file, int line) {
+// tonic's client fails a call whose deadline passed and a send on tokio's channel reads no deadline (neither
+// checked at source).
+pub void Enqueue(long index, long number, byte* message, bool bounded, long bound, string file, int line) {
     sys.Entered()
     byte* state = Lookup(index, number)
     if state == null {
@@ -3814,7 +3818,9 @@ pub void Enqueue(long index, long number, byte* message, string file, int line) 
         byte* reply = *Ptr<byte*>(message + 16)
         if reply != null {
             mut long own = block
-            if own == 0 {
+            if own == 0 && bounded {
+                own = Due(now, bound)
+            } else if own == 0 {
                 own = Due(now, sys.DefaultBound())
             }
 
@@ -4095,7 +4101,9 @@ pub void Replied(byte* reply) {
 // The reply `reply` of a call, which its owner took (`ReplyTaken`), set to `kind` with no result: 2 where its
 // callee crashed (U20), 3 where the actor that was to answer ended, 4 where its message was dropped at its
 // deadline (`Dropped`; U37); the waiter and its actor read before the
-// word's release store, and the activation that waits on it woken as `Replied` wakes it, where its actor
+// word's release store, and the clock at the set stored in the reply at 40 before it too, the time that `Wait`
+// holds a crash or an end to the call's deadline by, not the time the waiter reads the word (U43; assumed: T7 of
+// comment 6967625156, "the earlier of the two"); and the activation that waits on it woken as `Replied` wakes it, where its actor
 // neither waits for its restart or for the decision of its block nor ended, as C#'s `TaskCompletionSource` is
 // set faulted.
 void Signal(byte* reply, int kind) {
@@ -4106,6 +4114,7 @@ void Signal(byte* reply, int kind) {
             state = *Ptr<byte*>(waiter + 320)
         }
 
+        *Ptr<long>(reply + 40) = PauseClock()
         AtomicInt.FromPtr(Ptr<int>(reply)).Store(kind, MemoryOrder.Release)
         if state != null {
             int life = *Ptr<int>(state - 88)
@@ -4124,7 +4133,7 @@ long Never() => 9223372036854775807
 // The deadline `bound` nanoseconds after `now`, the bound rounded up to whole milliseconds (U36): `now` for a
 // bound of zero or less, a deadline that has passed (U40; assumed: T4 of comment 6967147952), and none where it
 // would pass the largest time the clock holds, as Tokio's `timeout` falls back on a far future where its sum
-// overflows (U40).
+// overflows (not checked at source) (U40; assumed in section 6, proposed with the record and not put to the owner).
 long Due(long now, long bound) {
     if bound <= 0 {
         return now
@@ -4160,7 +4169,9 @@ thread static mut long rootBlock = 0
 // The entry of a `within` block (U38): its deadline, `bound` from now (`Due`), the smaller of it and the
 // deadline of the block it stands in (U38, assumed), set for the running code, the top-level code's or the
 // running message's, and the deadline it replaces, which its exit puts back (`BlockExit`); the emitted code calls
-// it at the block's entry, and `BlockExit` at every way out of the block that goes on running.
+// it at the block's entry, and `BlockExit` at every way out of the block that goes on running. A deadline of 0
+// is no block (`rootBlock`, `Enqueue`); `Due` gives 0 only where the clock reads 0, which `PauseClock` gives only
+// where the clock cannot be read, and a `within` entered then reads as no block, its calls taking their own bounds.
 pub long BlockEnter(long bound) {
     mut long before = 0
     raw {
@@ -4272,7 +4283,7 @@ long Next() {
 
 // The timers whose deadline passed at `now` fired, the earliest first: each reply taken off them, and the
 // actor of the activation that waits on it woken, which goes on where that activation is its top (`Waited`);
-// the timer owns no reply and sets no word, so that the activation's own fall unhooks its reply (`Wait`).
+// the timer owns no reply and sets no word, so that the activation's own fall unhooks its reply (`Fall`).
 void Fire(long now) {
     raw {
         while timers != null && *Ptr<long>(timers + 16) <= now {
@@ -4342,11 +4353,12 @@ void Discard(byte* message) {
 // first timer and the deadline. Inside a message the activation's reply joins the thread's timers while it
 // parks (`TimerAdd`), and the activation goes on where its deadline passed at the scheduler's turn (`Waited`),
 // its reply leaving the timers at every way out (`TimerRemove`). The reply's word is read once after the wait, and
-// an answer set before that read is the call's result (U36), the header then naming no reply. A call that left
+// a result set before that read is the call's result (U36), the header then naming no reply. A call that left
 // its wait with no answer raises `call-timeout` at its line, the crash of the waiting actor in its turn, whose
 // fall unhooks the reply, which the header still names (`Fall`; U20); so does a reply set `dropped` (`Dropped`),
-// and a reply set `callee crashed` or `gone` once the call's own deadline passed (U43; assumed: T7 of comment
-// 6967625156), as tonic reports a call's own deadline.
+// and a reply set `callee crashed` or `gone` at a time, which `Signal` stored in it, at or past the call's own
+// deadline, whenever the waiter reads it (U43; assumed: T7 of comment 6967625156), as tonic reports a call's own
+// deadline (not checked at source).
 pub void Wait(byte* reply, byte* message, string file, int line) {
     sys.Entered()
     raw {
@@ -4405,7 +4417,7 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
             *Ptr<byte*>(running + 432) = null
         }
 
-        if kind == 0 || kind == 4 || (kind != 1 && *Ptr<long>(reply + 16) <= PauseClock()) {
+        if kind == 0 || kind == 4 || (kind != 1 && *Ptr<long>(reply + 16) <= *Ptr<long>(reply + 40)) {
             Raise("call-timeout", file, line)
         }
 
@@ -5404,8 +5416,8 @@ pub void Decide(long word) {
 
 // The message of the block of the policy of the actor whose state is `taker`, made in the heap `above`
 // of its supervisor (U28): the message after it, the blocks' table, no reply, a chain of its own, as a
-// restart's message has (U34; assumed: S11 of comment 6907441402), with no deadline and no block's (U37,
-// U38), the actor, its stack that raised, `kept`,
+// restart's message has (U34; assumed: S11 of comment 6907441402), with no deadline and no block's (U45;
+// assumed: T9 of comment 6967625156), the actor, its stack that raised, `kept`,
 // null for none, then a copy of the crash's id and its count, the file, a constant of the emitted code, and
 // its count, the line, whether the text stands below the error line, a copy of the text and its count, the
 // chain of the activation `header` that crashed, the number of the thrown value's type, one more, 0 for none,

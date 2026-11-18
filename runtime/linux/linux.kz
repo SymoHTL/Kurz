@@ -2628,8 +2628,9 @@ byte* Endpoints() {
 }
 
 // The bound of a read, a write and `Connect` on a socket where the program sets none, 5 seconds in
-// nanoseconds (S9), and of a call that waits where no `within` names another (U36), as the design record ties
-// the one to the other (section 12); Windows's runtime holds the same value, which a test holds equal.
+// nanoseconds (S9, section 12), and of a call that waits where no `within` names another, the 5 seconds of
+// section 6 (U36): one constant for both is the build's reading, which the design record does not state;
+// Windows's runtime holds the same value, which a test holds equal.
 pub long DefaultBound() => 5000000000
 
 // The monotonic clock in nanoseconds, read by `clock_gettime` with `CLOCK_MONOTONIC` (1) into the page at

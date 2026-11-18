@@ -62,6 +62,7 @@ public static class SyntaxCopy
             Parameters = d.Parameters.Select(Parameter).ToList(),
             ExpressionBody = Optional(d.ExpressionBody),
             BlockBody = d.BlockBody is null ? null : Block(d.BlockBody),
+            Within = Optional(d.Within),
         };
 
         private Parameter Parameter(Parameter p) => p with { Type = OptionalType(p.Type), Default = Optional(p.Default) };
@@ -110,6 +111,7 @@ public static class SyntaxCopy
                     Callee = Expression(c.Callee),
                     TypeArguments = c.TypeArguments.Select(Type).ToList(),
                     Arguments = c.Arguments.Select(a => a with { Value = Expression(a.Value) }).ToList(),
+                    Within = Optional(c.Within),
                 },
                 ListLiteral l => l with { Items = l.Items.Select(Expression).ToList() },
                 IndexExpression i => i with { Target = Expression(i.Target), Index = Expression(i.Index) },

@@ -1786,10 +1786,68 @@ public sealed class ParserTests
         Assert.Equal(tree, Tree(program));
     }
 
+    [Theory]
+    [InlineData("s.Get(1) within 2s", "(call (. s Get) (int 1) (within (unit 2s)))")]
+    [InlineData("x = s.Get() within d * 2", "(assign-or-declare x (* (call (. s Get) (within d)) (int 2)))")]
+    [InlineData("x = s.Get() within (d * 2)", "(assign-or-declare x (call (. s Get) (within (paren (* d (int 2))))))")]
+    [InlineData("x = s.Get() within -d", "(assign-or-declare x (call (. s Get) (within (- d))))")]
+    [InlineData("x = s.Get() within b.Bound()", "(assign-or-declare x (call (. s Get) (within (call (. b Bound)))))")]
+    [InlineData("x = s.Get() within 2s else {\n    Gone => 0\n}", "(assign-or-declare x (else (call (. s Get) (within (unit 2s))) [((type Gone) => (int 0))]))")]
+    [InlineData("x = s.Get() within Bound() else {\n    Gone => 0\n}", "(assign-or-declare x (call (. s Get) (within (else (call Bound) [((type Gone) => (int 0))]))))")]
+    [InlineData("send s.Add(1) within 2s", "(send (call (. s Add) (int 1) (within (unit 2s))))")]
+    [InlineData("x = within(1) within 2s", "(assign-or-declare x (call within (int 1) (within (unit 2s))))")]
+    public void A_within_after_a_call_is_its_clause_and_takes_a_unary_expression(string program, string tree)
+    {
+        // U39: `x.M() within d` bounds the one call, its operand a unary expression, as T35's constant operand is, so that `* 2` applies
+        // to the call's result and a computed bound stands in parentheses, and the clause stands before a postfix `else` (O5), the `else`
+        // after a call in the operand that call's (assumed: T12 of comment 6967625156); whether the call is one a clause applies to is the
+        // checker's (T11)
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("s.Get() within 1s within 2s", 1)]
+    [InlineData("x = s.Get() else {\n    Gone => 0\n} within 2s", 3)]
+    [InlineData("x = s.Get() within", 1)]
+    [InlineData("s = spawn Store() within 2s", 1)]
+    public void A_clause_where_a_call_takes_none_is_syntax(string program, int line)
+    {
+        // U39, T12: one clause on a call, standing before its postfix `else`; a `spawn`, whose constructor's call waits for no answer,
+        // takes none, as `spawn` and Elixir's `cast` take no timeout (assumed: T11 and T12 of comment 6967625156)
+        Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
+    }
+
+    [Theory]
+    [InlineData("actor Store {\n    pub int Get() within 2s => 1\n}", "(actor Store {(function pub int Get() (within (unit 2s)) => (int 1))})")]
+    [InlineData("actor Store {\n    pub void Put(int x) within 150ms {\n    }\n}", "(actor Store {(function pub void Put(int x) (within (unit 150ms)) {})})")]
+    [InlineData("actor Store {\n    pub int Get() within -1s => 1\n}", "(actor Store {(function pub int Get() (within (- (unit 1s))) => (int 1))})")]
+    [InlineData("actor Store {\n    pub int Get() within 2 => 1\n}", "(actor Store {(function pub int Get() (within (int 2)) => (int 1))})")]
+    [InlineData("int F() within 2s => 1", "(function int F() (within (unit 2s)) => (int 1))")]
+    [InlineData("int within() => 1", "(function int within() => (int 1))")]
+    public void A_within_after_the_parameters_of_a_declaration_is_its_clause(string program, string tree)
+    {
+        // U39: `pub T M(...) within d` bounds every call of the method, its operand a number literal, with its sign where it has one,
+        // as a knob of a policy takes one (U26), the checker reading its type (U40); whether the declaration is one a clause applies to
+        // is the checker's (assumed: T11 and T13 of comment 6967625156)
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("actor Store {\n    pub int Get() within d => 1\n}", 2)]
+    [InlineData("actor Store {\n    pub int Get() within 2s * 2 => 1\n}", 2)]
+    [InlineData("actor Store {\n    pub int Get() within (2s) => 1\n}", 2)]
+    [InlineData("actor Store {\n    pub int Get() within Bound() => 1\n}", 2)]
+    public void The_clause_of_a_declaration_takes_a_duration_literal_alone(string program, int line)
+    {
+        // U39: anything but a literal after the declaration's `within` is `syntax`, as after a knob of a policy (U26) (assumed: T13 of
+        // comment 6967625156)
+        Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
+    }
+
     [Fact]
     public void The_block_of_a_within_on_the_next_line_is_braces_required()
     {
-        // U38, C1: the block opens on the line where the bound ends, as an `if`'s does, and still parses
+        // U40, C1: the block opens on the line where the bound ends, as an `if`'s does, and still parses
         Assert.Equal([(ErrorIds.BracesRequired, 1)], Errors("within d\n{\n    f()\n}"));
     }
 

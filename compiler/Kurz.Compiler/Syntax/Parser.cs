@@ -1475,15 +1475,29 @@ public sealed class Parser
 
         var typeParameters = ParseTypeParameters();
         var parameters = ParseParameters(typesOptional: false);
+        Expression? within = null;
+        if (Current is { Kind: TokenKind.Name, Text: "within" })
+        {
+            // U39: the declaration clause `pub T M(...) within d` bounds every call of the method; its operand is a duration literal
+            // alone, as a knob of a policy takes one (U26), and anything else there is `syntax` (assumed: T13 of comment 6967625156);
+            // whether the declaration is one a clause applies to is the checker's (T11)
+            Advance();
+            within = PolicyValue("a duration literal after `within`, `within 2s` (U39)");
+            if (!At(TokenKind.Arrow) && !At(TokenKind.LeftBrace) && !EndsStatement())
+            {
+                throw Fail("the body after the duration literal of `within`, which stands alone (U39)");
+            }
+        }
+
         if (Match(TokenKind.Arrow))
         {
             SkipNewlines();
-            return new FunctionDeclaration(line, modifiers, returnType, name.Text, typeParameters, parameters, ParseExpression(), null);
+            return new FunctionDeclaration(line, modifiers, returnType, name.Text, typeParameters, parameters, ParseExpression(), null, Within: within);
         }
 
         if (At(TokenKind.LeftBrace))
         {
-            return new FunctionDeclaration(line, modifiers, returnType, name.Text, typeParameters, parameters, null, ParseBlock());
+            return new FunctionDeclaration(line, modifiers, returnType, name.Text, typeParameters, parameters, null, ParseBlock(), Within: within);
         }
 
         if (typeName is not null && EndsStatement())
@@ -1491,12 +1505,12 @@ public sealed class Parser
             // C1, last sentence, which records the owner's choice of 2026-10-10: "A method signature inside a type body that ends its
             // line is the bodiless form of an interface member (K7), so its `{` on the next line is `syntax` (E4)"; whether this kind
             // of body may hold the form is the checker's
-            return new FunctionDeclaration(line, modifiers, returnType, name.Text, typeParameters, parameters, null, null);
+            return new FunctionDeclaration(line, modifiers, returnType, name.Text, typeParameters, parameters, null, null, Within: within);
         }
 
         // C1: the body of a function outside a type body opens on the first line of its signature; one on the next line, one that
         // is missing (E1: an error of the whole construct) or a statement in its place is `braces-required` there
-        return new FunctionDeclaration(line, modifiers, returnType, name.Text, typeParameters, parameters, null, ParseBlockAfter(line, "the body of a function"));
+        return new FunctionDeclaration(line, modifiers, returnType, name.Text, typeParameters, parameters, null, ParseBlockAfter(line, "the body of a function"), Within: within);
     }
 
     private List<TypeParameter> ParseTypeParameters()
@@ -1795,9 +1809,11 @@ public sealed class Parser
 
     /// <summary>
     /// U38, U40: <c>within d { ... }</c>, the word, its bound read as the condition of an <c>if</c> is (<see cref="Header"/>), and a block
-    /// that opens on the line where the bound ends, as C1 has an <c>if</c>'s; tried, so that where no block follows the bound the word
-    /// is a name, <c>within(3)</c> a call and <c>within + 1</c> a sum, as <c>on crash</c>, <c>attempt</c> and <c>vouch</c> are words
-    /// only where they stand (section 6, comment 6847932993, Q10). False, with the cursor back where it was, when no block follows.
+    /// that opens on the line where the bound ends, as C1 has an <c>if</c>'s, or, with nothing but line breaks between, on a following line,
+    /// which is the statement still and <c>braces-required</c> (U40's reading, assumed in section 6); tried, so that where no block
+    /// follows the bound the word is a name, <c>within(3)</c> a call and <c>within + 1</c> a sum, as <c>on crash</c>, <c>attempt</c> and
+    /// <c>vouch</c> are words only where they stand (section 6, comment 6847932993, Q10). False, with the cursor back where it was, when
+    /// no block follows.
     /// </summary>
     private bool TryWithin(out Statement? statement)
     {
@@ -2417,6 +2433,16 @@ public sealed class Parser
             {
                 var with = Advance(); // D5: `value with { Field = expression }`; its braces open on the line of `with` (C1) and take no trailing comma (L4)
                 expression = new WithExpression(with.Line, expression, ParseFieldAssignments(with.Line));
+                continue;
+            }
+
+            if (Current is { Kind: TokenKind.Name, Text: "within" } && expression is CallExpression { Within: null } bounded)
+            {
+                // U39: the call clause `x.M() within d` bounds the one call; its operand is a unary expression, as T35's constant
+                // operand is, and the clause stands before a postfix `else` (assumed: T12 of comment 6967625156); whether the call is
+                // one a clause applies to is the checker's (T11)
+                Advance();
+                expression = bounded with { Within = ParseUnary() };
                 continue;
             }
 

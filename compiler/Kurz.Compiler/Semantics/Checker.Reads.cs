@@ -71,7 +71,7 @@ public sealed partial class Checker
         // list counts as it is made, as `Add` counts its item (M11, M7)
         List<(IReadOnlyList<Held> Held, Expression Part)> ordered = e switch
         {
-            CallExpression c => [(Callee(c), c.Callee), .. c.Arguments.Where(a => !a.Mut).Select(a => (HeldBy(a.Value), a.Value))],
+            CallExpression c => [(Callee(c), c.Callee), .. c.Arguments.Where(a => !a.Mut).Select(a => (HeldBy(a.Value), a.Value)), .. c.Clause().Select(b => (HeldBy(b), b))],
             IndexExpression or RangeExpression or WithExpression or BinaryExpression { Operator: not TokenKind.QuestionQuestion } =>
                 Parts(e).Select(p => (HeldBy(p), p)).ToList(),
             StringLiteral => Parts(e).Select(p => (IsString(p) ? HeldBy(p) : [], p)).ToList(),
@@ -175,7 +175,7 @@ public sealed partial class Checker
         ParenthesizedExpression p => [p.Inner],
         MemberAccess m => [m.Target],
         CallExpression c when model.IsMade(c, out var construction) => construction is null ? [] : [construction],
-        CallExpression c => [c.Callee, .. c.Arguments.Where(a => !a.Mut).Select(a => a.Value)],
+        CallExpression c => [c.Callee, .. c.Arguments.Where(a => !a.Mut).Select(a => a.Value), .. c.Clause()],
         IndexExpression i => [i.Target, i.Index],
         UnaryExpression u => [u.Operand],
         BinaryExpression b => [b.Left, b.Right],
