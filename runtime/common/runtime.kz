@@ -3723,7 +3723,7 @@ pub byte* ActorNew(byte* heap, long size, long stack, byte* side, byte* name) {
     return state
 }
 
-// The slot of the table whose index is `index`, in its page, which is made at the first slot it gives (above),
+// The slot of the table whose index is `index`, in its page, which is made at the first slot it gives (`slotPages`),
 // under the lock of the table, and stored with release, so that a lookup that loads it with acquire finds it made.
 byte* SlotMade(long index) {
     raw {
@@ -4088,8 +4088,9 @@ pub void Enqueue(long index, long number, byte* message, bool bounded, long boun
 }
 
 // The message `message` at the end of the queue of many senders at `queue`, whose end the senders swap at 0, whose
-// next message its holder takes at 8 and whose stub, a message's link alone, stands at 16, as Dmitry Vyukov's
-// intrusive queue of many producers and one consumer pushes (not checked at source): the message's link cleared, one atomic swap of the
+// next message its holder takes at 8 and whose stub, a message's link alone, stands at 16, as an intrusive queue
+// of many producers and one consumer, whose producers append by one atomic swap of its tail, pushes (not checked
+// at source): the message's link cleared, one atomic swap of the
 // end with acquire and release, which orders the senders, then the link of the message the swap gave stored
 // with release, which the holder loads with acquire (`Popped`), so that a sender never waits for another.
 void Pushed(byte* queue, byte* message) {
@@ -4100,8 +4101,8 @@ void Pushed(byte* queue, byte* message) {
     }
 }
 
-// The first message of the queue of many senders at `queue` taken off it by its one holder, as Vyukov's queue pops
-// one (not checked at source): null where the queue holds none, and where a sender's swap stands before its link, which that sender's
+// The first message of the queue of many senders at `queue` taken off it by its one holder, as that intrusive queue
+// of many producers and one consumer (`Pushed`) pops one (not checked at source): null where the queue holds none, and where a sender's swap stands before its link, which that sender's
 // wake follows (`Enqueue`), so that the holder takes the message at its next turn. A message taken has its link
 // cleared, which its sender set before the holder could take it.
 byte* Popped(byte* queue) {

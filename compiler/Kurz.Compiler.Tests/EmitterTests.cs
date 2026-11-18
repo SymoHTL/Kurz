@@ -1509,7 +1509,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // section 6, R19: a sender puts its message on the actor's queue by one swap of its end with acquire and release, after a
         // relaxed store of the message's link, and stores the link of the end it found with release, which the holder loads with
-        // acquire (`Pushed`, `Popped`, Vyukov's queue); the lock of the shared words is Rust's futex mutex, a compare-exchange from 0
+        // acquire (`Pushed`, `Popped`, an intrusive queue of many producers and one consumer); the lock of the shared words is Rust's futex mutex, a compare-exchange from 0
         // to 1 with acquire, relaxed where it fails, relaxed loads in its spin, a swap of 2 with acquire, and its end a swap of 0 with
         // release before the wake (`LockTried`, `LockSpun`, `Lock`, `Unlock`); the count of the actors is one relaxed add (`ActorNew`); a
         // slot is set with release, its state before its number, cleared with release, its number before its link, and looked up with

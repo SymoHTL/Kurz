@@ -983,7 +983,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `ActorNew` fills, the actor's record in the 144 bytes in front of it, the build's own layout, which no rule of the record names, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps
   the alignment of the allocator's block, as Rust's `ArcInner` pads its counts to what it holds, a
   `Vector128` field's 16 among it: the queue of many senders its messages are put on and the queue its
-  blocks are posted on, 24 bytes each, Dmitry Vyukov's intrusive queue of many producers and one consumer (not checked at source),
+  blocks are posted on, 24 bytes each, an intrusive queue of many producers and one consumer, whose producers append by one
+  atomic swap of its tail (not checked at source),
   which a sender appends to by one atomic swap of its end and a release store of the link and which the
   thread that holds the actor moves at its take into the inbox and the side list of the activation that
   waits in the message's chain, the blocks to the front of the inbox (the runtime's `Pushed`, `Popped`,
@@ -1349,7 +1350,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `getrandom` with `ENOSYS` or `EPERM`, the process keeping to the file from then on, or where the
   pool is not ready, `EAGAIN`; the two flags and the descriptor are `thread static mut`s where Rust
   keeps `AtomicBool`s and a `OnceLock`, each thread finding the kernel's answer and opening the file for itself,
-  since the runtime's code takes no address of a static for an atomic view (R19).
+  since the runtime's code takes no address of a static for an atomic view (R19) (assumed: each thread's own, as
+  Rust's `ThreadRng` is one per thread, not checked at source).
   Where Rust panics, with any other error of `getrandom`, an open or a read of the file that fails or
   a file that ends first, `Random` gives false and the first write into the thread's first map ends
   the program with `random-failed` before it takes a block (M9; the owner, 2026-10-30, "End with an
