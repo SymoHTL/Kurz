@@ -2092,7 +2092,8 @@ command line, the environment or the clock, and a log call, in a build for Windo
 map, a field or a union and a lambda that reads a variable of a vector's type, whose places are not
 aligned to it, and on a 64-bit Arm machine a test of a class under `Arm`, whose intrinsics are not
 built (R18), and an `asm`, whose operands the checker reads for x86-64 alone (R11), where a `naked` function, whose
-operands are `sym` and `const` alone, builds (R12), and a construct of the other chapters the checker does not read. The line
+operands are `sym` and `const` alone, builds (R12), `check` and a `test` block (Y6, Y1), and a construct of the other chapters the
+checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use"); a call on a socket or a file that a
 function of `std/` makes is refused at the line of the program's statement whose call reached that function, which the queue of

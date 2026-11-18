@@ -76,11 +76,11 @@ public sealed partial class Checker
 
     /// <summary>
     /// Y6 with F10: whether a side of a comparison shows its value in the failure's text, as a hole of an interpolation shows it (L6): a value
-    /// with a text (A2 to A15) that holds no raw pointer, no C function value and no vector, whose texts no rule gives, and reaches no
-    /// <c>Text()</c> without <c>pub</c>, which no <c>print</c> reaches (A9, A15). A side that does not shows nothing, and its condition its
-    /// text alone.
+    /// with a text (A2 to A15), which a vector has not (R18), that holds no raw pointer and no C function value, whose texts no rule gives,
+    /// and reaches no <c>Text()</c> without <c>pub</c>, which no <c>print</c> reaches (A9, A15). A side that does not shows nothing, and its
+    /// condition its text alone.
     /// </summary>
-    private static bool Shows(KurzType type) => HasText(type) && !HoldsRaw(type, []) && !HoldsVector(type) && PrivateTextClass(type, []) is null;
+    private static bool Shows(KurzType type) => HasText(type) && !HoldsRaw(type, []) && PrivateTextClass(type, []) is null;
 
     /// <summary>Y9: <c>mock X with Y</c>, whose types the checker does not resolve, is <c>not supported</c> while what it accepts is open.</summary>
     private void CheckMock(MockStatement m) => NotSupported(m.Line, "`mock X with Y` (Y9)");

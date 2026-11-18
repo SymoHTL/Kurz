@@ -1115,8 +1115,10 @@ public sealed class ParserTests
     public void A_mock_whose_type_no_with_follows_is_no_mock()
     {
         // Y9: `mock` is the statement where a type, `with` and a type follow it; `mock Clock FakeClock` declares `Clock` of a type named
-        // `mock`, and the name after it is `syntax` (L18; assumed: D2 of issue 586, comment 6992687784)
+        // `mock`, and the name after it is `syntax`, and so is `mock Clock as FakeClock`, whose `as` is no `with` (L18; assumed: D2 of
+        // issue 586, comment 6992687784)
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("mock Clock FakeClock").Distinct());
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("mock Clock as FakeClock").Distinct());
         Assert.StartsWith("(mock ", Tree("mock Clock with FakeClock"));
     }
 
