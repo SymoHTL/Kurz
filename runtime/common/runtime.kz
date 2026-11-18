@@ -5252,7 +5252,7 @@ byte* Taker(byte* state) {
         while at != null {
             int life = *Ptr<int>(at - 88)
             byte* side = *Ptr<byte*>(at - 80)
-            if (life != 4 || Ending(at)) && (life != 0 || side == null || *Ptr<byte*>(side) != null) {
+            if life != 4 && (life != 0 || side == null || *Ptr<byte*>(side) != null) {
                 return at
             }
 
