@@ -4240,6 +4240,10 @@ void Hold(duration d) {
 
 actor Store {
     pub int Get() => 1
+
+    pub void Slow() {
+        Hold(150ms)
+    }
 }
 
 // the block's call past the deadline of the `within` block around the `attempt` raises `call-timeout` in the child,
@@ -4258,6 +4262,23 @@ within 100ms {
 
     print(v)
 }
+
+// the block's call that waits past the deadline, behind a message that holds its callee, raises `call-timeout` in the
+// child, while the code that waits for the `attempt` waits on past that deadline, with none of its own
+within 100ms {
+    w = attempt {
+        send s.Slow()
+        return s.Get()
+    } else {
+        Crashed c => {
+            print(c.Reason.Kind)
+            -2
+        }
+    }
+
+    print(w)
+}
+
 print("after")
 ```
 
