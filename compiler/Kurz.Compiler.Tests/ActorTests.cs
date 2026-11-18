@@ -5486,12 +5486,12 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void A_bound_that_gives_the_field_its_callee_was_read_from_another_actor_leaves_the_call_with_the_actor_read_before_it()
+    public void A_bound_that_gives_the_field_its_callee_was_read_from_another_actor_through_its_instance_leaves_the_call_with_the_actor_read_before_it()
     {
         // U39, F12, U2: the callee's reference, two words, is read before the arguments and the bound, as a receiver is, so that a bound
-        // that gives the field it was read from another actor, through its instance passed as `mut` or in a method of the actor that
-        // holds the field, leaves the call with the actor read before it, which answers `1`, and the next read of the field the other
-        // actor, which answers `2`; M7 refuses no such bound, as it refuses one that changes the callee's variable or its list
+        // that gives the field it was read from another actor, through its instance passed as `mut`, leaves the call with the actor read
+        // before it, which answers `1`, and the next read of the field the other actor, which answers `2`; M7 refuses no such bound, as
+        // it refuses one that changes the callee's variable or its list
         // (`CheckerTests.The_bound_of_a_calls_clause_changes_nothing_its_callee_was_read_from`); under the allocator that makes every
         // freed block inaccessible
         const string swap = """
@@ -5514,6 +5514,16 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(swap, ListTests.Fenced, "actor-callee-field-swap"), 0, ["1", "2"], "");
+    }
+
+    [Fact]
+    public void A_bound_that_gives_the_actors_field_its_callee_was_read_from_another_actor_in_its_method_leaves_the_call_with_the_actor_read_before_it()
+    {
+        // U39, F12, U2: as through an instance passed as `mut`
+        // (`A_bound_that_gives_the_field_its_callee_was_read_from_another_actor_through_its_instance_leaves_the_call_with_the_actor_read_before_it`),
+        // a bound that calls a method of the actor that holds the field, which gives the field another actor, leaves the call with the
+        // actor read before it, which answers `1`, and the next read of the field the other actor, which answers `2`; under the
+        // allocator that makes every freed block inaccessible
         const string reset = """
             actor Store(int N) {
                 pub int Get() => N
