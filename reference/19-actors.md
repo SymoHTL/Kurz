@@ -968,8 +968,8 @@ collection, a `data` value or a class instance that reaches one *(assumed: as §
 An immutable class is one through which nothing
 reachable has a `mut` field, and a value crosses where every type its type reaches crosses, a
 collection's item type and a `data` value's field types among them, as Rust's `Send` is
-structural and read from types *(assumed: the reading of Q14 (i) said back in #519, comment
-6882879015, reading 4, read by types, as a crossing copies by the parameter's type)*; a lambda
+structural and read from types *(assumed: the reading of Q14 (i) of #519, comment 6866132292, said
+back in comment 6882879015, reading 4, read by types, as a crossing copies by the parameter's type)*; a lambda
 the sending function shows crosses where every value it captures crosses (§6, comment 6896192351, Q5), and a
 mutable class instance given as a call's result, where no word can stand, is a compile error (§6,
 the owner, 2026-11-14, #519, comment 6880404917, Q14, "All eight leans (Recommended)"), and that
@@ -1063,11 +1063,11 @@ stays decided and unbuilt (§6, the owner, 2026-11-15, #519, comment 6902210646,
 big unbuilt") *(assumed, §6: the share read for a
 block that reaches no class instance, since every class instance a crossing reaches is copied)*; a `copy` at a call that crosses nothing copies every block on a path to a class
 instance that passes through no function value and no actor's reference, the instance among them, and shares by
-its count every other block *(assumed, §6: the answer read for a call inside one heap)*. A `weak` reference counts as a
-path to its target for what such a copy copies, so that a block that holds one is copied, but is no path the copy
-follows: it points at its target's copy where the call's copies hold that target strongly, and is null otherwise, as at
-a crossing *(assumed, §6: Q3 of comment 6896192351 read for a call that crosses nothing, the `weak` slot counted as a
-path for what is copied)*. An argument after `copy` whose parameter is `weak`, at such a call, is a `weak` reference to
+its count every other block *(assumed, §6: the answer read for a call inside one heap)*. A `weak` reference makes the
+block that holds it count as on a path for what such a copy copies, so that the block is copied, and its target is
+copied only through a strong path: the reference is no path the copy follows, and points at its target's copy where the
+call's copies hold that target strongly, and is null otherwise, as at a crossing *(assumed, §6: Q3 of comment 6896192351
+read for a call that crosses nothing, the block that holds a `weak` slot counted as on a path for what is copied)*. An argument after `copy` whose parameter is `weak`, at such a call, is a `weak` reference to
 the argument's copy, which the caller holds as a temporary to the end of its statement, so that the callee reads that
 copy whether or not another copy of the call holds it *(assumed, §6: a temporary held to the end of its statement, read
 for the copy that `copy` makes)*. The copy of a map whose keys reach a
@@ -2973,13 +2973,15 @@ ends the expression at `spawn`, as the words of a policy do (U2), and after an a
 type's default (U27), the braces after it the actor's body; no parentheses after `on crash` before a block, no
 name in them, a second one, and a block that does not open on the line of its parameter are `syntax` (E4)
 *(assumed: as §6 marks it)*. The blocks `attempt { ... }` and `retry { ... }` of §6, which keep a crash to a piece of
-code, have no rule here but where each word is a name, and `compiler/README.md` says what the build does with them; in
+code, have no rule here but where each word is a name, and where, inside a header, it is the block's word again, and
+`compiler/README.md` says what the build does with them; in
 the condition, the collection or the subject before the block of an `if`, a `while`, a `for` or a `match` each word is a
 name, so that a variable of either name stands there, as a struct literal is no condition in Rust *(assumed: §6, the
 owner, 2026-11-13, #519, comment 6847932993, Q10, which makes the words words only where they stand, so that a variable
-may be named as one)*, and inside that header's parentheses, brackets, arms and blocks it is the block's word again, as
-Rust reads a struct literal there (§6, the owner, 2026-11-17, #570, comment 6961064167, Q3, "Block's words
-(Recommended)").
+may be named as one)*, and inside that header's brackets, arms and blocks it is the block's word again, as Rust
+reads a struct literal there (§6, the owner, 2026-11-17, #570, comment 6961064167, Q3, "Block's words
+(Recommended)"), and inside its parentheses too *(assumed, §6: the parentheses, which the answer did not name, read as its
+brackets)*.
 
 Case: [actors/block-sample.kz](../corpus/actors/block-sample.kz)
 ```kurz
@@ -3143,9 +3145,9 @@ path that ends with no value is (F3) (§6, the owner, 2026-11-16, #519, comment 
 "missing-return error"). `restart` there takes no knobs, the default's pause and no limit, as Akka's
 `Restart` directive carries none, and a knob after it, a type before the parameter and `return` in
 the block, outside a lambda in it, are `syntax` (E4); the three words are statements in the block alone,
-where each is the decision before anything but `=`, and anything after the decision on its line but the `}` that closes the
-block is `syntax`
-(E4), and names elsewhere, before `=` in the block among it, as `send` is (U6), and a lambda inside the
+where each is the decision before anything but `=`, and anything after the decision on its line but a `}` that closes a block
+it stands in is `syntax` (E4) *(assumed: L5's one statement of a block written on one line, read for a decision, which
+§6 makes a statement)*, and names elsewhere, before `=` in the block among it, as `send` is (U6), and a lambda inside the
 block decides nothing, its words names there *(assumed: as §6 marks it)*. A block can restart, so that its `spawn` keeps the
 copy of its arguments that a restart constructs from, as `on crash restart` keeps it (U22).
 
@@ -3355,7 +3357,8 @@ a container's CPU quota counted, where neither the line `threads = 4` of a `depl
 §6)*. A value of the line that is not a whole number above 0 is the compile error `threads-line`,
 and one of `KURZ_THREADS` ends the start with an error line and the id `threads-variable` *(assumed
 in §6: both ids, and the end of the start)*. The main thread runs the top-level code alone, and
-sleeps while it waits (U18; §6, Q3). A message parked in a wait goes on on the thread that parked it,
+sleeps while it waits (U18; §6, Q3), but in a case marked `// threads: 1`, where its wait runs the ready actors and
+no worker thread runs (§6, the owner, 2026-11-17, #570, comment 6961064167, Q1). A message parked in a wait goes on on the thread that parked it,
 and an actor between messages moves to any thread (§6, the owner, 2026-11-17, #519, comment
 6946657505, Q2, "Stays on its thread (Recommended)"). A message that runs on another thread when the
 top-level code ends runs to its end or its wait, a wait then dropped as a parked message is (U13), and
