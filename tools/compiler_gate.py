@@ -60,7 +60,7 @@ COMMAND = ["dotnet", "test", SOLUTION, "--nologo", "-c", "Release", "-p:RestoreL
 # the count of those tests on x86-64 on 2026-11-17, which no test of them skips on Arm
 ARM_FILTER = ("FullyQualifiedName~ActorTests|FullyQualifiedName~RuntimeTests|FullyQualifiedName~EmitterTests.On_an_arm"
               "|FullyQualifiedName~EmitterTests.The_switch|(FullyQualifiedName~RunTests&DisplayName~actors/)")
-ARM_FLOOR = 329  # 123 of ActorTests, 32 of RuntimeTests, 2 of EmitterTests and 172 rows of the actors' cases of RunTests, each case run twice
+ARM_FLOOR = 330  # 124 of ActorTests, 32 of RuntimeTests, 2 of EmitterTests and 172 rows of the actors' cases of RunTests, each case run twice
 ARM_COMMAND = COMMAND + ["--filter", ARM_FILTER]
 # the command the test run built, run without a build of its own; the dotnet host reads global.json from CWD as for the tests
 VERSION_COMMAND = ["dotnet", "run", "--project", "Kurz", "-c", "Release", "--no-build", "--", "--version"]
@@ -344,7 +344,7 @@ def self_test():
     cases.append(("the Arm run is the gate's command with the actors' filter alone",
                   ARM_COMMAND == COMMAND + ["--filter", ARM_FILTER] and "ActorTests" in ARM_FILTER and "RunTests&DisplayName~actors/" in ARM_FILTER,
                   ARM_COMMAND))
-    cases.append(("the Arm floor is at least 329 tests", ARM_FLOOR >= 329, ARM_FLOOR))
+    cases.append(("the Arm floor is at least 330 tests", ARM_FLOOR >= 330, ARM_FLOOR))
     with kit.scratch("compiler-gate-arm-") as root:
         os.makedirs(os.path.join(root, "compiler"))
         with open(os.path.join(root, CONFIG), "w", encoding="utf-8") as f:
