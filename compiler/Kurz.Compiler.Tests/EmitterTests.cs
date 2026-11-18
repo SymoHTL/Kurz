@@ -476,9 +476,11 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             var made = Body(@"f\.Make\.[0-9]+");
             Assert.True(Regex.IsMatch(made, @"(%[\w.]+) = call i64 @""?rt\.sys\.StatModeAt\b[^\n(]*\(\)[^\n]*\n(?:[^\n]*\n)*?[^\n]*call i64 @""?rt\.sys\.CreateDirectories\b[^\n(]*\(ptr %[\w.]+, i64 %[\w.]+, i64 \1\)"),
                 $"{arch}: `CreateDirectories` is not given what `StatModeAt` gave:\n{made}");
+            // the mode loaded from the pointer the parameter's own load offsets, since a literal offset is a value too (`sext i32 24
+            // to i64`), so that no operand of a pointer's offset is a constant
             var read = Body(@"rt\.sys\.IsDirectory");
-            Assert.True(Regex.IsMatch(read, @"getelementptr i8, ptr %[\w.]+, i64 %[\w.]+") && !Regex.IsMatch(read, @"getelementptr i8, ptr %[\w.]+, i64 (16|24)\b"),
-                $"{arch}: `IsDirectory` reads no byte it was given, or one of its own:\n{read}");
+            Assert.True(Regex.IsMatch(read, @"store i64 %p1, ptr (%[\w.]+)\b[^\n]*\n(?:[^\n]*\n)*?[^\n]*?(%[\w.]+) = load i64, ptr \1\b[^\n]*\n(?:[^\n]*\n)*?[^\n]*?(%[\w.]+) = getelementptr i8, ptr %[\w.]+, i64 \2\b[^\n]*\n(?:[^\n]*\n)*?[^\n]*load i32, ptr \3\b"),
+                $"{arch}: `IsDirectory` reads `st_mode` at no byte its parameter gave:\n{read}");
         }
     }
 
