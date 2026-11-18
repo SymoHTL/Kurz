@@ -1,0 +1,32 @@
+// expect: throws call-timeout at 32
+// | 1
+// | 1
+// threads: 1
+// rules: U39
+
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Store {
+    pub void Busy() {
+        Hold(150ms)
+    }
+
+    // each call of `Get` through a reference is bounded by 100 ms where nothing else bounds it
+    pub int Get() within 100ms => 1
+}
+
+s = spawn Store()
+send s.Busy()
+print(s.Get() within 1s)
+send s.Busy()
+within 1s {
+    print(s.Get() within 50ms)
+}
+
+send s.Busy()
+print(s.Get())

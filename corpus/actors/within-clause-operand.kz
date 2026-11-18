@@ -1,0 +1,13 @@
+// expect: output
+// | 2
+// | 3
+// rules: U41
+
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+// the clause takes a unary expression: `* 2` applies to the call's result
+print(s.Get() within 1s * 2)
+print(s.Get() within (1s + 1s) + 2)

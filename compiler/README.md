@@ -2151,10 +2151,9 @@ switch, `naked` on Arm and the stacks build, and no run of this repository's gat
 job `compiler-arm`, which is not required and runs on Linux, as `compiler-windows` runs on x86-64, so
 that the switch of Windows on Arm is assembled
 (`EmitterTests.The_switch_of_every_target_and_architecture_is_assembled_by_clang_for_its_machine`)
-and runs nowhere; a call waits 5 seconds where no `within` block names another bound (U36 to U38, U40, U42 to U45), on the
-system's clock, with no virtual time of section 11, and the clause on a call and the clause on a method's
-declaration, which section 6 decides, are not built (U39, U41), while a socket's wait keeps its own bound of
-section 12, which no `within` block bounds;
+and runs nowhere; a call waits 5 seconds where no `within` block, clause on the call or clause on the method's declaration names
+another bound (U36 to U45), on the system's clock, with no virtual time of section 11, while a socket's wait keeps its own bound
+of section 12, which no `within` bounds;
 and an inbox grows with no bound, where section 13 spills it at 64 MB, until the allocator ends the
 process with `allocation-failed`. An actor's record and the place of its state live to the end of the
 process, the state built again at each restart (U22), which is

@@ -3643,9 +3643,39 @@ A clause on a call, `store.Get(id) within 2s`, bounds that call, and a clause on
 gRPC service's default (§6, the owner, 2026-11-13, #519, comment 6847932993, Q11, "All three and 1 wins over 2 and 2 wins over
 3"). Where more than one form names a bound for one call, the block's bound wins over the call's clause and the call's clause
 over the declaration's, and every bound stays capped by the time the chain has left (U37) *(assumed in §6: the reading of the
-answer's words, said back on 2026-11-13)*. Where a clause may stand, and what its operand may be, are open (U41).
+answer's words, said back on 2026-11-13)*. The bound of a call's clause runs after the call's arguments, in the order written at
+the call, as F12 evaluates the arguments *(assumed in §6: proposed with this change and not put to the owner)*, and the bound of
+either clause is read as U40 reads a block's. Where a clause may stand, and what its operand may be, are U41's.
 
-No case: the compiler builds no clause on a call or on a declaration.
+Case: [actors/within-clauses.kz](../corpus/actors/within-clauses.kz)
+```kurz
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Store {
+    pub void Busy() {
+        Hold(150ms)
+    }
+
+    // each call of `Get` through a reference is bounded by 100 ms where nothing else bounds it
+    pub int Get() within 100ms => 1
+}
+
+s = spawn Store()
+send s.Busy()
+print(s.Get() within 1s)
+send s.Busy()
+within 1s {
+    print(s.Get() within 50ms)
+}
+
+send s.Busy()
+print(s.Get())
+```
 
 ### U40 (assumed, §6) The word `within` and the bound's value
 
@@ -3691,23 +3721,73 @@ within 2 {
 }
 ```
 
-### U41 (open) Where a clause stands, and its operand
+### U41 (assumed, §6) Where a clause stands, and its operand
 
-Nobody chose these, and §6 does not settle them:
+A call's clause stands on a call of an actor's method through a reference that waits (U4) alone: on a call after `send`, which
+waits for nothing (U6), on a call of a function, of a class's method or of an actor's own method inside it, a direct call (§6,
+2026-11-13, Q14, "Direct call"), and after a `spawn`, it is `syntax`, as `send` before what is no call of an actor's method is
+(U14) and as `tokio::spawn` and Elixir's `cast` take no timeout; and a declaration's clause stands on a message, a `pub` method
+of an actor (U9), alone, on the declaration of a function, of a class's, a data type's or an interface's method, or of an actor's
+method without `pub` being `syntax` *(assumed: T11 of comment 6967625156)*. The operand of a call's clause is a unary expression,
+as a constant type parameter's default is read (T35), so that `a.F() within d * 2` reads as `(a.F() within d) * 2`, a computed
+bound standing in parentheses, and the clause stands before a postfix `else` (O5), an `else` after a call inside the operand
+being that call's; Rust has no such form *(assumed: T12 of comment 6967625156)*. The operand of a declaration's clause is a
+number literal, with its sign where it has one, as a knob of a policy takes one (U26), any other operand being `syntax`, and the
+literal is read as U40 reads a bound, so that one of another type is `type-mismatch` and one of zero or less a deadline that has
+passed at each call *(assumed: T13 of comment 6967625156)*.
 
-- A clause on a call that is no call of an actor's method that waits, a function's, a class's method's, or an actor's own method
-  called inside it (§6, 2026-11-13, Q14, "Direct call"): (a) a block around that one call, as Tokio's `timeout` wraps any future;
-  (b) `syntax`, as `send` before what is no call of an actor's method is (U14); (c) `type-mismatch`. Lean: (b).
-- A clause on a call after `send`: (a) `syntax`, as `tokio::spawn` and Elixir's `cast` take no bound; (b) the deadline of the
-  message it sends. Lean: (a).
-- A clause on the declaration of a method that is no message, a class's method, a function, or an actor's method without `pub`:
-  (a) `syntax`; (b) allowed, holding where a message runs the method. Lean: (a), with a `pub` method's clause holding no direct call
-  of it inside its actor, as a gRPC service's default holds its remote calls alone.
-- The operand of a call's clause: (a) a unary expression, as a constant type parameter's default is read (T35), so that
-  `a.F() within d * 2` reads as `(a.F() within d) * 2`, a computed bound standing in parentheses, and the clause standing before a
-  postfix `else` (O5); (b) the rest of the expression. Rust has no such form. Lean: (a).
-- The operand of a declaration's clause: (a) a duration literal alone, any other operand `syntax`, as the knobs of a policy are
-  (U26); (b) a constant `duration`; (c) an expression over the parameters, which the caller reads. Lean: (a).
+Case: [actors/within-clause-send.kz](../corpus/actors/within-clause-send.kz)
+```kurz
+actor Store {
+    pub void Run() {
+        print("run")
+    }
+}
+
+s = spawn Store()
+send s.Run() within 2s
+```
+
+Case: [actors/within-clause-function.kz](../corpus/actors/within-clause-function.kz)
+```kurz
+int Twice(int x) => x * 2
+
+print(Twice(2) within 2s)
+```
+
+Case: [actors/within-declaration-private.kz](../corpus/actors/within-declaration-private.kz)
+```kurz
+actor Store {
+    int Get() within 2s => 1
+
+    pub int Twice() => Get() + Get()
+}
+
+s = spawn Store()
+print(s.Twice())
+```
+
+Case: [actors/within-clause-operand.kz](../corpus/actors/within-clause-operand.kz)
+```kurz
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+// the clause takes a unary expression: `* 2` applies to the call's result
+print(s.Get() within 1s * 2)
+print(s.Get() within (1s + 1s) + 2)
+```
+
+Case: [actors/within-declaration-operand.kz](../corpus/actors/within-declaration-operand.kz)
+```kurz
+actor Store {
+    pub int Get() within 1s + 1s => 1
+}
+
+s = spawn Store()
+print(s.Get())
+```
 
 ### U42 (assumed, §6) A wait of the top-level code with no message to run while a deadline stands
 

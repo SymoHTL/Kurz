@@ -1,0 +1,11 @@
+// expect: error syntax at 11
+// rules: U41
+
+actor Store {
+    pub void Run() {
+        print("run")
+    }
+}
+
+s = spawn Store()
+send s.Run() within 2s
