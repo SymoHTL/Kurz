@@ -73,7 +73,7 @@ public sealed class ThrowSets
         [typeof(ThisExpression)] = "no code",
         [typeof(MemberAccess)] = "its target, and a property's read",
         [typeof(TypeMemberAccess)] = "a property's read",
-        [typeof(CallExpression)] = "its callee, its arguments and what it calls",
+        [typeof(CallExpression)] = "its callee, its arguments, the bound of its clause and what it calls",
         [typeof(ListLiteral)] = "its items",
         [typeof(IndexExpression)] = "its target and its index",
         [typeof(UnaryExpression)] = "its operand",
@@ -1011,6 +1011,11 @@ public sealed class ThrowSets
             foreach (var argument in c.Arguments)
             {
                 Expression(argument.Value);
+            }
+
+            foreach (var bound in c.Clause())
+            {
+                Expression(bound); // U39: the clause's bound, after the arguments
             }
 
             Calls(c);

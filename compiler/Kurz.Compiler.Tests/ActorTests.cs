@@ -3435,7 +3435,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         // the error line names the scheduler's own line where the fault is, the call of `Burn` that did not fit, in the edited runtime's file
-        const string at = "pub void Enqueue(long index, long number, byte* message, string file, int line) {\n    sys.Entered()\n";
+        const string at = "pub void Enqueue(long index, long number, byte* message, bool bounded, long bound, string file, int line) {\n    sys.Entered()\n";
         var run = BuildAndRun(text, Burning("runtime/common/runtime.kz", at), "actor-fault-scheduler");
         var (crashes, rest) = Logged(run.Error);
         Assert.Empty(crashes);
@@ -3607,7 +3607,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(s.Go())
 
             """;
-        const string at = "pub void Enqueue(long index, long number, byte* message, string file, int line) {\n    sys.Entered()\n";
+        const string at = "pub void Enqueue(long index, long number, byte* message, bool bounded, long bound, string file, int line) {\n    sys.Entered()\n";
         (string Path, string Old, string New)[] edits = [("runtime/common/runtime.kz", at, Check + at + "    CheckArmed()\n"), Armed("CheckArm()")];
         var run = BuildAndRun(text, ListTests.Edited(edits), "actor-check-scheduler");
         var (crashes, rest) = Logged(run.Error);
@@ -5368,5 +5368,163 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
 
         Ran(BuildAndRun(text, toolchain.Runtime, "actor-deadline-within"), 1, ["1", "1"], "error: call-timeout at program.kz:33\n");
+    }
+
+    [Fact]
+    public void A_calls_bound_is_its_blocks_over_its_clauses_over_its_declarations_each_capped_by_its_chain()
+    {
+        // U39: where more than one form names a bound for one call, the block's wins over the call's clause and the call's clause over
+        // the declaration's, and every bound stays capped by the time the chain has left (assumed in section 6): `Busy` holds `Store` for
+        // 150 ms, so a call queued behind it under a bound of 100 ms or less is dropped and raises `call-timeout` in `Probe`, its crash,
+        // and one under 1 s answers; `Relay` runs under the 100 ms of its call, so its clause of 1 s is capped to that (U44)
+        const string text = Hold + """
+            actor Store {
+                pub void Busy() {
+                    Hold(150ms)
+                }
+
+                pub int Get() within 100ms => 1
+
+                pub int Put() => 2
+            }
+
+            actor Front(Store S) {
+                pub int Relay() {
+                    send S.Busy()
+                    return S.Put() within 1s
+                }
+            }
+
+            actor Probe(Store S, Front F) {
+                pub void ClauseOverDeclaration() {
+                    send S.Busy()
+                    print(S.Get() within 1s)
+                }
+
+                pub void BlockOverClause() {
+                    send S.Busy()
+                    within 1s {
+                        print(S.Get() within 50ms)
+                    }
+                }
+
+                pub void Declaration() {
+                    send S.Busy()
+                    print(S.Get())
+                }
+
+                pub void Clause() {
+                    send S.Busy()
+                    print(S.Put() within 100ms)
+                }
+
+                pub void Chain() {
+                    print(F.Relay() within 100ms)
+                }
+
+                pub string Done() => "done"
+            }
+
+            s = spawn Store()
+            f = spawn Front(s)
+            p = spawn Probe(s, f)
+            send p.ClauseOverDeclaration()
+            send p.BlockOverClause()
+            send p.Declaration()
+            send p.Clause()
+            send p.Chain()
+            print(p.Done())
+
+            """;
+        if (ClockRefusedOnWindows(text))
+        {
+            return;
+        }
+
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-deadline-clauses");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Probe#3 crashed: call-timeout at program.kz:38", "Probe#3 crashed: call-timeout at program.kz:43"], crashes.Take(2));
+
+        // the wait of `Chain` and that of `Relay` end at one deadline, in either order
+        Assert.Equal(["Front#2 crashed: call-timeout at program.kz:19", "Probe#3 crashed: call-timeout at program.kz:47"], crashes.Skip(2).Order(StringComparer.Ordinal));
+        Ran((run.Code, run.Output, rest), 0, ["1", "1", "done"], "");
+    }
+
+    [Fact]
+    public void A_clauses_bound_runs_after_the_arguments_and_a_declarations_literal_bounds_each_call()
+    {
+        // U39, F12: the bound of a call's clause runs after the call's arguments, as it is written after them, and the literal of a
+        // declaration's clause bounds every call of the method that names none, which answers within it
+        const string text = """
+            actor Store {
+                pub int Add(int x) within 2s => x + 1
+            }
+
+            int Note(string text, int x) {
+                print(text)
+                return x
+            }
+
+            duration Bound(string text) {
+                print(text)
+                return 1s
+            }
+
+            s = spawn Store()
+            print(s.Add(Note("argument", 1)) within Bound("bound"))
+            print(s.Add(2))
+
+            """;
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-clause-order"), 0, ["argument", "bound", "2", "3"], "");
+    }
+
+    [Fact]
+    public void A_message_whose_callee_ends_while_its_clauses_bound_waits_holds_no_block_of_the_heap_the_end_freed()
+    {
+        // U39, U12, U21: the bound of the clause waits after the arguments ran, as an argument that waits does (`A_message_whose_callee_
+        // ends_while_one_of_its_arguments_waits_holds_no_block_of_the_heap_the_end_freed`): `Box` ends as the child of a supervisor that
+        // crashed during the wait of `s.Bound()`, which frees its heap whole, so the message is built in a heap of its own and copied at
+        // its queueing into the heap the top-level code allocates in, the call raising `actor-gone` at its line; under the allocator that
+        // makes every freed block inaccessible
+        const string text = """
+            actor Slow {
+                pub duration Bound() => 2s
+            }
+
+            actor Box {
+                pub int Add(List<int> xs, int k, List<int> ys) => xs[0] + k + ys[2]
+            }
+
+            actor Parent {
+                mut Box? kid = null
+
+                pub void Make() {
+                    kid = spawn Box()
+                }
+
+                pub Box? Kid() => kid
+
+                pub void Boom() {
+                    throw "parent"
+                }
+            }
+
+            p = spawn Parent()
+            p.Make()
+            kid = p.Kid()
+            s = spawn Slow()
+            items = [10, 20, 30]
+            if kid != null {
+                send p.Boom()
+                print(kid.Add(items, 1, items) within s.Bound())
+            }
+
+            print("end")
+
+            """;
+        var run = BuildAndRun(text, ListTests.Fenced, "actor-ended-while-bound-waits");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Parent#1 crashed: thrown \"parent\" at program.kz:19"], crashes);
+        Ran((run.Code, run.Output, rest), 1, [], "error: actor-gone at program.kz:30\n");
     }
 }

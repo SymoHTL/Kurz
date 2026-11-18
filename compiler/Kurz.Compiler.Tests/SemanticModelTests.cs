@@ -827,6 +827,7 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     }
 
                     Defaults(f.Parameters);
+                    Expression(f.Within); // U39: the literal of the declaration's clause
                     Expression(f.ExpressionBody);
                     if (f.BlockBody is not null)
                     {
@@ -1101,6 +1102,11 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
             foreach (var a in c.Arguments)
             {
                 Expression(a.Value);
+            }
+
+            foreach (var bound in c.Clause())
+            {
+                Expression(bound); // U39: the bound of the call's clause
             }
         }
 

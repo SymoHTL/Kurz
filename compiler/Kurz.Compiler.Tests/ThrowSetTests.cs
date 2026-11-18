@@ -47,6 +47,7 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         data ESpawn
         data ECallee
         data EAnswered
+        data EClause
         data EEscalate
         data ERestarted
         data ETypeEscalate
@@ -305,6 +306,15 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
             send a.Fail()
             x = a.Get()
             print(x)
+        }
+
+        duration ClauseBound() {
+            throw EClause
+        }
+
+        void ViaClause() {
+            a = spawn Answering()
+            print(a.Get() within ClauseBound())
         }
 
         actor Escalated {
@@ -716,6 +726,7 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     [InlineData("ViaUnionText", "EUnionText")] // the Text() of a case of a union (A4)
     [InlineData("ViaWeakText", "EWeakText")] // the Text() of the target of a `weak` field of a data type without its own Text() (A3, R3)
     [InlineData("ViaSpawn", "ESpawn")] // the construction of an actor a spawn makes, whose throw is the spawner's crash (U3)
+    [InlineData("ViaClause", "EClause")] // the bound of a call's clause, which runs in the caller (U39)
     [InlineData("ViaGeneric", "EGeneric")] // a throw of a type parameter, with the type argument the call gives it (T19)
     [InlineData("ViaBare", "EBare")] // a bare `throw` in an arm of `else` throws the case its arm took (O7)
     [InlineData("ViaElsePattern", "EOther")] // a bare `throw` in the arm `else` throws the cases it takes (O7)

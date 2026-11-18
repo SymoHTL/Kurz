@@ -3783,12 +3783,14 @@ pub string ActorText(string name, long number) {
 // before its deadline is read (U36). The message is stamped with its deadline too (U37): a `send` carries
 // the running message's, none in the top-level code (section 6, comment 6880404917, Q13; assumed: T9 of
 // comment 6967625156); a call the smaller of that deadline and its own bound, the deadline of the `within`
-// block that runs, else the default bound from now, 5 seconds (U36, U38, U44; assumed: T8 of that comment), which
+// block that runs, else `bound` from now where `bounded`, the bound of the call's clause or of its method's
+// declaration (U39; the block over the call's clause over the declaration's, assumed in section 6), else the
+// default bound from now, 5 seconds (U36, U38, U44; assumed: T8 of that comment), which
 // its reply holds too, for its wait (`Wait`). A message whose deadline passed at its queueing is dropped
 // unqueued (`Discard`), and a call raises `call-timeout` at its line, the crash of the actor that makes it,
 // while a `send` raises nothing (U37, U45; assumed: T1 of comment 6967147952, T10 of comment 6967625156), as
 // tonic's client fails a call whose deadline passed and a send on tokio's channel reads no deadline.
-pub void Enqueue(long index, long number, byte* message, string file, int line) {
+pub void Enqueue(long index, long number, byte* message, bool bounded, long bound, string file, int line) {
     sys.Entered()
     byte* state = Lookup(index, number)
     if state == null {
@@ -3814,7 +3816,9 @@ pub void Enqueue(long index, long number, byte* message, string file, int line) 
         byte* reply = *Ptr<byte*>(message + 16)
         if reply != null {
             mut long own = block
-            if own == 0 {
+            if own == 0 && bounded {
+                own = Due(now, bound)
+            } else if own == 0 {
                 own = Due(now, sys.DefaultBound())
             }
 

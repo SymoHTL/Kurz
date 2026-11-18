@@ -42,6 +42,106 @@ public sealed class CheckerTests
         Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
     }
 
+    /// <summary>An actor whose calls wait, <c>Get</c> and <c>Twice</c>, and whose <c>Run</c> a <c>send</c> takes, made in <c>s</c>: seven lines.</summary>
+    private const string Store = "actor Store {\n    pub int Get() => 1\n    pub void Run() {\n    }\n}\n\ns = spawn Store()\n";
+
+    [Theory]
+    [InlineData(Store + "print(s.Get() within 2)", "type-mismatch")]
+    [InlineData(Store + "long x = 3\nprint(s.Get() within x)", "type-mismatch")]
+    [InlineData(Store + "longduration d = 2s\nprint(s.Get() within d)", "type-mismatch")]
+    [InlineData(Store + "duration? d = null\nprint(s.Get() within d)", "nullable-unchecked")]
+    [InlineData(Store + "void Stop() {\n}\n\nprint(s.Get() within Stop())", "syntax")]
+    [InlineData(Store + "print(s.Missing() within 2)", "unknown-name")]
+    [InlineData(Store + "duration d = 2s\nprint(s.Get() within d)", null)]
+    [InlineData(Store + "print(s.Get() within (2s + 1ms))", null)]
+    [InlineData(Store + "print(s.Get() within 2s + 1ms)", "type-mismatch")]
+    [InlineData(Store + "print(s.Get() within 0s)", null)]
+    [InlineData(Store + "print(s.Get() within -1s)", null)]
+    public void The_bound_of_a_calls_clause_is_a_duration(string program, string? id)
+    {
+        // U39, U40: the clause's bound is read as a block's is: a value of another type is `type-mismatch` at its line, a nullable one
+        // `nullable-unchecked` and a call with a `void` success `syntax` (O10); a call that reports its own error has its bound read with
+        // no diagnostic of its own (E1); a bound of zero or less is a deadline that has passed, no error (U40); the bound is a unary
+        // expression, so that `+ 1ms` adds to the call's `int` (assumed: T12 of comment 6967625156)
+        var line = program.Split('\n').Length;
+        Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
+    }
+
+    [Theory]
+    [InlineData("print(s.Take(move xs) within Bound(xs))", "used-after-move")]
+    [InlineData("print(s.Take(copy xs) within Bound(xs))", null)]
+    [InlineData("print(s.Take(move xs) within Bound([3]))\nprint(xs.Count)", "used-after-move")]
+    public void The_bound_of_a_calls_clause_runs_after_its_arguments_and_reads_no_variable_they_moved(string tail, string? id)
+    {
+        // U39, U12, F12: the bound runs after the call's arguments, as a later argument does, so a read of what an argument moved is
+        // `used-after-move` at the read's line
+        var program = "actor Store {\n    pub int Take(List<int> items) => items.Count\n}\n\nduration Bound(List<int> ys) {\n    print(ys.Count)\n    return 1s\n}\n\ns = spawn Store()\nxs = [1, 2]\n" + tail;
+        Assert.Equal(id is null ? [] : [(id, program.Split('\n').Length)], Errors(program));
+    }
+
+    [Theory]
+    [InlineData("print(s.Take(xs, Count(mut xs)))", "changed-while-held")]
+    [InlineData("print(s.Take(xs, 1) within Grow(mut xs))", "changed-while-held")]
+    [InlineData("mut zs = [3]\nprint(s.Take(xs, 1) within Grow(mut zs))", null)]
+    public void The_bound_of_a_calls_clause_changes_nothing_its_arguments_still_hold(string tail, string? id)
+    {
+        // U39, M7, F12: the bound runs after the call's arguments, as a later argument does, so a change it makes of a value an argument
+        // still holds is `changed-while-held` at the bound's line, as one an argument makes is
+        var program = "actor Store {\n    pub int Take(List<int> items, int n) => items.Count + n\n}\n\nint Count(mut List<int> ys) {\n    ys.Add(3)\n    return 1\n}\n\n" +
+            "duration Grow(mut List<int> ys) {\n    ys.Add(3)\n    return 1s\n}\n\ns = spawn Store()\nmut xs = [1, 2]\n" + tail;
+        Assert.Equal(id is null ? [] : [(id, program.Split('\n').Length)], Errors(program));
+    }
+
+    [Theory]
+    [InlineData(Store + "send s.Run() within 2s", 8)]
+    [InlineData(Store + "duration d = 2s\nsend s.Run() within d", 9)]
+    [InlineData("int F() => 1\n\nprint(F() within 2s)", 3)]
+    [InlineData("class Box {\n    pub int Get() => 1\n}\n\nb = Box()\nprint(b.Get() within 2s)", 6)]
+    [InlineData("actor Store {\n    pub int Get() => 1\n    pub int Twice() => Get() within 2s\n}", 3)]
+    [InlineData("actor Store {\n    pub int Get() => 1\n    pub int Twice() => this.Get() within 2s\n}", 3)]
+    public void A_clause_on_a_call_that_is_no_call_of_an_actors_method_that_waits_is_syntax(string program, int line)
+    {
+        // U39: a clause bounds a call of an actor's method through a reference, which waits (U4); after `send` (U6), on a function's call,
+        // a class's method's and an actor's own method called inside it it is `syntax`, as `send` before what is no call of an actor's
+        // method is (U14) (assumed: T11 of comment 6967625156), its bound read with no diagnostic, a variable it reads counted as read
+        Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
+    }
+
+    [Theory]
+    [InlineData("int F() within 2s => 1\n\nprint(F())", 1)]
+    [InlineData("class Box {\n    pub int Get() within 2s => 1\n}\n\nprint(Box().Get())", 2)]
+    [InlineData("data Point(int X) {\n    pub int Twice() within 2s => X * 2\n}\n\nprint(Point(1).Twice())", 2)]
+    [InlineData("interface Shape {\n    int Area() within 2s\n}", 2)]
+    [InlineData("actor Store {\n    int Get() within 2s => 1\n    pub int Twice() => Get() + Get()\n}", 2)]
+    public void A_clause_on_a_declaration_that_is_no_message_is_syntax(string program, int line)
+    {
+        // U39: a declaration's clause bounds the calls through a reference of a message, a `pub` method of an actor (U4, U9); on a
+        // function, a class's, a data type's or an interface's method and an actor's method without `pub` it is `syntax` (assumed: T11 of
+        // comment 6967625156)
+        Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
+    }
+
+    [Theory]
+    [InlineData("pub int Get() within 2 => 1", "type-mismatch")]
+    [InlineData("pub int Get() within 2.5 => 1", "type-mismatch")]
+    [InlineData("pub int Get() within 2mb => 1", "type-mismatch")]
+    [InlineData("pub int Get() within 2s => 1", null)]
+    [InlineData("pub int Get() within 0s => 1", null)]
+    [InlineData("pub int Get() within -1s => 1", null)]
+    public void The_literal_of_a_declarations_clause_is_a_duration(string method, string? id)
+    {
+        // U39, U40: the literal is read as a block's bound is, of another type `type-mismatch` at its line, zero or less a deadline that
+        // has passed at each call (assumed: T13 of comment 6967625156)
+        Assert.Equal(id is null ? [] : [(id, 2)], Errors($"actor Store {{\n    {method}\n}}\n\ns = spawn Store()\nprint(s.Get())"));
+    }
+
+    [Fact]
+    public void An_actor_the_checker_does_not_read_has_no_error_of_its_declarations_clauses()
+    {
+        // U2, E1: an actor with a constructor in its body has the one diagnostic of that constructor, its methods unread
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("actor Store {\n    Store() {\n    }\n\n    pub int Get() within 2 => 1\n}"));
+    }
+
     private static List<(string Id, int Line)> Errors(string program, string grants = "")
     {
         var (diagnostics, _) = Check(program, grants);

@@ -59,7 +59,8 @@ internal static class SyntaxPrinter
     {
         var typeParameters = TypeParameters(f.TypeParameters);
         var body = f.ExpressionBody is not null ? " => " + Print(f.ExpressionBody) : f.BlockBody is not null ? " " + Print(f.BlockBody) : "";
-        return $"(function {Mods(f.Modifiers)}{Type(f.ReturnType)}{f.Name}{typeParameters}({Parameters(f.Parameters)}){body})";
+        var within = f.Within is null ? "" : $" (within {Print(f.Within)})";
+        return $"(function {Mods(f.Modifiers)}{Type(f.ReturnType)}{f.Name}{typeParameters}({Parameters(f.Parameters)}){within}{body})";
     }
 
     /// <summary>
@@ -169,7 +170,7 @@ internal static class SyntaxPrinter
         ThisExpression => "this",
         MemberAccess m => $"({(m.Conditional ? "?." : ".")} {Print(m.Target)} {m.Member})",
         TypeMemberAccess m => $"(. {Type(m.Type).TrimEnd()} {m.Member})",
-        CallExpression c => $"(call {Print(c.Callee)}{(c.TypeArguments.Count == 0 ? "" : "<" + string.Join(", ", c.TypeArguments.Select(t => Type(t).TrimEnd())) + ">")}{(c.Arguments.Count == 0 ? "" : " " + Arguments(c.Arguments))})",
+        CallExpression c => $"(call {Print(c.Callee)}{(c.TypeArguments.Count == 0 ? "" : "<" + string.Join(", ", c.TypeArguments.Select(t => Type(t).TrimEnd())) + ">")}{(c.Arguments.Count == 0 ? "" : " " + Arguments(c.Arguments))}{(c.Within is null ? "" : $" (within {Print(c.Within)})")})",
         IndexExpression i => $"(index {Print(i.Target)} {Print(i.Index)})",
         ListLiteral l => "(list" + string.Concat(l.Items.Select(item => " " + Print(item))) + ")",
         UnaryExpression u => $"({Op(u.Operator)} {Print(u.Operand)})",

@@ -476,7 +476,8 @@ public sealed partial class Emitter
     /// of its chain, its actor's own methods; the result is then the caller's, a temporary of its region as any call's result is. A
     /// <c>send</c> passes none (U6). The message names the table of its call site, a constant: the function that runs it and the one
     /// that copies it into the heap of the actor's new instance after a crash (<see cref="MessageCopy"/>; U21); <c>Wait</c> is given the
-    /// message, so that a crash of the waiting actor unhooks the reply from it (U20). Where any argument can wait, one that runs a call
+    /// message, so that a crash of the waiting actor unhooks the reply from it (U20). Where any argument or the bound of the call's clause
+    /// (U39) can wait, one that runs a call
     /// anywhere in it (<see cref="SemanticModel.CanWait"/>), the wait lets the actor crash, which frees or empties the heap taken before it,
     /// that the arguments and the message would go into (U21), or end (U13): the message is then built in a heap of its own, made for it (the runtime's
     /// <c>MessageHeapNew</c>), and at its queueing copied into the heap the actor has then by the function of its call site that copies it
@@ -496,7 +497,7 @@ public sealed partial class Emitter
             NameExpression n => Reference(This(n, n.Line)),
             _ => throw new InvalidOperationException($"a message through `{c.Callee.GetType().Name}` at line {c.Line}"),
         };
-        var own = c.Arguments.Any(a => Model.CanWait(a.Value)) ? fn.Value($"call ptr {RuntimeFunction("MessageHeapNew")}()") : null;
+        var own = c.Arguments.Select(a => a.Value).Concat(c.Clause()).Any(Model.CanWait) ? fn.Value($"call ptr {RuntimeFunction("MessageHeapNew")}()") : null;
         var left = own is null ? null : HeapBegun(own, "MessageHeapFree");
         var heap = own ?? fn.Value($"call ptr {RuntimeFunction("ActorHeap")}({ReferenceWords(actor)})");
         var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => Default(f.Declaration!.Parameters[j].Default, owners[f]), cConvention: false, owned: true, into: heap);
@@ -530,10 +531,13 @@ public sealed partial class Emitter
         {
             fn.Emit($"store ptr null, ptr {MessageField(message, block, 2)}");
             var sent = Queued();
-            fn.Emit($"call void {RuntimeFunction("Enqueue")}({ReferenceWords(actor)}, ptr {sent}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
+            fn.Emit($"call void {RuntimeFunction("Enqueue")}({ReferenceWords(actor)}, ptr {sent}, i1 false, i64 0, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
             return "void";
         }
 
+        // U39: the call's bound, that of its clause, run after the arguments, else the literal of the method's declaration, the call's
+        // clause winning over the declaration's, which the runtime's `Enqueue` takes where no `within` block runs (assumed in section 6)
+        var bound = c.Within is { } clause ? EmitExpression(clause) : f.Declaration!.Within is { } declared ? EmitExpression(declared) : null;
         var result = f.ReturnType;
         var reply = fn.Alloca(Reply(result), "reply");
         fn.Emit($"store i32 0, ptr {reply}");
@@ -545,7 +549,7 @@ public sealed partial class Emitter
         fn.Emit($"call void {RuntimeFunction("ReplyWaiter")}(ptr {reply})"); // the waiter before the message is queued
         fn.Emit($"store ptr {reply}, ptr {MessageField(message, block, 2)}");
         block = Queued();
-        fn.Emit($"call void {RuntimeFunction("Enqueue")}({ReferenceWords(actor)}, ptr {block}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
+        fn.Emit($"call void {RuntimeFunction("Enqueue")}({ReferenceWords(actor)}, ptr {block}, i1 {(bound is null ? "false" : "true")}, i64 {bound ?? "0"}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
         fn.Emit($"call void {RuntimeFunction("Wait")}(ptr {reply}, ptr {block}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
         return Types.IsVoid(result) ? "void" : fn.Value($"load {Ir(result)}, ptr {fn.Value($"getelementptr {Reply(result)}, ptr {reply}, i32 0, i32 {Number(ReplyHeap + 1)}")}");
     }

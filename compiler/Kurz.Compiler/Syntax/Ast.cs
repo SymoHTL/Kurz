@@ -107,8 +107,18 @@ public enum ArgumentWord
     Move,
 }
 
-/// <summary>A call, a construction (D2) or a conversion (T10); type arguments where the call writes them (T19).</summary>
-public sealed record CallExpression(int Line, Expression Callee, IReadOnlyList<TypeSyntax> TypeArguments, IReadOnlyList<Argument> Arguments) : Expression(Line);
+/// <summary>
+/// A call, a construction (D2) or a conversion (T10); type arguments where the call writes them (T19). <paramref name="Within"/> is the
+/// bound of the call clause <c>x.M() within d</c> (U39, record section 6), null where the call writes none.
+/// </summary>
+public sealed record CallExpression(int Line, Expression Callee, IReadOnlyList<TypeSyntax> TypeArguments, IReadOnlyList<Argument> Arguments, Expression? Within = null) : Expression(Line)
+{
+    /// <summary>
+    /// The bound of the call's clause, none or one, a part of the call that runs after its arguments, as it is written after them; a
+    /// method, so that a walk of a node's properties meets the bound once, as <see cref="Within"/>.
+    /// </summary>
+    public IReadOnlyList<Expression> Clause() => Within is null ? [] : [Within];
+}
 
 /// <summary><c>[1, 2, 3]</c> and <c>[]</c>: a list written by its items (M11); the line is the opening bracket's.</summary>
 public sealed record ListLiteral(int Line, IReadOnlyList<Expression> Items) : Expression(Line);
@@ -334,6 +344,8 @@ public sealed record TypeParameter(int Line, string Name, TypeSyntax? Limit, Typ
 /// <summary>
 /// A function or a method (F1 to F4, K7). Both bodies are null for the signature of an interface method. <paramref name="Property"/>
 /// marks a read-only property of a type body, <c>pub int Count => names.Count</c> (K7): a method without parameters, read without a call.
+/// <paramref name="Within"/> is the duration literal of the declaration clause <c>pub T M(...) within d</c> (U39, record section 6), null
+/// where the declaration writes none.
 /// </summary>
 public sealed record FunctionDeclaration(
     int Line,
@@ -344,7 +356,8 @@ public sealed record FunctionDeclaration(
     IReadOnlyList<Parameter> Parameters,
     Expression? ExpressionBody,
     Block? BlockBody,
-    bool Property = false) : Statement(Line);
+    bool Property = false,
+    Expression? Within = null) : Statement(Line);
 
 /// <summary>A field written in a type body (K7): <c>mut int count = 0</c>, <c>pub static int Step = 2</c>, <c>int x</c>, or <c>mut count = 0</c> without a written type, the reading on K7 with V2 (K7 shows a field as <c>Type name</c>; V2 declares a variable without one, and the record's actor bodies write the form).</summary>
 public sealed record FieldDeclaration(int Line, Modifiers Modifiers, TypeSyntax? Type, string Name, Expression? Value) : Statement(Line);

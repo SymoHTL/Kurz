@@ -955,6 +955,75 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>
+    /// U39: the clause <c>within d</c> on a call bounds a call of an actor's method through a reference that waits (U4), its bound read as
+    /// a block's is (U40, <see cref="CheckBound"/>), after the call's arguments, and recorded as one that can wait where it runs a call, as
+    /// an argument is (<see cref="RecordWaits"/>); on any other call, a <c>send</c>'s (U6), a function's, a class's method's or an actor's
+    /// own method called inside it, it is <c>syntax</c>, as <c>send</c> before what is no call of an actor's method is (U14) (assumed: T11
+    /// of comment 6967625156), the bound then read with no diagnostic, as is that of a call that reported its own error (E1), so that a
+    /// variable it reads counts as read.
+    /// </summary>
+    private void CallClause(CallExpression c, Expression bound, Typed result)
+    {
+        if (result.IsError)
+        {
+            CheckLoosely(bound);
+            return;
+        }
+
+        var kind = model.TryCallOf(c)?.Kind;
+        if (kind != CallKind.ActorCall)
+        {
+            Report(ErrorIds.Syntax, bound.Line, kind == CallKind.ActorSend
+                ? "`within` bounds a call that waits, and a `send` waits for nothing (U39, U6)"
+                : "`within` after a call bounds a call of an actor's method through a reference, which waits, and this call is none (U39, U4)");
+            CheckLoosely(bound);
+            return;
+        }
+
+        CheckBound(bound);
+        if (Calls(bound))
+        {
+            model.RecordWaitingArgument(bound);
+        }
+    }
+
+    /// <summary>
+    /// U39: the clause <c>within d</c> on a declaration bounds every call through a reference of a message, a <c>pub</c> method of an actor
+    /// (U4, U9), its duration literal read as a block's bound is (U40, <see cref="CheckBound"/>); on any other declaration, a function's,
+    /// a class's, a data type's or an interface's method, or an actor's method without <c>pub</c>, it is <c>syntax</c>, as <c>send</c>
+    /// before what is no call of an actor's method is (U14) (assumed: T11 of comment 6967625156). An actor the checker does not read has
+    /// its one diagnostic (<see cref="RefuseUnreadActors"/>; E1), and a <c>static</c> method of an actor its <c>not supported</c> (U1).
+    /// </summary>
+    private void CheckDeclarationClauses(IReadOnlyList<Statement> statements)
+    {
+        foreach (var s in statements)
+        {
+            var (declarations, actor) = s switch
+            {
+                FunctionDeclaration f => (new List<FunctionDeclaration> { f }, false),
+                TypeDeclaration t when !unreadActors.Contains(t) => ((t.Members ?? []).OfType<FunctionDeclaration>().ToList(), t.Kind == TypeDeclarationKind.Actor),
+                _ => (new List<FunctionDeclaration>(), false),
+            };
+            foreach (var f in declarations)
+            {
+                if (f.Within is not { } bound)
+                {
+                    continue;
+                }
+
+                if (actor && (f.Modifiers & Modifiers.Pub) != 0)
+                {
+                    frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = f.Line };
+                    CheckBound(bound);
+                    continue;
+                }
+
+                Report(ErrorIds.Syntax, bound.Line, $"`within` on a declaration bounds the calls of a message, a `pub` method of an actor, and `{f.Name}` is none (U39, U4, U9)");
+            }
+        }
+    }
+
     /// <summary>U8: a member of an actor's reference read without a call: its fields are no one's outside it, and a method named without a call is no value (F11).</summary>
     private Typed ActorMember(ActorType type, string member, int line)
     {

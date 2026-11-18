@@ -428,6 +428,7 @@ public sealed partial class Checker
         CheckDefaults();
         CheckClassDefaults();
         CheckMethodDefaults(); // F12, K7
+        CheckDeclarationClauses(program.Statements); // U39
         CheckStaticFields(); // K18: before every body, which reads their types
         CollectReserved(program.Statements);
         RefuseReservedTypeParameters(); // F16
@@ -2461,21 +2462,24 @@ public sealed partial class Checker
         }
     }
 
+    private void CheckWithin(WithinStatement w) => CheckBound(w.Bound);
+
     /// <summary>
-    /// U40: the bound of a <c>within</c> block is a <c>duration</c>, read as a condition is (C3): a value of another type there is
-    /// <c>type-mismatch</c> at its line, a <c>longduration</c> among them, a <c>duration?</c> is <c>nullable-unchecked</c>, and a call with a
-    /// <c>void</c> success is <c>syntax</c> (O10) (section 6, assumed: the forms of that section write a duration and name no other type).
+    /// U40: the bound of <c>within</c>, a block's or a clause's (U39), is a <c>duration</c>, read as a condition is (C3): a value of another
+    /// type there is <c>type-mismatch</c> at its line, a <c>longduration</c> among them, a <c>duration?</c> is <c>nullable-unchecked</c>, and
+    /// a call with a <c>void</c> success is <c>syntax</c> (O10) (section 6, assumed: the forms of that section write a duration and name no
+    /// other type).
     /// </summary>
-    private void CheckWithin(WithinStatement w)
+    private void CheckBound(Expression bound)
     {
-        var t = CheckExpression(w.Bound, Types.Duration);
+        var t = CheckExpression(bound, Types.Duration);
         if (Types.IsVoid(t.Type))
         {
-            Report(ErrorIds.Syntax, w.Bound.Line, "a call with a `void` success used as a value (O10)");
+            Report(ErrorIds.Syntax, bound.Line, "a call with a `void` success used as a value (O10)");
         }
-        else if (!t.IsError && t.Type is not PrimitiveType { Kind: Primitive.Duration } && !Unchecked(t, w.Bound.Line, "as the bound of `within`"))
+        else if (!t.IsError && t.Type is not PrimitiveType { Kind: Primitive.Duration } && !Unchecked(t, bound.Line, "as the bound of `within`"))
         {
-            Report(ErrorIds.TypeMismatch, w.Bound.Line, $"the bound of `within` is a `duration`, not {Types.A(t.Type)} (U40)");
+            Report(ErrorIds.TypeMismatch, bound.Line, $"the bound of `within` is a `duration`, not {Types.A(t.Type)} (U40)");
         }
     }
 
