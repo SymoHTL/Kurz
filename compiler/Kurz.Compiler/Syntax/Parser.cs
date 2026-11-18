@@ -1809,7 +1809,7 @@ public sealed class Parser
 
     /// <summary>
     /// U38, U40: <c>within d { ... }</c>, the word, its bound read as the condition of an <c>if</c> is (<see cref="Header"/>), and a block
-    /// that opens on the line where the bound ends, as C1 has an <c>if</c>'s, or, with nothing but line breaks between, on a later line,
+    /// that opens on the line where the bound ends, as C1 has an <c>if</c>'s, or, with nothing but line breaks between, on a following line,
     /// which is the statement still and <c>braces-required</c> (U40's reading, assumed in section 6); tried, so that where no block
     /// follows the bound the word is a name, <c>within(3)</c> a call and <c>within + 1</c> a sum, as <c>on crash</c>, <c>attempt</c> and
     /// <c>vouch</c> are words only where they stand (section 6, comment 6847932993, Q10). False, with the cursor back where it was, when
