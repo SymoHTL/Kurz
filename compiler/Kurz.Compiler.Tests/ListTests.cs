@@ -2853,6 +2853,129 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "freed",
     ];
 
+    // U12, F11 (issue 587): calls of a function value whose type writes `move` at a parameter, which its lambda owns and lets go of at
+    // its end (`OwningMoved`), so that the call hands the argument over as a direct call does: a new value, a moved variable, the item
+    // of a loop that takes its list, a moved value whose place is not emptied (an inline `data` value), one copy, the first of two
+    // copies, a lambda that moves its parameter on into a function's parameter written `move`, and a call left by the case a later
+    // argument propagates, after a new value, a moved variable and a copy of a call of two copies; a function value whose parameters
+    // borrow, the control; `Run` gives each row's value, the rows of `ActorTests` and of the fenced program the same
+    internal const string ValueMoves = """
+        data Missing
+
+        class Box(mut int N)
+        class Holder(mut Box B)
+        data Tag(Box B)
+
+        Box | Missing Lose() {
+            return Missing
+        }
+
+        int Add(move Box a, Box b) => a.N + b.N
+
+        int Through((move Box, Box) => int f) {
+            return f(move Box(5), Box(6))
+        }
+
+        int Variable((move Box, Box) => int f) {
+            b = Box(5)
+            return f(move b, Box(6))
+        }
+
+        int Item((move Box, Box) => int f) {
+            mut total = 0
+            boxes = [Box(5), Box(7)]
+            for k in boxes {
+                total = total + f(move k, Box(6))
+            }
+
+            return total
+        }
+
+        int Inline((move Tag, Box) => int g) {
+            t = Tag(Box(5))
+            return g(move t, Box(6))
+        }
+
+        int Copied((move Box, Box) => int f, Holder held) {
+            return f(copy held.B, Box(6))
+        }
+
+        int Copies((move Box, Box) => int f, Holder held, Box other) {
+            return f(copy held.B, copy other)
+        }
+
+        int | Missing Left((move Box, Box) => int f) {
+            return f(move Box(5), Lose())
+        }
+
+        int | Missing LeftVariable((move Box, Box) => int f) {
+            b = Box(5)
+            return f(move b, Lose())
+        }
+
+        int | Missing LeftCopy((move Box, Box) => int f, Holder held) {
+            return f(copy held.B, copy Lose())
+        }
+
+        int Borrowed((Box, Box) => int g) {
+            b = Box(5)
+            return g(b, Box(6)) + g(Box(1), b)
+        }
+
+        int Score(int | Missing r) {
+            match r {
+                int k => return k
+                Missing => return 100
+            }
+        }
+
+        int Run(int row, Holder held, Box other) {
+            adder = (move Box a, Box b) => a.N + b.N
+            if row == 0 {
+                return Through(adder)
+            }
+
+            if row == 1 {
+                return Variable(adder)
+            }
+
+            if row == 2 {
+                return Item(adder)
+            }
+
+            if row == 3 {
+                return Inline((move Tag a, Box b) => a.B.N + b.N)
+            }
+
+            if row == 4 {
+                return Copied(adder, held)
+            }
+
+            if row == 5 {
+                return Copies(adder, held, other)
+            }
+
+            if row == 6 {
+                return Through((move Box a, Box b) => Add(move a, b))
+            }
+
+            if row == 7 {
+                return Score(Left(adder))
+            }
+
+            if row == 8 {
+                return Score(LeftVariable(adder))
+            }
+
+            if row == 9 {
+                return Score(LeftCopy(adder, held))
+            }
+
+            return Borrowed((Box a, Box b) => a.N + b.N)
+        }
+
+        """;
+
     // the environments of fields of a function type, made, replaced and let go of with their instances each round
     private const string FunctionFieldRounds = """
         class Button(string Name, mut () => int OnClick)
@@ -5059,6 +5182,24 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             """;
         Ran(BuildAndRun(propertyChange, fenced, "property-change-fenced"), 0, ["3", "[7]", "2", "[7]"], "");
         Ran(BuildAndRun(FunctionFields, fenced, "function-fields-fenced"), 0, FunctionFieldsPrint, "");
+        // U12, F11 (issue 587): the issue's program, a function value whose type writes `move` given a new value three times, then each
+        // row of `ValueMoves` once: no argument a call hands over is let go of by the call's statement after the lambda let go of it
+        const string valueMoveMain = """
+            issue = (move Box a, Box b) => a.N + b.N
+            mut n = 0
+            for i in 0..<3 {
+                n = n + Through(issue)
+            }
+
+            print(n)
+            h = Holder(Box(5))
+            o = Box(7)
+            for row in 0..<11 {
+                print(Run(row, h, o))
+            }
+
+            """;
+        Ran(BuildAndRun(ValueMoves + valueMoveMain, fenced, "value-move-fenced"), 0, ["33", "11", "11", "24", "11", "11", "12", "11", "100", "100", "100", "17"], "");
         Ran(BuildAndRun(Interfaces, fenced, "class-interfaces-fenced"), 0, InterfacesPrint, "");
         Ran(BuildAndRun(ClassArms, fenced, "class-arms-fenced"), 0, ClassArmsPrint, "");
         // the first release a program lays out is of a class that holds another, whose release it lays out inside its own: the flag of
