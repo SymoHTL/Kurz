@@ -69,7 +69,8 @@ public sealed partial class Emitter
     /// value into the slot <paramref name="into"/>, in the call's session <paramref name="session"/>, else in a session of its own
     /// (<see cref="CopyRun"/>), whose copies go into the heap <paramref name="heap"/> of a crossing, every counted block among them, or,
     /// for null, after <c>copy</c> at a call that is no crossing, into the heap the allocation entry serves, every block on a path to a
-    /// class instance among them (Q5). A function value crosses by <paramref name="copyInto"/>, the copy of the environment of its lambda
+    /// class instance that passes through no function value and no actor's reference among them (Q5). A function value crosses by
+    /// <paramref name="copyInto"/>, the copy of the environment of its lambda
     /// (<see cref="CopyEnvironmentInto"/>). A session of more than one copy points the <c>weak</c> references of its copies at its last
     /// copy, the ones the slot holds itself among them, a <c>weak T?</c> and a plain <c>data</c> value or a union that holds one, so that
     /// the slot is read after the call's last copy (<see cref="Late"/>), or is the place the callee reads.
@@ -654,7 +655,8 @@ public sealed partial class Emitter
     /// 2026-11-16, #519, comment 6923513534, "Rehash each key (Recommended)"). The maps are placed before the session's last copy points
     /// the <c>weak</c> references of its copies (the runtime's <c>CopyLeft</c>), and no key the checker admits hashes a <c>weak</c> slot:
     /// a <c>weak T?</c> as a map's key or value is <c>not supported</c> (the checker's <c>WeakUnread</c>), a key type that reaches one
-    /// through a field, an item or a case is no key the checker reads (its <c>KeyOf</c>), a class with a <c>weak</c> field compares, and
+    /// through what <c>==</c> compares by content, a <c>data</c> value's field, an item or a case, is no key the checker reads (its
+    /// <c>KeyOf</c>), and a class with a <c>weak</c> field compares, and
     /// hashes, by identity (K4, <c>ComparesByIdentity</c>), by its copy's address, which the pointing does not change, and an
     /// <c>equal by</c> that names such a field is <c>not supported</c> (K8). No two keys are compared: two keys of the source are two of
     /// the copy, since a copy gives each block of its source one copy (Q2), and a key the checker admits reaches no <c>weak</c> reference

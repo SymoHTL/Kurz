@@ -2075,9 +2075,11 @@ each waiting caller `callee-crashed` (U20), ends the actor's children after thei
 to 30 s, run by the top-level code's wait, which sleeps while only a pause is left (U22, U23); the
 emitted `spawn` keeps a copy of the constructor's arguments in the spawner's heap and makes the
 function that constructs the state again from them, and each call site of a message gets a table
-of the function that runs it and the one that copies it into a new heap. No case carries chapter 0's
-line `// threads: 1`, which neither the corpus runner nor `tools/lint_reference.py` reads: the lint
-refuses a header that holds it. A message any of whose
+of the function that runs it and the one that copies it into a new heap. Chapter 0's line
+`// threads: 1`, on a case whose output follows one thread's order, is read by `tools/lint_reference.py` and by the
+corpus runner's reading of a header (`CaseHeader`), each refusing another count, and the runner does nothing more for
+it: the build runs every actor on its one thread, the ready actors first in, first out, the top-level code's wait
+running them, which is U35's order for such a case. A message any of whose
 arguments can wait, one that runs a call anywhere in it, is built in a
 heap of its own (`MessageHeapNew`) and at its queueing copied by that copy into the heap its actor has
 then, its own heap freed, as Erlang builds a message in the sender's heap and copies it into the

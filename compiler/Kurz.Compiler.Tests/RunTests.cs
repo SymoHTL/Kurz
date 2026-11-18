@@ -149,7 +149,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             ? CrashLine().Replace(written, string.Empty) : written;
 
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the cases whose <c>system:</c> line names Linux, the stack overflows', nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls, the reads of standard input and running a program. The number for Linux is the count measured in the gates image, with no margin, so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156). The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 594 : 721;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 595 : 722;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -240,14 +240,15 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     };
 
     /// <summary>
-    /// U25, U26: the <c>throws</c> cases whose trace is no raise of the top-level code at the error line, each with the line of its first
-    /// frame and the name of its last: a crash escalated to the root, whose trace is the child's stack, from its raise to its message's
-    /// method, and the root's <c>restart-limit</c>, whose trace is the top-level code's where it waits, and not at the line of the
-    /// <c>spawn</c> that its error line names (assumed readings of section 6, "Policy at <c>spawn</c>").
+    /// U25, U26, U29: the <c>throws</c> cases whose trace is no raise of the top-level code at the error line, each with the line of its
+    /// first frame and the name of its last: a crash escalated to the root, by its policy or by its block, whose trace is the child's stack,
+    /// from its raise to its message's method, and the root's <c>restart-limit</c>, whose trace is the top-level code's where it waits, and
+    /// not at the line of the <c>spawn</c> that its error line names (assumed readings of section 6, "Policy at <c>spawn</c>").
     /// </summary>
     private static readonly Dictionary<string, (int First, string Last)> OwnTraces = new(StringComparer.Ordinal)
     {
         ["actors/crash-escalate-root.kz"] = (7, "Worker.Fail"),
+        ["actors/block-escalate-root.kz"] = (6, "Worker.Fail"),
         ["actors/crash-restart-limit.kz"] = (18, "main"),
     };
 
@@ -333,7 +334,9 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             return;
         }
 
-        // the trace on, as a program runs where nobody set KURZ_TRACE; the log line of a crash left out in a case of a crash (E3)
+        // the trace on, as a program runs where nobody set KURZ_TRACE; the log line of a crash left out in a case of a crash (E3); a case's
+        // `threads: 1` line (chapter 0) asks for the one thread the build runs every program on, first in, first out (U35), so the run sets
+        // nothing for it
         var (code, output, written) = Toolchain.Run(executable, null);
         var all = LeftOut(written, header.Rules);
         Assert.Equal(header.OutputLines, output);

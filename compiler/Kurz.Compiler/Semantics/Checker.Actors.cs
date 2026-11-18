@@ -628,7 +628,7 @@ public sealed partial class Checker
     /// (F15, K7; assumed: S7 of issue 519, comment 6907441402), and after a type's name it reads what a top-level function reads (F16;
     /// assumed: S6 of that comment); each path of it ends with a decision or a <c>throw</c>, and one that ends with neither is <c>missing-return</c>,
     /// as for a lambda whose path ends with no value (F3; the owner, 2026-11-16, comment 6919351399, "missing-return error"). Whether it
-    /// reported an error. The <c>Reason</c> read is the one the reading before found (<see cref="Check(ProgramSyntax, DiagnosticBag)"/>):
+    /// reported an error or a <c>not supported</c>, the one other diagnostic that reaches the block's list, a warning going to the lints. The <c>Reason</c> read is the one the reading before found (<see cref="Check(ProgramSyntax, DiagnosticBag)"/>):
     /// at the first reading it is the runtime's error type alone and what the block reports is dropped, as it is at a reading made only for
     /// the sets of one whose errors stand in blocks alone. A <c>Reason</c> with a type the
     /// crossing copy does not copy (U12) is <c>not supported</c>, as the copy that brings it into the supervisor's heap is not built.

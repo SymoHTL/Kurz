@@ -4,7 +4,11 @@
 // | first's block
 // | queued
 // | 2
-// rules: U28
+// threads: 1
+// rules: U28, U35
+
+// `first`'s `Fail` runs before `Other` answers `Go`'s call, so that its block stands ahead of `Queued` in `Boss`'s inbox, as one
+// thread runs the ready actors first in, first out (U35)
 
 actor Other {
     pub int Ping() => 1

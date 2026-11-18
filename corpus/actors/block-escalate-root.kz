@@ -1,0 +1,16 @@
+// expect: throws thrown at 6
+// rules: U29
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Ping() => 1
+}
+
+w = spawn Worker() on crash (c) {
+    escalate
+}
+send w.Fail()
+print(w.Ping())

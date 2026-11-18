@@ -55,6 +55,11 @@ carries the `Case:` line alone.
 // expect: throws stack-overflow at 6
 // system: linux                      optional: the one system the case runs on, linux or windows
 // rules: O11
+
+// expect: output
+// | 1
+// threads: 1                         optional: the output follows one thread's order (U35)
+// rules: U34
 ```
 
 A case is a single file with no `project.kz`, run with no argument and with nothing on its standard
@@ -67,7 +72,9 @@ line where it has one and before its `// rules:` line, names the one system it r
 the fix of T10 of the reading of issue 39, comment 6926929175)*.
 A case whose output follows one thread's order carries the line `// threads: 1`, with which the runner
 runs it on one thread (U35; §6, the owner, 2026-11-17, #519, comment 6946657505, Q5, "// threads: 1
-header (Recommended)"), and `compiler/README.md` says whether a runner reads it.
+header (Recommended)"), and `compiler/README.md` says whether a runner reads it. The line stands after its `// system:`
+line where it has one and before its `// rules:` line, and takes no other count *(assumed: the line as that answer
+gives it, in the place of the other optional lines, which the answer did not name)*.
 
 The ids of both kinds are listed in chapter 12. The compiler's test suite parses each file and checks the errors of its
 front end, `syntax`, `semicolon`, `reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, or the absence of any diagnostic, against the header,

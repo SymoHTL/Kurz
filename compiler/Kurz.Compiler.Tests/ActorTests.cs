@@ -4477,9 +4477,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void The_block_takes_the_variables_it_reads_after_the_spawns_arguments_ran()
     {
-        // U28, U31: the block is written after the spawn's arguments, and the checker reads it after them, so the variables it takes by
-        // value (F15) are taken after the arguments ran: `n`, which the argument `Bumped(mut n)` changes, reaches the block as 1; the
-        // string it takes too, under the allocator that makes every freed block inaccessible
+        // U28, U31: the block takes the variables it reads after the spawn's arguments ran, F12's left to right with the block written last
+        // (section 6, the owner, 2026-11-17, #570, comment 6961064167, Q2, "After the arguments"), as the checker reads it after them,
+        // so the variables it takes by value (F15) are taken after the arguments ran: `n`, which the argument `Bumped(mut n)` changes,
+        // reaches the block as 1; the string it takes too, under the allocator that makes every freed block inaccessible
         const string text = """
             int Bumped(mut int n) {
                 n = n + 1
