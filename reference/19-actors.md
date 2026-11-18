@@ -2741,6 +2741,32 @@ print(b.Count())
 print(w.Ping())
 ```
 
+Case: [actors/per-node-child.kz](../corpus/actors/per-node-child.kz)
+```kurz
+actor Worker {
+    pub int Ping() => 1
+}
+
+actor Holder per node {
+    Worker worker = spawn Worker()
+    mut int count = 0
+
+    pub Worker Get() => worker
+
+    pub int Count() => count
+
+    pub void Fail() {
+        throw "holder fails"
+    }
+}
+
+w = Holder.Get()
+print(w.Ping())
+send Holder.Fail()
+print(Holder.Count())
+print(w.Ping())
+```
+
 ### U22 (decided, §6) The supervisor restarts the actor
 
 The default policy, `on crash restart`, runs the actor's constructor again, after the pause of U23,
@@ -4297,7 +4323,8 @@ A `per node` actor starts at the first message that names it, a call or a `send`
 top-level code, a function, another actor or itself, and a program that names it nowhere starts none,
 as Orleans activates a grain at its first call (not checked at source) and C#'s `Lazy<T>` makes its value
 at the first read of its `Value` (§13) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*; a `send` starts it as a call does *(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*. Its constructor and its fields' defaults run on
-the first caller's stack, as `spawn`'s do (U3), and a throw there is that caller's crash, under the
+the first caller's stack, as `spawn`'s do (U3), an actor they spawn its child,
+which a crash of it ends (U21), and a throw there is that caller's crash, under the
 caller's own policy: the half-built actor ends, the calls of other actors queued behind its start get
 `actor-gone`, and the first message after that starts it again, as Rust's `OnceLock::get_or_init`
 leaves its cell empty after a panic in its function (checked 2026-11-18: its documentation, "the cell remains uninitialized") *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. The crash names the line of the throw, as a
@@ -4409,6 +4436,8 @@ int Measured() {
 
 print(Cache.Size())
 ```
+
+Case: [actors/per-node-child.kz](../corpus/actors/per-node-child.kz)
 
 ### U53 (assumed, §6, §13) Its supervisor is the root
 

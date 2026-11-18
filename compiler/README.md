@@ -2244,6 +2244,7 @@ count of its knobs' ring back to 0, stores the slot and the number in the cell, 
 lock. The lock is held around the read, the making of the record and that store alone,
 never around a constructor or a wait, which the one thread of the build never contends (U35). The defaults then run on the
 caller's stack in the actor's heap, the actor BUILDING, so that a message that reaches it meanwhile waits in its inbox, and
+named as the one built (`Building`), so that an actor they spawn is its child (U21), and
 at their end `PerBuilt` makes the root its supervisor and ends its building as `ActorBuilt` does (U53). A throw in the
 defaults is the caller's crash, which ends its child, the actor half built, the calls queued in it raising `actor-gone`,
 and the message after it finds no actor in the cell and starts a fresh one (U52). The crash of a `per node` actor whose knobs
