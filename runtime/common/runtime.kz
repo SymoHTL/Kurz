@@ -3972,7 +3972,6 @@ void EndActors() {
             byte* slot = Slot(index)
             if *Ptr<long>(slot + 8) != 0 {
                 byte* at = *Ptr<byte*>(slot)
-                Moved(at)
                 byte* heap = *Ptr<byte*>(at - 64)
                 if heap != at - 192 {
                     std.HeapFree(heap)
