@@ -24,7 +24,6 @@ public sealed class CheckerTests
         return (diagnostics, checker);
     }
 
-    /// <summary>The compile errors of a program the checker reads in full, by line.</summary>
     [Theory]
     [InlineData("within 2 {\n}", "type-mismatch")]
     [InlineData("long x = 3\nwithin x {\n}", "type-mismatch")]
@@ -36,8 +35,8 @@ public sealed class CheckerTests
     public void The_bound_of_a_within_is_a_duration(string program, string? id)
     {
         // U40: a bound of another type is `type-mismatch` at its line, a `longduration` among them; a nullable one is N2's
-        // `nullable-unchecked`, and a call with a `void` success O10's `syntax`, as a condition's are (proposed: the forms of section 6
-        // write a duration and name no other type)
+        // `nullable-unchecked`, and a call with a `void` success O10's `syntax`, as a condition's are (assumed in section 6, U40: the
+        // forms of section 6 write a duration and name no other type)
         var line = program.Split('\n').Length - 1;
         Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
     }
@@ -147,6 +146,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("actor Store {\n    Store() {\n    }\n\n    pub int Get() within 2 => 1\n}"));
     }
 
+    /// <summary>The compile errors of a program the checker reads in full, by line.</summary>
     private static List<(string Id, int Line)> Errors(string program, string grants = "")
     {
         var (diagnostics, _) = Check(program, grants);

@@ -256,7 +256,10 @@ public sealed record UseStatement(int Line, string Target) : Statement(Line);
 /// <summary><c>send c.Add(1)</c> (U6): a call of an actor's method that does not wait, which <paramref name="Call"/> holds.</summary>
 public sealed record SendStatement(int Line, CallExpression Call) : Statement(Line);
 
-/// <summary><c>within 2s { ... }</c> (U38): one deadline, <paramref name="Bound"/> from the block's entry, for every call the block makes.</summary>
+/// <summary>
+/// <c>within 2s { ... }</c> (U38): one deadline, <paramref name="Bound"/> from the block's entry, for every call that waits, made in the
+/// block or in the functions it calls, a <c>send</c> carrying its chain's deadline.
+/// </summary>
 public sealed record WithinStatement(int Line, Expression Bound, Block Body) : Statement(Line);
 
 /// <summary>

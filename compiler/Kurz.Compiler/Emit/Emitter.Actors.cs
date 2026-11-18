@@ -661,9 +661,9 @@ public sealed partial class Emitter
     });
 
     /// <summary>
-    /// The IR type of a message of the method: the message after it in its list, the function that runs it, the reply, the chain ID as two
-    /// words, the deadline and the deadline of the <c>within</c> block that runs while it runs (U37, U38), then the arguments, from the
-    /// field <see cref="MessageArguments"/> on.
+    /// The IR type of a message of the method: the message after it in its list, the table of its call site (run, copy, drop), the reply,
+    /// the chain ID as two words, the deadline and the deadline of the <c>within</c> block that runs while it runs (U37, U38), then the
+    /// arguments, from the field <see cref="MessageArguments"/> on.
     /// </summary>
     private string MessageType(FunctionSymbol f) => $"{{ ptr, ptr, ptr, i64, i64, i64, i64{string.Concat(f.Parameters.Select(p => ", " + Ir(p.Type)))} }}";
 

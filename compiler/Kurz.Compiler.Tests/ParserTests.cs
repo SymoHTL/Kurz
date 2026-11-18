@@ -1847,7 +1847,7 @@ public sealed class ParserTests
     [Fact]
     public void The_block_of_a_within_on_the_next_line_is_braces_required()
     {
-        // U38, C1: the block opens on the line where the bound ends, as an `if`'s does, and still parses
+        // U40, C1: the block opens on the line where the bound ends, as an `if`'s does, and still parses
         Assert.Equal([(ErrorIds.BracesRequired, 1)], Errors("within d\n{\n    f()\n}"));
     }
 

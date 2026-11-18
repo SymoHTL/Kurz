@@ -4667,11 +4667,11 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // ---- the deadlines of the calls (U36 to U45; the owner, 2026-10-30, "Deadline on chain ID"; #519, comments 6967147952, 6967625156)
 
-    /// <summary>A function that holds the thread for <c>d</c> with no call and no wait, as the cases of timeouts hold it.</summary>
     /// <summary>
-    /// S11: the build for Windows of <paramref name="text"/>, a program that reads the clock to hold its thread or to time a wait, says
-    /// <c>not supported</c> at that read, which this checks on every system, on <paramref name="windows"/> where it is given, else on
-    /// the runtime of Windows; whether this machine is Windows, where such a test holds that refusal alone, its run not built.
+    /// S11: the build for Windows of <paramref name="text"/>, a program that reads the clock to hold its thread or to time a wait, is
+    /// refused with one diagnostic, whose text is the emitter's refusal of such a read (<c>Emitter.ProcessNotOnWindows</c>), which this
+    /// checks on every system, on <paramref name="windows"/> where it is given, else on the runtime of Windows, and not that diagnostic's
+    /// line; whether this machine is Windows, where such a test holds that refusal alone, its run not built.
     /// </summary>
     private static bool ClockRefusedOnWindows(string text, CheckedRuntime? windows = null)
     {
@@ -4681,6 +4681,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         return OperatingSystem.IsWindows();
     }
 
+    /// <summary>A function that holds the thread for <c>d</c> with no call and no wait, as the cases of timeouts hold it.</summary>
     private const string Hold = """
         void Hold(duration d) {
             instant start = instant.Now
@@ -5076,7 +5077,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // code (U3), so that its call after 300 ms raises `call-timeout` at its line under the top-level code's `within`, under the
         // `within` of a message and under the deadline of a message's chain, as a call of the spawner's own would; the raise of a
         // constructor that a message runs is the crash of that message's actor, and the top-level code whose callee crashed once its own
-        // deadline had passed raises `call-timeout` (U43); with neither, the constructor's call answers
+        // deadline had passed raises `call-timeout` (U43); under the 5 seconds of the top-level code's call alone, which its 300 ms fit,
+        // the constructor's call answers
         const string slow = Hold + """
             actor Ticker {
                 pub int Ping() => 1
