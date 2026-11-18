@@ -2210,6 +2210,9 @@ public sealed partial class Checker
             case SendStatement s:
                 CheckSend(s); // U6
                 return Flow.Completes;
+            case WithinStatement w:
+                CheckWithin(w); // U38, U40
+                return CheckBlock(w.Body);
             case DecisionStatement d:
                 // U29: a decision of the block ends its path, as `return` ends a function's; the parser makes one in the block alone
                 return frame.Deciding ? Flow.Ends : throw new InvalidOperationException($"the decision `{d.Word}` at line {d.Line} outside the block of `on crash`: the parser reads it there alone");
@@ -2455,6 +2458,24 @@ public sealed partial class Checker
                 default:
                     break;
             }
+        }
+    }
+
+    /// <summary>
+    /// U40: the bound of a <c>within</c> block is a <c>duration</c>, read as a condition is (C3): a value of another type there is
+    /// <c>type-mismatch</c> at its line, a <c>longduration</c> among them, a <c>duration?</c> is <c>nullable-unchecked</c>, and a call with a
+    /// <c>void</c> success is <c>syntax</c> (O10) (section 6, assumed: the forms of that section write a duration and name no other type).
+    /// </summary>
+    private void CheckWithin(WithinStatement w)
+    {
+        var t = CheckExpression(w.Bound, Types.Duration);
+        if (Types.IsVoid(t.Type))
+        {
+            Report(ErrorIds.Syntax, w.Bound.Line, "a call with a `void` success used as a value (O10)");
+        }
+        else if (!t.IsError && t.Type is not PrimitiveType { Kind: Primitive.Duration } && !Unchecked(t, w.Bound.Line, "as the bound of `within`"))
+        {
+            Report(ErrorIds.TypeMismatch, w.Bound.Line, $"the bound of `within` is a `duration`, not {Types.A(t.Type)} (U40)");
         }
     }
 

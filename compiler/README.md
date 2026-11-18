@@ -1105,13 +1105,17 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   in the top-level code it runs the first actor of the run queue ("The runtime"),
   in a loop until the word is set, as tokio's `block_on` runs its queue until its future is ready, so
   that a call behind any count of messages takes the stack of one, and ends the process with
-  `deadlock` at the call's line where the queue is empty and the word is not set (U18); inside a
-  message it parks the activation, switching to the thread's side until the word is set (`ActorTests`).
+  `deadlock` at the call's line where the queue is empty, no restart's pause runs and the word is not set
+  (U18, U42), and with `call-timeout` there once its deadline passes (U36); inside a
+  message it parks the activation, switching to the thread's side until the word is set or a timer of the
+  thread, the timers kept in the order of their deadlines, wakes it at its deadline (U37), and the scheduler drops
+  a message whose deadline passed before it starts it, its reply's word set to 4 (`ActorTests`).
   `ModelTests` explores every interleaving of two and three threads over a transcription of the state
   word's protocol and the reply's into C#, as loom explores a Rust test's (not checked at source), each
   move naming the runtime's function it transcribes, which a test holds to `runtime/common/runtime.kz`,
   and finds no lost wake, no two owners of a reply, no two threads holding one actor and no message
-  while its constructor runs, and each of these in a model broken so; `EmitterTests` holds the orders
+  while its constructor runs, and with the deadlines no lost wake of a drop or of a timer and no reply read or
+  kept among the timers once its frame was gone, and each of these in a model broken so; `EmitterTests` holds the orders
   of the atomic operations in the IR, which one thread does not show;
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
   number among the cases needs (section 5, round 19), a data type's number that of its name, as the IR names it, so
@@ -2147,7 +2151,10 @@ switch, `naked` on Arm and the stacks build, and no run of this repository's gat
 job `compiler-arm`, which is not required and runs on Linux, as `compiler-windows` runs on x86-64, so
 that the switch of Windows on Arm is assembled
 (`EmitterTests.The_switch_of_every_target_and_architecture_is_assembled_by_clang_for_its_machine`)
-and runs nowhere; a call waits with no bound, where section 6 bounds it by 5 seconds (`call-timeout`);
+and runs nowhere; a call waits 5 seconds where no `within` block names another bound (U36 to U38, U40, U42 to U45), on the
+system's clock, with no virtual time of section 11, and the clause on a call and the clause on a method's
+declaration, which section 6 decides, are not built (U39, U41), while a socket's wait keeps its own bound of
+section 12, which no `within` block bounds;
 and an inbox grows with no bound, where section 13 spills it at 64 MB, until the allocator ends the
 process with `allocation-failed`. An actor's record and the place of its state live to the end of the
 process, the state built again at each restart (U22), which is
@@ -2179,7 +2186,9 @@ the turns, the end and the inbox's growth, each heap giving back every block of 
 and moves, 10,000 idle actors within 512 bytes each, on Linux alone, which reads the resident memory,
 a buffer of the runtime made inside an actor outliving it, and a block of more than 262144 bytes of an
 actor joining the kept blocks at the end; the line `actor-heaps-fenced` of `ListTests` the heaps of
-actors freed whole and every result of their messages read after it, from the caller's heap; no test pins the wait with no bound, which would not end.
+actors freed whole and every result of their messages read after it, from the caller's heap; and `ActorTests` the deadlines, the bound of every target, the timers kept in the order of their
+deadlines, the inbox's drop of a message past its deadline, a `within` put back at every way out of it, and a wait that its
+deadline ends while a restart's pause runs.
 
 On Linux an exception that ends the process writes the trace of the calls below its error line
 (section 6), but `allocation-failed` and `random-failed`, which write no place and no trace (O11, M9): the runtime's `Trace` (`runtime/linux/linux.kz`) walks the stack it raised on with

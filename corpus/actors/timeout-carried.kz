@@ -1,0 +1,34 @@
+// expect: throws callee-crashed at 34
+// threads: 1
+// rules: U44, U20
+
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Ticker {
+    pub int Ping() => 1
+}
+
+actor Worker(Ticker T) {
+    pub int Work() {
+        Hold(200ms)
+        return T.Ping()
+    }
+}
+
+actor Front(Worker W) {
+    pub int Go() {
+        within 100ms {
+            return W.Work()
+        }
+    }
+}
+
+t = spawn Ticker()
+w = spawn Worker(t)
+f = spawn Front(w)
+print(f.Go())

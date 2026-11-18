@@ -21,6 +21,7 @@ internal static class SyntaxPrinter
         Assignment a => $"(assign {Print(a.Target)} {Print(a.Value)})",
         ExpressionStatement e => Print(e.Expression),
         SendStatement s => $"(send {Print(s.Call)})",
+        WithinStatement w => $"(within {Print(w.Bound)} {Print(w.Body)})",
         DecisionStatement d => $"(decide {d.Word})",
         IfStatement i => $"(if {Print(i.Condition)} {Print(i.Then)}{(i.Else is null ? "" : " else " + Print(i.Else))})",
         WhileStatement w => $"(while {Print(w.Condition)} {Print(w.Body)})",

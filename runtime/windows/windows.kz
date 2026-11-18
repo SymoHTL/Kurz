@@ -271,6 +271,10 @@ pub void Sleep(long nanoseconds) {
     }
 }
 
+// The bound of a call that waits where no `within` names another, 5 seconds in nanoseconds (U36), the value
+// Linux's runtime gives its sockets and its calls, which a test holds equal.
+pub long DefaultBound() => 5000000000
+
 // The function of the runtime that takes the crash of an actor whose stack overflowed (U19), which no
 // handler calls on Windows: an actor's overflow ends the process there, as the system ends it
 // (compiler/README.md, "What the emitter does not emit").

@@ -160,6 +160,7 @@ public static class SyntaxCopy
             Assignment a => a with { Target = Expression(a.Target), Value = Expression(a.Value) },
             ExpressionStatement e => e with { Expression = Expression(e.Expression) },
             SendStatement e => e with { Call = (CallExpression)Expression(e.Call) },
+            WithinStatement w => w with { Bound = Expression(w.Bound), Body = Block(w.Body) },
             DecisionStatement d => d with { },
             IfStatement i => i with { Condition = Expression(i.Condition), Then = Block(i.Then), Else = i.Else is null ? null : Statement(i.Else) },
             WhileStatement w => w with { Condition = Expression(w.Condition), Body = Block(w.Body) },

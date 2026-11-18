@@ -1,6 +1,6 @@
 // expect: throws deadlock at 28
 // threads: 1
-// rules: U18, U35
+// rules: U18, U35, U42
 
 // `Left`'s `Ask` waits on `Right`'s `Value` while `Right`'s `Ask` stands ahead of it in `Right`'s inbox, as one thread
 // runs the ready actors first in, first out (U35)

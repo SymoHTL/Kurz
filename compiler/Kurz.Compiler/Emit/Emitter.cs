@@ -726,6 +726,9 @@ public sealed partial class Emitter
             case SendStatement s:
                 EmitCall(s.Call); // U6: a message nobody waits for, which gives nothing
                 break;
+            case WithinStatement w:
+                EmitWithin(w);
+                break;
             case IfStatement i:
                 EmitIf(i);
                 break;

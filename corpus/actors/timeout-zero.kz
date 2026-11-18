@@ -1,0 +1,13 @@
+// expect: throws call-timeout at 12
+// | 1
+// rules: U40
+
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+print(s.Get())
+within 0s {
+    print(s.Get())
+}

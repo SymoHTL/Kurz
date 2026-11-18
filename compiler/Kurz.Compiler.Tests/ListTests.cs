@@ -4007,7 +4007,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     internal static CheckedRuntime Edited(params (string Path, string Old, string New)[] edits) => EditedFor(Builder.HostTarget!.Value, edits);
 
     /// <summary>As <see cref="Edited"/>, the runtime and the standard library of <paramref name="target"/>.</summary>
-    private static CheckedRuntime EditedFor(Target target, (string Path, string Old, string New)[] edits)
+    internal static CheckedRuntime EditedFor(Target target, (string Path, string Old, string New)[] edits)
     {
         var files = Runtime.Files.Select(f =>
         {
