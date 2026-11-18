@@ -1,0 +1,34 @@
+// expect: output
+// | CallTimeout
+// | -1
+// | after
+// rules: U49
+
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Store {
+    pub int Get() => 1
+}
+
+// the block's call past the deadline of the `within` block around the `attempt` raises `call-timeout` in the child,
+// which reaches the top-level code as `Crashed`
+s = spawn Store()
+within 100ms {
+    v = attempt {
+        Hold(150ms)
+        return s.Get()
+    } else {
+        Crashed c => {
+            print(c.Reason.Kind)
+            -1
+        }
+    }
+
+    print(v)
+}
+print("after")
