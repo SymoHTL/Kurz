@@ -26,7 +26,8 @@ headers: no run on Arm reads it). Since 2026-11-18 each architecture's file give
 `Directory.Create` passes it to `CreateDirectories`, since the target's file is checked alone and
 calls none of the architecture file's functions by name.
 
-The suite runs every program on x86-64, and the Arm job runs the actors' tests alone, in which no
+The suite runs every program on x86-64, and the Arm job runs the tests `ARM_FILTER` names alone (`ActorTests`,
+`RuntimeTests`, two of `EmitterTests` and the actors' cases of `RunTests`), in which no
 lock is ever found taken while one thread runs every program, and no directory is created (inferred
 from `ARM_FILTER` in `tools/compiler_gate.py`, read on 2026-11-18 against its floor, `ARM_FLOOR` 341): no run
 on Arm reached either line. So a number or a
@@ -40,8 +41,8 @@ the wait sleeps on (2), and
 against both tables before it goes in.
 
 A test of an offset in the IR follows the value from its store to the load, through each function that hands it
-on, and looks for no constant operand: the emitter turns a literal offset into a value (`sext i32 24 to i64`), so
-that no offset of a pointer is a constant. The directory test's first form held `IsDirectory` to no pointer offset
+on, and looks for no constant operand: the emitter turns the literal offset of `IsDirectory`'s read into a value (`sext i32 24 to i64`), so
+that the offset of that read is no constant operand. The directory test's first form held `IsDirectory` to no pointer offset
 by a constant 16 or 24, and the mutation that read 24 on every architecture passed it (GREEN on 581's commit
 `42832a42`); since 2026-11-18 the test follows `StatModeAt`'s result into `CreateDirectories`, through `MakeDirectory` into
 `IsDirectory`, and the parameter there to the load of `st_mode`.

@@ -24,7 +24,7 @@ thread static mut long room = 0
 // The start makes it in the thread's own heap, while the main thread is the one thread of the process, so that on
 // that path its address is written once, before any other thread runs; where the system refuses it there, the
 // first `spawn` makes it, before any actor runs (`Shared`), so that a program the system gives no memory ends at its
-// own first allocation, as it did, and the one thread takes no lock until then; that make takes no lock, which holds
+// own first allocation, as it did; that make takes no lock, which holds
 // while one thread runs every program (U35): a thread the program started through C (R16) may run by then, and two
 // threads could each make it (inferred).
 static mut byte* sharedWords = null
