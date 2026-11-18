@@ -3551,7 +3551,7 @@ pub string ExitErrorText(ExitError e) {
 // that a stack fault inside the scheduler or the allocator ends the process and one in an actor's code is
 // that actor's crash (design record, section 6, "End the process"; O11).
 
-// The first and the last actor of the run queue, plain `static`s with no lock and no atomic operation, which hold
+// The first and the last actor of the run queue, plain `static mut`s with no lock and no atomic operation, which hold
 // while one thread runs every program (U35): a waker on another thread would change them (`Wake`, `Queue`) while
 // the thread that runs the actors takes the first off (`RunOne`).
 static mut byte* runFirst = null
