@@ -3492,10 +3492,11 @@ pub string ExitErrorText(ExitError e) {
 // The actors of a program run on the one thread the runtime runs, while the top-level code waits for a
 // call's result (U4), as tokio's `current_thread` runtime runs its tasks inside `block_on`
 // (compiler/README.md, "What the emitter emits"). An actor's state, which the emitted code constructs, has
-// the actor's record in the 96 bytes in front of it, as a string's block stands in front of its bytes, and its
+// the actor's record in the 144 bytes in front of it, as a string's block stands in front of its bytes, and its
 // reference is the index of its slot in the table of the process and its number (below), a multiple of 16
 // so that the state keeps the alignment of the allocator's
-// block, as Rust's `ArcInner` pads its counts to what it holds: the name of the actor's type, whether the
+// block, as Rust's `ArcInner` pads its counts to what it holds: the queue of many senders its messages are
+// put on and the queue its blocks are posted on, 24 bytes each (`Pushed`), the name of the actor's type, whether the
 // actor runs (0), waits for its restart (1), ends after its current
 // message (2), ended (3) (U19, U22), has its constructor run at its `spawn` (4) (U3, U25) or waits for the
 // decision of the block of its policy (5) (U28), an `int`, and beside it the actor's state word, an `int`
@@ -3574,9 +3575,9 @@ thread static mut byte* running = null
 // bytes behind it (design record, section 3), made before the arguments of `spawn`, which cross into it
 // (U12). A heap the system refuses ends the process as a refused allocation does.
 pub byte* ActorHeapNew(long size) {
-    byte* heap = std.HeapNew(96 + size)
+    byte* heap = std.HeapNew(144 + size)
     if heap == null {
-        AllocationFailed(96 + size)
+        AllocationFailed(144 + size)
     }
 
     return heap
@@ -3681,7 +3682,7 @@ pub byte* ActorNew(byte* heap, long size, long stack, byte* side, byte* name) {
     raw {
         number = AtomicLong.FromPtr(Ptr<long>(Shared() + 24)).FetchAdd(1, MemoryOrder.Relaxed)
         if number == 9223372036854775807 {
-            AllocationFailed(96 + size)
+            AllocationFailed(144 + size)
         }
 
         number = number + 1
@@ -3690,7 +3691,13 @@ pub byte* ActorNew(byte* heap, long size, long stack, byte* side, byte* name) {
     sys.Entered()
     mut byte* state = std.HeapFirst(heap)
     raw {
-        state = state + 96
+        state = state + 144
+        *Ptr<byte*>(state - 144) = state - 128
+        *Ptr<byte*>(state - 136) = state - 128
+        *Ptr<byte*>(state - 128) = null
+        *Ptr<byte*>(state - 120) = state - 104
+        *Ptr<byte*>(state - 112) = state - 104
+        *Ptr<byte*>(state - 104) = null
         *Ptr<byte*>(state - 96) = name
         *Ptr<int>(state - 88) = 4
         *Ptr<int>(state - 84) = 8
@@ -3947,7 +3954,7 @@ void EndActors() {
         while queued != null {
             byte* after = *Ptr<byte*>(queued - 16)
             if *Ptr<int>(queued - 88) == 3 {
-                std.HeapFree(queued - 144)
+                std.HeapFree(queued - 192)
             }
 
             queued = after
@@ -3959,12 +3966,13 @@ void EndActors() {
             byte* slot = Slot(index)
             if *Ptr<long>(slot + 8) != 0 {
                 byte* at = *Ptr<byte*>(slot)
+                Moved(at)
                 byte* heap = *Ptr<byte*>(at - 64)
-                if heap != at - 144 {
+                if heap != at - 192 {
                     std.HeapFree(heap)
                 }
 
-                std.HeapFree(at - 144)
+                std.HeapFree(at - 192)
                 *Ptr<long>(slot + 8) = 0
             }
 
@@ -3990,12 +3998,11 @@ pub string ActorText(string name, long number) {
 // A message to the actor whose reference is the slot `index` and the number `number`, stamped with its chain
 // ID: the running message's,
 // or a new one where the top-level code makes it, so that each waiting call and each `send` of the
-// top-level code starts a chain of its own (section 6, "Deadlocks", layer 1, assumed there). A call that
-// waits, of the chain the actor's activation waits in, goes to the end of that activation's side list
-// (layer 1; section 6, "One-shot reply slot"), and every other message to the end of the inbox, as
-// tokio's `mpsc` channel pushes a value at the tail of its list, so that an inbox keeps the order in
-// which its messages were sent (U5, U15); the actor is woken (`Wake`) where it waits neither for its restart
-// (U22) nor for the decision of its block (U34). A call or a
+// top-level code starts a chain of its own (section 6, "Deadlocks", layer 1, assumed there). The message goes
+// on the actor's queue of many senders by one atomic swap (`Pushed`), which reads nothing of the actor but the
+// queue, and the thread that holds the actor moves it at its next take to the side list of the activation that
+// waits in its chain, or to the end of the inbox (`Moved`); the actor is woken (`Wake`) where it waits neither
+// for its restart (U22) nor for the decision of its block (U34). A call or a
 // `send` to an actor that ended raises `actor-gone` at its line `line` of the file `file`, the message and what
 // crossed into it staying in the heap the running code allocates in (`ActorHeap`) (U6, U20; design record,
 // section 6, the owner, 2026-11-16, #519, comments 6919351399 and 6923513534), before its deadline is
@@ -4064,13 +4071,7 @@ pub void Enqueue(long index, long number, byte* message, bool bounded, long boun
             return
         }
 
-        byte* top = *Ptr<byte*>(state - 8)
-        if top != null && reply != null && *Ptr<long>(message + 24) == *Ptr<long>(top + 344) && *Ptr<long>(message + 32) == *Ptr<long>(top + 352) {
-            Append(top + 376, message)
-        } else {
-            Append(state - 32, message)
-        }
-
+        Pushed(state - 144, message)
         int life = *Ptr<int>(state - 88)
         if life != 1 && life != 5 {
             Wake(state)
@@ -4078,6 +4079,102 @@ pub void Enqueue(long index, long number, byte* message, bool bounded, long boun
     }
 
     sys.Left()
+}
+
+// The message `message` at the end of the queue of many senders at `queue`, whose end the senders swap at 0, whose
+// next message its holder takes at 8 and whose stub, a message's link alone, stands at 16, as Dmitry Vyukov's
+// intrusive queue of many producers and one consumer pushes: the message's link cleared, one atomic swap of the
+// end with acquire and release, which orders the senders, then the link of the message the swap gave stored
+// with release, which the holder loads with acquire (`Popped`), so that a sender never waits for another.
+void Pushed(byte* queue, byte* message) {
+    raw {
+        AtomicPtr<byte>.FromPtr(Ptr<byte*>(message)).Store(null, MemoryOrder.Relaxed)
+        byte* before = AtomicPtr<byte>.FromPtr(Ptr<byte*>(queue)).Swap(message, MemoryOrder.AcqRel)
+        AtomicPtr<byte>.FromPtr(Ptr<byte*>(before)).Store(message, MemoryOrder.Release)
+    }
+}
+
+// The first message of the queue of many senders at `queue` taken off it by its one holder, as Vyukov's queue pops
+// one: null where the queue holds none, and where a sender's swap stands before its link, which that sender's
+// wake follows (`Enqueue`), so that the holder takes the message at its next turn. A message taken has its link
+// cleared, which its sender set before the holder could take it.
+byte* Popped(byte* queue) {
+    raw {
+        byte* stub = queue + 16
+        mut byte* first = *Ptr<byte*>(queue + 8)
+        mut byte* next = AtomicPtr<byte>.FromPtr(Ptr<byte*>(first)).Load(MemoryOrder.Acquire)
+        if first == stub {
+            if next == null {
+                return null
+            }
+
+            *Ptr<byte*>(queue + 8) = next
+            first = next
+            next = AtomicPtr<byte>.FromPtr(Ptr<byte*>(first)).Load(MemoryOrder.Acquire)
+        }
+
+        if next == null {
+            if first != AtomicPtr<byte>.FromPtr(Ptr<byte*>(queue)).Load(MemoryOrder.Acquire) {
+                return null
+            }
+
+            Pushed(queue, stub)
+            next = AtomicPtr<byte>.FromPtr(Ptr<byte*>(first)).Load(MemoryOrder.Acquire)
+            if next == null {
+                return null
+            }
+        }
+
+        *Ptr<byte*>(queue + 8) = next
+        *Ptr<byte*>(first) = null
+        return first
+    }
+}
+
+// The messages the senders put on the queues of the actor whose state is `state` moved by the thread that holds
+// it into its own lists, at a take of the actor and before its holder reads them (`RunOne`, `Ready`, `Fall`,
+// `EndActor`): each block at the front of the inbox, after the blocks there, in the order of its posts, so that
+// it runs after the current message and before the queued ones (U28, U34); then each message, a call that waits
+// of the chain the actor's top activation waits in to the end of that activation's side list (layer 1; section
+// 6, "One-shot reply slot"), every other message to the end of the inbox, as tokio's `mpsc` channel pushes a
+// value at the tail of its list, so that an inbox keeps the order in which its messages were sent (U5, U15).
+void Moved(byte* state) {
+    raw {
+        mut byte* block = Popped(state - 120)
+        while block != null {
+            mut byte* before = null
+            mut byte* at = *Ptr<byte*>(state - 32)
+            while at != null && *Ptr<byte*>(at + 8) == BlockTable() {
+                before = at
+                at = *Ptr<byte*>(at)
+            }
+
+            *Ptr<byte*>(block) = at
+            if before == null {
+                *Ptr<byte*>(state - 32) = block
+            } else {
+                *Ptr<byte*>(before) = block
+            }
+
+            if at == null {
+                *Ptr<byte*>(state - 24) = block
+            }
+
+            block = Popped(state - 120)
+        }
+
+        mut byte* message = Popped(state - 144)
+        while message != null {
+            byte* top = *Ptr<byte*>(state - 8)
+            if top != null && *Ptr<byte*>(message + 16) != null && *Ptr<long>(message + 24) == *Ptr<long>(top + 344) && *Ptr<long>(message + 32) == *Ptr<long>(top + 352) {
+                Append(top + 376, message)
+            } else {
+                Append(state - 32, message)
+            }
+
+            message = Popped(state - 144)
+        }
+    }
 }
 
 // `message` at the end of the list whose first message stands at `list` and whose last at `list + 8`.
@@ -4218,7 +4315,7 @@ void LetGo(byte* state, bool ready) {
         Queue(state)
     } else if ended && (seen & 2) == 0 {
         raw {
-            std.HeapFree(state - 144)
+            std.HeapFree(state - 192)
         }
     }
 }
@@ -4237,10 +4334,11 @@ void Queue(byte* state) {
     }
 }
 
-// Whether the actor whose state is `state` has a message that can go on: a call of its chain on the
-// side list of its top activation, that activation's reply set or its deadline passed at the scheduler's
-// turn (`Waited`), or, where it is idle, a message in its inbox.
+// Whether the actor whose state is `state` has a message that can go on, once the messages on its queues were
+// moved (`Moved`): a call of its chain on the side list of its top activation, that activation's reply set or
+// its deadline passed at the scheduler's turn (`Waited`), or, where it is idle, a message in its inbox.
 bool Ready(byte* state) {
+    Moved(state)
     raw {
         byte* top = *Ptr<byte*>(state - 8)
         if top == null {
@@ -4678,10 +4776,11 @@ void RunOne() {
 
         int life = *Ptr<int>(state - 88)
         if life == 3 {
-            std.HeapFree(state - 144)
+            std.HeapFree(state - 192)
             return
         }
 
+        Moved(state)
         if life == 1 || life == 5 {
             LetGo(state, false)
             return
@@ -5191,6 +5290,7 @@ void Ends(bool hasText, byte* id, long idCount, byte* file, long fileCount, long
 // 6907441402), and a block that waits in the inbox is dropped, with no line, its child ended with the actor's
 // other children (U34; assumed: S11 of that comment).
 void Fall(byte* state, byte* header, byte* kept) {
+    Moved(state)
     raw {
         *Ptr<int>(state - 88) = 1
         mut byte* sideFirst = null
@@ -5368,12 +5468,12 @@ bool Limited(byte* knobs, byte* heap, long now) {
 void Emptied(byte* state) {
     raw {
         byte* heap = *Ptr<byte*>(state - 64)
-        if heap != state - 144 {
+        if heap != state - 192 {
             std.HeapFree(heap)
         }
 
-        std.HeapReset(state - 144)
-        *Ptr<byte*>(state - 64) = state - 144
+        std.HeapReset(state - 192)
+        *Ptr<byte*>(state - 64) = state - 192
     }
 }
 
@@ -5386,6 +5486,7 @@ void Emptied(byte* state) {
 // holds it, when that thread lets go of it (`LetGo`) (design record,
 // section 6, the owner, 2026-11-16, #519, comment 6919351399; assumed there).
 void EndActor(byte* state) {
+    Moved(state)
     raw {
         if *Ptr<int>(state - 88) == 1 {
             Unpause(state)
@@ -5413,7 +5514,7 @@ void EndActor(byte* state) {
         Emptied(state)
         SlotFree(*Ptr<long>(state - 56))
         if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {
-            std.HeapFree(state - 144)
+            std.HeapFree(state - 192)
         }
     }
 }
@@ -5761,10 +5862,11 @@ byte* RootHeap() {
     return own
 }
 
-// The message `message` of a block to the supervisor whose state is `parent`: at the front of its
-// inbox, after the blocks already there, so that it runs after the current message and before the queued
-// ones in the order of the crashes, and the supervisor woken where it can run it (`Wake`; U28, U34); for the
-// top-level code, null, at the end of the blocks its wait runs (U33).
+// The message `message` of a block to the supervisor whose state is `parent`: on its queue of the blocks
+// (`Pushed`), which its holder moves to the front of its inbox, after the blocks already there (`Moved`), so that
+// it runs after the current message and before the queued ones in the order of the crashes, and the supervisor
+// woken where it can run it (`Wake`; U28, U34); for the top-level code, null, at the end of the blocks its wait
+// runs (U33).
 void Post(byte* parent, byte* message) {
     raw {
         if parent == null {
@@ -5780,24 +5882,7 @@ void Post(byte* parent, byte* message) {
             return
         }
 
-        mut byte* before = null
-        mut byte* at = *Ptr<byte*>(parent - 32)
-        while at != null && *Ptr<byte*>(at + 8) == BlockTable() {
-            before = at
-            at = *Ptr<byte*>(at)
-        }
-
-        *Ptr<byte*>(message) = at
-        if before == null {
-            *Ptr<byte*>(parent - 32) = message
-        } else {
-            *Ptr<byte*>(before) = message
-        }
-
-        if at == null {
-            *Ptr<byte*>(parent - 24) = message
-        }
-
+        Pushed(parent - 120, message)
         int life = *Ptr<int>(parent - 88)
         if life != 1 && life != 3 && life != 5 {
             Wake(parent)

@@ -6,10 +6,11 @@ using Xunit;
 namespace Kurz.Compiler.Tests;
 
 /// <summary>
-/// The two protocols by which actors can run on any number of threads, transcribed into C# and explored, as loom explores the
+/// The protocols by which actors can run on any number of threads, transcribed into C# and explored, as loom explores the
 /// interleavings of the threads of a Rust test and CDSChecker those of a C11 program (neither checked at source): the actor's state
 /// word, whose wakes, takes and ends of a hold say whether a thread holds the actor and whether an entry of it stands in the run queue,
-/// and the reply of a call that waits, which its callee and the crash of its waiter each take by one atomic swap. Each move of a model
+/// the reply of a call that waits, which its callee and the crash of its waiter each take by one atomic swap, and the queue of many
+/// senders an actor's messages are put on, which its holder moves into its own lists (<c>Pushed</c>, <c>Popped</c>). Each move of a model
 /// is one atomic operation of the runtime, or one plain read or write that no other thread races, and names the function of
 /// <c>runtime/common/runtime.kz</c> it transcribes, with the text of the atomic operation it is there and the texts of the masks of
 /// the state word's bits it decides by; a test holds every name and every such text to that file, a guard against a model that says
@@ -18,7 +19,8 @@ namespace Kurz.Compiler.Tests;
 /// actor or the waiter running), no two owners of a reply, no two threads holding one actor, no message while its constructor runs
 /// (U17) or before its restart (U22), and no owner of a reply, and no timer, that reads or writes the waiter's frame once it is gone; the
 /// timer that fires at a call's deadline wakes the waiter and owns no reply (U36, U37); no <c>Ready</c> reads the reply of a wait that
-/// returned, which <c>Wait</c> takes off its activation at its read of the set word; and it finds each of these broken in a model
+/// returned, which <c>Wait</c> takes off its activation at its read of the set word; no message of a queue lost, moved twice or moved
+/// before an earlier message of its sender (U5); and it finds each of these broken in a model
 /// broken so, the cases of <see cref="Break"/>. Its moves are sequentially consistent: the orders of the runtime's atomic operations,
 /// acquire and release, are the IR's to show (<c>EmitterTests</c>), not the explorer's.
 /// </summary>
@@ -74,6 +76,12 @@ public sealed class ModelTests
 
         /// <summary>A timed wait that read a set word goes on at <c>Ready</c>, which reads the reply, not at the end of the hold.</summary>
         ReadyAfterReturn,
+
+        /// <summary>A sender wakes the actor after its swap of the queue's end and before it links its message.</summary>
+        WakeBeforeLink,
+
+        /// <summary><c>Popped</c> returns null once it pushed the stub, with no second load of the link of the message it holds.</summary>
+        StubPushedNotRead,
     }
 
     /// <summary>
@@ -189,7 +197,7 @@ public sealed class ModelTests
     /// </summary>
     private static Strand Sender(string name, int at) => new(name, at,
     [
-        new("Enqueue", "Append(state - 32, message)", _ => true, s => { s[Mail]++; s[at] = s[Life] != 0 ? -1 : 1; },
+        new("Enqueue", "Pushed(state - 144, message)", _ => true, s => { s[Mail]++; s[at] = s[Life] != 0 ? -1 : 1; },
             ["if life != 1 && life != 5 {"]),
         .. Woken(at, 1, -1),
     ]);
@@ -394,7 +402,7 @@ public sealed class ModelTests
     {
         var late = broken == Break.WaiterAfterEnqueue;
         Move stored = new("ReplyWaiter", "*Ptr<byte*>(reply + 8) = running", _ => true, s => { s[Waiter] = 1; s[at] = late ? 2 : 1; });
-        Move queued = new("Enqueue", "Append(state - 32, message)", _ => true, s => { s[Published] = 1; s[at] = late ? 1 : 2; });
+        Move queued = new("Enqueue", "Pushed(state - 144, message)", _ => true, s => { s[Published] = 1; s[at] = late ? 1 : 2; });
         int Then(int[] s) => s[Returned] != 0 || s[Crashed] != 0 ? -1 : 7;
         return new("waiter", at,
         [
@@ -554,7 +562,7 @@ public sealed class ModelTests
         return new("waiter", at,
         [
             new("ReplyWaiter", "*Ptr<byte*>(reply + 8) = running", _ => true, s => { s[Waiter] = 1; s[at] = 1; }),
-            new("Enqueue", "Append(state - 32, message)", _ => true, s => { s[Published] = 1; s[at] = 2; }),
+            new("Enqueue", "Pushed(state - 144, message)", _ => true, s => { s[Published] = 1; s[at] = 2; }),
             new("Wait", "TimerAdd(reply)", _ => true, s => { s[Listed] = 1; s[at] = 3; }),
             new("Wait", "while ReplyState(reply) == 0 && !Waited(reply)", _ => true, s =>
             {
@@ -692,14 +700,150 @@ public sealed class ModelTests
             [TimedWaiting(At(0), broken), Timer(At(1), broken), Crash(At(2), broken)], Always, ReplyAtRest),
     ];
 
-    private static Model[] Models(Break broken) => [.. WordModels(broken), .. ReplyModels(broken)];
+    // The words of the queue's model: the end the senders swap (`in`, at the queue's 0), the next message its holder takes (`out`, at 8),
+    // the link of each node, the stub's and each message's, the count of the moves of each node out of the queue, the wakes no take
+    // answered; then each strand's place and its registers. A node is named by its number, the stub 0, null -1.
+    private const int In = 0, Out = 1, Link = 2, Moves = 6, Wakes = 10, QueueShared = 11, Stub = 0, Null = -1;
+
+    /// <summary>The first state of the queue's model: the stub at both ends, every link null, no move, no wake, each strand at its place 0.</summary>
+    private static int[] QueueStart(int strands)
+    {
+        var state = new int[QueueShared + strands * Own];
+        for (var node = Stub; node < Moves - Link; node++)
+        {
+            state[Link + node] = Null;
+        }
+
+        return state;
+    }
+
+    /// <summary>The first word of the strand numbered <paramref name="n"/> of the queue's model, its place.</summary>
+    private static int QueueAt(int n) => QueueShared + n * Own;
+
+    /// <summary>
+    /// A sender of the messages <paramref name="messages"/>, each by <c>Enqueue</c>: its link cleared and the queue's end swapped for it in
+    /// one atomic swap, the end it found kept, then the link of that end set to it with release (<c>Pushed</c>), then the wake of the
+    /// actor (<c>Wake</c>), abstracted to one count of the takes it asks for.
+    /// </summary>
+    private static Strand QueueSender(string name, int at, Break broken, params int[] messages)
+    {
+        var moves = new List<Move>();
+        foreach (var message in messages)
+        {
+            var place = moves.Count;
+            var last = place + 3 == messages.Length * 3;
+            Move swapped = new("Pushed", "Swap(message, MemoryOrder.AcqRel)", _ => true, s =>
+            {
+                s[Link + message] = Null;
+                s[at + 1] = s[In];
+                s[In] = message;
+                s[at] = place + 1;
+            });
+            Move linked = new("Pushed", ".Store(message, MemoryOrder.Release)", _ => true, s =>
+            {
+                s[Link + s[at + 1]] = message;
+                s[at] = broken == Break.WakeBeforeLink ? (last ? -1 : place + 3) : place + 2;
+            });
+            Move woken = new("Enqueue", "Wake(state)", _ => true, s =>
+            {
+                s[Wakes]++;
+                s[at] = broken == Break.WakeBeforeLink ? place + 2 : (last ? -1 : place + 3);
+            });
+            moves.AddRange(broken == Break.WakeBeforeLink ? new[] { swapped, woken, linked } : new[] { swapped, linked, woken });
+        }
+
+        return new(name, at, [.. moves]);
+    }
+
+    /// <summary>
+    /// The holder of the actor: at each take a wake asked for (<c>RunOne</c>), the messages of the queue moved out one by one
+    /// (<c>Moved</c>, <c>Popped</c>) until <c>Popped</c> gives null: the link of the node at <c>out</c> loaded with acquire, the stub passed
+    /// over, the end loaded where the node has no link yet, null where a sender's swap stands before its link, else the stub pushed behind
+    /// the last message (<c>Pushed</c>) and its link loaded again; a message taken has <c>out</c> set to its link and its own link cleared.
+    /// </summary>
+    private static Strand QueueHolder(int at, Break broken) => new("holder", at,
+    [
+        new("RunOne", "Moved(state)", s => s[Wakes] > 0, s => { s[Wakes]--; s[at] = 1; }),
+        new("Popped", "mut byte* next = AtomicPtr<byte>.FromPtr(Ptr<byte*>(first)).Load(MemoryOrder.Acquire)", _ => true, s =>
+        {
+            var first = s[Out];
+            var next = s[Link + first];
+            s[at + 1] = first;
+            s[at + 2] = next;
+            s[at] = first == Stub ? (next == Null ? 0 : 2) : (next == Null ? 3 : 7);
+        }, ["if first == stub {"]),
+        new("Popped", "*Ptr<byte*>(queue + 8) = next\n            first = next", _ => true, s =>
+        {
+            s[Out] = s[at + 2];
+            s[at + 1] = s[at + 2];
+            s[at + 2] = s[Link + s[at + 1]];
+            s[at] = s[at + 2] == Null ? 3 : 7;
+        }),
+        new("Popped", "if first != AtomicPtr<byte>.FromPtr(Ptr<byte*>(queue)).Load(MemoryOrder.Acquire) {", _ => true,
+            s => { s[at] = s[at + 1] != s[In] ? 0 : 4; }, ["Pushed(queue, stub)"]),
+        new("Pushed", "Swap(message, MemoryOrder.AcqRel)", _ => true, s =>
+        {
+            s[Link + Stub] = Null;
+            s[at + 3] = s[In];
+            s[In] = Stub;
+            s[at] = 5;
+        }),
+        new("Pushed", ".Store(message, MemoryOrder.Release)", _ => true, s => { s[Link + s[at + 3]] = Stub; s[at] = 6; }),
+        new("Popped", "next = AtomicPtr<byte>.FromPtr(Ptr<byte*>(first)).Load(MemoryOrder.Acquire)\n            if next == null {", _ => true, s =>
+        {
+            s[at + 2] = s[Link + s[at + 1]];
+            s[at] = broken == Break.StubPushedNotRead || s[at + 2] == Null ? 0 : 7;
+        }),
+        new("Popped", "*Ptr<byte*>(queue + 8) = next\n        *Ptr<byte*>(first) = null", _ => true, s =>
+        {
+            s[Out] = s[at + 2];
+            s[Link + s[at + 1]] = Null;
+            s[Moves + s[at + 1]]++;
+            s[at] = 1;
+        }),
+    ]);
+
+    /// <summary>What every state of the queue's model keeps: no node moved as a message twice, the stub never, and a sender's messages in its order.</summary>
+    private static string? QueueAlways(int[] s) =>
+        s[Moves + Stub] != 0 ? "the stub moved as a message"
+        : Enumerable.Range(1, 3).Any(m => s[Moves + m] > 1) ? "a message moved twice"
+        : s[Moves + 2] != 0 && s[Moves + 1] == 0 ? "a sender's second message moved before its first"
+        : null;
+
+    /// <summary>What a state of the queue's model in which no thread can move keeps: every message pushed was moved.</summary>
+    private static string? QueueAtRest(int[] s) =>
+        Enumerable.Range(1, 3).Any(m => s[Moves + m] == 0) ? "a message pushed and never moved: a lost message" : null;
+
+    /// <summary>The model of the queue of many senders: two senders, one of two messages, and the holder.</summary>
+    private static Model[] QueueModels(Break broken) =>
+    [
+        // the messages 1 and 2 of one sender and the message 3 of another, put on the queue while its holder moves them out (U5)
+        new("a queue of many senders and its holder", QueueStart(3),
+            [QueueSender("first", QueueAt(0), broken, 1, 2), QueueSender("second", QueueAt(1), broken, 3), QueueHolder(QueueAt(2), broken)],
+            QueueAlways, QueueAtRest),
+    ];
+
+    private static Model[] Models(Break broken) => [.. WordModels(broken), .. ReplyModels(broken), .. QueueModels(broken)];
 
     [Fact]
     public void The_state_word_and_the_reply_keep_every_interleaving_of_their_threads()
     {
         // the six properties in every state of every model, as the runtime is; each model reaches more than a handful of states, so
         // that a model whose threads do not move is not read as one that keeps everything
-        foreach (var model in Models(Break.None))
+        foreach (var model in WordModels(Break.None).Concat(ReplyModels(Break.None)))
+        {
+            var (broken, states) = Explore(model);
+            Assert.True(broken is null, $"{model.Name}: {broken?.What} after {string.Join(", ", broken?.Path ?? [])}");
+            Assert.True(states >= 40, $"{model.Name}: {states} states");
+        }
+    }
+
+    [Fact]
+    public void The_queue_of_many_senders_moves_every_message_once_and_in_its_sender_s_order_in_every_interleaving()
+    {
+        // two senders and the holder of the actor, every interleaving of their swaps, links, wakes and moves: each message moved once,
+        // none lost while a sender's swap stands before its link, the stub never moved, and one sender's messages in their order (U5)
+        foreach (var model in QueueModels(Break.None))
         {
             var (broken, states) = Explore(model);
             Assert.True(broken is null, $"{model.Name}: {broken?.What} after {string.Join(", ", broken?.Path ?? [])}");
@@ -723,6 +867,8 @@ public sealed class ModelTests
     [InlineData(Break.TimerWakesNothing, "a call no callee takes, and its deadline", "a lost wake")]
     [InlineData(Break.TimerKeptPastFrame, "a deadline and the crash of the waiter's actor", "once it was gone")]
     [InlineData(Break.ReadyAfterReturn, "a call, its answer or its drop, and its deadline", "once its wait had returned")]
+    [InlineData(Break.WakeBeforeLink, "a queue of many senders and its holder", "a lost message")]
+    [InlineData(Break.StubPushedNotRead, "a queue of many senders and its holder", "a lost message")]
     public void The_explorer_finds_each_break_of_a_model_in_the_model_it_breaks(Break broken, string name, string what)
     {
         // each break found in the model it breaks, with the moves that reach it: the explorer's own red proof

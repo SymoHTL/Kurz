@@ -2836,10 +2836,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(s.Get())
 
             """;
-        var poisoned = ListTests.Edited([.. ListTests.Fence, ("runtime/common/runtime.kz", "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            std.HeapFree(state - 144)\n",
-            "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 144)\n"),
-            ("runtime/common/runtime.kz", "    } else if ended && (seen & 2) == 0 {\n        raw {\n            std.HeapFree(state - 144)\n",
-            "    } else if ended && (seen & 2) == 0 {\n        raw {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 144)\n")]);
+        var poisoned = ListTests.Edited([.. ListTests.Fence, ("runtime/common/runtime.kz", "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            std.HeapFree(state - 192)\n",
+            "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 192)\n"),
+            ("runtime/common/runtime.kz", "    } else if ended && (seen & 2) == 0 {\n        raw {\n            std.HeapFree(state - 192)\n",
+            "    } else if ended && (seen & 2) == 0 {\n        raw {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 192)\n")]);
         var run = BuildAndRun(text, poisoned, "actor-orphan-crash");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Parent#3 crashed: thrown \"parent\" at program.kz:26", "Child#4 crashed: thrown \"child 7\" at program.kz:12"], crashes);
@@ -2925,7 +2925,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         var late = ListTests.Edited(("runtime/common/runtime.kz", "            sharedWords = SharedCleared(words)\n", "            sharedWords = SharedCleared(words)\n            *Ptr<long>(words + 24) = 9223372036854775806\n"));
-        Ran(BuildAndRun(text, late, "actor-number-last"), 1, ["Idle#9223372036854775807"], "error: allocation-failed (112 bytes)\n");
+        Ran(BuildAndRun(text, late, "actor-number-last"), 1, ["Idle#9223372036854775807"], "error: allocation-failed (160 bytes)\n");
     }
 
     [Fact]
