@@ -419,13 +419,15 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // section 2, round 20, "Dir per arch": `futex` is 202 on x86-64 and 98 on AArch64, where 202 is `accept`, so each Linux
         // architecture's file gives the lock word's wait and wake with its own number, which every program reaches through the lock of
-        // its streams (`Print`); Windows waits by `WaitOnAddress` and wakes by `WakeByAddressSingle`, as Rust's futex does there
+        // its streams (`Print`); Windows waits by `WaitOnAddress` on the 4 bytes of the word with no time limit (`INFINITE`) and wakes by
+        // `WakeByAddressSingle`, as Rust's futex does there
+        const string windowsWait = @"@WaitOnAddress\(ptr %[\w.]+, ptr %[\w.]+, i64 4, i32 -1\)";
         foreach (var (target, arch, wait, wake) in new[]
         {
-            (Target.Linux, Arch.X64, "@syscall(i64 202, ptr %", "@syscall(i64 202, ptr %"),
-            (Target.Linux, Arch.Arm64, "@syscall(i64 98, ptr %", "@syscall(i64 98, ptr %"),
-            (Target.Windows, Arch.X64, "@WaitOnAddress(", "@WakeByAddressSingle("),
-            (Target.Windows, Arch.Arm64, "@WaitOnAddress(", "@WakeByAddressSingle("),
+            (Target.Linux, Arch.X64, @"@syscall\(i64 202, ptr %", @"@syscall\(i64 202, ptr %"),
+            (Target.Linux, Arch.Arm64, @"@syscall\(i64 98, ptr %", @"@syscall\(i64 98, ptr %"),
+            (Target.Windows, Arch.X64, windowsWait, @"@WakeByAddressSingle\(ptr %"),
+            (Target.Windows, Arch.Arm64, windowsWait, @"@WakeByAddressSingle\(ptr %"),
         })
         {
             var cpu = arch == Arch.X64 ? Cpu.Baseline : Cpu.ArmBaseline;
@@ -436,10 +438,27 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             {
                 var body = Regex.Match(ir, $@"^define [^\n]*@""?rt\.sys\.{function}\b[^\n]*\n(.*?)\n\}}", RegexOptions.Multiline | RegexOptions.Singleline);
                 Assert.True(body.Success, $"{target} {arch}: no `{function}` in the module");
-                Assert.Contains(call, body.Groups[1].Value, StringComparison.Ordinal);
+                Assert.Matches(call, body.Groups[1].Value);
             }
 
             Assert.Equal(target == Target.Linux ? 2 : 0, Regex.Count(ir, @"@syscall\(i64 (202|98), ")); // no other number of the two
+        }
+    }
+
+    [Fact]
+    public void Random_s_words_on_linux_are_each_thread_s_own()
+    {
+        // section 6 (assumed: each thread's own, as Rust's `ThreadRng` is one per thread): the two flags and the descriptor `Random` keeps
+        // on Linux are the thread's local storage, since an atomic view takes the address of its word (R19) and no `static` gives one
+        foreach (var arch in new[] { Arch.X64, Arch.Arm64 })
+        {
+            var cpu = arch == Arch.X64 ? Cpu.Baseline : Cpu.ArmBaseline;
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", "print(1)\n"), [], Builder.CheckRuntime(Target.Linux, arch), true, cpu: () => cpu);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            foreach (var name in new[] { "insecureTaken", "getrandomRefused", "urandom" })
+            {
+                Assert.Matches($@"@""s\.[\w.]+\.{name}"" = internal thread_local global ", compilation.Program.Ir);
+            }
         }
     }
 

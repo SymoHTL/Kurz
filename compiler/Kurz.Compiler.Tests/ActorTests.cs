@@ -2929,6 +2929,82 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_process_whose_start_got_no_block_for_the_shared_words_makes_it_at_its_first_spawn()
+    {
+        // section 6 (assumed): the start makes the block of the words the threads share, and where the system refuses it there, the first
+        // `spawn` makes it (`Shared`), the one thread taking no lock before it; here the start's allocation gives none
+        const string text = """
+            actor Counter {
+                mut int n = 0
+
+                pub int Add() {
+                    n = n + 1
+                    return n
+                }
+            }
+
+            print(0)
+            c = spawn Counter()
+            print(c.Add())
+            print(c.Add())
+
+            """;
+        var refused = ListTests.Edited(("runtime/common/runtime.kz", "        byte* words = std.AllocateIn(null, 48)\n", "        byte* words = null\n"));
+        Ran(BuildAndRun(text, refused, "actor-shared-at-spawn"), 0, ["0", "1", "2"], "");
+    }
+
+    [Fact]
+    public async Task A_print_after_a_print_the_system_refused_takes_its_stream_s_lock_and_raises_at_its_own_line()
+    {
+        // section 6: a `print` lets go of its stream's lock before it raises `print-failed`, so that the top-level code's `print` after
+        // the crash of `Printer`, whose `print` the system refused, takes the lock and raises `print-failed` at its own line, where a
+        // lock left taken waits on its word for ever
+        const string text = """
+            actor Printer {
+                pub void Spam() {
+                    mut i = 0
+                    while i < 100000000 {
+                        print("line")
+                        i = i + 1
+                    }
+                }
+
+                pub int Count() => 3
+            }
+
+            p = spawn Printer()
+            send p.Spam()
+            eprint(p.Count())
+            print("again")
+
+            """;
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], StoodIn(print: false), true);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var info = new System.Diagnostics.ProcessStartInfo(toolchain.Build(compilation.Program, "actor-print-again"))
+        {
+            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
+        };
+        info.Environment["KURZ_TRACE"] = "0";
+        using var process = System.Diagnostics.Process.Start(info)!;
+        try
+        {
+            process.StandardOutput.Close(); // the reader is gone: a write is refused (a closed pipe)
+            var error = process.StandardError.ReadToEndAsync();
+            Assert.True(process.WaitForExit(30_000), "the program did not end once its output was closed");
+            var (crashes, rest) = Logged(await error);
+            Assert.Equal(["Printer#1 crashed: print-failed at program.kz:5"], crashes);
+            Assert.Equal((1, "3\nerror: print-failed at program.kz:16\n"), (process.ExitCode, rest));
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill();
+            }
+        }
+    }
+
+    [Fact]
     public void An_escalated_crash_at_the_root_ends_the_process_with_the_childs_error_line_and_trace_and_no_log_line()
     {
         // U25: the root is the supervisor of `Worker`, so that its escalated crash ends the process with the child's error line, the
