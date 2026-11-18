@@ -48,7 +48,8 @@ pub void Enter(byte* side, byte* top, extern "C" () => void entry) {
 }
 
 // The system call `syscall` makes, by its number, which differs between the architectures: `futex` is
-// 202 on x86-64 (the kernel's `arch/x86/entry/syscalls/syscall_64.tbl`, as Rust's `libc` names it `SYS_futex` for x86_64).
+// 202 on x86-64 (the kernel's `arch/x86/entry/syscalls/syscall_64.tbl`, as Rust's `libc` names it `SYS_futex` for x86_64; not
+// checked at source).
 extern "C" {
     long syscall(long number, ...)
 }

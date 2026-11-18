@@ -62,7 +62,7 @@ pub void Enter(byte* side, byte* top, extern "C" () => void entry) {
 
 // The system call `syscall` makes, by its number, which differs between the architectures: `futex` is
 // 98 on AArch64 (the kernel's generic table, `include/uapi/asm-generic/unistd.h`, which Arm Linux takes, as Rust's `libc` names it
-// `SYS_futex` for aarch64; 202 there is `accept`).
+// `SYS_futex` for aarch64, not checked at source; 202 there is `accept`).
 extern "C" {
     long syscall(long number, ...)
 }
