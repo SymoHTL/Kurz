@@ -17,7 +17,8 @@ namespace Kurz.Compiler.Tests;
 /// interleaving of two or three threads, each state once, and finds no lost wake (a message queued or a reply set always leads to the
 /// actor or the waiter running), no two owners of a reply, no two threads holding one actor, no message while its constructor runs
 /// (U17) or before its restart (U22), and no owner of a reply, and no timer, that reads or writes the waiter's frame once it is gone; the
-/// timer that fires at a call's deadline wakes the waiter and owns no reply (U36, U37); and it finds each of these broken in a model
+/// timer that fires at a call's deadline wakes the waiter and owns no reply (U36, U37); no <c>Ready</c> reads the reply of a wait that
+/// returned, which <c>Wait</c> takes off its activation at its read of the set word; and it finds each of these broken in a model
 /// broken so, the cases of <see cref="Break"/>. Its moves are sequentially consistent: the orders of the runtime's atomic operations,
 /// acquire and release, are the IR's to show (<c>EmitterTests</c>), not the explorer's.
 /// </summary>
@@ -70,6 +71,9 @@ public sealed class ModelTests
 
         /// <summary><c>Fall</c> gives the waiter's stack back with its reply still among the timers.</summary>
         TimerKeptPastFrame,
+
+        /// <summary>A timed wait that read a set word goes on at <c>Ready</c>, which reads the reply, not at the end of the hold.</summary>
+        ReadyAfterReturn,
     }
 
     /// <summary>
@@ -157,11 +161,11 @@ public sealed class ModelTests
     // message names the reply, whether the message is queued, whether the reply names its waiter, the reply's word, the owners of the
     // reply, whether the waiter's frame is gone, whether the waiter parked, returned or crashed, and whether an owner of the reply read
     // or wrote the frame once it was gone; the actor's life, 1 while it waits for its restart; whether the reply stands among the timers,
-    // and whether the call's deadline passed at the scheduler's turn. Each strand's words follow: its place, the word it read, what
-    // `Ready` gave, a register.
+    // whether the call's deadline passed at the scheduler's turn, and whether the waiter's `Ready` read the reply once its wait had
+    // returned. Each strand's words follow: its place, the word it read, what `Ready` gave, a register.
     private const int Word = 0, Entries = 1, Mail = 2, Holders = 3, Built = 4, Early = 5;
     private const int Hook = 6, Published = 7, Waiter = 8, Answer = 9, Owners = 10, Gone = 11, Parked = 12, Returned = 13, Crashed = 14;
-    private const int Touched = 15, Life = 16, Listed = 17, Due = 18, Shared = 19, Own = 4;
+    private const int Touched = 15, Life = 16, Listed = 17, Due = 18, ReadLate = 19, Shared = 20, Own = 4;
 
     /// <summary>A first state: the shared words zero but those given, each strand at its place 0 but those given.</summary>
     private static int[] Start(int strands, params (int Word, int Value)[] set)
@@ -350,6 +354,7 @@ public sealed class ModelTests
         : s[Early] != 0 ? "a message started while the actor's constructor ran or before its restart"
         : s[Owners] > 1 ? "two owners of the reply"
         : s[Touched] != 0 ? "an owner of the reply read or wrote the waiter's frame once it was gone"
+        : s[ReadLate] != 0 ? "Ready read the reply once its wait had returned, which Wait took off the activation"
         : null;
 
     /// <summary>What a state of the state word's models in which no thread can move keeps.</summary>
@@ -536,7 +541,8 @@ public sealed class ModelTests
     /// message queued (<c>Enqueue</c>), the reply among the timers (<c>TimerAdd</c>), the loop's test of the reply's word and of the
     /// deadline (<c>Wait</c>), and where neither holds the activation parked: <c>Ready</c> and the end of the hold, then the takes of the
     /// actor's entries, each resuming the activation where the word is set or the deadline passed (<c>RunOne</c>), which tests again.
-    /// Out of the loop: the reply off the timers (<c>TimerRemove</c>) and its word read once; where it is set the wait returns, and else
+    /// Out of the loop: the reply off the timers (<c>TimerRemove</c>) and its word read once; where it is set the wait returns, the
+    /// activation naming the reply no more, and the strand goes on at the end of the hold, not at <c>Ready</c>, and else
     /// the deadline's <c>call-timeout</c> is the actor's crash, whose fall unhooks the reply as <see cref="Crash"/> does, the waiter's thread
     /// holding the actor; then the stack given back and the end of the hold.
     /// </summary>
@@ -561,7 +567,12 @@ public sealed class ModelTests
                 s[Parked] = 1;
                 s[at] = 4;
             }),
-            new("Ready", "ReplyState(reply) != 0 || Waited(reply)", _ => true, s => { s[at + 2] = s[Answer] != 0 || s[Due] != 0 ? 1 : 0; s[at] = 5; }),
+            new("Ready", "ReplyState(reply) != 0 || Waited(reply)", _ => true, s =>
+            {
+                s[ReadLate] |= s[Returned];
+                s[at + 2] = s[Answer] != 0 || s[Due] != 0 ? 1 : 0;
+                s[at] = 5;
+            }),
             .. LetGone(at, 5, Then, broken),
             .. Taken(at, 8, 11, broken),
             new("RunOne", "if reply != null && (ReplyState(reply) != 0 || Waited(reply))", _ => true, s =>
@@ -582,12 +593,12 @@ public sealed class ModelTests
                 {
                     s[Returned] = 1;
                     s[Gone] = 1;
-                    s[at] = 5;
+                    s[at] = broken == Break.ReadyAfterReturn ? 4 : 5;
                     return;
                 }
 
                 s[at] = broken == Break.TimeoutLeavesAtOnce ? give : 14;
-            }),
+            }, ["*Ptr<byte*>(running + 360) = null"]),
             new("Fall", "ReplyState(waited) == 0", _ => true, s => { s[at] = s[Answer] != 0 ? give : 15; }),
             .. Took(at, 15, give, wait, _ => true, broken),
             new("Fall", "while ReplyState(waited) == 0", s => s[Answer] != 0, s => { s[at] = give; }),
@@ -686,7 +697,7 @@ public sealed class ModelTests
     [Fact]
     public void The_state_word_and_the_reply_keep_every_interleaving_of_their_threads()
     {
-        // the five properties in every state of every model, as the runtime is; each model reaches more than a handful of states, so
+        // the six properties in every state of every model, as the runtime is; each model reaches more than a handful of states, so
         // that a model whose threads do not move is not read as one that keeps everything
         foreach (var model in Models(Break.None))
         {
@@ -711,6 +722,7 @@ public sealed class ModelTests
     [InlineData(Break.TimeoutLeavesAtOnce, "a call, its answer or its drop, and its deadline", "once it was gone")]
     [InlineData(Break.TimerWakesNothing, "a call no callee takes, and its deadline", "a lost wake")]
     [InlineData(Break.TimerKeptPastFrame, "a deadline and the crash of the waiter's actor", "once it was gone")]
+    [InlineData(Break.ReadyAfterReturn, "a call, its answer or its drop, and its deadline", "once its wait had returned")]
     public void The_explorer_finds_each_break_of_a_model_in_the_model_it_breaks(Break broken, string name, string what)
     {
         // each break found in the model it breaks, with the moves that reach it: the explorer's own red proof
