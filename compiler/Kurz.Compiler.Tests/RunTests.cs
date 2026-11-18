@@ -181,14 +181,14 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         "system/command-env-dir.kz",
     ];
 
-    /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11), the cases of the deadlines that hold their thread by the clock among them (U36 to U45).</summary>
+    /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11), the cases of the deadlines that hold their thread by the clock among them (U36 to U45); a case of a deadline that reads no clock, a <c>within</c> that bounds a call with no such hold, is none of them, and a build for Windows runs it.</summary>
     private static readonly string[] ProcessCases =
     [
         "system/arguments.kz", "system/args-parameter.kz", "system/args-in-lambda.kz", "system/args-new-list.kz", "system/clock.kz", "system/environment-missing.kz",
         "system/monotonic-clock.kz", "system/elapsed-order.kz", "functions/top-level-return.kz", "functions/top-level-return-end.kz",
         "actors/timeout-block.kz", "actors/timeout-callee-crash.kz", "actors/timeout-capped.kz", "actors/timeout-carried.kz", "actors/timeout-crashed.kz",
         "actors/timeout-crashed-early.kz", "actors/timeout-default.kz", "actors/timeout-send.kz", "actors/within-clauses.kz",
-        "actors/timeout-chain-nested.kz",
+        "actors/timeout-chain-nested.kz", "actors/timeout-chain-left.kz",
     ];
 
     /// <summary>The cases of log calls that expect a run, which a build for Windows says <c>not supported</c> to (S11, P6).</summary>
@@ -256,6 +256,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         ["actors/crash-escalate-root.kz"] = (7, "Worker.Fail"),
         ["actors/block-escalate-root.kz"] = (6, "Worker.Fail"),
         ["actors/crash-restart-limit.kz"] = (18, "main"),
+        ["actors/timeout-chain-left.kz"] = (24, "Front.Ask"),
     };
 
     public static TheoryData<string> RunnableCases()

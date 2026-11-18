@@ -1,0 +1,11 @@
+// expect: throws call-timeout at 11
+// rules: U41, U39
+
+// the literal of `Late`'s declaration, 0 s, is a deadline that has passed at each call of `Late` that names no bound of its own
+
+actor Store {
+    pub int Late() within 0s => 0
+}
+
+s = spawn Store()
+print(s.Late())
