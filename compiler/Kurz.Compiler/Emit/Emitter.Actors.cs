@@ -738,7 +738,7 @@ public sealed partial class Emitter
 
     /// <summary>
     /// U46 to U50: the whole value of <c>attempt { ... }</c>, a value of its own, as Erlang's <c>spawn_monitor</c> starts a process and
-    /// waits for its result or its <c>'DOWN'</c> reason: the fields of <c>this</c> that the block names read into the variables it takes
+    /// waits for its result or its <c>'DOWN'</c> reason (not checked at source): the fields of <c>this</c> that the block names read into the variables it takes
     /// them through, at its start; the block's function value made as a lambda's is (F15); the child made (the runtime's
     /// <c>AttemptNew</c>), whose supervisor is the code that runs; one message in the child's heap that holds a copy of that function
     /// value, made as a message's argument crosses (U12), and whose function calls it (<see cref="AttemptRun"/>); a reply in the frame as

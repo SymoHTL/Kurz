@@ -6224,7 +6224,8 @@ pub void PendingLeft(byte* message) {
 // that runs the code or by the top-level code (`Supervisor`), whose state of 64 bytes holds no field, and whose
 // policy word names its own state, so that its crash is its own to take (`Taker`, whose test it passes as a
 // `restart` passes it) and is taken as an `attempt` takes it (`Fell`); built at once, and ending after its first
-// message (`Run`), as Erlang's `spawn_monitor` starts a process that ends with its function.
+// message (`Run`), as Erlang's `spawn_monitor` starts a process that ends with its function (not checked at
+// source).
 pub byte* AttemptNew(byte* name) {
     byte* heap = ActorHeapNew(64)
     byte* state = ActorNew(heap, 64, 2097152, null, name)
