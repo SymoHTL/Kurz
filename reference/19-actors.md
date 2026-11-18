@@ -3838,11 +3838,14 @@ message, a `pub` method
 of an actor (U9), alone, on the declaration of a function, of a class's, a data type's or an interface's method, or of an actor's
 method without `pub` being `syntax` *(assumed: T11 of comment 6967625156)*. The operand of a call's clause is a unary expression,
 as a constant type parameter's default is read (T35), so that `a.F() within d * 2` reads as `(a.F() within d) * 2`, a computed
-bound standing in parentheses, and the clause stands before a postfix `else` (O5), an `else` after a call inside the operand
-being that call's; Rust has no such form (not checked at source) *(assumed: T12 of comment 6967625156)*. The operand of a
-declaration's clause is a number literal, with its sign where it has one, as a knob of a policy takes one (U26), any other operand
-being `syntax`, and the literal is read as U40 reads a bound, so that one of another type is `type-mismatch` and one of zero or
-less a deadline that has passed at each call *(assumed: T13 of comment 6967625156)*.
+bound standing in parentheses, and the clause stands before a postfix `else` (O5); Rust has no such form (not checked at source)
+*(assumed: T12 of comment 6967625156)*. An `else` after a call inside the operand is that call's, as a unary expression takes its
+own postfix forms (T35) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. The operand of a
+declaration's clause is a duration literal alone, any other operand being `syntax`, as a knob of a policy is read (U26) *(assumed:
+T13 of comment 6967625156)*. The literal takes its sign where it has one, as a knob of a policy takes one (U26), and is read as
+U40 reads a bound, so that a number literal of another type, `within 2`, is `type-mismatch`, as a knob's is (U26), and not
+`syntax`, and one of zero or less a deadline that has passed at each call, where a knob refuses a value of 0 or less (U26)
+*(assumed: a reading of the build, proposed with this record and not put to the owner)*.
 
 Case: [actors/within-clause-send.kz](../corpus/actors/within-clause-send.kz)
 ```kurz
