@@ -1152,7 +1152,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   its list, a variable moved and assigned again in a loop, and a parameter written `move` left by a
   `return` or moved on; and the calls of a function value whose type writes `move` at a parameter, given a new value, a moved
   variable, a loop's item, an inline `data` value, a copy, the first of two copies and a lambda that moves its parameter on,
-  and left by a later argument, `ActorTests` by the count of blocks and the line `value-move-fenced` of `ListTests` under the
+  and left by an argument after the `move`, `ActorTests` by the count of blocks and the line `value-move-fenced` of `ListTests` under the
   fence (issue 587).
   A call that waits (U4), wherever it stands, passes a reply in its own frame, the
   one-shot slot of section 6, an `int` word, the activation that waits on it and the result, whose

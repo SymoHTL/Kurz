@@ -792,7 +792,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // U12, F11 (issue 587): each row of `ListTests.ValueMoves`, a call of a function value whose type writes `move` at a parameter,
         // hands that argument over to the lambda, which lets go of it at its end, as a direct call does (`Arguments`), and a call left by
-        // the case a later argument propagates lets go of it there; the blocks live across a second call of each row, after one that
+        // the case an argument after it propagates lets go of it there; the blocks live across a second call of each row, after one that
         // warmed it up, and the sum of every row's value twice
         const string main = """
             names = ["Through", "Variable", "Item", "Inline", "Copied", "Copies", "Forwarded", "Left", "LeftVariable", "LeftCopy", "Borrowed"]

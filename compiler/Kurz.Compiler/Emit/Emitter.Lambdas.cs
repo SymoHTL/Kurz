@@ -136,8 +136,8 @@ public sealed partial class Emitter
     /// <summary>
     /// F11: a call of a function value, its code given its environment and the arguments, taken as a direct call takes them
     /// (<see cref="Arguments"/>): an argument of a parameter its type writes <c>move</c> is handed over to the lambda, which owns it
-    /// and lets go of it at its end (<see cref="OwningMoved"/>), a value <see cref="Taken"/> lists until the call has its last
-    /// argument, so that a jump out of the call a later argument takes lets go of it there (issue 587); every other argument it
+    /// and lets go of it at its end (<see cref="OwningMoved"/>), a value <see cref="Taken"/> lists to the call's last
+    /// argument, so that a jump out of the call that an argument after it takes lets go of it there (issue 587); every other argument it
     /// borrows for the call. The value it calls and each argument it borrows are borrowed across the arguments after them: the
     /// checker holds them there (M7), refuses a change of a list among them, <c>f(xs, Push(mut xs))</c>, and marks a read of a copied
     /// type that a change meets, <c>f</c> in <c>f(Swap(mut f))</c>, which <see cref="HeldCopy"/> counts.

@@ -2856,8 +2856,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // U12, F11 (issue 587): calls of a function value whose type writes `move` at a parameter, which its lambda owns and lets go of at
     // its end (`OwningMoved`), so that the call hands the argument over as a direct call does: a new value, a moved variable, the item
     // of a loop that takes its list, a moved value whose place is not emptied (an inline `data` value), one copy, the first of two
-    // copies, a lambda that moves its parameter on into a function's parameter written `move`, and a call left by the case a later
-    // argument propagates, after a new value, a moved variable and a copy of a call of two copies; a function value whose parameters
+    // copies, a lambda that moves its parameter on into a function's parameter written `move`, and a call left by the case an argument
+    // after them propagates, after a new value, a moved variable and a copy of a call of two copies; a function value whose parameters
     // borrow, the control; `Run` gives each row's value, the rows of `ActorTests` and of the fenced program the same
     internal const string ValueMoves = """
         data Missing
