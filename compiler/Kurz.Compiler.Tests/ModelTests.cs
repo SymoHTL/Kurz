@@ -853,7 +853,7 @@ public sealed class ModelTests
     private static int LockAt(int n) => LockShared + n * Own;
 
     /// <summary>
-    /// A thread that takes the lock once and lets go of it (<c>Lock</c>, <c>Unlock</c>), as Rust's futex mutex: the compare-exchange from
+    /// A thread that takes the lock once and lets go of it (<c>Lock</c>, <c>Unlock</c>), as Rust's futex mutex (not checked at source): the compare-exchange from
     /// 0 to 1, the spin, abstracted to one load, a second compare-exchange where the spin found 0, then the swap of 2 where the word
     /// found is not 2, the wait on the word while it holds 2 (<c>sys.LockWait</c>, asleep until a wake), the spin and the swap again;
     /// the end of the hold swaps 0 in and wakes one sleeper where it found 2 (<c>sys.LockWake</c>, lost where none sleeps).

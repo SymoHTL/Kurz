@@ -188,7 +188,10 @@ pub void Release(byte* p, long bytes) {
 // it is not open. An atomic view takes the address of its word (R19), and the runtime's code takes the address
 // of no `static` (R10, R13), so each thread keeps its own, which no other thread reads: each thread learns the
 // system's answer at its own first call, and opens its own descriptor where the system refuses `getrandom`
-// (assumed: each thread's own, as Rust's `ThreadRng` is one per thread, not checked at source).
+// (assumed: each thread's own, as the `rand` crate's `ThreadRng` is one per thread, not checked at source). Nothing
+// closes a thread's descriptor when the thread ends, so that each thread a program starts through C (R16) that
+// opened one leaves it open to the end of the process, where Rust keeps one descriptor for the process, opened
+// once (its `OnceLock`, not checked at source).
 thread static mut bool insecureTaken = true
 thread static mut bool getrandomRefused = false
 thread static mut int urandom = -1

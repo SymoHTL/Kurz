@@ -448,7 +448,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void Random_s_words_on_linux_are_each_thread_s_own()
     {
-        // section 6 (assumed: each thread's own, as Rust's `ThreadRng` is one per thread): the two flags and the descriptor `Random` keeps
+        // section 6 (assumed: each thread's own, as the `rand` crate's `ThreadRng` is one per thread, not checked at source): the two flags and the descriptor `Random` keeps
         // on Linux are the thread's local storage, since an atomic view takes the address of its word (R19) and no `static` gives one
         foreach (var arch in new[] { Arch.X64, Arch.Arm64 })
         {
@@ -1528,7 +1528,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // section 6, R19: a sender puts its message on the actor's queue by one swap of its end with acquire and release, after a
         // relaxed store of the message's link, and stores the link of the end it found with release, which the holder loads with
-        // acquire (`Pushed`, `Popped`, an intrusive queue of many producers and one consumer); the lock of the shared words is Rust's futex mutex, a compare-exchange from 0
+        // acquire (`Pushed`, `Popped`, an intrusive queue of many producers and one consumer, not checked at source); the lock of the shared words is of the shape of Rust's futex mutex (not checked at source), a compare-exchange from 0
         // to 1 with acquire, relaxed where it fails, relaxed loads in its spin, a swap of 2 with acquire, and its end a swap of 0 with
         // release before the wake (`LockTried`, `LockSpun`, `Lock`, `Unlock`); the count of the actors is one relaxed add (`ActorNew`); a
         // slot is set with release, its state before its number, cleared with release, its number before its link, and looked up with

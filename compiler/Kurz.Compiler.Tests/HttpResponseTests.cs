@@ -228,7 +228,7 @@ public sealed class HttpResponseTests(Toolchain toolchain) : IClassFixture<Toolc
     [InlineData("constructor", 9)]
     public void A_build_for_windows_says_not_supported_at_the_statement_that_made_a_lambda_whose_write_reaches_a_socket(string made, int line)
     {
-        // S11 with W8: a lambda, one that reads a variable among them, the defaults of a class's body and a constructor are emitted
+        // S11, W1, as the emitter's comment cites them, the response's write W8's: a lambda, one that reads a variable among them, the defaults of a class's body and a constructor are emitted
         // after the function they are made in or first needed by, and the refusal names the program's statement that made or needed
         // them, never the one of the function emitted before them, which the functions of the runtime queued after the program's last
         // statement made line 0, so that the build of the first program ended in the compiler's own error; the second reaches std/

@@ -587,7 +587,7 @@ out at once, and not after the peer's acknowledgement of the one before.
 `LockWait` puts the thread to sleep on a lock word, a file's or one of the runtime's, while it holds
 the value given, and `LockWake` wakes one thread that sleeps on it, each by the `futex` call through `syscall`,
 as Rust's `futex_wait` and `futex_wake` do (S16); each Linux architecture's file gives the two with the number of
-`futex` there, 202 on x86-64 and 98 on AArch64, where 202 is `accept`, and the Windows runtime waits by
+`futex` there, 202 on x86-64, and 98 on AArch64, where 202 is `accept`, and the Windows runtime waits by
 `WaitOnAddress` and wakes by `WakeByAddressSingle`, as Rust's futex does there. `std/` gives the room a read makes in a list of bytes before it,
 `BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9), and the
 block of a map, its growth and the hash of its keys (M9, below).
@@ -983,10 +983,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `ActorNew` fills, the actor's record in the 144 bytes in front of it, the build's own layout, which no rule of the record names, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps
   the alignment of the allocator's block, as Rust's `ArcInner` pads its counts to what it holds, a
   `Vector128` field's 16 among it: the queue of many senders its messages are put on and the queue its
-  blocks are posted on, 24 bytes each, an intrusive queue of many producers and one consumer, whose producers append by one
-  atomic swap of its tail (not checked at source),
+  blocks are posted on, 24 bytes each, an intrusive queue of many producers and one consumer (not checked at source),
   which a sender appends to by one atomic swap of its end and a release store of the link and which the
-  thread that holds the actor moves at its take into the inbox and the side list of the activation that
+  thread that holds the actor moves at its take, at `Ready`, at its crash's fall (`Fall`) and at its end
+  (`EndActor`) into the inbox and the side list of the activation that
   waits in the message's chain, the blocks to the front of the inbox (the runtime's `Pushed`, `Popped`,
   `Moved`; section 6), the name of its type and two words the emitted code holds (U2),
   whether it runs, waits for its restart or ended (U19, U22), an `int`,
@@ -1014,15 +1014,30 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   with it, the next `spawn` takes the slot freed last again, and a call or a `send` through a reference
   whose number its slot no longer holds finds no actor and raises `actor-gone` at its line (the
   runtime's `Lookup`, `ActorHeap` and `Enqueue`; U6, U20); the table's pages double from 64 slots and
-  never move, their directory in the thread's own heap (assumed in section 6). The table is taken and freed
+  never move (assumed in section 6), their directory made once, by the first take of a slot under the table's
+  lock, in the own heap of that take's thread, the main thread's while one thread runs every program (U35), and
+  never moved, grown or freed while the process runs, so that a lookup with no lock finds it made, since an index
+  it reads was given by a take after the directory was stored (inferred). The table is taken and freed
   under a lock of its own and looked up with none, by three loads with acquire, the number, the state and the
   number again, against the stores with release of `SlotTake` and `SlotFree` (section 6). The words the threads
-  share are one block the runtime's `Start` makes: the locks of the streams of `print` and of the log, of the
+  share are one block the runtime's `Start` makes, or the first `spawn` where the system refused it there
+  (`Shared`): the locks of the streams of `print` and of the log, of the
   table of slots, of the queue of the pauses and of the blocks the top-level code's wait runs, each of Rust's
   futex shape (`library/std/src/sys/sync/mutex/futex.rs`, not checked at source: a compare-exchange from 0 to 1, a spin, a swap of 2
   and a sleep on the word while it holds 2, a swap of 0 and a wake where it found 2), the count of the actors
   and the table of every block's message, made there once; a `print` writes its line whole under its stream's
-  lock, and a log line under the lock of standard error. `==` of two references
+  lock, and a log line under the lock of standard error. Of the state the threads share, these hold on any
+  number of threads: the lock word (`Lock`, `LockTried`, `LockSpun`, `Unlock`), the lock of the table of slots
+  and its lookup with none (`SlotTake`, `SlotFree`, `SlotsUsed`, `Lookup`), and the futex's wait and wake
+  (`sys.LockWait`, `sys.LockWake`). These hold only while one thread runs every program (U35): the run queue,
+  a plain `static` (`Queue`, `RunOne`); the life of an actor a sender reads by a plain load after its push
+  (`Enqueue`, `Post`); the queues of a supervisor the thread does not hold, moved where a child's crash
+  escalates through it or ends it (`Moved` in `Fall` and `EndActor`); the reads that find a supervisor's
+  children with no hold, the ENDING bit set before the child's hold, and the siblings of a crashed child held
+  in no one order (`EndChildren`); the gap between a restart's take off the queue of the pauses and its hold
+  (`PauseEnded`, `Restart`); a block for the top-level code posted with no wake, which the main thread finds at
+  its wait's following turn (`Post`); and the plain stores that clear the table's slots at the end of the
+  process (`EndActors`). `==` of two references
   compares their numbers, a reference's hash as a map's key is its number's, `this` as a value inside
   an actor is the reference its record holds (U2, U10), and the runtime's `ActorText` makes the text of
   a reference from its number, the name of the actor's type, `#` and its number, `Counter#1`, all three
@@ -1347,11 +1362,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `GRND_INSECURE`, `GRND_NONBLOCK` for the rest of the process where the kernel refuses that flag with
   `EINVAL`, the call made again for the bytes left and where `EINTR` interrupted it, and
   `/dev/urandom`, opened with `O_CLOEXEC` at its first read and kept open, where the system refuses
-  `getrandom` with `ENOSYS` or `EPERM`, the process keeping to the file from then on, or where the
+  `getrandom` with `ENOSYS` or `EPERM`, the thread keeping to the file from then on, or where the
   pool is not ready, `EAGAIN`; the two flags and the descriptor are `thread static mut`s where Rust
   keeps `AtomicBool`s and a `OnceLock`, each thread finding the kernel's answer and opening the file for itself,
-  since the runtime's code takes no address of a static for an atomic view (R19) (assumed: each thread's own, as
-  Rust's `ThreadRng` is one per thread, not checked at source).
+  since an atomic view takes the address of its word (R19) and the runtime's code takes the address of no
+  static (R10, R13) (assumed: each thread's own, as the `rand` crate's `ThreadRng` is one per thread, not
+  checked at source).
   Where Rust panics, with any other error of `getrandom`, an open or a read of the file that fails or
   a file that ends first, `Random` gives false and the first write into the thread's first map ends
   the program with `random-failed` before it takes a block (M9; the owner, 2026-10-30, "End with an
