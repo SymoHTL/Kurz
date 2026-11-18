@@ -242,7 +242,8 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     /// <summary>
     /// U25, U26, U29: the <c>throws</c> cases whose trace is no raise of the top-level code at the error line, each with the line of its
     /// first frame and the name of its last: a crash escalated to the root, by its policy or by its block, whose trace is the child's stack,
-    /// from its raise to its message's method, and the root's <c>restart-limit</c>, whose trace is the top-level code's where it waits, and
+    /// from its raise to its message's method, but a <c>stack-overflow</c> that a block escalates, whose trace is the top-level code's (Q4),
+    /// and the root's <c>restart-limit</c>, whose trace is the top-level code's where it waits, and
     /// not at the line of the <c>spawn</c> that its error line names (assumed readings of section 6, "Policy at <c>spawn</c>").
     /// </summary>
     private static readonly Dictionary<string, (int First, string Last)> OwnTraces = new(StringComparer.Ordinal)

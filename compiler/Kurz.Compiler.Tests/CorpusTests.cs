@@ -328,8 +328,8 @@ public sealed class CorpusTests
     [InlineData("// expect: output\n// threads: 1 2\n// rules: U34\n\nx\n")]
     public void A_threads_line_of_another_count_is_refused_as_such(string text)
     {
-        // chapter 0: the line is `// threads: 1` (assumed: the line as section 6's answer gives it); another count is named as the threads
-        // line it is, not as a missing rules line
+        // chapter 0: the line is `// threads: 1` (section 6, comment 6946657505, Q5); another count is refused (assumed: chapter 0, the
+        // answer naming no other count), named as the threads line it is, not as a missing rules line
         Assert.Null(CaseHeader.Parse(text, out var problem));
         Assert.Equal("the `// threads:` line is not `// threads: 1`", problem);
     }
