@@ -5775,4 +5775,46 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal(["attempt#2 crashed: thrown \"lost\" at program.kz:9"], crashes);
         Ran((run.Code, run.Output, rest), 0, ["[kept, [1, 2]]", "[lost, [3, 4]]", "kept"], "");
     }
+
+    [Fact]
+    public void An_attempt_of_the_top_level_code_outside_a_within_block_has_no_deadline()
+    {
+        // U49 (assumed: T26 of comment 6982985447): the block's message roots a chain with no deadline, so that a call of the block made past
+        // the default bound of a call, 5 seconds (U36), is bounded on its own and runs
+        if (OperatingSystem.IsWindows())
+        {
+            return; // a build for Windows says `not supported` to the reads of the clock (S11)
+        }
+
+        const string text = """
+            // the thread held for `d`, with no call and no wait
+            void Hold(duration d) {
+                instant start = instant.Now
+                while start.Elapsed < d {
+                }
+            }
+
+            actor Store {
+                pub int Get() => 1
+            }
+
+            s = spawn Store()
+            v = attempt {
+                Hold(5200ms)
+                return s.Get()
+            } else {
+                Crashed c => {
+                    print(c.Reason.Kind)
+                    -1
+                }
+            }
+
+            print(v)
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-attempt-unbounded");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Empty(crashes);
+        Ran((run.Code, run.Output, rest), 0, ["1"], "");
+    }
 }
