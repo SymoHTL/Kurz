@@ -3179,10 +3179,11 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_spawn_makes_the_block_of_its_knobs_only_where_it_writes_after_or_max()
     {
-        // U26: the first pause, the limit's count and window, the ring of the crash times and the place of the `spawn` stand in a block of
-        // their own in the supervisor's heap, made where `after` or `max N in` is written, so that the block of a restart that writes
-        // neither grows by one word alone and an idle actor stays within its 512 bytes (section 13)
-        const string knobs = "{ i64, i64, i64, ptr, i64, i64, i64, %kz.str, i64 }";
+        // U26: the first pause, the limit's count and window, the ring of the crash times, the place of the `spawn` and the word that
+        // marks a `per node` type's block (U54) stand in a block of their own in the supervisor's heap, made where `after` or `max N in`
+        // is written, so that the block of a restart that writes neither grows by one word alone and an idle actor stays within its 512
+        // bytes (section 13)
+        const string knobs = "{ i64, i64, i64, ptr, i64, i64, i64, %kz.str, i64, i64 }";
         string Ir(string spawn)
         {
             var compilation = Builder.Compile(SourceText.FromString("program.kz", $"actor A {{\n    pub int Get() => 1\n}}\n\na = {spawn}\nprint(a.Get())\n"), [], toolchain.Runtime, true);
