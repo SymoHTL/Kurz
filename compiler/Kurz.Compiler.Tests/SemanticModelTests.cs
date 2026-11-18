@@ -242,6 +242,22 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
         Assert.Contains("4: an expression the walk does not know, TypeMemberAccess", unknown.Missing);
     }
 
+    [Fact]
+    public void The_walk_reads_each_test_and_each_check()
+    {
+        // Y5, Y6: a code generator reads the function each test is checked as, its body, and each check's entry with its condition; a
+        // test and a check built by hand, which the checker never read, are named (the control)
+        var (tree, model) = Clean("int Twice(int n) => n * 2\n\ncheck Twice(1) == 2\ntest \"twice\" {\n    x = Twice(2)\n    check x == 4\n    print(x)\n}");
+        var walk = new Walk(model);
+        walk.Program(tree);
+        Assert.Empty(walk.Missing);
+        var stray = new TestDeclaration(9, "stray", "\"stray\"", new Block(9, [new AssertionStatement(10, new BoolLiteral(10, true), "true")], 11));
+        var unknown = new Walk(model);
+        unknown.Program(new ProgramSyntax([.. tree.Statements, stray]));
+        Assert.Contains("9: test \"stray\"", unknown.Missing);
+        Assert.Contains("10: `check`", unknown.Missing);
+    }
+
     // ---- facts --------------------------------------------------------------------------------
 
     private static T Find<T>(ProgramSyntax tree, Func<T, bool>? where = null)
@@ -777,6 +793,14 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break;
                 case ConstAssertStatement:
                     break; // T37: checked while the program compiles, and nothing of it is emitted
+                case TestDeclaration t:
+                    Need(Try(() => model.TestOf(t)), t.Line, $"test {t.Written}"); // Y5: the function a test is checked as
+                    Block(t.Body);
+                    break;
+                case AssertionStatement a:
+                    Need(Try(() => model.AssertionOf(a)), a.Line, "`check`"); // Y6: its text, and the sides its failure shows
+                    Expression(a.Condition);
+                    break;
                 case AsmStatement a:
                     foreach (var o in a.Operands)
                     {

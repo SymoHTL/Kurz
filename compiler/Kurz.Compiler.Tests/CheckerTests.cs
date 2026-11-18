@@ -7047,7 +7047,7 @@ public sealed class CheckerTests
     [InlineData("void Mark<const char C, const bool B>() {\n    const assert(B || C != 'x', \"{C} {B}\")\n}\n\nMark<'y', false>()\nMark<'x', true>()\nMark<'x', false>()", "10: const-assert-failed: `Mark<'x', false>`: x false (the `const assert` in `Mark`, T37)")]
     [InlineData("void Need<T>(T value) {\n    const assert(T.Kind == TypeKind.Data, \"{T}\")\n}\n\nvoid Outer<T>(T value) {\n    Need(value)\n}\n\nOuter(1)", "12: const-assert-failed: `Outer<int>`: int (the `const assert` in `Need`, T37)")]
     [InlineData("data Bad(int Id)\n\nvoid NoId<T>(T value) {\n    for f in T.Fields {\n        const assert(f.Name != \"Id\", \"{T}.{f.Name}\")\n    }\n}\n\nNoId(Bad(1))", "12: const-assert-failed: `NoId<Bad>`: Bad.Id (the `const assert` in `NoId`, T37)")]
-    [InlineData("void Later<T>(T value) {\n    check = () => {\n        const assert(T.Kind != TypeKind.Int, \"no {T}\")\n    }\n\n    check()\n}\n\nLater(\"a\")\nLater(1)", "13: const-assert-failed: `Later<int>`: no int (the `const assert` in `Later`, T37)")]
+    [InlineData("void Later<T>(T value) {\n    later = () => {\n        const assert(T.Kind != TypeKind.Int, \"no {T}\")\n    }\n\n    later()\n}\n\nLater(\"a\")\nLater(1)", "13: const-assert-failed: `Later<int>`: no int (the `const assert` in `Later`, T37)")]
     [InlineData("const assert(1 + 1 == 3, \"{1 + 1} {'x'} {true} {\"s\"} {Mode.Loud}\")", "4: const-assert-failed: 2 x true s Loud (T37)")]
     [InlineData("void Plain() {\n    const assert(false, \"plain\")\n}", "5: const-assert-failed: plain (T37)")]
     [InlineData("n = 2\nconst assert(n > 1, \"{n}\")", "5: const-assert-failed: the value of `n` is not known while the program compiles, in a condition of a `const assert` (T37)|5: const-assert-failed: the value of `n` is not known while the program compiles, in a hole of the text of a `const assert` (T37)")]
@@ -7085,6 +7085,170 @@ public sealed class CheckerTests
         var program = Modes + "bool Check(int x) => true\n\nn = 1\nconst assert(Check(n), \"x\")";
         Assert.Equal(["7: a call in a `const assert`, which the build does not evaluate while the program compiles (T37)"], NotSupported(program));
         Assert.Equal([(ErrorIds.UnusedVariable, 6)], Errors(program.Replace("Check(n)", "true")));
+    }
+
+    // ---- tests (Y1 to Y10; assumed: issue 586, comments 6992687784 and 6993110710) ----------------------------------------------
+
+    [Fact]
+    public void A_second_test_of_one_name_is_syntax_at_its_line_naming_the_first()
+    {
+        // Y1 with E4: a test's name is its own in its file, compared by its value; the text of the second names the line of the first
+        // (assumed: D3 of issue 586, comment 6992687784)
+        Assert.Equal([(ErrorIds.Syntax, 4)], Errors("test \"a\" {\n}\n\ntest \"a\" {\n}"));
+        Assert.Contains("line 3", ErrorText("print(1)\n\ntest \"a\" {\n}\n\ntest \"a\" {\n}"), StringComparison.Ordinal);
+        Assert.Equal([(ErrorIds.Syntax, 6), (ErrorIds.Syntax, 8)], Errors("test \"a\" {\n}\n\ntest \"b\" {\n}\ntest \"a\" {\n}\ntest \"b\" {\n}"));
+        Assert.Empty(Errors("test \"a\" {\n}\n\ntest \"b\" {\n}\n\ntest \"A\" {\n}"));
+        Assert.Equal([(ErrorIds.Syntax, 4)], Errors("test \"A\" {\n}\n\ntest \"\\u0041\" {\n}")); // one name by its value
+    }
+
+    [Fact]
+    public void A_check_narrows_nothing_after_it()
+    {
+        // Y6: after `check n != null` the variable is still nullable (N2), as Rust's `assert!` narrows no type; an `if` is the control
+        // (the reading in compiler/README.md)
+        Assert.Equal([(ErrorIds.NullableUnchecked, 3)], Errors("int? n = null\ncheck n != null\nprint(n + 1)"));
+        Assert.Empty(Errors("int? n = null\nif n != null {\n    print(n + 1)\n}"));
+    }
+
+    [Fact]
+    public void The_body_of_a_test_is_checked_as_a_function_s_body()
+    {
+        // Y5: a test is a function of the file with no parameter and a `void` result: it reads no top-level variable and declares none
+        // (F16), sees no `args` (S13), and a case that can leave it is `unlisted-case` (O3) (assumed: D1 of issue 586, comment
+        // 6992687784, and F17 and F18 of comment 6993110710)
+        Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("x = 1\ntest \"a\" {\n    print(x)\n}\nprint(x)"));
+        Assert.Equal([(ErrorIds.Redeclared, 3)], Errors("x = 1\ntest \"a\" {\n    x = 2\n    print(x)\n}\nprint(x)"));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("test \"a\" {\n    print(args.Count)\n}"));
+        Assert.Equal([(ErrorIds.UnusedVariable, 2)], Errors("test \"a\" {\n    y = 2\n}"));
+        Assert.Equal([(ErrorIds.UnlistedCase, 6)], Errors("data NotFound\n\nint | NotFound Find(int id) => NotFound\n\ntest \"a\" {\n    value = Find(1)\n    print(value)\n}"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("test \"a\" {\n    return 1\n}"));
+        // controls: a function, a type and a constant of the file are read, and a variable of the test's own
+        Assert.Empty(Errors("data Point(int X, int Y)\n\nint Twice(int n) => n * 2\n\ntest \"a\" {\n    y = Twice(2)\n    p = Point(y, 1)\n    print(p.X)\n    return\n}"));
+        Assert.Empty(Errors("data NotFound\n\nint | NotFound Find(int id) => NotFound\n\ntest \"a\" {\n    value = Find(1) else {\n        NotFound => 0\n    }\n\n    print(value)\n}"));
+    }
+
+    [Theory]
+    [InlineData("check 1", "type-mismatch")]
+    [InlineData("check \"a\"", "type-mismatch")]
+    [InlineData("bool? b = null\ncheck b", "nullable-unchecked")]
+    [InlineData("void Stop() {\n}\n\ncheck Stop()", "syntax")]
+    [InlineData("check true", null)]
+    [InlineData("n = 2\ncheck n == 2 && n > 1", null)]
+    [InlineData("bool? b = null\ncheck b != null", null)]
+    public void The_condition_of_a_check_is_a_bool_as_a_condition_is(string program, string? id)
+    {
+        // Y6 with C3: a condition of another type is `type-mismatch` at its line, a nullable one N2's `nullable-unchecked`, and a call
+        // with a `void` success O10's `syntax` (assumed: Q1 of issue 586, comment 6992687784, and F8 of comment 6993110710)
+        var line = program.Split('\n').Length;
+        Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
+    }
+
+    [Fact]
+    public void A_check_stands_in_any_code()
+    {
+        // Y6: in top-level code, a function, a method, a lambda and a test, in every build (assumed: Q1 of issue 586, comment
+        // 6992687784, and F9 of comment 6993110710)
+        Assert.Empty(Errors("int Twice(int n) {\n    check n >= 0\n    return n * 2\n}\n\nclass Box(int N) {\n    pub int Get() {\n        check N > 0\n        return N\n    }\n}\n\nf = (int x) => {\n    check x != 0\n    return x\n}\n\ncheck Twice(1) == 2\nprint(f(Box(1).Get()))\ntest \"a\" {\n    check Twice(2) == 4\n}"));
+    }
+
+    [Fact]
+    public void The_model_keeps_each_test_in_its_order_and_each_check_s_text_and_the_types_its_failure_shows()
+    {
+        // Y5, Y6 with F10: the tests of the file in their order, each its function; a check's text, and for one of the six comparisons
+        // whose two sides have a text (A4) the comparison and each side's type, which its failure line shows in parentheses (assumed:
+        // Q1 of issue 586, comment 6992687784, and F10 of comment 6993110710)
+        var diagnostics = new DiagnosticBag();
+        var tree = Parser.Parse(SourceText.FromString("test.kz", "class Box(int N)\n\nb = Box(1)\nnames = [\"a\"]\ncheck (names.Count == 1)\ncheck b == b\nprint(b.N)\ntest \"second\" {\n    check 1 + 1 == 2\n}\n\ntest \"first\" {\n    check \"a\" != \"b\" && true\n    check 2.5 < 3.0\n}"), diagnostics);
+        var model = Checker.Check(tree, diagnostics, []).Model;
+        Assert.Empty(diagnostics.Items);
+        Assert.Equal(["\"second\"", "\"first\""], model.Tests.Select(t => t.Written));
+        Assert.Equal(["second", "first"], model.Tests.Select(t => t.Name));
+        Assert.All(model.Tests, t => Assert.Equal(Types.Void, model.TestOf(t).ReturnType));
+        Assert.All(model.Tests, t => Assert.Same(t.Body, model.TestOf(t).Declaration!.BlockBody));
+
+        var topLevel = tree.Statements.OfType<AssertionStatement>().ToList();
+        var paren = model.AssertionOf(topLevel[0]);
+        Assert.Equal("(names.Count == 1)", paren.Text);
+        Assert.Same(((ParenthesizedExpression)topLevel[0].Condition).Inner, paren.Comparison);
+        Assert.Equal(("int", "int"), (paren.Left!.Text, paren.Right!.Text));
+        Assert.Equal(new Assertion("b == b", null, null, null), model.AssertionOf(topLevel[1])); // a class with no `Text()`
+
+        var sum = (AssertionStatement)model.Tests[0].Body.Statements[0];
+        Assert.Equal(new Assertion("1 + 1 == 2", (BinaryExpression)sum.Condition, Types.Int, Types.Int), model.AssertionOf(sum));
+        var first = model.Tests[1].Body.Statements.Cast<AssertionStatement>().ToList();
+        Assert.Equal(new Assertion("\"a\" != \"b\" && true", null, null, null), model.AssertionOf(first[0])); // `&&` is no comparison
+        Assert.Equal(("double", "double"), (model.AssertionOf(first[1]).Left!.Text, model.AssertionOf(first[1]).Right!.Text));
+    }
+
+    [Fact]
+    public void A_side_whose_value_no_print_shows_shows_none_in_the_failure()
+    {
+        // Y6 with F10: a side shows its value as a hole of an interpolation shows it (L6); a `Text()` without `pub` (A9, A15), a raw
+        // pointer (R14) and a vector (R18), whose texts nothing shows, leave the condition its text alone; a `pub` one is the control
+        // (assumed: F10 of issue 586, comment 6993110710)
+        Assert.Null(Assertions("class Secret(int N) {\n    string Text() => \"s\"\n}\n\ns = Secret(1)\ncheck s == s").Single().Comparison);
+        Assert.Null(Assertions("raw {\n    p = Ptr<long>(64)\n    check p == p\n}", "raw").Single().Comparison);
+        Assert.Null(Assertions("v = Vector128.Create(1, 2, 3, 4)\ncheck v == v").Single().Comparison);
+        var shown = Assertions("class Shown(int N) {\n    pub string Text() => \"s\"\n}\n\ns = Shown(1)\ntest \"a\" {\n    check Shown(2) != Shown(3)\n}\n\ncheck s == s").Select(a => a.Left?.Text).ToList();
+        Assert.Equal(["Shown", "Shown"], shown);
+    }
+
+    /// <summary>The model's entry of each check of a program the checker reads with no error, at the top level, in a `raw` block and in a test, in their order.</summary>
+    private static List<Assertion> Assertions(string program, string grants = "")
+    {
+        var diagnostics = new DiagnosticBag();
+        var tree = Parser.Parse(SourceText.FromString("test.kz", program), diagnostics);
+        var model = Checker.Check(tree, diagnostics, grants.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Model;
+        Assert.DoesNotContain(diagnostics.Items, d => d.IsError);
+        return Flatten(tree.Statements).OfType<AssertionStatement>().Select(model.AssertionOf).ToList();
+
+        static IEnumerable<Statement> Flatten(IEnumerable<Statement> statements) =>
+            statements.SelectMany(s => s is RawBlock r ? Flatten(r.Body.Statements) : s is TestDeclaration t ? Flatten(t.Body.Statements) : [s]);
+    }
+
+    [Fact]
+    public void A_change_in_a_check_meets_what_the_expression_around_it_holds()
+    {
+        // Y6 with the walk of `changed-while-held`: a call in a check's condition that takes `mut numbers`, in a statement of an `else`
+        // arm's block, changes what the expression holds, at its line, as such a call in any statement does
+        var program = "data NotFound\n\nint | NotFound Find(int id) => NotFound\n\nint Grow(mut List<int> xs) {\n    xs.Add(5)\n    return xs.Count\n}\n\nint Sum(List<int> xs, int n) => xs.Count + n\n\nmut numbers = List<int>()\nprint(Sum(numbers, Find(2) else {\n    NotFound => {\n        check CHECK\n        5\n    }\n}))";
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 15)], Errors(program.Replace("CHECK", "Grow(mut numbers) == 1", StringComparison.Ordinal)));
+        Assert.Empty(Errors(program.Replace("CHECK", "numbers.Count == 0", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void A_cluster_test_mock_and_advance_are_not_supported()
+    {
+        // Y8: the cluster test of section 13, once at its line, its body unread; Y9 and Y10: `mock` and `advance`, whose questions are
+        // open, once at their line, in a test or not; the duration's variables count as read (E1) (assumed: D7 of issue 586, comment
+        // 6992687784, and F20 of comment 6993110710)
+        NotSupportedAt(1, "Y8", "test cluster 3 seed 42 {\n    a = spawn Store()\n    split 2 | 3\n    check a.Count() == 1\n}");
+        NotSupportedAt(2, "Y9", "test \"a\" {\n    mock Clock with FakeClock\n}");
+        NotSupportedAt(1, "Y9", "mock Clock with FakeClock");
+        NotSupportedAt(3, "Y10", "test \"a\" {\n    d = 1s\n    advance d\n}");
+        NotSupportedAt(2, "Y10", "d = 1s\nadvance d + 1ms");
+
+        // T8 with Y10: the duration is checked as any expression is, as the bound of `within` is (U40), beside the `not supported`
+        foreach (var (program, id) in new[] { ("advance 1", ErrorIds.TypeMismatch), ("long n = 1\nadvance n", ErrorIds.TypeMismatch), ("duration? d = null\nadvance d", ErrorIds.NullableUnchecked), ("void Stop() {\n}\n\nadvance Stop()", ErrorIds.Syntax) })
+        {
+            var line = program.Split('\n').Length;
+            var (diagnostics, _) = Check(program);
+            Assert.Equal([(id, line)], diagnostics.Items.Where(d => d.IsError).Select(d => (d.Id, d.Line)));
+            var unread = Assert.Single(diagnostics.Items, d => !d.IsError);
+            Assert.Equal((line, "`advance` (Y10)"), (unread.Line, unread.Message));
+        }
+    }
+
+    [Fact]
+    public void An_error_in_a_test_refuses_the_build_of_its_program()
+    {
+        // Y7: every command checks every test, so that an error in one refuses `kurz build` and `kurz run` of its file as an error
+        // elsewhere does; the control has no error (assumed: Q5 of issue 586, comment 6992687784)
+        var refused = Builder.Compile(SourceText.FromString("program.kz", "test \"a\" {\n    check 1\n}\n\nprint(1)"), [], StdRuntime.Value, testBuild: true);
+        Assert.Null(refused.Program);
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], refused.Diagnostics.Items.Where(d => d.IsError).Select(d => (d.Id, d.Line)));
+        var control = Builder.Compile(SourceText.FromString("program.kz", "test \"a\" {\n    check 1 == 1\n}\n\nprint(1)"), [], StdRuntime.Value, testBuild: true);
+        Assert.DoesNotContain(control.Diagnostics.Items, d => d.IsError);
     }
 
     // ---- T.Make (T33) -------------------------------------------------------------------------------

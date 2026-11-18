@@ -106,6 +106,10 @@ public sealed class ThrowSets
         [typeof(DecisionStatement)] = "no code: the runtime acts on the decision",
         [typeof(AsmStatement)] = "its operands, and the function a sym operand names",
         [typeof(ConstAssertStatement)] = "no code: the compiler reads it",
+        [typeof(TestDeclaration)] = "no code where it stands: its body is the code of the test's own actor under kurz test",
+        [typeof(AssertionStatement)] = "its condition, and the Text() of each side of the comparison its failure shows",
+        [typeof(MockStatement)] = "no code: the checker refuses it",
+        [typeof(AdvanceStatement)] = "no code: the checker refuses it",
         [typeof(ExternBlock)] = "no code",
         [typeof(FunctionDeclaration)] = "no code where it stands: its body where it is called",
         [typeof(FieldDeclaration)] = "no code where it stands: its value where its type is made",
@@ -870,6 +874,17 @@ public sealed class ThrowSets
                     Match(m.Subject, m.Arms);
                     break;
                 case BreakStatement or ContinueStatement or UseStatement or ConstAssertStatement or ExternBlock or FunctionDeclaration or FieldDeclaration or ConstructorDeclaration or TypeDeclaration or DecisionStatement:
+                    break;
+                case TestDeclaration or MockStatement or AdvanceStatement:
+                    break;
+                case AssertionStatement a:
+                    Expression(a.Condition);
+                    if (model.AssertionOf(a) is { Left: { } left, Right: { } right })
+                    {
+                        Text(left); // Y6: the text of each side its failure shows, made by the actor that runs it
+                        Text(right);
+                    }
+
                     break;
                 case ReturnStatement r:
                     Optional(r.Value);
