@@ -4172,8 +4172,10 @@ T21 of comment 6980152255, built at the default while it waits for the owner)*. 
 supervises the child as the root actor and waits for it in its wait, which runs the scheduler (§6, "Deadlocks")
 *(assumed: T22 of comment 6980152255, built at the default while it waits for the owner)*. A message whose deadline
 passed at its queueing, or before the child takes it, is dropped (U37), and the `attempt` raises `call-timeout` at its
-line in the parent, as a call does, the crash of the parent ending the child (U13) *(assumed: a reading of the build,
-proposed with this record and not put to the owner)*.
+line in the parent, as a call does, the crash of the parent ending the child (U13) *(assumed: T25 of comment
+6982985447, built at the default while it waits for the owner)*. An `attempt` of the top-level code outside a `within`
+roots a chain with no deadline, each call of its block bounded on its own (U36) *(assumed: T26 of comment 6982985447,
+built at the default while it waits for the owner)*.
 
 Case: [actors/attempt-callback.kz](../corpus/actors/attempt-callback.kz)
 ```kurz
