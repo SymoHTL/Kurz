@@ -67,6 +67,8 @@ public sealed partial class Emitter
                 return type is ActorType ? Reference(This(t, t.Line)) : This(t, t.Line); // K7: borrowed, as a parameter is; U10: inside an actor, as a value, its reference
             case SpawnExpression s:
                 return EmitActorSpawn(s); // U2's reference, with no count: a reference whose actor ended finds no actor (section 6)
+            case AttemptExpression a:
+                return Temp(EmitAttempt(a) ?? throw new InvalidOperationException($"an `attempt` whose block gives no value stands as a value at line {a.Line}: the checker reports it"), type);
             case NameExpression n when Model.IsVariable(n):
                 {
                     var stored = Sub(Model.VariableOf(n).Type);

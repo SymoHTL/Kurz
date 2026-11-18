@@ -1307,4 +1307,71 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         var arms = Regex.Matches(of, "\"([a-z-]+)\" => RuntimeKind\\.([A-Za-z]+)").Select(m => (m.Groups[1].Value, m.Groups[2].Value)).ToList();
         Assert.Equal(ids.Zip(kinds).ToList(), arms);
     }
+
+    [Fact]
+    public void The_reason_of_an_attempt_is_what_its_block_throws_and_its_throw_leaves_neither_the_function_nor_the_actor()
+    {
+        // U46: an `attempt`'s `Reason` is what its block's code can throw, a function it calls among it, with the runtime's error type
+        // (assumed: the small defaults of comment 6980152255); that throw is the crash of the child, which the `attempt` holds, so it
+        // reaches neither the function around the block nor the `Reason` of the actor whose method runs it (section 6: an actor never
+        // catches its own exception, only its child's death), while what the function throws after it does
+        const string text = """
+            data ELost(int Code)
+            data EAfter(int Code)
+
+            int Lose(int n) {
+                if n > 0 {
+                    throw ELost(n)
+                }
+
+                return n
+            }
+
+            actor Worker {
+                pub int Go(int n) {
+                    v = attempt { Lose(n) } else {
+                        Crashed c => -1
+                    }
+
+                    if v > 5 {
+                        throw EAfter(v)
+                    }
+
+                    return v
+                }
+            }
+
+            int Plain(int n) {
+                v = attempt { Lose(n) } else {
+                    Crashed c => -1
+                }
+
+                return v
+            }
+
+            w = spawn Worker()
+            print(w.Go(1) + Plain(2))
+
+            """;
+        var own = Own(text);
+        var attempts = new List<AttemptExpression>();
+        var worker = own.Tree.Statements.OfType<TypeDeclaration>().Single(t => t.Name == "Worker");
+        foreach (var function in worker.Members!.OfType<FunctionDeclaration>().Concat(own.Tree.Statements.OfType<FunctionDeclaration>().Where(f => f.Name == "Plain")))
+        {
+            SyntaxCopy.Walk(function, e =>
+            {
+                if (e is AttemptExpression a)
+                {
+                    attempts.Add(a);
+                }
+            });
+        }
+
+        Assert.Equal(2, attempts.Count);
+        Assert.All(attempts, a => Assert.Equal(["ELost", "RuntimeError"], Names(own.Sets.ReasonOf(a))));
+        Assert.DoesNotContain("ELost", RaisedIn(own, "Plain"));
+        var reason = Names(own.Sets.ReasonOf(own.Checker.Model.ClassOf(worker)));
+        Assert.Contains("EAfter", reason);
+        Assert.DoesNotContain("ELost", reason);
+    }
 }

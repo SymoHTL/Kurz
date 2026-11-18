@@ -340,9 +340,20 @@ public sealed partial class Emitter
     /// </summary>
     private string? EmitElse(ElseExpression e, bool asValue)
     {
-        var call = (CallExpression)Unwrap(e.Call);
-        var union = Sub(Model.CallOf(call).Result) as UnionType ?? throw new InvalidOperationException($"`else` after a call whose result is no union at line {e.Line}: the checker reports it (O5)");
-        var value = EmitCall(call) ?? throw new InvalidOperationException($"the call before `else` at line {e.Line} has no value");
+        UnionType union;
+        string value;
+        if (Unwrap(e.Call) is AttemptExpression attempt)
+        {
+            union = (UnionType)Sub(Model.AttemptOf(attempt).Type); // U46: the whole value of the `attempt`, its block's value and `Crashed`
+            value = EmitAttemptValue(attempt);
+        }
+        else
+        {
+            var call = (CallExpression)Unwrap(e.Call);
+            union = Sub(Model.CallOf(call).Result) as UnionType ?? throw new InvalidOperationException($"`else` after a call whose result is no union at line {e.Line}: the checker reports it (O5)");
+            value = EmitCall(call) ?? throw new InvalidOperationException($"the call before `else` at line {e.Line} has no value");
+        }
+
         var success = union.Cases[0];
         var tag = Tag(value, union);
         var slot = asValue && success is not VoidType ? fn.Alloca(Ir(success), "recovered") : null;
@@ -362,7 +373,7 @@ public sealed partial class Emitter
 
         fn.Branch(done);
         fn.Block(cases);
-        ElseArms(e.Arms, value, union, slot, done, e.Line);
+        ElseArms(e.Arms, value, union, slot, done, e.Line, held: Unwrap(e.Call) is AttemptExpression);
         fn.Block(done);
         return slot is null ? null : fn.Value($"load {Ir(success)}, ptr {slot}");
     }
@@ -370,9 +381,11 @@ public sealed partial class Emitter
     /// <summary>
     /// O5: the arms of an <c>else</c> over the union's value, whose case is not its success, of a call or of a loop's collection (S16): each
     /// arm takes the cases its pattern takes and recovers into <paramref name="slot"/>, returns or throws, and goes on at
-    /// <paramref name="done"/>; a case no arm takes leaves the function (O2, O3).
+    /// <paramref name="done"/>; a case no arm takes leaves the function (O2, O3). Where the arms are an <c>attempt</c>'s,
+    /// <paramref name="held"/>, the case an arm of a type takes is a variable of the arm, which its end lets go of, as the
+    /// <c>Crashed</c> a block of <c>on crash</c> reads is let go of once the block ran (U46, U30).
     /// </summary>
-    private void ElseArms(IReadOnlyList<MatchArm> arms, string value, UnionType union, string? slot, string done, int line)
+    private void ElseArms(IReadOnlyList<MatchArm> arms, string value, UnionType union, string? slot, string done, int line, bool held = false)
     {
         var success = union.Cases[0];
         var rest = union.Cases.Skip(1).ToList();
@@ -402,7 +415,15 @@ public sealed partial class Emitter
                 throw new InvalidOperationException($"an arm of `else` that names no case type at line {arm.Line}: the checker reports it (O5)");
             }
 
-            InScope(() => InRegion(() => ElseArm(arm.Body, success, slot)));
+            InScope(() =>
+            {
+                if (held && arm.Pattern is TypePattern && caseSlot is not null)
+                {
+                    Declare(caseSlot, Sub(Model.PatternTypeOf((TypePattern)arm.Pattern)));
+                }
+
+                InRegion(() => ElseArm(arm.Body, success, slot));
+            });
             elseCase = outer;
             if (!fn.Terminated)
             {

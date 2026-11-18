@@ -260,69 +260,79 @@ public sealed partial class Emitter
 
     /// <summary>
     /// U30, U34: the function that runs the block <paramref name="block"/>, which the runtime calls with the block of the restart and the
-    /// block's message: <c>c</c>, the <c>Crashed</c> it reads, built from the copy of the crash the message holds in the supervisor's heap,
-    /// its <c>Reason</c> the thrown value of the case its type's number names, or, for the runtime's own crash, the runtime's error of its
-    /// id and its text (std's <c>RuntimeErrorOf</c>, which throws for an id no row of the run-time table names, as for a type the
-    /// <c>Reason</c> lacks), its <c>Place</c> the file and the line, and its <c>Chain</c> the crashing chain's ID as text; then the block's
-    /// function value called with it, which sets the decision (<c>Decide</c>), and <c>c</c> let go of.
+    /// block's message: <c>c</c>, the <c>Crashed</c> it reads (<see cref="CrashedOf"/>), then the block's function value called with it,
+    /// which sets the decision (<c>Decide</c>), and <c>c</c> let go of.
     /// </summary>
     private string BlockEntry(LambdaExpression block)
     {
         var crashed = (DataType)Model.LambdaOf(block).Type.Parameters[0];
-        var reason = crashed.TypeArguments[0];
-        var place = new DataType(std.Model.DataTypes.Single(d => d.Name == "Place"), []);
-        var error = std.Model.DataTypes.Single(d => d.Name == "RuntimeError");
         return Helper($"actor.block.{Number(++actorSites)}", "void", ["ptr", "ptr"], () =>
         {
             const string type = "{ ptr, %kz.fn }";
             var record = fn.Value("load ptr, ptr " + fn.Value("getelementptr i8, ptr %a0, i64 56"));
             var decides = fn.Value($"load %kz.fn, ptr {fn.Value($"getelementptr {type}, ptr {record}, i32 0, i32 1")}");
-            string Word(int offset, string ir) => fn.Value($"load {ir}, ptr {fn.Value($"getelementptr i8, ptr %a1, i64 {Number(offset)}")}");
-            string Text(int at, int count) => fn.Value($"call %kz.str {RuntimeFunction("TextAt")}(ptr {Word(at, "ptr")}, i64 {Word(count, "i64")})");
-
-            var number = Word(152, "i64");
-            var held = Word(160, "ptr");
-            var slot = fn.Alloca(Ir(reason), "reason");
-            IReadOnlyList<KurzType> cases = reason is Semantics.UnionType u ? u.Cases : [reason];
-            var labels = cases.Select(_ => fn.Label("case")).ToList();
-            var runtime = fn.Label("runtime");
-            var done = fn.Label("reason");
-            fn.Terminate($"switch i64 {number}, label %{runtime} [ {string.Join(" ", cases.Select((c, i) => $"i64 {Number(layout.Number(c) + 1)}, label %{labels[i]}"))} ]");
-            string Case(KurzType c, string? value) => reason is Semantics.UnionType union ? MakeUnion(union, c, value) : value!;
-            for (var i = 0; i < cases.Count; i++)
-            {
-                fn.Block(labels[i]);
-                string? value = cases[i] is NullType ? "zeroinitializer" : null; // a thrown `null` holds no value, which the message holds none of
-                if (cases[i] is not (Semantics.VoidType or NullType))
-                {
-                    value = fn.Value($"load {Ir(cases[i])}, ptr {held}");
-                    fn.Emit($"call void {StdFunction("Free")}(ptr {held}, i64 {IrSize(Ir(cases[i]))})");
-                }
-
-                fn.Emit($"store {Ir(reason)} {Case(cases[i], value)}, ptr {slot}");
-                fn.Branch(done);
-            }
-
-            fn.Block(runtime);
-            var id = Text(72, 80);
-            var detail = Text(120, 128);
-            var errorType = new DataType(error, []);
-            var made = fn.Value($"call {Ir(errorType)} {StdFunction("RuntimeErrorOf")}(%kz.str {id}, %kz.str {detail})");
-            Release(id, Types.String);
-            Release(detail, Types.String);
-            fn.Emit($"store {Ir(reason)} {Case(cases.Single(c => c is DataType d && d.Symbol == error), made)}, ptr {slot}");
-            fn.Branch(done);
-
-            fn.Block(done);
-            var file = fn.Value($"call %kz.str {RuntimeFunction("TextAt")}(ptr {Word(88, "ptr")}, i64 {Word(96, "i64")})");
-            var line = fn.Value($"trunc i64 {Word(104, "i64")} to i32");
-            var where = Make(place, [file, line]);
-            var chain = fn.Value($"call %kz.str {RuntimeFunction("ChainText")}(ptr {fn.Value("getelementptr i8, ptr %a1, i64 136")})");
-            var c = Make(crashed, [fn.Value($"load {Ir(reason)}, ptr {slot}"), where, chain]);
+            var c = CrashedOf(crashed, "%a1");
             fn.Emit($"call void {fn.Value($"extractvalue %kz.fn {decides}, 0")}(ptr {fn.Value($"extractvalue %kz.fn {decides}, 1")}, {Ir(crashed)} {c})");
             Release(c, crashed);
             fn.Return(null);
         });
+    }
+
+    /// <summary>
+    /// U30, U46: the <c>Crashed</c> <paramref name="crashed"/> that a block of <c>on crash</c> reads and an <c>attempt</c> gives, built from
+    /// the copy of the crash the message <paramref name="message"/> holds in the heap of the code that takes it (the runtime's
+    /// <c>Pending</c>): its <c>Reason</c> the thrown value of the case its type's number names, whose block the message holds and which
+    /// is freed once read, or, for the runtime's own crash, the runtime's error of its id and its text (std's <c>RuntimeErrorOf</c>, which
+    /// throws for an id no row of the run-time table names, as for a type the <c>Reason</c> lacks), its <c>Place</c> the file and the line,
+    /// and its <c>Chain</c> the crashing chain's ID as text.
+    /// </summary>
+    private string CrashedOf(DataType crashed, string message)
+    {
+        var reason = crashed.TypeArguments[0];
+        var place = new DataType(std.Model.DataTypes.Single(d => d.Name == "Place"), []);
+        var error = std.Model.DataTypes.Single(d => d.Name == "RuntimeError");
+        string Word(int offset, string ir) => fn.Value($"load {ir}, ptr {fn.Value($"getelementptr i8, ptr {message}, i64 {Number(offset)}")}");
+        string Text(int at, int count) => fn.Value($"call %kz.str {RuntimeFunction("TextAt")}(ptr {Word(at, "ptr")}, i64 {Word(count, "i64")})");
+
+        var number = Word(152, "i64");
+        var held = Word(160, "ptr");
+        var slot = fn.Alloca(Ir(reason), "reason");
+        IReadOnlyList<KurzType> cases = reason is Semantics.UnionType u ? u.Cases : [reason];
+        var labels = cases.Select(_ => fn.Label("case")).ToList();
+        var runtime = fn.Label("runtime");
+        var done = fn.Label("reason");
+        fn.Terminate($"switch i64 {number}, label %{runtime} [ {string.Join(" ", cases.Select((c, i) => $"i64 {Number(layout.Number(c) + 1)}, label %{labels[i]}"))} ]");
+        string Case(KurzType c, string? value) => reason is Semantics.UnionType union ? MakeUnion(union, c, value) : value!;
+        for (var i = 0; i < cases.Count; i++)
+        {
+            fn.Block(labels[i]);
+            string? value = cases[i] is NullType ? "zeroinitializer" : null; // a thrown `null` holds no value, which the message holds none of
+            if (cases[i] is not (Semantics.VoidType or NullType))
+            {
+                value = fn.Value($"load {Ir(cases[i])}, ptr {held}");
+                fn.Emit($"call void {StdFunction("Free")}(ptr {held}, i64 {IrSize(Ir(cases[i]))})");
+            }
+
+            fn.Emit($"store {Ir(reason)} {Case(cases[i], value)}, ptr {slot}");
+            fn.Branch(done);
+        }
+
+        fn.Block(runtime);
+        var id = Text(72, 80);
+        var detail = Text(120, 128);
+        var errorType = new DataType(error, []);
+        var made = fn.Value($"call {Ir(errorType)} {StdFunction("RuntimeErrorOf")}(%kz.str {id}, %kz.str {detail})");
+        Release(id, Types.String);
+        Release(detail, Types.String);
+        fn.Emit($"store {Ir(reason)} {Case(cases.Single(c => c is DataType d && d.Symbol == error), made)}, ptr {slot}");
+        fn.Branch(done);
+
+        fn.Block(done);
+        var file = fn.Value($"call %kz.str {RuntimeFunction("TextAt")}(ptr {Word(88, "ptr")}, i64 {Word(96, "i64")})");
+        var line = fn.Value($"trunc i64 {Word(104, "i64")} to i32");
+        var where = Make(place, [file, line]);
+        var chain = fn.Value($"call %kz.str {RuntimeFunction("ChainText")}(ptr {fn.Value($"getelementptr i8, ptr {message}, i64 136")})");
+        return Make(crashed, [fn.Value($"load {Ir(reason)}, ptr {slot}"), where, chain]);
     }
 
     /// <summary>
@@ -709,4 +719,191 @@ public sealed partial class Emitter
 
     /// <summary>The size of a value of the IR type, in bytes.</summary>
     private string IrSize(string irType) => fn.Value($"ptrtoint ptr {fn.Value($"getelementptr {irType}, ptr null, i32 1")} to i64");
+
+    // ---- the block `attempt { ... }` (U46 to U50) ------------------------------------------------------------------------------
+
+    /// <summary>The global of the name the child of every <c>attempt</c> carries for the log line of its crash, declared once (U50).</summary>
+    private string? attemptName;
+
+    /// <summary>
+    /// U46: <c>attempt { ... }</c> where it stands as a value or a statement: its whole value (<see cref="EmitAttemptValue"/>), whose
+    /// success stands where it stands and whose <c>Crashed</c> leaves the function, but where a written union type keeps its cases (O2, O3).
+    /// </summary>
+    private string? EmitAttempt(AttemptExpression a)
+    {
+        var union = (Semantics.UnionType)Sub(Model.AttemptOf(a).Type);
+        var value = EmitAttemptValue(a);
+        return Types.Same(TypeOf(a), union) ? value : Propagate(value, union, a.Line);
+    }
+
+    /// <summary>
+    /// U46 to U50: the whole value of <c>attempt { ... }</c>, a value of its own, as Erlang's <c>spawn_monitor</c> starts a process and
+    /// waits for its result or its <c>'DOWN'</c> reason: the fields of <c>this</c> that the block names read into the variables it takes
+    /// them through, at its start; the block's function value made as a lambda's is (F15); the child made (the runtime's
+    /// <c>AttemptNew</c>), whose supervisor is the code that runs; one message in the child's heap that holds a copy of that function
+    /// value, made as a message's argument crosses (U12), and whose function calls it (<see cref="AttemptRun"/>); a reply in the frame as
+    /// a call's, the heap its value crosses back into and the slot of the crash's message beside it (<see cref="AttemptReply"/>); the
+    /// message queued with the chain's deadline and no bound of its own (the runtime's <c>Enqueue</c>), and the wait for it
+    /// (<c>Attempted</c>; U49): the block's value as the union's success where the reply holds it, else <c>Crashed</c>, built from the
+    /// crash's message (<see cref="CrashedOf"/>), which is then freed (<c>PendingLeft</c>).
+    /// </summary>
+    private string EmitAttemptValue(AttemptExpression a)
+    {
+        var attempt = Model.AttemptOf(a);
+        var union = (Semantics.UnionType)Sub(attempt.Type);
+        var success = union.Cases[0];
+        var crashed = (DataType)union.Cases[^1];
+        if (attempt.This is { } self)
+        {
+            var symbol = ((ClassType)Sub(self.Type)).Symbol;
+            var instance = fn.Value($"load {Ir(Sub(self.Type))}, ptr {Place(self, a.Line)}");
+            foreach (var (variable, field) in attempt.Fields)
+            {
+                var type = Sub(variable.Type);
+                var slot = fn.Alloca(Ir(type), "taken");
+                fn.Emit($"store {Ir(type)} {InstanceField(instance, symbol, symbol.FieldIndex(field.Name))}, ptr {slot}"); // U47: by value, a temporary of the region
+                slots[variable] = slot;
+            }
+        }
+
+        var info = Model.LambdaOf(attempt.Lambda);
+        var block = (Semantics.FunctionType)Sub(info.Type);
+        var made = EmitLambda(attempt.Lambda, block);
+        if (attemptName is null)
+        {
+            attemptName = "@\"attempt.name\"";
+            module.Global($"{attemptName} = private unnamed_addr constant %kz.str {StringValue("attempt")}");
+        }
+
+        var child = fn.Value($"call ptr {RuntimeFunction("AttemptNew")}(ptr {attemptName})");
+        var reference = Reference(child);
+        var heap = fn.Value($"load ptr, ptr {fn.Value($"getelementptr i8, ptr {child}, i64 -64")}"); // the child's heap, its record's word at -64
+        var message = AttemptMessage();
+        var queued = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr {heap}, i64 {IrSize(message)})");
+        var copyInto = CopyEnvironmentInto(info.Captures.Select(v => Sub(v.Type)).ToList());
+        var table = $"@\"attempt.table.{Number(++actorSites)}\"";
+        module.Global($"{table} = private unnamed_addr constant [3 x ptr] [ptr {AttemptRun(block)}, ptr {AttemptCopy(block, copyInto)}, ptr {AttemptDrop(block)}]");
+        fn.Emit($"store ptr {table}, ptr {MessageField(message, queued, 1)}");
+        fn.Emit($"store %kz.fn {Crossed(made, block, heap, copyInto)}, ptr {MessageField(message, queued, MessageArguments)}");
+        var replyType = AttemptReply(success);
+        var reply = fn.Alloca(replyType, "reply");
+        fn.Emit($"store i32 0, ptr {reply}");
+        fn.Emit($"store ptr {fn.Value($"call ptr {StdFunction("HeapCurrent")}()")}, ptr {fn.Value($"getelementptr {replyType}, ptr {reply}, i32 0, i32 {Number(ReplyHeap)}")}");
+        fn.Emit($"store ptr null, ptr {fn.Value($"getelementptr {replyType}, ptr {reply}, i32 0, i32 {Number(ReplyHeap + 1)}")}");
+        fn.Emit($"call void {RuntimeFunction("ReplyWaiter")}(ptr {reply})"); // the waiter before the message is queued
+        fn.Emit($"store ptr {reply}, ptr {MessageField(message, queued, 2)}");
+        fn.Emit($"call void {RuntimeFunction("Enqueue")}({ReferenceWords(reference)}, ptr {queued}, i1 true, i64 9223372036854775807, %kz.str {StringValue(unit.File)}, i32 {Number(a.Line)})");
+        var crash = fn.Value($"call ptr {RuntimeFunction("Attempted")}(ptr {reply}, ptr {queued}, %kz.str {StringValue(unit.File)}, i32 {Number(a.Line)})");
+        var result = fn.Alloca(Ir(union), "attempt");
+        var held = fn.Label("attempt.value");
+        var fell = fn.Label("attempt.crashed");
+        var done = fn.Label("attempt.done");
+        fn.CondBranch(fn.Value($"icmp eq ptr {crash}, null"), held, fell);
+        fn.Block(held);
+        var value = success is Semantics.VoidType ? null : fn.Value($"load {Ir(success)}, ptr {fn.Value($"getelementptr {replyType}, ptr {reply}, i32 0, i32 {Number(ReplyHeap + 2)}")}");
+        fn.Emit($"store {Ir(union)} {MakeUnion(union, success, value)}, ptr {result}");
+        fn.Branch(done);
+        fn.Block(fell);
+        var c = CrashedOf(crashed, crash);
+        fn.Emit($"call void {RuntimeFunction("PendingLeft")}(ptr {crash})");
+        fn.Emit($"store {Ir(union)} {MakeUnion(union, crashed, c)}, ptr {result}");
+        fn.Branch(done);
+        fn.Block(done);
+        return fn.Value($"load {Ir(union)}, ptr {result}");
+    }
+
+    /// <summary>
+    /// U46: the IR type of the message of an <c>attempt</c>, a message's seven words (<see cref="MessageType"/>) and the block's function
+    /// value, the one argument, at <see cref="MessageArguments"/>.
+    /// </summary>
+    private static string AttemptMessage() => "{ ptr, ptr, ptr, i64, i64, i64, i64, %kz.fn }";
+
+    /// <summary>
+    /// U46, U50: the IR type of the reply of an <c>attempt</c>, a call's (<see cref="Reply"/>) with the caller's heap at
+    /// <see cref="ReplyHeap"/> whatever the block gives, then the slot of the crash's message, at byte 56, where the runtime's
+    /// <c>Fell</c> stores it, then the block's value, where it gives one.
+    /// </summary>
+    private string AttemptReply(KurzType success) => success is Semantics.VoidType
+        ? "{ i32, ptr, i64, ptr, ptr, i64, ptr, ptr }"
+        : $"{{ i32, ptr, i64, ptr, ptr, i64, ptr, ptr, {Ir(success)} }}";
+
+    /// <summary>
+    /// U46, U47: the function of the message of an <c>attempt</c> whose block has the function type <paramref name="block"/>, which the
+    /// runtime calls in the child with its state and the message: the block's function value called, then, as a method's message
+    /// (<see cref="MessageRun"/>), the reply taken off the message by the runtime's <c>ReplyTaken</c>, the value moved beside it, a copy of
+    /// its own in the heap of the code that waits where it holds a block (U12), and the reply set (<c>Replied</c>); a value whose waiter
+    /// crashed meanwhile is let go of; then the function value and the message's block freed.
+    /// </summary>
+    private string AttemptRun(Semantics.FunctionType block) => Helper($"attempt.run.{Lower.Mangle(block.Result)}", "void", ["ptr", "ptr"], () =>
+    {
+        var message = AttemptMessage();
+        var result = block.Result;
+        var made = fn.Value($"load %kz.fn, ptr {MessageField(message, "%a1", MessageArguments)}");
+        var call = $"call {Ir(result)} {fn.Value($"extractvalue %kz.fn {made}, 0")}(ptr {fn.Value($"extractvalue %kz.fn {made}, 1")})";
+        var value = Types.IsVoid(result) ? Emitted(call) : fn.Value(call);
+        var reply = fn.Value($"call ptr {RuntimeFunction("ReplyTaken")}(ptr %a1)");
+        var answered = fn.Label("answered");
+        var dropped = fn.Label("dropped");
+        var joined = fn.Label("joined");
+        fn.CondBranch(fn.Value($"icmp ne ptr {reply}, null"), answered, dropped);
+        fn.Block(dropped);
+        if (!Types.IsVoid(result) && Counted(result))
+        {
+            Release(value, result);
+        }
+
+        fn.Branch(joined);
+        fn.Block(answered);
+        if (!Types.IsVoid(result))
+        {
+            var replyType = AttemptReply(result);
+            if (Counted(result))
+            {
+                var crossed = Crossed(value, result, fn.Value($"load ptr, ptr {fn.Value($"getelementptr {replyType}, ptr {reply}, i32 0, i32 {Number(ReplyHeap)}")}"));
+                Release(value, result);
+                value = crossed;
+            }
+
+            fn.Emit($"store {Ir(result)} {value}, ptr {fn.Value($"getelementptr {replyType}, ptr {reply}, i32 0, i32 {Number(ReplyHeap + 2)}")}");
+        }
+
+        fn.Emit($"call void {RuntimeFunction("Replied")}(ptr {reply})");
+        fn.Branch(joined);
+        fn.Block(joined);
+        Release(made, block);
+        fn.Emit($"call void {StdFunction("Free")}(ptr %a1, i64 {IrSize(message)})");
+        fn.Return(null);
+    });
+
+    /// <summary>
+    /// U21, U46: the function that copies the message of an <c>attempt</c> into a heap, the second of its table, as a method's message is
+    /// copied (<see cref="MessageCopy"/>): its words, and the block's function value by the environment of its lambda,
+    /// <paramref name="copyInto"/>.
+    /// </summary>
+    private string AttemptCopy(Semantics.FunctionType block, string copyInto) => Helper($"attempt.copy.{Number(++actorSites)}", "ptr", ["ptr", "ptr"], () =>
+    {
+        var message = AttemptMessage();
+        var moved = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr %a1, i64 {IrSize(message)})");
+        fn.Emit($"store ptr null, ptr {MessageField(message, moved, 0)}");
+        foreach (var (index, type) in new[] { (1, "ptr"), (2, "ptr"), (3, "i64"), (4, "i64"), (5, "i64"), (6, "i64") })
+        {
+            fn.Emit($"store {type} {fn.Value($"load {type}, ptr {MessageField(message, "%a0", index)}")}, ptr {MessageField(message, moved, index)}");
+        }
+
+        var made = fn.Value($"load %kz.fn, ptr {MessageField(message, "%a0", MessageArguments)}");
+        CrossInto(MessageField(message, moved, MessageArguments), made, block, null, "%a1", copyInto);
+        fn.Return($"ptr {moved}");
+    });
+
+    /// <summary>
+    /// U37, U46: the function that drops the message of an <c>attempt</c> unrun, the third of its table, which the runtime calls where its
+    /// deadline passed at its queueing or before the child took it: the block's function value let go of and the message's block freed.
+    /// </summary>
+    private string AttemptDrop(Semantics.FunctionType block) => Helper($"attempt.drop.{Lower.Mangle(block)}", "void", ["ptr"], () =>
+    {
+        var message = AttemptMessage();
+        Release(fn.Value($"load %kz.fn, ptr {MessageField(message, "%a0", MessageArguments)}"), block);
+        fn.Emit($"call void {StdFunction("Free")}(ptr %a0, i64 {IrSize(message)})");
+        fn.Return(null);
+    });
 }

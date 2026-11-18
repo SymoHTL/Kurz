@@ -7778,14 +7778,14 @@ public sealed class CheckerTests
     }
 
     [Theory]
-    [InlineData(13, "section 6, U28", "x = attempt {\n    print(1)\n}\n")]
+    [InlineData(13, "U46", "x = attempt {\n    print(1)\n}\n")]
     [InlineData(13, "section 6, U28", "x = retry {\n    print(1)\n}\n")]
     [InlineData(13, "U30", "c = spawn Counter() on crash (c) {\n    stop\n}\nprint(c.Get())\n")]
     [InlineData(14, "U4, F11", "c = spawn Counter()\nf = c.Get\nprint(f())\n")]
     public void A_message_or_a_spawn_where_the_build_makes_none_is_not_supported(int line, string rule, string program)
     {
-        // section 6: `attempt { ... }` and `retry { ... }`, which U28 leaves out; U30: the block of `on crash` in a file read without `std/`,
-        // which declares `Crashed`; U4 with F11: a method of an actor named without a call
+        // U46: `attempt { ... }` in a file read without `std/`, which declares `Crashed`; section 6: `retry { ... }`, which U28 leaves out;
+        // U30: the block of `on crash` in a file read without `std/`, which declares `Crashed`; U4 with F11: a method of an actor named without a call
         NotSupportedAt(line, rule, ActorCounter + program);
     }
 
@@ -8142,5 +8142,104 @@ public sealed class CheckerTests
         Assert.Empty(Errors("actor A {\n    int n = 1\n\n    pub int Me() => Same(this) + this.n\n}\n\nint Same(A a) => 1\n"));
         Assert.Empty(Errors("actor B {\n    pub void Hello(A from) {\n        send from.Back()\n    }\n}\n\nactor A(B Peer) {\n    pub void Start() {\n        send Peer.Hello(this)\n    }\n\n    pub void Back() {\n        print(this == this)\n    }\n}\n"));
         Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("class Box(int N)\n\nactor A {\n    int n = 1\n\n    pub Box Me() => this\n}\n"));
+    }
+
+    // ---- the block `attempt { ... }` (U46 to U50) ------------------------------------------------------------------------------
+
+    /// <summary>A function that throws a <c>Bad</c> for a positive argument, and the line the program after it starts at, 11.</summary>
+    private const string Throwing = "data Bad(string Why)\n\nint F(int n) {\n    if n > 0 {\n        throw Bad(\"big\")\n    }\n\n    return n\n}\n\n";
+
+    /// <summary>The one diagnostic of a program that sees <c>std/</c>: <c>not supported</c>, at <paramref name="line"/>, naming <paramref name="rule"/> last.</summary>
+    private static void NotSupportedSeeingStdAt(int line, string rule, string program)
+    {
+        var (diagnostics, _) = CheckSeeingStd(program);
+        var only = Assert.Single(diagnostics.Items);
+        Assert.False(only.IsError, only.Message);
+        Assert.Equal(line, only.Line);
+        Assert.EndsWith($"({rule})", only.Message);
+    }
+
+    [Fact]
+    public void An_attempt_is_the_union_of_its_blocks_value_and_Crashed_read_as_a_calls_union()
+    {
+        // U46 (assumed: T18 of comment 6980152255): a postfix `else` handles the cases its arms name, `Crashed` with no type arguments
+        // naming the case (a reading of the build), and a case it leaves propagates; a written union type keeps the cases; the case passes
+        // through a signature that lists it
+        Assert.Empty(ErrorsSeeingStd(Throwing + "v = attempt { F(1) } else {\n    Crashed c => -1\n}\nprint(v)\n"));
+        Assert.Empty(ErrorsSeeingStd(Throwing + "int | Crashed<Bad | RuntimeError> v = attempt { F(1) }\nmatch v {\n    int n => print(n)\n    Crashed<Bad | RuntimeError> c => print(c.Place.Line)\n}\n"));
+        Assert.Empty(ErrorsSeeingStd(Throwing + "int | Crashed<Bad | RuntimeError> Read(int n) {\n    v = attempt { F(n) }\n    return v\n}\n\nr = Read(1) else {\n    Crashed<Bad | RuntimeError> c => 0\n}\nprint(r)\n"));
+
+        // with no `else` and no written type it propagates: the top-level code has no caller to pass it to (O9), and a function whose
+        // signature lists no case beside its success cannot let it leave (O3)
+        Assert.Equal([(ErrorIds.UnlistedCase, 11)], ErrorsSeeingStd(Throwing + "v = attempt { F(1) }\nprint(v)\n"));
+        Assert.Equal([(ErrorIds.UnlistedCase, 12)], ErrorsSeeingStd(Throwing + "int Read(int n) {\n    v = attempt { F(n) }\n    return v\n}\n\nprint(Read(1))\n"));
+
+        // every file sees `Crashed`, so that a signature names it (a reading of the build), and a file's own type of that name is
+        // `redeclared` (V9)
+        Assert.Equal([(ErrorIds.Redeclared, 1)], ErrorsSeeingStd("data Crashed(int Code)\n\nprint(1)\n"));
+    }
+
+    [Fact]
+    public void The_reason_of_an_attempt_is_what_its_block_can_throw_and_the_runtimes_error_type()
+    {
+        // U46 (assumed: the small defaults of comment 6980152255): a `match` on the `Reason` that leaves out the type the block's code throws,
+        // or the runtime's error type, is not exhaustive
+        const string arms = "v = attempt { F(1) } else {\n    Crashed c => {\n        match c.Reason {\n@        }\n\n        -1\n    }\n}\nprint(v)\n";
+        Assert.Empty(ErrorsSeeingStd(Throwing + arms.Replace("@", "            Bad b => print(b.Why)\n            RuntimeError e => print(e.Detail)\n", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.MatchNotExhaustive, 13)], ErrorsSeeingStd(Throwing + arms.Replace("@", "            Bad b => print(b.Why)\n", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.MatchNotExhaustive, 13)], ErrorsSeeingStd(Throwing + arms.Replace("@", "            RuntimeError e => print(e.Detail)\n", StringComparison.Ordinal)));
+
+        // a block whose code throws nothing has the runtime's error type alone as its `Reason`
+        Assert.Empty(ErrorsSeeingStd("v = attempt { 1 } else {\n    Crashed c => {\n        print(c.Reason.Detail)\n        -1\n    }\n}\nprint(v)\n"));
+    }
+
+    [Fact]
+    public void The_block_of_an_attempt_takes_values_and_a_mutable_instance_only_after_copy()
+    {
+        // U47 (assumed: T19 of comment 6980152255): a value and an immutable instance with no word, a mutable instance after `copy`, and one
+        // read bare is `capture-needs-word` at the name
+        const string box = "class Box(mut int N)\nclass Point(int X)\n\nint Get(Box x) => x.N\n\n";
+        Assert.Empty(ErrorsSeeingStd(box + "b = Box(1)\np = Point(2)\nn = 3\nv = attempt { Get(copy b) + p.X + n } else {\n    Crashed c => 0\n}\nprint(v)\n"));
+        Assert.Equal([(ErrorIds.CaptureNeedsWord, 9)], ErrorsSeeingStd(box + "b = Box(1)\nv = attempt {\n    x = 1\n    return b.N + x\n} else {\n    Crashed c => 0\n}\nprint(v)\n"));
+        Assert.Equal([(ErrorIds.CaptureNeedsWord, 9)], ErrorsSeeingStd(box + "b = Box(1)\nv = attempt {\n    x = Get(copy b)\n    return b.N + x\n} else {\n    Crashed c => 0\n}\nprint(v)\n"));
+
+        // a read inside an `attempt` in the block is the inner block's, which reports it once
+        Assert.Equal([(ErrorIds.CaptureNeedsWord, 8)], ErrorsSeeingStd(box + "b = Box(1)\nv = attempt {\n    w = attempt { b.N } else {\n        Crashed c => 0\n    }\n\n    return w\n} else {\n    Crashed c => 0\n}\nprint(v)\n"));
+    }
+
+    [Fact]
+    public void An_assignment_in_the_block_of_an_attempt_of_what_it_takes_is_capture_assign()
+    {
+        // U47 (assumed: T19 of comment 6980152255): a variable around the block, and a field of the actor whose method runs it, which the
+        // block takes by value at its start; reading the field is no error
+        Assert.Equal([(ErrorIds.CaptureAssign, 3)], ErrorsSeeingStd("mut n = 1\nv = attempt {\n    n = 2\n    return n\n} else {\n    Crashed c => 0\n}\nprint(v + n)\n"));
+        const string actor = "actor A {\n    mut int count = 0\n\n    pub int Go() {\n        v = attempt {\n@        } else {\n            Crashed c => 0\n        }\n\n        return v\n    }\n}\n\na = spawn A()\nprint(a.Go())\n";
+        Assert.Equal([(ErrorIds.CaptureAssign, 6)], ErrorsSeeingStd(actor.Replace("@", "            count = 1\n            return count\n", StringComparison.Ordinal)));
+        Assert.Empty(ErrorsSeeingStd(actor.Replace("@", "            return count + 1\n", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void Return_in_the_block_of_an_attempt_gives_its_value_and_in_an_arm_leaves_the_function()
+    {
+        // U48 (assumed: T20 of comment 6980152255): the block's `return`s give an `int`, its value, as a lambda's do, and the arm's `return`
+        // gives the function's `string`
+        Assert.Empty(ErrorsSeeingStd(Throwing + "string Read(int n) {\n    v = attempt {\n        if n > 1 {\n            return 2\n        }\n\n        return F(n)\n    } else {\n        Crashed c => return \"crashed\"\n    }\n\n    return \"{v}\"\n}\n\nprint(Read(1))\n"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 8)], ErrorsSeeingStd("int Read(int n) {\n    v = attempt {\n        return \"two\"\n    } else {\n        Crashed c => return 0\n    }\n\n    return v\n}\n\nprint(Read(1))\n"));
+    }
+
+    [Fact]
+    public void What_this_build_does_not_bring_into_or_out_of_the_child_of_an_attempt_is_not_supported()
+    {
+        // U47: `this`, a method or a property of the class whose method runs the `attempt`, and a `move` of what it takes; U46: a block whose
+        // value is a union; section 6: `retry { ... }`, whose call's id is open (section 14), as on a file read without std
+        const string actor = "actor A {\n    pub int Get() => 1\n\n    pub int Go() {\n        v = attempt { @ } else {\n            Crashed c => 0\n        }\n\n        return v\n    }\n}\n\na = spawn A()\nprint(a.Go())\n";
+        NotSupportedSeeingStdAt(5, "U47", actor.Replace("@", "this.Get()", StringComparison.Ordinal));
+        NotSupportedSeeingStdAt(5, "U47", actor.Replace("@", "Get()", StringComparison.Ordinal));
+        NotSupportedSeeingStdAt(6, "U47", "class Box(mut int N)\n\nint Take(move Box x) => x.N\n\nb = Box(1)\nv = attempt { Take(move b) } else {\n    Crashed c => 0\n}\nprint(v)\n");
+        NotSupportedSeeingStdAt(3, "U46", "int? Maybe() => null\n\nv = attempt { Maybe() } else {\n    Crashed c => 0\n}\nprint(v)\n");
+        NotSupportedSeeingStdAt(1, "section 6, U28", "v = retry { 1 }\n");
+
+        // the positive control: the same actor whose block names a value of its own
+        Assert.Empty(ErrorsSeeingStd(actor.Replace("@", "1", StringComparison.Ordinal)));
     }
 }

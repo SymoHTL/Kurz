@@ -1063,6 +1063,20 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                 case SpawnExpression spawn:
                     Expression(spawn.Call); // U2: the construction of the actor's state
                     break;
+                case AttemptExpression attempt:
+                    Need(model.HasAttempt(attempt), attempt.Line, "`attempt`");
+                    if (model.HasAttempt(attempt))
+                    {
+                        var block = model.AttemptOf(attempt).Lambda; // U46: a code generator reads the block as the lambda it was read as
+                        Need(Try(() => model.LambdaOf(block)), attempt.Line, "the block's lambda");
+                        Expression(block.ExpressionBody);
+                        if (block.BlockBody is not null)
+                        {
+                            Block(block.BlockBody);
+                        }
+                    }
+
+                    break;
                 case StringLiteral s:
                     foreach (var hole in s.Segments.OfType<HoleSegment>())
                     {

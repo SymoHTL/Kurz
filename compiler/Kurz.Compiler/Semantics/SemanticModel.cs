@@ -391,6 +391,14 @@ public sealed record LogSite(int Level, string? Category, IReadOnlyList<string> 
 public sealed record LambdaInfo(IReadOnlyList<VariableSymbol> Parameters, IReadOnlyList<VariableSymbol> Captures, FunctionType Type);
 
 /// <summary>
+/// U46, U47: an <c>attempt</c> as the checker read it: the lambda of no parameter its block is read as, the union of its value, the
+/// block's value then <c>Crashed</c> of its <c>Reason</c>, each field of the class whose code runs it that the block names, with the
+/// variable the block reads it through, which the field's value is taken into at the block's start, and <c>this</c> of that code, which
+/// they are read from, null where the block names no field.
+/// </summary>
+public sealed record AttemptInfo(LambdaExpression Lambda, UnionType Type, IReadOnlyList<(VariableSymbol Variable, FieldSymbol Field)> Fields, VariableSymbol? This);
+
+/// <summary>
 /// What the checker found out about a program, by node, for a code generator: the type and constant
 /// of every expression, the variable or function every name means, the variable every declaration
 /// makes, what every call calls, what every lambda captures, the type every arm pattern names, and
@@ -417,6 +425,8 @@ public sealed class SemanticModel
     private readonly Dictionary<CallExpression, CallExpression?> made = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<AssignOrDeclare, VariableSymbol> assignments = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<LambdaExpression, LambdaInfo> lambdas = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<AttemptExpression, AttemptInfo> attempts = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<LambdaExpression> attemptLambdas = new(ReferenceEqualityComparer.Instance);
     private readonly List<KurzType> crashReasons = [];
     private readonly HashSet<Expression> heldCopies = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Expression> copied = new(ReferenceEqualityComparer.Instance);
@@ -528,11 +538,21 @@ public sealed class SemanticModel
 
     public LambdaInfo LambdaOf(LambdaExpression lambda) => lambdas.TryGetValue(lambda, out var l) ? l : throw Missing("lambda", lambda.Line);
 
-    /// <summary>Every lambda the checker read in the file, with what it captures (F15), in no order: R9 judges a field of a function type by them.</summary>
-    internal IEnumerable<(LambdaExpression Lambda, LambdaInfo Info)> Lambdas => lambdas.Select(p => (p.Key, p.Value));
+    /// <summary>
+    /// Every lambda the checker read in the file, with what it captures (F15), in no order: R9 judges a field of a function type by them.
+    /// The block of an <c>attempt</c>, read as a lambda, is none of them: no value of the program holds it, and no call of a function value
+    /// runs it (U46).
+    /// </summary>
+    internal IEnumerable<(LambdaExpression Lambda, LambdaInfo Info)> Lambdas => lambdas.Where(p => !attemptLambdas.Contains(p.Key)).Select(p => (p.Key, p.Value));
 
     /// <summary>Whether the checker read the lambda.</summary>
     public bool HasLambda(LambdaExpression lambda) => lambdas.ContainsKey(lambda);
+
+    /// <summary>U46: the <c>attempt</c> as the checker read it.</summary>
+    public AttemptInfo AttemptOf(AttemptExpression attempt) => attempts.TryGetValue(attempt, out var a) ? a : throw Missing("attempt", attempt.Line);
+
+    /// <summary>Whether the checker read the <c>attempt</c>.</summary>
+    public bool HasAttempt(AttemptExpression attempt) => attempts.ContainsKey(attempt);
 
     /// <summary>
     /// U30: the <c>Reason</c> of each block of <c>on crash</c> the checker read, in the order it read them, whose cases a <c>throw</c> names
@@ -727,6 +747,10 @@ public sealed class SemanticModel
     internal void RecordAssignment(AssignOrDeclare assignment, VariableSymbol variable) => assignments[assignment] = variable;
 
     internal void RecordLambda(LambdaExpression lambda, LambdaInfo info) => lambdas[lambda] = info;
+
+    internal void RecordAttempt(AttemptExpression attempt, AttemptInfo info) => attempts[attempt] = info;
+
+    internal void RecordAttemptLambda(LambdaExpression lambda) => attemptLambdas.Add(lambda);
 
     internal void RecordCrashReason(KurzType reason) => crashReasons.Add(reason);
 
