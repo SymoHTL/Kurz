@@ -219,4 +219,74 @@ public sealed class HttpResponseTests(Toolchain toolchain) : IClassFixture<Toolc
         Assert.Equal((4, Emitter.NotOnWindows), (diagnostic.Line, diagnostic.Message));
         Assert.NotNull(Compile(text, Builder.CheckRuntime(Target.Linux)).Program); // the positive control
     }
+
+    [Theory]
+    [InlineData("first", 1)]
+    [InlineData("lambda", 2)]
+    [InlineData("capture", 3)]
+    [InlineData("default", 9)]
+    [InlineData("constructor", 9)]
+    public void A_build_for_windows_says_not_supported_at_the_statement_that_made_a_lambda_whose_write_reaches_a_socket(string made, int line)
+    {
+        // S11 with W8: a lambda, one that reads a variable among them, the defaults of a class's body and a constructor are emitted
+        // after the function they are made in or first needed by, and the refusal names the program's statement that made or needed
+        // them, never the one of the function emitted before them, which the functions of the runtime queued after the program's last
+        // statement made line 0, so that the build of the first program ended in the compiler's own error; the second reaches std/
+        // from its lambda alone, at a line no other part of the program stands on
+        var stream = "HttpResponse.Stream(200, (HttpWriter w) => w.Write(\"x\"))";
+        var text = made switch
+        {
+            "first" => $$"""
+                print({{stream}}.Status)
+                HttpResponse.Stream(304, (HttpWriter w) => w.Write("x"))
+                print("after")
+                """,
+            "lambda" => """
+                print(1)
+                (TcpStream) => void | IoError reply = (TcpStream s) => HttpResponse.Text(200, "hi").Write(s)
+                TcpStream? none = null
+                if none != null {
+                    reply(none) else {
+                        IoError e => print(e)
+                    }
+                }
+                """,
+            "capture" => $$"""
+                print(1)
+                x = "x"
+                r = HttpResponse.Stream(200, (HttpWriter w) => w.Write(x))
+                print(r.Status)
+                """,
+            "default" => $$"""
+                print(1)
+                class Holder {
+                    HttpResponse r = {{stream}}
+
+                    pub int Status => r.Status
+                }
+
+                print(2)
+                h = Holder()
+                print(h.Status)
+                """,
+            _ => $$"""
+                print(1)
+                class Base(HttpResponse R)
+
+                class Holder : Base {
+                    pub Holder() : base({{stream}}) { }
+                }
+
+                print(2)
+                h = Holder()
+                print(h.R.Status)
+                """,
+        };
+        var refused = Compile(text, Builder.CheckRuntime(Target.Windows));
+        Assert.Null(refused.Program);
+        var diagnostic = Assert.Single(refused.Diagnostics.Items);
+        Assert.Equal((line, Emitter.NotOnWindows), (diagnostic.Line, diagnostic.Message));
+        var built = Compile(text, Builder.CheckRuntime(Target.Linux)); // the positive control
+        Assert.True(built.Program is not null, string.Join("; ", built.Diagnostics.Sorted));
+    }
 }
