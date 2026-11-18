@@ -2169,7 +2169,7 @@ a property of the class whose method runs it, a `move` in the block of a variabl
 it, a block whose value is a union, a nullable value among them, or a value the crossing copy does not
 bring back, a block that takes a value no word makes cross or that the crossing copy does not copy, a
 block that can throw a type the crossing copy does not copy, one in a file read without `std/` and one
-whose `Reason` still grows at the fifth reading; a block whose child can
+whose `Reason` still grows at the fifth reading; a block of `on crash` whose child can
 throw a type the crossing copy does not copy (U12), a block in a file read without `std/`, and a block
 whose child's `Reason` grows by what the blocks of the program read, read five times, the first and four more; a policy after
 the name of a `per` actor with `per` itself (U1), a block there among it; the crash paths of the ESP32
