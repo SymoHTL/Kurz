@@ -1112,7 +1112,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `corpus/actors/copy-two-arguments.kz`, `copy-two-at-call.kz`, `copy-weak-across-arguments.kz`,
   `copy-weak-argument.kz` and `copy-weak-at-call.kz` the memo of a call, `copy-left-to-right.kz` the order, `copy-memo-keeps-block.kz` a block the memo
   holds living to the call's last copy and `copy-left-early.kz` a call left before it, whose copies
-  the call had not read yet are let go of (`ActorTests`, by the count of blocks); and
+  the call had not read yet are let go of (`ActorTests`, by the count of blocks, and for a construction
+  and a parameter written `move`, whose slots take their copies, by the count and by the order of the
+  frees, issue 569); and
   `corpus/actors/copy-derived.kz` an instance of a derived class held as its base. The copy of a map whose
   keys reach a class instance is the copy of its block's bytes, with its source's hash and keys, each key
   and each value copied in its slot, and then each entry placed again under its copied key's hash, by
@@ -1804,7 +1806,12 @@ the rest. The count
 is lowered where a holder ends: at the end of the block that declared a variable, and at a
 `return`, a `break` or a `continue` for the blocks it leaves; at an assignment over the value; at
 the end of its statement for a value that a call, a `with`, a `match` or an `else` made and that
-nothing keeps; and where a value that holds the list ends. At zero the lists the items hold are let
+nothing keeps; where a case an argument propagates, or another jump, leaves a construction or a call
+that is no message before its last argument, for each value a slot took from the arguments before
+it, a field of the construction or a parameter written `move`, and each copy a call of more than one
+copy made before it, the last made first, as Rust drops the operands of an expression that one of its
+operands leaves (the Rust Reference, "Destructors", read on 2026-11-18; issue 569); and where a value
+that holds the list ends. At zero the lists the items hold are let
 go of in turn, and the block goes back to `Free`. A parameter borrows its argument and changes no
 count: nothing changes the value it borrows while the call runs, since the checker refuses a read of
 what a call takes as `mut` that the expression still holds when the call runs, or when an assignment
