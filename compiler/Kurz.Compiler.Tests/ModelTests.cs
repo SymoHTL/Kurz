@@ -797,7 +797,9 @@ public sealed class ModelTests
         new("Popped", "*Ptr<byte*>(queue + 8) = next\n            first = next", _ => true, s =>
         {
             s[Out] = s[at + 2];
-            s[at] = 1; // the load of the new first node's link is a move of its own, the first's
+            // the load of the new first node's link is a move of its own, the first's, which reads `first` from `out` (`var first =
+            // s[Out]`), the one consumer's own word, so that this store of `out` is the text's `first = next` too
+            s[at] = 1;
         }),
         new("Popped", "if first != AtomicPtr<byte>.FromPtr(Ptr<byte*>(queue)).Load(MemoryOrder.Acquire) {", _ => true,
             s => { s[at] = s[at + 1] != s[In] ? 0 : 4; }, ["Pushed(queue, stub)"]),

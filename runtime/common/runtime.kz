@@ -19,11 +19,14 @@ thread static mut long room = 0
 // slots, at 8, of the queue of the pauses, at 12, and of the blocks the top-level code's wait runs, at 16, the
 // count of the actors spawned, at 24 (`ActorNew`), and the table of every block's message, at 32 (`BlockTable`),
 // whose first word holds the function that runs a block (`BlockRun`) from the moment the block of the words is
-// made (`SharedCleared`), and whose second, at 40, the function that copies one, stays null, as no block is copied.
-// The start makes it in the thread's own heap, while the main thread is the one thread of the process, so that
-// its address is written at most once, by the one thread, before any other thread runs; where the system
-// refuses it there, the first `spawn` makes it, before any actor runs (`Shared`), so that a program the
-// system gives no memory ends at its own first allocation, as it did, and the one thread takes no lock until then.
+// made (`SharedCleared`), and whose second, at 40, the function that copies one, `SharedCleared` leaves null and
+// nothing writes, since a block that waits in the inbox of an actor that crashes is dropped, never copied (`BlockLeft`).
+// The start makes it in the thread's own heap, while the main thread is the one thread of the process, so that on
+// that path its address is written once, before any other thread runs; where the system refuses it there, the
+// first `spawn` makes it, before any actor runs (`Shared`), so that a program the system gives no memory ends at its
+// own first allocation, as it did, and the one thread takes no lock until then; that make takes no lock, which holds
+// while one thread runs every program (U35): a thread the program started through C (R16) may run by then, and two
+// threads could each make it (inferred).
 static mut byte* sharedWords = null
 
 // Called by the emitted `main` before the program's first statement, with the arguments the C library's
@@ -3548,7 +3551,7 @@ pub string ExitErrorText(ExitError e) {
 // that a stack fault inside the scheduler or the allocator ends the process and one in an actor's code is
 // that actor's crash (design record, section 6, "End the process"; O11).
 
-// The first and the last actor of the run queue, plain `static`s with no lock and no atomic operation, which hold
+// The first and the last actor of the run queue, plain `static mut`s with no lock and no atomic operation, which hold
 // while one thread runs every program (U35): a waker on another thread would change them (`Wake`, `Queue`) while
 // the thread that runs the actors takes the first off (`RunOne`).
 static mut byte* runFirst = null
@@ -5898,7 +5901,8 @@ thread static mut long decision = 0
 // The blocks the top-level code's wait runs, in the order of the crashes, a list as an inbox is (`Append`),
 // in the own heap of the thread that posted the first, null until then, which a thread's `Post` changes and the
 // main thread's wait takes from under the lock of the root's blocks (`RootLock`), so that a block posted on any
-// thread reaches the main thread at its following turn, since `Post` wakes nothing; the one that runs there, null where none does; and the block whose escalation
+// thread reaches the main thread at its following turn, since `Post` wakes nothing for the top-level code, a null
+// parent; the one that runs there, null where none does; and the block whose escalation
 // ends the process on the stack its child raised on (`Escalate`).
 static mut byte* rootBlocks = null
 thread static mut byte* rootRunning = null
@@ -6111,7 +6115,10 @@ void RootBlock(byte* message) {
 // each after the crash's log line, written at the decision (U34; assumed: S10 of comment 6907441402), the
 // stack it raised on given back to the pool and the message freed; the restart and the end alone run under the
 // child's hold (`HeldAlone`, `LetGo`), as one actor acts on another (`EndChildren`); `escalate` crashes the
-// supervisor (`Escalate`).
+// supervisor (`Escalate`). The log line, which reads the child's record, the stack's return and the message's free
+// come before that hold, which holds while one thread runs every program (U35): on more than one, a thread that
+// ends the supervisor meanwhile with no hold of it, as a crash it takes ends it (`EndActor`), could end the child
+// and free the record the log line reads (`EndChildren`; inferred).
 void Decided(byte* child, byte* message, long word) {
     raw {
         if word == 3 {
