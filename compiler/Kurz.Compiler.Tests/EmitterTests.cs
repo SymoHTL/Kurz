@@ -417,15 +417,16 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void The_lock_word_s_wait_and_wake_call_futex_by_its_number_on_each_architecture_and_windows_waits_on_the_address()
     {
-        // section 2, round 20, "Dir per arch": `futex` is 202 on x86-64 and 98 on AArch64, where 202 is `accept`, so each Linux
+        // section 2, round 20, "Dir per arch": `futex` is 202 on x86-64, and 98 on AArch64, where 202 is `accept`, so each Linux
         // architecture's file gives the lock word's wait and wake with its own number, which every program reaches through the lock of
-        // its streams (`Print`); Windows waits by `WaitOnAddress` on the 4 bytes of the word with no time limit (`INFINITE`) and wakes by
-        // `WakeByAddressSingle`, as Rust's futex does there
+        // its streams (`Print`): the wait by `FUTEX_WAIT_PRIVATE` (128) while the word holds the value the lock gives it, 2, with no time
+        // limit, and the wake of one by `FUTEX_WAKE_PRIVATE` (129); Windows waits by `WaitOnAddress` on the 4 bytes of the word with no
+        // time limit (`INFINITE`) and wakes by `WakeByAddressSingle`, as Rust's futex does there
         const string windowsWait = @"@WaitOnAddress\(ptr %[\w.]+, ptr %[\w.]+, i64 4, i32 -1\)";
         foreach (var (target, arch, wait, wake) in new[]
         {
-            (Target.Linux, Arch.X64, @"@syscall\(i64 202, ptr %", @"@syscall\(i64 202, ptr %"),
-            (Target.Linux, Arch.Arm64, @"@syscall\(i64 98, ptr %", @"@syscall\(i64 98, ptr %"),
+            (Target.Linux, Arch.X64, @"@syscall\(i64 202, ptr %[\w.]+, i64 128, i64 %[\w.]+, i64 0\)", @"@syscall\(i64 202, ptr %[\w.]+, i64 129, i64 1\)"),
+            (Target.Linux, Arch.Arm64, @"@syscall\(i64 98, ptr %[\w.]+, i64 128, i64 %[\w.]+, i64 0\)", @"@syscall\(i64 98, ptr %[\w.]+, i64 129, i64 1\)"),
             (Target.Windows, Arch.X64, windowsWait, @"@WakeByAddressSingle\(ptr %"),
             (Target.Windows, Arch.Arm64, windowsWait, @"@WakeByAddressSingle\(ptr %"),
         })
@@ -438,11 +439,47 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             {
                 var body = Regex.Match(ir, $@"^define [^\n]*@""?rt\.sys\.{function}\b[^\n]*\n(.*?)\n\}}", RegexOptions.Multiline | RegexOptions.Singleline);
                 Assert.True(body.Success, $"{target} {arch}: no `{function}` in the module");
-                Assert.Matches(call, body.Groups[1].Value);
+                Assert.True(Regex.IsMatch(body.Groups[1].Value, call), $"{target} {arch}: no `{call}` in `{function}`:\n{body.Groups[1].Value}");
             }
 
+            // the value the wait sleeps on, which the lock gives it: 2, taken with a thread that may sleep (`Lock`)
+            var locked = Regex.Match(ir, @"^define [^\n]*@""rt\.common\.Lock\.[0-9]+""\([^\n]*\n(.*?)\n\}", RegexOptions.Multiline | RegexOptions.Singleline);
+            Assert.True(locked.Success, $"{target} {arch}: no `Lock` in the module");
+            Assert.True(Regex.IsMatch(locked.Groups[1].Value, @"@""?rt\.sys\.LockWait\b[^\n(]*\(ptr %[\w.]+, i32 2\)"), $"{target} {arch}: `Lock` waits on no 2:\n{locked.Groups[1].Value}");
             Assert.Equal(target == Target.Linux ? 2 : 0, Regex.Count(ir, @"@syscall\(i64 (202|98), ")); // no other number of the two
         }
+    }
+
+    [Fact]
+    public void A_function_of_sys_that_neither_file_or_both_give_is_named_with_both_files()
+    {
+        // round 20, "Dir per arch": a call on a file finds the runtime's function in the target's file or in the architecture's, which the
+        // folder `sys` reads beside it (`SysFunction`); where neither gives it, the error names both files and the function, and where both
+        // do, which the runtime's check refuses as `redeclared` (V9), it names each declaration by its file and line, where `.Single` named
+        // neither
+        const string linux = "runtime/linux/linux.kz", x64 = "runtime/linux/x86-64/x86-64.kz";
+        var program = SourceText.FromString("program.kz", "print(Environment.Args().Count)\n");
+        CheckedRuntime Edited(string path, Func<string, string> edit, List<string> errors)
+        {
+            var files = Runtime.Files.Select(f => f.Path == path ? new RuntimeFile(f.Path, Encoding.UTF8.GetBytes(edit(Encoding.UTF8.GetString(f.Bytes).ReplaceLineEndings("\n")))) : f).ToList();
+            Assert.NotEqual(Runtime.Files.Select(f => f.Bytes), files.Select(f => f.Bytes)); // the file did change
+            return Runtime.Check(files, Target.Linux, Arch.X64, errors);
+        }
+
+        Assert.NotNull(Builder.Compile(program, [], Builder.CheckRuntime(Target.Linux, Arch.X64), true, cpu: () => Cpu.Baseline).Program); // the positive control
+
+        var errors = new List<string>();
+        var missing = Edited(linux, t => t.Replace("pub int Arguments(", "int Arguments(", StringComparison.Ordinal), errors);
+        Assert.Empty(errors); // only a program's call reaches `Arguments`, so that the check finds nothing missing
+        var none = Assert.Throws<InvalidOperationException>(() => Builder.Compile(program, [], missing, true, cpu: () => Cpu.Baseline));
+        Assert.True(none.Message.Contains(linux, StringComparison.Ordinal) && none.Message.Contains(x64, StringComparison.Ordinal) && none.Message.Contains("`Arguments`", StringComparison.Ordinal), none.Message);
+
+        var declared = Encoding.UTF8.GetString(Runtime.Files.Single(f => f.Path == linux).Bytes).ReplaceLineEndings("\n").Split('\n').ToList().FindIndex(l => l.StartsWith("pub int Arguments(", StringComparison.Ordinal)) + 1;
+        var twice = Edited(x64, t => t + "\npub int Arguments(int skip) => skip\n", errors);
+        var again = Encoding.UTF8.GetString(Runtime.Files.Single(f => f.Path == x64).Bytes).ReplaceLineEndings("\n").Split('\n').Length + 1;
+        Assert.Contains(errors, e => e.StartsWith($"{x64}:{again}: redeclared: ", StringComparison.Ordinal)); // the check refuses it
+        var both = Assert.Throws<InvalidOperationException>(() => Builder.Compile(program, [], twice, true, cpu: () => Cpu.Baseline));
+        Assert.True(declared > 0 && both.Message.Contains($"{linux}:{declared}", StringComparison.Ordinal) && both.Message.Contains($"{x64}:{again}", StringComparison.Ordinal) && both.Message.Contains("`Arguments`", StringComparison.Ordinal), both.Message);
     }
 
     [Fact]

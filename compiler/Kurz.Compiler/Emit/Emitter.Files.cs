@@ -92,14 +92,22 @@ public sealed partial class Emitter
     /// <summary>
     /// The IR name of a <c>pub</c> function of the runtime of the target, which only a program's calls on files and sockets call: of the
     /// target's file or of the architecture's, which the folder <c>sys</c> reads beside it (round 20, "Dir per arch"), as the lock word's
-    /// wait and wake by the number of <c>futex</c> on Linux.
+    /// wait and wake by the number of <c>futex</c> on Linux. Where neither file gives it, the error names both files; where more than one
+    /// declaration does, which the runtime's check refuses as <c>redeclared</c> (V9), it names each with its file and line.
     /// </summary>
-    private string SysFunction(string name) => Instance(
-        new[] { sys, arch }.SelectMany(u => u.Tree.Statements.OfType<FunctionDeclaration>()
+    private string SysFunction(string name)
+    {
+        var found = new[] { sys, arch }.SelectMany(u => u.Tree.Statements.OfType<FunctionDeclaration>()
             .Where(d => d.Name == name && (d.Modifiers & Modifiers.Pub) != 0)
-            .Select(d => u.Model.FunctionOf(d)))
-            .SingleOrDefault() ?? throw new InvalidOperationException($"{sys.File} has no `pub` function `{name}`, which a call on a file or a socket calls"),
-        NoMap);
+            .Select(d => (Unit: u, Declaration: d)))
+            .ToList();
+        return found switch
+        {
+            [var one] => Instance(one.Unit.Model.FunctionOf(one.Declaration), NoMap),
+            [] => throw new InvalidOperationException($"neither {sys.File} nor {arch.File} has a `pub` function `{name}`, which a call on a file or a socket calls"),
+            _ => throw new InvalidOperationException($"`{name}`, which a call on a file or a socket calls, is a `pub` function at {string.Join(" and at ", found.Select(f => $"{f.Unit.File}:{f.Declaration.Line}"))}, which the folder `sys` reads as one"),
+        };
+    }
 
     /// <summary>Whether the data type is <c>IoError</c>, which no file can declare beside the one every file sees (S1, V9).</summary>
     private static bool IsIoError(KurzType type) => type is DataType { Symbol.Name: "IoError" };
