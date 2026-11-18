@@ -143,7 +143,12 @@ flowchart TD
         conversion from an unsigned type to a signed one, red on a value above the signed maximum that raises no
         overflow in a test build, and on a function whose first instruction starts a block, which clang refuses
         without the entry block's branch, and on a function without uwtable, or without the inline stack probe on Linux
-        or with it on Windows; and ListTests, red on a mut field of the instance passed as mut in its method that the
+        or with it on Windows, and on a lock word's wait or wake by another architecture's number of futex, another
+        operation or another value, on st_mode read at a byte other than the one its architecture's struct stat holds it
+        at, and on a function of sys that neither file or both give whose error names not both files; and
+        HttpResponseTests, red on a build for Windows that says not supported at a line other than the statement that
+        made or first needed a queued lambda, class's defaults or constructor; and ListTests, red on a mut field of the
+        instance passed as mut in its method that the
         callee's write does not reach, on a list's or a string's block read or written after it was
         freed, under an allocator that makes every freed block inaccessible (a borrow that outlived its source, the
         name an arm binds among the programs), on lists or strings made and dropped that outgrow a system giving
