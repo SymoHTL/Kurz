@@ -75,8 +75,8 @@ runs it on one thread (U35; §6, the owner, 2026-11-17, #519, comment 6946657505
 header (Recommended)"), and `compiler/README.md` says whether a runner reads it. The line stands after its `// system:`
 line where it has one and before its `// rules:` line, and takes no other count *(assumed: the line as that answer
 gives it, in the place of the other optional lines, which the answer did not name)*. A header out of the shape this
-chapter gives, a `// threads:` line of another count or out of its place among it, is refused by the gate `reference`
-and by the compiler's runner of the corpus.
+chapter gives, a `// threads:` line of another count among it, is refused by the gate `reference` and by the compiler's
+runner of the corpus.
 
 The ids of both kinds are listed in chapter 12. The compiler's test suite parses each file and checks the errors of its
 front end, `syntax`, `semicolon`, `reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, or the absence of any diagnostic, against the header,
