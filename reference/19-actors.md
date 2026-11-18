@@ -1064,10 +1064,12 @@ big unbuilt") *(assumed, §6: the share read for a
 block that reaches no class instance, since every class instance a crossing reaches is copied)*; a `copy` at a call that crosses nothing copies every block on a path to a class
 instance that passes through no function value and no actor's reference, the instance among them, and shares by
 its count every other block *(assumed, §6: the answer read for a call inside one heap)*. A `weak` reference makes the
-block that holds it count as on a path for what such a copy copies, so that the block is copied, and its target is
+block that holds it count as on a path for what such a copy copies, where a path that passes through no function value and
+no actor's reference reaches that block, so that the block is copied, and its target is
 copied only through a strong path: the reference is no path the copy follows, and points at its target's copy where the
 call's copies hold that target strongly, and is null otherwise, as at a crossing *(assumed, §6: Q3 of comment 6896192351
-read for a call that crosses nothing, the block that holds a `weak` slot counted as on a path for what is copied)*. An argument after `copy` whose parameter is `weak`, at such a call, is a `weak` reference to
+read for a call that crosses nothing, the block that holds a `weak` slot counted as on a path for what is copied, the walk
+stopping at a function value and at an actor's reference for it as for every other block)*. An argument after `copy` whose parameter is `weak`, at such a call, is a `weak` reference to
 the argument's copy, which the caller holds as a temporary to the end of its statement, so that the callee reads that
 copy whether or not another copy of the call holds it *(assumed, §6: a temporary held to the end of its statement, read
 for the copy that `copy` makes)*. The copy of a map whose keys reach a
@@ -2973,7 +2975,8 @@ ends the expression at `spawn`, as the words of a policy do (U2), and after an a
 type's default (U27), the braces after it the actor's body; no parentheses after `on crash` before a block, no
 name in them, a second one, and a block that does not open on the line of its parameter are `syntax` (E4)
 *(assumed: as §6 marks it)*. The blocks `attempt { ... }` and `retry { ... }` of §6, which keep a crash to a piece of
-code, have no rule here but where each word is a name, and where, inside a header, it is the block's word again, and
+code, have no rule here but where each word is a name, and where, inside a header's brackets, arms, blocks and
+parentheses, each is the block's word again, and
 `compiler/README.md` says what the build does with them; in
 the condition, the collection or the subject before the block of an `if`, a `while`, a `for` or a `match` each word is a
 name, so that a variable of either name stands there, as a struct literal is no condition in Rust *(assumed: §6, the
@@ -3145,9 +3148,11 @@ path that ends with no value is (F3) (§6, the owner, 2026-11-16, #519, comment 
 "missing-return error"). `restart` there takes no knobs, the default's pause and no limit, as Akka's
 `Restart` directive carries none, and a knob after it, a type before the parameter and `return` in
 the block, outside a lambda in it, are `syntax` (E4); the three words are statements in the block alone,
-where each is the decision before anything but `=`, and anything after the decision on its line but a `}` that closes a block
-it stands in is `syntax` (E4) *(assumed: L5's one statement of a block written on one line, read for a decision, which
-§6 makes a statement)*, and names elsewhere, before `=` in the block among it, as `send` is (U6), and a lambda inside the
+where each is the decision before anything but `=`, and the token after the decision ends its statement as L5 ends one, the
+end of its line, a `;`, which is `semicolon` (L5), or a `}` that closes a block it stands in, what follows on the line read by
+that line's rules, as `else` after the `}` of an `if`'s block is, and any other token after the decision is `syntax` (E4) *(assumed: L5's
+end of a statement and its one statement of a block written on one line, read for a decision, which §6 makes a statement)*,
+and names elsewhere, before `=` in the block among it, as `send` is (U6), and a lambda inside the
 block decides nothing, its words names there *(assumed: as §6 marks it)*. A block can restart, so that its `spawn` keeps the
 copy of its arguments that a restart constructs from, as `on crash restart` keeps it (U22).
 
@@ -3357,7 +3362,7 @@ a container's CPU quota counted, where neither the line `threads = 4` of a `depl
 §6)*. A value of the line that is not a whole number above 0 is the compile error `threads-line`,
 and one of `KURZ_THREADS` ends the start with an error line and the id `threads-variable` *(assumed
 in §6: both ids, and the end of the start)*. The main thread runs the top-level code alone, and
-sleeps while it waits (U18; §6, Q3), but in a case marked `// threads: 1`, where its wait runs the ready actors and
+sleeps while it waits (U18; §6, Q3), except in a case marked `// threads: 1`, where its wait runs the ready actors and
 no worker thread runs (§6, the owner, 2026-11-17, #570, comment 6961064167, Q1). A message parked in a wait goes on on the thread that parked it,
 and an actor between messages moves to any thread (§6, the owner, 2026-11-17, #519, comment
 6946657505, Q2, "Stays on its thread (Recommended)"). A message that runs on another thread when the
