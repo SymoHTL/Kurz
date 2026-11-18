@@ -2794,6 +2794,10 @@ print(s.Count())
 
 Case: [actors/timeout-capped.kz](../corpus/actors/timeout-capped.kz)
 ```kurz
+// `Front`'s `Ask` runs, and its `within 2s` keeps the 100 ms its chain has left from the top-level code's `within` (U38), so
+// that its call `S.Get()`, which waits behind `Busy`'s 300 ms in `Store`'s inbox, is dropped there past that deadline (U37):
+// `Ask` raises `call-timeout`, `Front` restarts with `asked` at 0 (U22), and `Store` ran no `Get`
+
 // the thread held for `d`, with no call and no wait
 void Hold(duration d) {
     instant start = instant.Now
@@ -3647,12 +3651,14 @@ No case: the compiler builds no clause on a call or on a declaration.
 
 `within` is a word only where it stands, as `on crash`, `attempt` and `vouch` are, so that a variable may be named `within`
 (§6, the owner, 2026-11-13, #519, comment 6847932993, Q10, "Any order + contextual (Recommended)") *(assumed in §6: `within`
-among those words)*. The bound is a `duration`, and a value of another type there is `type-mismatch` *(proposed: the forms of §6
-write a duration and name no other type)*. A bound of zero or less sets a deadline that has passed, so that each call it bounds
-raises `call-timeout` at once and no id of its own is added, as Tokio's `timeout(Duration::ZERO, f)` elapses at its first wait
-(not checked at source) *(assumed: T4 of comment 6967147952)*. A bound whose deadline would pass the largest time the clock holds
-sets no deadline, as Tokio's `timeout` falls back on a far future where its sum overflows (not checked at source) *(assumed in
-§6)*.
+among those words)*. The bound is a `duration`, read as a condition is (C3): a value of another type there is
+`type-mismatch`, a `duration?` is `nullable-unchecked` (N2), and a call with a `void` success is `syntax` (O10); and a `{`
+of the block on a line after the bound's is `braces-required` at the line where the bound ends, as C1 has it of an `if`
+*(assumed in §6: proposed there and not put to the owner)*. A bound of zero or less sets a deadline that has passed, so
+that each call it bounds raises `call-timeout` at once and no id of its own is added, as Tokio's
+`timeout(Duration::ZERO, f)` elapses at its first wait (not checked at source) *(assumed: T4 of comment 6967147952)*. A
+bound whose deadline would pass the largest time the clock holds sets no deadline, as Tokio's `timeout` falls back on a
+far future where its sum overflows (not checked at source) *(assumed in §6)*.
 
 Case: [actors/timeout-zero.kz](../corpus/actors/timeout-zero.kz)
 ```kurz

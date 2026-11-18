@@ -4,6 +4,10 @@
 // threads: 1
 // rules: U37, U38, U22
 
+// `Front`'s `Ask` runs, and its `within 2s` keeps the 100 ms its chain has left from the top-level code's `within` (U38), so
+// that its call `S.Get()`, which waits behind `Busy`'s 300 ms in `Store`'s inbox, is dropped there past that deadline (U37):
+// `Ask` raises `call-timeout`, `Front` restarts with `asked` at 0 (U22), and `Store` ran no `Get`
+
 // the thread held for `d`, with no call and no wait
 void Hold(duration d) {
     instant start = instant.Now

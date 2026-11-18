@@ -2461,10 +2461,10 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>C3: a condition is a <c>bool</c>.</summary>
     /// <summary>
-    /// U40: the bound of a <c>within</c> block is a <c>duration</c>; a value of another type there is <c>type-mismatch</c> at its line, a
-    /// <c>longduration</c> among them (U40, proposed: the forms of section 6 write a duration and name no other type).
+    /// U40: the bound of a <c>within</c> block is a <c>duration</c>, read as a condition is (C3): a value of another type there is
+    /// <c>type-mismatch</c> at its line, a <c>longduration</c> among them, a <c>duration?</c> is <c>nullable-unchecked</c>, and a call with a
+    /// <c>void</c> success is <c>syntax</c> (O10) (section 6, assumed: the forms of that section write a duration and name no other type).
     /// </summary>
     private void CheckWithin(WithinStatement w)
     {
@@ -2479,6 +2479,7 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>C3: a condition is a <c>bool</c>.</summary>
     private void CheckCondition(Expression condition)
     {
         var t = CheckExpression(condition, Types.Bool);
