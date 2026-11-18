@@ -4295,12 +4295,12 @@ print(Cache.hits)
 
 A `per node` actor starts at the first message that names it, a call or a `send`, from any code, the
 top-level code, a function, another actor or itself, and a program that names it nowhere starts none,
-as Orleans activates a grain at its first call and C#'s `Lazy<T>` makes its value at its first use
-(§13) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*; a `send` starts it as a call does *(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*. Its constructor and its fields' defaults run on
+as Orleans activates a grain at its first call (not checked at source) and C#'s `Lazy<T>` makes its value
+at the first read of its `Value` (§13) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*; a `send` starts it as a call does *(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*. Its constructor and its fields' defaults run on
 the first caller's stack, as `spawn`'s do (U3), and a throw there is that caller's crash, under the
 caller's own policy: the half-built actor ends, the calls of other actors queued behind its start get
 `actor-gone`, and the first message after that starts it again, as Rust's `OnceLock::get_or_init`
-leaves its cell empty after a panic in its function *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. The crash names the line of the throw, as a
+leaves its cell empty after a panic in its function (checked 2026-11-18: its documentation, "the cell remains uninitialized") *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. The crash names the line of the throw, as a
 throw in a constructor at `spawn` does *(assumed: a reading of the build, proposed with this record and not put to the owner)*. Messages that reach it while it is built wait in its
 inbox for its start, and a message to it from the code its own start runs, a default that calls a
 function that calls `Cache.Get()`, waits for a start that waits for it, which the top-level code's
