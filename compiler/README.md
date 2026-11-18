@@ -983,7 +983,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `ActorNew` fills, the actor's record in the 144 bytes in front of it, the build's own layout, which no rule of the record names, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps
   the alignment of the allocator's block, as Rust's `ArcInner` pads its counts to what it holds, a
   `Vector128` field's 16 among it: the queue of many senders its messages are put on and the queue its
-  blocks are posted on, 24 bytes each, Dmitry Vyukov's intrusive queue of many producers and one consumer,
+  blocks are posted on, 24 bytes each, Dmitry Vyukov's intrusive queue of many producers and one consumer (not checked at source),
   which a sender appends to by one atomic swap of its end and a release store of the link and which the
   thread that holds the actor moves at its take into the inbox and the side list of the activation that
   waits in the message's chain, the blocks to the front of the inbox (the runtime's `Pushed`, `Popped`,
@@ -1018,7 +1018,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   number again, against the stores with release of `SlotTake` and `SlotFree` (section 6). The words the threads
   share are one block the runtime's `Start` makes: the locks of the streams of `print` and of the log, of the
   table of slots, of the queue of the pauses and of the blocks the top-level code's wait runs, each of Rust's
-  futex shape (`library/std/src/sys/sync/mutex/futex.rs`: a compare-exchange from 0 to 1, a spin, a swap of 2
+  futex shape (`library/std/src/sys/sync/mutex/futex.rs`, not checked at source: a compare-exchange from 0 to 1, a spin, a swap of 2
   and a sleep on the word while it holds 2, a swap of 0 and a wake where it found 2), the count of the actors
   and the table of every block's message, made there once; a `print` writes its line whole under its stream's
   lock, and a log line under the lock of standard error. `==` of two references

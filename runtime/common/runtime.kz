@@ -64,7 +64,8 @@ byte* Shared() {
 }
 
 // The lock whose word is at `word` taken, as Rust's standard library takes its `Mutex` on a futex
-// (`library/std/src/sys/sync/mutex/futex.rs`): 0 free, 1 taken, 2 taken with a thread that may sleep on it;
+// (`library/std/src/sys/sync/mutex/futex.rs`, not checked at source): 0 free, 1 taken, 2 taken with a thread
+// that may sleep on it;
 // a compare-exchange from 0 to 1 with acquire, and where it fails, a spin of up to 100 loads while the word
 // holds 1, then a swap to 2 with acquire, the thread put to sleep while the word holds 2 (`sys.LockWait`) and
 // the spin and the swap made again after each wake, until a swap finds the word 0. The hold raises the count
@@ -107,7 +108,8 @@ int LockTried(AtomicInt lock) {
     return found
 }
 
-// The word of the lock `lock` once it holds no 1, or after 100 loads that found 1, as Rust's `spin` loads it.
+// The word of the lock `lock` once it holds no 1, or after 100 loads that found 1, as Rust's `spin` loads it
+// (not checked at source).
 int LockSpun(AtomicInt lock) {
     mut int spins = 100
     raw {
@@ -122,7 +124,7 @@ int LockSpun(AtomicInt lock) {
 }
 
 // The lock whose word is at `word` let go: a swap to 0 with release, and where it found 2, one thread that
-// sleeps on it woken (`sys.LockWake`), as Rust's `unlock` wakes one; the count of the entries under way
+// sleeps on it woken (`sys.LockWake`), as Rust's `unlock` wakes one (not checked at source); the count of the entries under way
 // lowered, which `Lock` raised.
 void Unlock(int* word) {
     raw {
@@ -270,7 +272,7 @@ pub void FreePath(byte* p, string path) {
 // owner, 2026-11-11, "Success, as Rust"). Where `eprint`'s write failed, the report of `print-failed`
 // goes to standard error too, and `Raise` drops it where that write is refused or takes no byte (A17). The
 // writes of a line hold the lock of its stream (`StreamLock`), so that a line is written whole between the lines
-// of other threads, as Rust's `println!` holds the lock of standard output for its line, and the raise comes
+// of other threads, as Rust's `println!` holds the lock of standard output for its line (not checked at source), and the raise comes
 // after the lock was let go.
 pub void Print(int fd, string text, string file, int line) {
     long count = long(text.Bytes.Count)
@@ -3673,7 +3675,7 @@ pub void HeapLeft(byte* heap) {
 // the bytes of its stack, `stack`, the size its clause wrote or 2 MiB (U1): the address of that room,
 // the state, whose record holds the actor's reference, the index of the slot of the table it takes and its
 // number (U2). The count of the actors spawned, which is the number of the last one, is raised by one atomic
-// add (`Shared`, at 24), as Rust's `Arc` raises its count; a spawn whose add found the largest `long` ends the
+// add (`Shared`, at 24), as Rust's `Arc` raises its count (not checked at source); a spawn whose add found the largest `long` ends the
 // process as a refused allocation does, as a string past the largest `int` does (T15), so that no two actors of
 // the process have one number (design record, section 6, assumed there). No message reaches the actor while `spawn` constructs it, as
 // section 6 has it (assumed there): its reference is the spawner's once `spawn` returns, and a default of
@@ -4087,7 +4089,7 @@ pub void Enqueue(long index, long number, byte* message, bool bounded, long boun
 
 // The message `message` at the end of the queue of many senders at `queue`, whose end the senders swap at 0, whose
 // next message its holder takes at 8 and whose stub, a message's link alone, stands at 16, as Dmitry Vyukov's
-// intrusive queue of many producers and one consumer pushes: the message's link cleared, one atomic swap of the
+// intrusive queue of many producers and one consumer pushes (not checked at source): the message's link cleared, one atomic swap of the
 // end with acquire and release, which orders the senders, then the link of the message the swap gave stored
 // with release, which the holder loads with acquire (`Popped`), so that a sender never waits for another.
 void Pushed(byte* queue, byte* message) {
@@ -4099,7 +4101,7 @@ void Pushed(byte* queue, byte* message) {
 }
 
 // The first message of the queue of many senders at `queue` taken off it by its one holder, as Vyukov's queue pops
-// one: null where the queue holds none, and where a sender's swap stands before its link, which that sender's
+// one (not checked at source): null where the queue holds none, and where a sender's swap stands before its link, which that sender's
 // wake follows (`Enqueue`), so that the holder takes the message at its next turn. A message taken has its link
 // cleared, which its sender set before the holder could take it.
 byte* Popped(byte* queue) {
@@ -4141,7 +4143,7 @@ byte* Popped(byte* queue) {
 // it runs after the current message and before the queued ones (U28, U34); then each message, a call that waits
 // of the chain the actor's top activation waits in to the end of that activation's side list (layer 1; section
 // 6, "One-shot reply slot"), every other message to the end of the inbox, as tokio's `mpsc` channel pushes a
-// value at the tail of its list, so that an inbox keeps the order in which its messages were sent (U5, U15).
+// value at the tail of its list (not checked at source), so that an inbox keeps the order in which its messages were sent (U5, U15).
 void Moved(byte* state) {
     raw {
         mut byte* block = Popped(state - 120)
