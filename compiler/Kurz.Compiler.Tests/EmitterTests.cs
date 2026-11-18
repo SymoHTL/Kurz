@@ -967,6 +967,27 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.DoesNotMatch(@"(%[\w.]+) = extractvalue %kz\.actor %[\w.]+, 0(, !dbg ![0-9]+)?\r?\n\s+store i64 \1, ptr %v\.key\.", compiled.Ir);
     }
 
+    [Theory]
+    [InlineData("d", 0)]
+    [InlineData("2s", 0)]
+    [InlineData("-2s", 0)]
+    [InlineData("(d)", 0)]
+    [InlineData("ds[0]", 1)]
+    [InlineData("(ds[0])", 1)]
+    public void A_message_whose_clauses_bound_can_raise_with_no_call_in_it_is_built_in_a_heap_of_its_own(string bound, int heaps)
+    {
+        // U39, U12: the bound of a call's clause runs after the message is built, so a bound that can raise with no call in it, an index,
+        // builds the message in a heap of its own (the runtime's `MessageHeapNew`), which the crash of its builder frees (ActorTests,
+        // `A_message_whose_clauses_bound_crashes_its_builder_leaves_no_block_in_its_callees_heap`); a duration's literal, its sign
+        // included, and a read of a name, either in brackets, raise nothing, and the message is built in the callee's heap; the IR is
+        // read, since a call whose bound raises nothing answers alike from either heap
+        var compilation = Compile("actor Store {\n    pub int Get(List<int> xs) => xs[0]\n}\n\ns = spawn Store()\nds = [1s]\nd = 1s\nitems = [1]\n"
+            + $"print([d, ds[0]].Count)\nprint(s.Get(items) within {bound})\n", Builder.CheckRuntime(Builder.HostTarget!.Value));
+        var program = compilation.Program;
+        Assert.True(program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        Assert.Equal(heaps, Regex.Count(program.Ir, @"call ptr @""[^""]+\.MessageHeapNew\.[0-9]+[^""]*""\(\)"));
+    }
+
     [Fact]
     public void Remove_finds_the_slot_of_its_key_once_and_takes_the_slot_of_a_copy_at_its_offset()
     {

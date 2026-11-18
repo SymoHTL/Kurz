@@ -465,14 +465,17 @@ public sealed partial class Emitter
 
     /// <summary>
     /// U39, U19: whether the bound of a call's clause can raise with no call in it, an index out of range or an operator's
-    /// <c>overflow</c> or <c>divide-by-zero</c> (chapter 12), which crashes the actor whose code runs it: anything but a literal, its sign
-    /// included, or a read of a name, either in brackets; a bound that runs a call, a name that runs a property's among them, can wait
+    /// <c>overflow</c> or <c>divide-by-zero</c> (chapter 12), which crashes the actor whose code runs it: anything but a duration's literal,
+    /// a number with its unit (L14), its sign included, or a read of a name, either in brackets, a bound of another type being
+    /// <c>type-mismatch</c> (U39, U40); a bound that runs a call, a name that runs a property's among them, can wait
     /// (<see cref="SemanticModel.CanWait"/>).
     /// </summary>
     private static bool Raises(Expression bound) => bound switch
     {
         ParenthesizedExpression p => Raises(p.Inner),
-        IntegerLiteral or RealLiteral or UnitLiteral or UnaryExpression { Operand: IntegerLiteral or RealLiteral or UnitLiteral } or NameExpression => false,
+        UnitLiteral => false,
+        UnaryExpression { Operand: UnitLiteral } => false,
+        NameExpression => false,
         _ => true,
     };
 
