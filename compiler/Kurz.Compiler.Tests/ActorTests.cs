@@ -4884,6 +4884,101 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_call_past_its_deadline_raises_where_it_is_queued_before_another_message_runs()
+    {
+        // U37, U38: a call whose deadline passed before it is queued raises there, so that the crash of its caller, whose block of the
+        // top-level code prints first (U33), comes before `C`'s message that the caller sent, which stands ahead in the run queue
+        const string text = Hold + """
+            actor B {
+                pub int Get() => 1
+            }
+
+            actor C {
+                pub void Say() {
+                    print("c")
+                }
+
+                pub int Ping() => 1
+            }
+
+            actor T(C Other) {
+                pub int Slow() => Other.Ping()
+            }
+
+            actor A {
+                pub void Go(B b, C c) {
+                    within 100ms {
+                        send c.Say()
+                        Hold(150ms)
+                        print("a {b.Get()}")
+                    }
+                }
+            }
+
+            getter = spawn B()
+            sayer = spawn C()
+            slow = spawn T(sayer)
+            caller = spawn A() on crash (e) {
+                print("crash")
+                stop
+            }
+
+            send caller.Go(getter, sayer)
+            print(slow.Slow())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-deadline-queued");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["A#4 crashed: call-timeout at program.kz:27"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["crash", "c", "1"], "");
+    }
+
+    [Fact]
+    public void A_call_of_the_waiting_chain_past_its_deadline_is_dropped_from_the_side_of_the_waiting_actor()
+    {
+        // U17, U37: `Y`'s call back into `X`, which waits on `Y` in the same chain, stands on `X`'s side while `W` holds the thread past
+        // its deadline, so that `X` drops it unrun: `Y` raises `call-timeout`, and `X`, whose deadline stands, `callee-crashed`
+        const string text = Hold + """
+            actor W {
+                pub void Busy() {
+                    Hold(300ms)
+                }
+            }
+
+            actor X {
+                pub int Go(Y y, W w) {
+                    me = this
+                    return y.Work(me, w)
+                }
+
+                pub int Back() => 1
+            }
+
+            actor Y {
+                pub int Work(X x, W w) {
+                    send w.Busy()
+                    mut r = 0
+                    within 50ms {
+                        r = x.Back()
+                    }
+
+                    return r
+                }
+            }
+
+            xs = spawn X()
+            ys = spawn Y()
+            ws = spawn W()
+            print(xs.Go(ys, ws))
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-deadline-side");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Y#2 crashed: call-timeout at program.kz:26", "X#1 crashed: callee-crashed at program.kz:15"], crashes);
+        Ran((run.Code, run.Output, rest), 1, [], "error: callee-crashed at program.kz:36\n");
+    }
+
+    [Fact]
     public void A_chain_that_no_call_starts_has_no_deadline()
     {
         // U45, T9 of comment 6967625156: the chain of a `send` of the top-level code and the restart's chain carry no deadline, each call
@@ -5003,6 +5098,48 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var run = BuildAndRun(text, toolchain.Runtime, "actor-deadline-timer");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["B#1 crashed: thrown \"b\" at program.kz:3", "A#2 crashed: call-timeout at program.kz:12"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["2", "true"], "");
+    }
+
+    [Fact]
+    public void A_timer_that_fired_leaves_the_timers_of_the_other_waits()
+    {
+        // U36, U37: two activations wait on `B`, whose restart's pause of 1 s runs, one to 100 ms and one to 200 ms; the first timer
+        // fires and its wait ends, which leaves the second timer in place, so that the second wait ends at 200 ms too
+        const string text = """
+            actor B {
+                pub void Fail() {
+                    throw "b"
+                }
+
+                pub int Get() => 1
+            }
+
+            actor A {
+                pub void Go(B b, duration d) {
+                    within d {
+                        print("got {b.Get()}")
+                    }
+                }
+
+                pub int After() => 2
+            }
+
+            paused = spawn B() on crash restart after 1s
+            first = spawn A() on crash restart after 1ms
+            second = spawn A() on crash restart after 1ms
+            send paused.Fail()
+            start = instant.Now
+            send first.Go(paused, 100ms)
+            send second.Go(paused, 200ms)
+            print(second.After())
+            print(start.Elapsed < 700ms)
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-deadline-timers-two");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["B#1 crashed: thrown \"b\" at program.kz:3", "A#2 crashed: call-timeout at program.kz:12",
+            "A#3 crashed: call-timeout at program.kz:12"], crashes);
         Ran((run.Code, run.Output, rest), 0, ["2", "true"], "");
     }
 
