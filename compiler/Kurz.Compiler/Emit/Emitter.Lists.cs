@@ -111,11 +111,13 @@ public sealed partial class Emitter
     /// them, lets go of it there with the region's other temporaries, the last made first, as Rust drops the operands of an expression
     /// that one of its operands leaves (the Rust Reference, "Destructors", the drop scopes of operands; issue 569). The name is its own,
     /// since the value may be a literal or a constant, which another read gives by the same name and which <see cref="Take"/> would
-    /// then take for that read. A helper opens no region, and nothing leaves it between its arguments.
+    /// then take for that read. A value of no counted type holds nothing to let go of, nor does null, a list's or a map's without items,
+    /// as <see cref="Temp"/> lists neither; a function with no region, a helper's, takes no slot from a program's argument, as it
+    /// makes no counted temporary (<see cref="Temp"/> refuses one there).
     /// </summary>
     private string Taken(string value, KurzType type, List<string> taken)
     {
-        if (Counted(type) && value != "null" && regions.Count > 0)
+        if (Counted(type) && value != "null")
         {
             var name = $"taken#{++takenNames}";
             standIns[(fn, name)] = () => value;

@@ -580,12 +580,13 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void A_construction_left_by_a_later_argument_lets_go_of_what_its_slots_took()
+    public void A_construction_an_argument_leaves_lets_go_of_what_the_slots_before_it_took()
     {
-        // a construction, of a data value and of an instance, and a call of a parameter written `move`, left by the case a later argument
+        // a construction, of a data value and of an instance, and a call of a parameter written `move`, left by the case an argument
         // propagates out of the function, let go of every value a slot took from an argument before it, a copy, a count of a shared block
-        // and a new value, as Rust drops the operands it had evaluated (issue 569); a plain call, whose parameters borrow, the control;
-        // the blocks live across a second call of each, after one that warmed it up
+        // and a new value, as Rust drops the operands it had evaluated (issue 569); a plain call and a function value's, whose
+        // parameters borrow, and slots of an `int` and of a list without items, which hold no block, the controls; the blocks live
+        // across a second call of each, after one that warmed it up
         const string program = """
             data Missing
 
@@ -595,6 +596,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             data Single(Box A)
             data Triple(Box A, Box B, Box C)
             class Kept(Box A, Box B)
+            data Mixed(int N, List<int> Xs, Box B)
 
             Box | Missing Lose(Holder held) {
                 held.B = Box(2)
@@ -645,6 +647,15 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 return Both(held.B, copy Lose(held))
             }
 
+            string | Missing Valued(Holder held) {
+                f = (Box a, Box b) => "{a.N} {b.N}"
+                return f(copy held.B, copy Lose(held))
+            }
+
+            Mixed | Missing Uncounted(Holder held) {
+                return Mixed(5, List<int>(), copy Lose(held))
+            }
+
             Box | Missing Found(Holder held) {
                 return Box(3)
             }
@@ -692,6 +703,13 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 }
             }
 
+            int MissedMixed(Mixed | Missing r) {
+                match r {
+                    Mixed m => return 0
+                    Missing => return 1
+                }
+            }
+
             int Run(int row, Holder held) {
                 if row == 0 {
                     return MissedPair(Copied(held))
@@ -734,16 +752,24 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 }
 
                 if row == 10 {
+                    return MissedText(Valued(held))
+                }
+
+                if row == 11 {
+                    return MissedMixed(Uncounted(held))
+                }
+
+                if row == 12 {
                     return MissedPair(Built(held))
                 }
 
                 return MissedTriple(BuiltNew(held))
             }
 
-            names = ["Copied", "Shared", "Alone", "Two", "Made", "MovedCopy", "MovedNew", "MovedOne", "Called", "CalledShared", "Built", "BuiltNew"]
+            names = ["Copied", "Shared", "Alone", "Two", "Made", "MovedCopy", "MovedNew", "MovedOne", "Called", "CalledShared", "Valued", "Uncounted", "Built", "BuiltNew"]
             h = Holder(Box(1))
             mut missed = 0
-            for row in 0..<12 {
+            for row in 0..<14 {
                 missed = missed + Run(row, h)
                 before = HttpServer.Live()
                 missed = missed + Run(row, h)
@@ -757,7 +783,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(
             BuildAndRun(program, Blocks.Value, "construction-left-early"),
             0,
-            ["Copied 0", "Shared 0", "Alone 0", "Two 0", "Made 0", "MovedCopy 0", "MovedNew 0", "MovedOne 0", "Called 0", "CalledShared 0", "Built 0", "BuiltNew 0", "20"],
+            ["Copied 0", "Shared 0", "Alone 0", "Two 0", "Made 0", "MovedCopy 0", "MovedNew 0", "MovedOne 0", "Called 0", "CalledShared 0", "Valued 0", "Uncounted 0", "Built 0", "BuiltNew 0", "24"],
             "");
     }
 
@@ -821,10 +847,11 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             """)));
 
     [Fact]
-    public void A_construction_left_by_a_later_argument_lets_go_of_what_its_slots_took_the_last_first()
+    public void A_construction_an_argument_leaves_lets_go_of_what_the_slots_before_it_took_the_last_first()
     {
         // what the slots of a construction took before the argument that leaves it is let go of in the reverse of the order the
-        // arguments were evaluated, the copy of a call of two copies among them, and so are the arguments of a plain call, as Rust drops
+        // arguments were evaluated, the copy of a call of two copies among them, and so are the arguments of a plain call and of a
+        // function value's, as Rust drops
         // the operands of an expression that one of its operands leaves (the Rust Reference, "Destructors", drop scopes, operands;
         // issue 569): the instance of the larger class, made second, is freed before the smaller one, made first, a copy where the
         // call makes two, and no other block is freed while the program records but the tables of the session of those two copies,
@@ -855,6 +882,11 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 return Both(copy h.S, Large(1, 2, 3, 4), copy Lose())
             }
 
+            string | Missing Valued(Holder h) {
+                g = (Small a, Large b, Small c) => "{a.N} {b.A} {c.N}"
+                return g(copy h.S, Large(1, 2, 3, 4), copy Lose())
+            }
+
             int MissedTwo(Two | Missing r) {
                 match r {
                     Two t => return 0
@@ -876,23 +908,25 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
                     missed = MissedTwo(Made())
                 } else if row == 1 {
                     missed = MissedTwo(Copied(h))
-                } else {
+                } else if row == 2 {
                     missed = MissedText(Called(h))
+                } else {
+                    missed = MissedText(Valued(h))
                 }
 
                 HttpServer.Stop()
                 return missed
             }
 
-            names = ["Made", "Copied", "Called"]
+            names = ["Made", "Copied", "Called", "Valued"]
             holder = Holder(Small(7))
-            for row in 0..<3 {
+            for row in 0..<4 {
                 missed = Order(row, holder)
                 print("{names[row]} {HttpServer.LastFreedSmaller()} {HttpServer.FreedCount()} {missed}")
             }
 
             """;
-        Ran(BuildAndRun(program, FreeOrder.Value, "construction-left-early-order"), 0, ["Made true 2 1", "Copied true 3 1", "Called true 3 1"], "");
+        Ran(BuildAndRun(program, FreeOrder.Value, "construction-left-early-order"), 0, ["Made true 2 1", "Copied true 3 1", "Called true 3 1", "Valued true 3 1"], "");
     }
 
     /// <summary>
