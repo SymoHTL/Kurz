@@ -1505,6 +1505,58 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void The_queues_the_locks_and_the_slots_the_threads_share_are_taken_and_set_by_atomic_operations_of_their_orders()
+    {
+        // section 6, R19: a sender puts its message on the actor's queue by one swap of its end with acquire and release, after a
+        // relaxed store of the message's link, and stores the link of the end it found with release, which the holder loads with
+        // acquire (`Pushed`, `Popped`, Vyukov's queue); the lock of the shared words is Rust's futex mutex, a compare-exchange from 0
+        // to 1 with acquire, relaxed where it fails, relaxed loads in its spin, a swap of 2 with acquire, and its end a swap of 0 with
+        // release before the wake (`LockTried`, `LockSpun`, `Lock`, `Unlock`); the count of the actors is one relaxed add (`ActorNew`); a
+        // slot is set with release, its state before its number, cleared with release, its number before its link, and looked up with
+        // no lock by three loads with acquire, the number, the state and the number again (`SlotTake`, `SlotFree`, `Lookup`); the orders
+        // are what a thread of its own needs and one thread does not show
+        const string text = "actor Counter {\n    mut long count = 0\n\n    pub void Add(long n) {\n        count = count + n\n    }\n\n    pub long Get() => count\n}\n\n"
+            + "c = spawn Counter()\nsend c.Add(2)\nprint(c.Get())\n";
+        var program = Emit(text);
+        var ir = program.Ir.ReplaceLineEndings("\n");
+        string Runtime(string name)
+        {
+            var defined = Regex.Match(ir, $@"^define [^\n]*@""rt\.common\.{name}\.[0-9]+""\([^\n]*\n(.*?)\n\}}\n", RegexOptions.Multiline | RegexOptions.Singleline);
+            Assert.True(defined.Success, $"no function {name}");
+            return defined.Groups[1].Value;
+        }
+
+        void InOrder(string body, params string[] patterns)
+        {
+            var at = 0;
+            foreach (var pattern in patterns)
+            {
+                var found = new Regex(pattern).Match(body, at);
+                Assert.True(found.Success, $"no `{pattern}` after the place {at} of:\n{body}");
+                at = found.Index + found.Length;
+            }
+        }
+
+        InOrder(Runtime("Pushed"), @"store atomic ptr null, ptr %[\w.]+ monotonic, align 8", @"atomicrmw xchg ptr %[\w.]+, ptr %[\w.]+ acq_rel, align 8",
+            @"store atomic ptr %[\w.]+, ptr %[\w.]+ release, align 8");
+        InOrder(Runtime("Popped"), @"load atomic ptr, ptr %[\w.]+ acquire, align 8", @"load atomic ptr, ptr %[\w.]+ acquire, align 8",
+            @"load atomic ptr, ptr %[\w.]+ acquire, align 8", @"call void @""rt\.common\.Pushed\.\d+""", @"load atomic ptr, ptr %[\w.]+ acquire, align 8");
+        InOrder(Runtime("LockTried"), @"cmpxchg ptr %[\w.]+, i32 0, i32 1 acquire monotonic, align 4");
+        InOrder(Runtime("LockSpun"), @"load atomic i32, ptr %[\w.]+ monotonic, align 4", @"load atomic i32, ptr %[\w.]+ monotonic, align 4");
+        InOrder(Runtime("Lock"), @"call i32 @""rt\.common\.LockTried\.\d+""", @"call i32 @""rt\.common\.LockSpun\.\d+""",
+            @"atomicrmw xchg ptr %[\w.]+, i32 2 acquire, align 4", @"call i64 @""?rt\.sys\.LockWait");
+        InOrder(Runtime("Unlock"), @"atomicrmw xchg ptr %[\w.]+, i32 0 release, align 4", @"call i64 @""?rt\.sys\.LockWake");
+        InOrder(Runtime("ActorNew"), @"atomicrmw add ptr %[\w.]+, i64 1 monotonic, align 8", @"call i64 @""rt\.common\.SlotTake\.\d+""");
+        InOrder(Runtime("SlotTake"), @"call void @""rt\.common\.Lock\.\d+""", @"store atomic ptr %[\w.]+, ptr %[\w.]+ release, align 8",
+            @"store atomic i64 %[\w.]+, ptr %[\w.]+ release, align 8", @"call void @""rt\.common\.Unlock\.\d+""");
+        InOrder(Runtime("SlotFree"), @"call void @""rt\.common\.Lock\.\d+""", @"store atomic i64 0, ptr %[\w.]+ release, align 8",
+            @"store atomic i64 %[\w.]+, ptr %[\w.]+ release, align 8", @"call void @""rt\.common\.Unlock\.\d+""");
+        InOrder(Runtime("Lookup"), @"load atomic i64, ptr %[\w.]+ acquire, align 8", @"load atomic ptr, ptr %[\w.]+ acquire, align 8",
+            @"load atomic i64, ptr %[\w.]+ acquire, align 8");
+        Ran(Toolchain.Run(toolchain.Build(program, "shared-orders")), 0, ["2"], string.Empty);
+    }
+
+    [Fact]
     public void An_atomic_order_a_copy_holds_as_its_constant_that_rust_refuses_raises_at_the_call()
     {
         // R19: an order no call writes, held as a constant by a copy of a function (T35), is no compile error; the copy that holds

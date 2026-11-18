@@ -10,7 +10,8 @@ namespace Kurz.Compiler.Tests;
 /// interleavings of the threads of a Rust test and CDSChecker those of a C11 program (neither checked at source): the actor's state
 /// word, whose wakes, takes and ends of a hold say whether a thread holds the actor and whether an entry of it stands in the run queue,
 /// the reply of a call that waits, which its callee and the crash of its waiter each take by one atomic swap, and the queue of many
-/// senders an actor's messages are put on, which its holder moves into its own lists (<c>Pushed</c>, <c>Popped</c>). Each move of a model
+/// senders an actor's messages are put on, which its holder moves into its own lists (<c>Pushed</c>, <c>Popped</c>), the lock of the words
+/// the threads share (<c>Lock</c>, <c>Unlock</c>) and the lookup of an actor's slot, which takes no lock (<c>Lookup</c>). Each move of a model
 /// is one atomic operation of the runtime, or one plain read or write that no other thread races, and names the function of
 /// <c>runtime/common/runtime.kz</c> it transcribes, with the text of the atomic operation it is there and the texts of the masks of
 /// the state word's bits it decides by; a test holds every name and every such text to that file, a guard against a model that says
@@ -20,7 +21,8 @@ namespace Kurz.Compiler.Tests;
 /// (U17) or before its restart (U22), and no owner of a reply, and no timer, that reads or writes the waiter's frame once it is gone; the
 /// timer that fires at a call's deadline wakes the waiter and owns no reply (U36, U37); no <c>Ready</c> reads the reply of a wait that
 /// returned, which <c>Wait</c> takes off its activation at its read of the set word; no message of a queue lost, moved twice or moved
-/// before an earlier message of its sender (U5); and it finds each of these broken in a model
+/// before an earlier message of its sender (U5), no two holders of a lock and no thread asleep on a free one, and no lookup that gives
+/// another actor's state; and it finds each of these broken in a model
 /// broken so, the cases of <see cref="Break"/>. Its moves are sequentially consistent: the orders of the runtime's atomic operations,
 /// acquire and release, are the IR's to show (<c>EmitterTests</c>), not the explorer's.
 /// </summary>
@@ -82,6 +84,18 @@ public sealed class ModelTests
 
         /// <summary><c>Popped</c> returns null once it pushed the stub, with no second load of the link of the message it holds.</summary>
         StubPushedNotRead,
+
+        /// <summary><c>Unlock</c> lets go of the lock and wakes no thread that sleeps on its word.</summary>
+        UnlockWakesNothing,
+
+        /// <summary>A contended <c>Lock</c> sleeps while the word holds 1, which the end of a hold wakes no thread for.</summary>
+        WaitsOnOne,
+
+        /// <summary><c>Lookup</c> loads the slot's number once, before the state, and not again after it.</summary>
+        LookupReadsOnce,
+
+        /// <summary><c>SlotFree</c> stores the link of the free slots before it clears the slot's number.</summary>
+        LinkBeforeNumber,
     }
 
     /// <summary>
@@ -823,7 +837,204 @@ public sealed class ModelTests
             QueueAlways, QueueAtRest),
     ];
 
-    private static Model[] Models(Break broken) => [.. WordModels(broken), .. ReplyModels(broken), .. QueueModels(broken)];
+    // The words of the lock's model: the lock's word, the threads that hold the lock, the threads asleep on its word, the wakes those
+    // are given and not yet taken; then each strand's place and the word its last load, compare-exchange or swap found.
+    private const int LockWord = 0, LockHolders = 1, Sleeping = 2, Given = 3, LockShared = 4;
+
+    /// <summary>The first word of the strand numbered <paramref name="n"/> of the lock's model, its place.</summary>
+    private static int LockAt(int n) => LockShared + n * Own;
+
+    /// <summary>
+    /// A thread that takes the lock once and lets go of it (<c>Lock</c>, <c>Unlock</c>), as Rust's futex mutex: the compare-exchange from
+    /// 0 to 1, the spin, abstracted to one load, a second compare-exchange where the spin found 0, then the swap of 2 where the word
+    /// found is not 2, the wait on the word while it holds 2 (<c>sys.LockWait</c>, asleep until a wake), the spin and the swap again;
+    /// the end of the hold swaps 0 in and wakes one sleeper where it found 2 (<c>sys.LockWake</c>, lost where none sleeps).
+    /// </summary>
+    private static Strand Locker(string name, int at, Break broken)
+    {
+        void Held(int[] s)
+        {
+            s[LockHolders]++;
+            s[at] = 7;
+        }
+
+        Move Tried(int then) => new("LockTried", "lock.CompareExchange(0, 1, MemoryOrder.Acquire, MemoryOrder.Relaxed)", _ => true, s =>
+        {
+            if (s[LockWord] == 0)
+            {
+                s[LockWord] = 1;
+                Held(s);
+                return;
+            }
+
+            s[at + 1] = s[LockWord];
+            s[at] = then;
+        });
+        return new(name, at,
+        [
+            Tried(1),
+            new("LockSpun", "mut int state = lock.Load(MemoryOrder.Relaxed)", _ => true, s =>
+            {
+                s[at + 1] = s[LockWord];
+                s[at] = s[at + 1] == 0 ? 2 : 3;
+            }, ["while state == 1 && spins > 0 {"]),
+            Tried(3),
+            new("Lock", "lock.Swap(2, MemoryOrder.Acquire)", _ => true, s =>
+            {
+                if (s[at + 1] == 2)
+                {
+                    s[at] = 4;
+                    return;
+                }
+
+                var before = s[LockWord];
+                s[LockWord] = 2;
+                if (before == 0)
+                {
+                    Held(s);
+                    return;
+                }
+
+                s[at] = 4;
+            }, ["while state == 2 || lock.Swap(2, MemoryOrder.Acquire) != 0 {"]),
+            new("Lock", "sys.LockWait(word, 2)", _ => true, s =>
+            {
+                if (s[LockWord] == (broken == Break.WaitsOnOne ? 1 : 2))
+                {
+                    s[Sleeping]++;
+                    s[at] = 5;
+                    return;
+                }
+
+                s[at] = 6;
+            }),
+            new("Lock", "sys.LockWait(word, 2)", s => s[Given] > 0, s => { s[Given]--; s[at] = 6; }),
+            new("LockSpun", "mut int state = lock.Load(MemoryOrder.Relaxed)", _ => true, s => { s[at + 1] = s[LockWord]; s[at] = 3; }),
+            new("Unlock", "Swap(0, MemoryOrder.Release) == 2 {", _ => true, s =>
+            {
+                var before = s[LockWord];
+                s[LockWord] = 0;
+                s[LockHolders]--;
+                s[at] = before == 2 && broken != Break.UnlockWakesNothing ? 8 : -1;
+            }),
+            new("Unlock", "sys.LockWake(word)", _ => true, s =>
+            {
+                if (s[Sleeping] > 0)
+                {
+                    s[Sleeping]--;
+                    s[Given]++;
+                }
+
+                s[at] = -1;
+            }),
+        ]);
+    }
+
+    /// <summary>What every state of the lock's model keeps: one holder at most.</summary>
+    private static string? LockAlways(int[] s) => s[LockHolders] > 1 ? "two threads hold the lock" : null;
+
+    /// <summary>What a state of the lock's model in which no thread can move keeps: every thread took the lock and let go of it.</summary>
+    private static string? LockAtRest(int[] s) =>
+        Enumerable.Range(0, 3).Any(n => s[LockAt(n)] != -1) ? "a thread sleeps on the lock and nothing wakes it: a lost wake"
+        : s[LockWord] != 0 ? $"the lock's word is {s[LockWord]} with no thread holding it"
+        : null;
+
+    // The words of the lookup's model: the slot's word, the state of the actor 1 or 2 or the link of the free slots, -1, and its number,
+    // 0 where the slot is free; whether a lookup gave a state that is not its actor's; then each strand's place and the state it loaded.
+    private const int SlotWord = 0, SlotNumber = 1, Wrong = 2, SlotShared = 3;
+
+    /// <summary>The first word of the strand numbered <paramref name="n"/> of the lookup's model, its place.</summary>
+    private static int SlotAt(int n) => SlotShared + n * Own;
+
+    /// <summary>
+    /// The end of the actor 1 (<c>SlotFree</c>: the number cleared with release, then the free slots' link stored with release) and the
+    /// spawn of the actor 2 into the same slot (<c>SlotTake</c>: its state, then its number, each with release), under the lock of the
+    /// table, which orders them.
+    /// </summary>
+    private static Strand Recycler(int at, Break broken)
+    {
+        Move cleared = new("SlotFree", "AtomicLong.FromPtr(Ptr<long>(slot + 8)).Store(0, MemoryOrder.Release)", _ => true, s =>
+        {
+            s[SlotNumber] = 0;
+            s[at] = broken == Break.LinkBeforeNumber ? 2 : 1;
+        });
+        Move linked = new("SlotFree", "AtomicLong.FromPtr(Ptr<long>(slot)).Store(slotFree, MemoryOrder.Release)", _ => true, s =>
+        {
+            s[SlotWord] = -1;
+            s[at] = broken == Break.LinkBeforeNumber ? 1 : 2;
+        });
+        return new("recycler", at,
+        [
+            broken == Break.LinkBeforeNumber ? linked : cleared,
+            broken == Break.LinkBeforeNumber ? cleared : linked,
+            new("SlotTake", "AtomicPtr<byte>.FromPtr(Ptr<byte*>(slot)).Store(state, MemoryOrder.Release)", _ => true, s => { s[SlotWord] = 2; s[at] = 3; }),
+            new("SlotTake", "AtomicLong.FromPtr(Ptr<long>(slot + 8)).Store(number, MemoryOrder.Release)", _ => true, s => { s[SlotNumber] = 2; s[at] = -1; }),
+        ]);
+    }
+
+    /// <summary>
+    /// A lookup of the actor whose number is <paramref name="number"/> (<c>Lookup</c>, no lock): the number loaded with acquire, null where
+    /// it is another, the state loaded with acquire, the number loaded again, null where it changed, else the state.
+    /// </summary>
+    private static Strand Looker(string name, int at, int number, Break broken)
+    {
+        void Gave(int[] s, int state)
+        {
+            s[Wrong] |= state != number ? 1 : 0;
+            s[at] = -1;
+        }
+
+        return new(name, at,
+        [
+            new("Lookup", "if held.Load(MemoryOrder.Acquire) != number {\n            return null\n        }\n\n        byte* state", _ => true,
+                s => { s[at] = s[SlotNumber] == number ? 1 : -1; }),
+            new("Lookup", "byte* state = AtomicPtr<byte>.FromPtr(Ptr<byte*>(slot)).Load(MemoryOrder.Acquire)", _ => true, s =>
+            {
+                s[at + 1] = s[SlotWord];
+                if (broken == Break.LookupReadsOnce)
+                {
+                    Gave(s, s[at + 1]);
+                    return;
+                }
+
+                s[at] = 2;
+            }),
+            new("Lookup", "if held.Load(MemoryOrder.Acquire) != number {\n            return null\n        }\n\n        return state", _ => true, s =>
+            {
+                if (s[SlotNumber] != number)
+                {
+                    s[at] = -1;
+                    return;
+                }
+
+                Gave(s, s[at + 1]);
+            }),
+        ]);
+    }
+
+    /// <summary>The models of the lock and of the lookup of a slot.</summary>
+    private static Model[] SharedModels(Break broken) =>
+    [
+        // three threads that each take the lock and let go of it
+        new("three threads on one lock", new int[LockShared + 3 * Own],
+            [Locker("first", LockAt(0), broken), Locker("second", LockAt(1), broken), Locker("third", LockAt(2), broken)], LockAlways, LockAtRest),
+
+        // the actor 1 in its slot ends, the actor 2 takes the slot, while a lookup of each runs
+        new("a lookup while its slot is freed and taken again", Slots(),
+            [Recycler(SlotAt(0), broken), Looker("lookup of 1", SlotAt(1), 1, broken), Looker("lookup of 2", SlotAt(2), 2, broken)],
+            s => s[Wrong] != 0 ? "a lookup gave a state that is not its actor's" : null, _ => null),
+    ];
+
+    /// <summary>The first state of the lookup's model: the actor 1 in the slot, each strand at its place 0.</summary>
+    private static int[] Slots()
+    {
+        var state = new int[SlotShared + 3 * Own];
+        state[SlotWord] = 1;
+        state[SlotNumber] = 1;
+        return state;
+    }
+
+    private static Model[] Models(Break broken) => [.. WordModels(broken), .. ReplyModels(broken), .. QueueModels(broken), .. SharedModels(broken)];
 
     [Fact]
     public void The_state_word_and_the_reply_keep_every_interleaving_of_their_threads()
@@ -851,6 +1062,48 @@ public sealed class ModelTests
         }
     }
 
+    [Fact]
+    public void The_lock_and_the_lookup_of_a_slot_keep_every_interleaving_of_their_threads()
+    {
+        // three threads on one futex lock: one holder at a time and no thread left asleep on a free lock; a lookup with no lock while
+        // its slot is freed and taken by another actor: no lookup gives the other actor's state or the link of the free slots (section 6)
+        foreach (var model in SharedModels(Break.None))
+        {
+            var (broken, states) = Explore(model);
+            Assert.True(broken is null, $"{model.Name}: {broken?.What} after {string.Join(", ", broken?.Path ?? [])}");
+            Assert.True(states >= 40, $"{model.Name}: {states} states");
+        }
+    }
+
+    [Fact]
+    public void Each_word_the_threads_share_is_read_and_written_under_its_lock()
+    {
+        // section 6: the table of slots, the queue of the pauses, the blocks the top-level code's wait runs and the streams of `print`
+        // and of the log are each read or written between the take of their lock and its end, which one thread cannot show
+        (string Function, string Take, string Access, string End)[] held =
+        [
+            ("Print", "StreamLock(fd)", "sys.WriteOut(fd, buffer + done, total - done)", "StreamUnlock(fd)"),
+            ("LogLine", "StreamLock(2)", "sys.Write(2, logBuffer + done, n - done)", "StreamUnlock(2)"),
+            ("SlotsUsed", "Lock(SlotLock())", "used = slotsUsed", "Unlock(SlotLock())"),
+            ("SlotTake", "Lock(SlotLock())", "mut long index = slotFree", "Unlock(SlotLock())"),
+            ("SlotFree", "Lock(SlotLock())", "slotFree = index", "Unlock(SlotLock())"),
+            ("Pause", "Lock(PauseLock())", "paused = state", "Unlock(PauseLock())"),
+            ("Unpause", "Lock(PauseLock())", "paused = after", "Unlock(PauseLock())"),
+            ("PauseDue", "Lock(PauseLock())", "due = *Ptr<long>(*Ptr<byte*>(paused - 80) + 32)", "Unlock(PauseLock())"),
+            ("PauseEnded", "Lock(PauseLock())", "paused = *Ptr<byte*>(*Ptr<byte*>(paused - 80) + 40)", "Unlock(PauseLock())"),
+            ("Post", "Lock(RootLock())", "Append(rootBlocks, message)", "Unlock(RootLock())"),
+            ("RootTaken", "Lock(RootLock())", "message = Taken(rootBlocks)", "Unlock(RootLock())"),
+        ];
+        foreach (var (function, take, access, end) in held)
+        {
+            var body = Body(function);
+            var taken = body.IndexOf(take, StringComparison.Ordinal);
+            var at = body.IndexOf(access, StringComparison.Ordinal);
+            Assert.True(taken >= 0 && at > taken && body.IndexOf(end, at, StringComparison.Ordinal) > at,
+                $"`{function}` holds no `{access}` between `{take}` and `{end}`");
+        }
+    }
+
     [Theory]
     [InlineData(Break.WaiterAfterEnqueue, "a call and its answer", "a lost wake")]
     [InlineData(Break.ReadThenWrite, "a call, its answer and the crash of its waiter", "two owners of the reply")]
@@ -869,6 +1122,10 @@ public sealed class ModelTests
     [InlineData(Break.ReadyAfterReturn, "a call, its answer or its drop, and its deadline", "once its wait had returned")]
     [InlineData(Break.WakeBeforeLink, "a queue of many senders and its holder", "a lost message")]
     [InlineData(Break.StubPushedNotRead, "a queue of many senders and its holder", "a lost message")]
+    [InlineData(Break.UnlockWakesNothing, "three threads on one lock", "a lost wake")]
+    [InlineData(Break.WaitsOnOne, "three threads on one lock", "a lost wake")]
+    [InlineData(Break.LookupReadsOnce, "a lookup while its slot is freed and taken again", "not its actor's")]
+    [InlineData(Break.LinkBeforeNumber, "a lookup while its slot is freed and taken again", "not its actor's")]
     public void The_explorer_finds_each_break_of_a_model_in_the_model_it_breaks(Break broken, string name, string what)
     {
         // each break found in the model it breaks, with the moves that reach it: the explorer's own red proof
@@ -880,19 +1137,20 @@ public sealed class ModelTests
         Assert.NotEmpty(found.Path);
     }
 
+    /// <summary>The body of the function <paramref name="function"/> of <c>runtime/common/runtime.kz</c>, which a test holds a text of to.</summary>
+    private static string Body(string function)
+    {
+        var text = Encoding.UTF8.GetString(Runtime.Files.Single(f => f.Path == "runtime/common/runtime.kz").Bytes).ReplaceLineEndings("\n");
+        var declared = Regex.Match(text, $@"^(pub )?[\w*<>]+ {function}\([^\n]*\{{\n(.*?)\n\}}\n", RegexOptions.Multiline | RegexOptions.Singleline);
+        Assert.True(declared.Success, $"runtime/common/runtime.kz declares no function `{function}`, which a test of the models names");
+        return declared.Groups[2].Value;
+    }
+
     [Fact]
     public void Each_move_of_the_models_names_a_function_of_the_runtime_and_the_text_it_transcribes_in_its_order()
     {
         // the guard against drift: every function a move names is declared in runtime/common/runtime.kz, the text a move transcribes and
         // the texts it decides by stand in that function's body, and the moves of one function in a strand stand in their order there
-        var text = Encoding.UTF8.GetString(Runtime.Files.Single(f => f.Path == "runtime/common/runtime.kz").Bytes).ReplaceLineEndings("\n");
-        string Body(string function)
-        {
-            var declared = Regex.Match(text, $@"^(pub )?[\w*<>]+ {function}\([^\n]*\{{\n(.*?)\n\}}\n", RegexOptions.Multiline | RegexOptions.Singleline);
-            Assert.True(declared.Success, $"runtime/common/runtime.kz declares no function `{function}`, which a move of the models names");
-            return declared.Groups[2].Value;
-        }
-
         var strands = Models(Break.None).SelectMany(m => m.Strands).ToList();
         var moves = strands.SelectMany(s => s.Moves).ToList();
         Assert.True(moves.Select(m => m.Function).Distinct().Count() >= 12, string.Join(", ", moves.Select(m => m.Function).Distinct()));
