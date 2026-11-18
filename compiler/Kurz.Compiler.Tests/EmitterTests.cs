@@ -451,6 +451,38 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_directory_s_creation_reads_st_mode_at_the_byte_of_its_architecture_s_struct_stat()
+    {
+        // S8, section 2, round 20, "Dir per arch": `Directory.Create` takes a directory that is there by the type in `st_mode`, at byte
+        // 24 of x86-64's `struct stat` and at byte 16 of AArch64's, the kernel's generic one, where 24 is `st_uid`; each Linux
+        // architecture's file gives the byte (`StatModeAt`), the emitted call passes it to `CreateDirectories`, and `IsDirectory` reads
+        // the mode at the byte it was given
+        const string text = "void | IoError Make() {\n    Directory.Create(\"made\")\n}\n\nMake() else {\n    IoError e => print(e)\n}\n";
+        foreach (var (arch, at) in new[] { (Arch.X64, 24), (Arch.Arm64, 16) })
+        {
+            var cpu = arch == Arch.X64 ? Cpu.Baseline : Cpu.ArmBaseline;
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], Builder.CheckRuntime(Target.Linux, arch), true, cpu: () => cpu);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var ir = compilation.Program.Ir.ReplaceLineEndings("\n");
+            string Body(string function)
+            {
+                var defined = Regex.Match(ir, $@"^define [^\n]*@""?{function}\b[^\n]*\n(.*?)\n\}}", RegexOptions.Multiline | RegexOptions.Singleline);
+                Assert.True(defined.Success, $"{arch}: no `{function}` in the module");
+                return defined.Groups[1].Value;
+            }
+
+            var given = Body(@"rt\.sys\.StatModeAt");
+            Assert.True(Regex.IsMatch(given, $@"\bi64 {at}\b") && !Regex.IsMatch(given, $@"\bi64 {40 - at}\b"), $"{arch}: `StatModeAt` gives no {at}:\n{given}");
+            var made = Body(@"f\.Make\.[0-9]+");
+            Assert.True(Regex.IsMatch(made, @"(%[\w.]+) = call i64 @""?rt\.sys\.StatModeAt\b[^\n(]*\(\)[^\n]*\n(?:[^\n]*\n)*?[^\n]*call i64 @""?rt\.sys\.CreateDirectories\b[^\n(]*\(ptr %[\w.]+, i64 %[\w.]+, i64 \1\)"),
+                $"{arch}: `CreateDirectories` is not given what `StatModeAt` gave:\n{made}");
+            var read = Body(@"rt\.sys\.IsDirectory");
+            Assert.True(Regex.IsMatch(read, @"getelementptr i8, ptr %[\w.]+, i64 %[\w.]+") && !Regex.IsMatch(read, @"getelementptr i8, ptr %[\w.]+, i64 (16|24)\b"),
+                $"{arch}: `IsDirectory` reads no byte it was given, or one of its own:\n{read}");
+        }
+    }
+
+    [Fact]
     public void A_function_of_sys_that_neither_file_or_both_give_is_named_with_both_files()
     {
         // round 20, "Dir per arch": a call on a file finds the runtime's function in the target's file or in the architecture's, which the

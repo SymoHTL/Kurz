@@ -1,7 +1,7 @@
 // The runtime's code for Linux on x86-64 (design record, section 2, round 20, "Dir per arch"), read into
 // the folder `sys` beside `runtime/linux/linux.kz`: the switch of a thread to an actor's stack and back
-// under the System V calling convention, the first frame of an actor's stack, and the lock word's wait and wake
-// by the number of `futex` on this architecture.
+// under the System V calling convention, the first frame of an actor's stack, the lock word's wait and wake
+// by the number of `futex` on this architecture, and the byte of `st_mode` in the `struct stat` that `stat` fills.
 
 // The switch from the side whose save area is `from` to the side whose save area is `to` (design record,
 // section 2; section 3, `naked`, R12), as Rust's stackful coroutines switch (corosensei's
@@ -79,3 +79,9 @@ pub long LockWake(int* word) {
 
     return result
 }
+
+// The byte of `st_mode` in the `struct stat` that `stat` and `fstat` fill on x86-64, 24, after `st_dev`, `st_ino` and
+// an `st_nlink` of 8 bytes (the kernel's `arch/x86/include/uapi/asm/stat.h`, as a system installs it; the C library's
+// struct on x86-64 not checked at source), where AArch64's is 16 (`IsDirectory` in `runtime/linux/linux.kz`, which
+// the emitted `Directory.Create` passes it to).
+pub long StatModeAt() => 24

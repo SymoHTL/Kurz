@@ -545,9 +545,11 @@ below (S1). `OpenFile` opens close-on-exec, a file it
 creates with the permissions 0666 less the `umask` (S2); `OpenFile` and `ReadFile` call again where a
 signal interrupted them; `WriteFile` calls `Write` again with the rest and returns the bytes written
 before a call that took none (S4); `CloseFile` takes an interrupt for no failure; `FileSize` and
-`FileExists` read `stat` into a page each thread maps at its first use, at the offsets of x86-64's
-`struct stat`; `CreateDirectories` creates the directories above that are missing, as Rust's
-`fs::create_dir_all` does, and `ListDirectory` reads the names `readdir` gives at byte 19 of the GNU C
+`FileExists` read `stat` into a page each thread maps at its first use, at the offsets of the
+architecture's `struct stat`, which agree on `st_size` and `st_mtime`; `CreateDirectories` creates the
+directories above that are missing, as Rust's `fs::create_dir_all` does, reading `st_mode` at the byte
+the architecture's file gives, 24 on x86-64 and 16 on AArch64 (`StatModeAt`, which the emitted call passes
+it), and `ListDirectory` reads the names `readdir` gives at byte 19 of the GNU C
 library's `struct dirent` (S8). `Listen` and `Connect` take an address as `CPath` copies it, read
 its port after its last `:` and its host by `inet_pton` where it is a literal of IPv4, or of IPv6 inside
 `[` and `]` with a scope id in digits after a `%` and a port without a `+`, as Rust's parse of a socket

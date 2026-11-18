@@ -280,7 +280,8 @@ public sealed partial class Emitter
             case CallKind.DirectoryCreate:
                 {
                     var count = fn.Value($"and i64 {fn.Value($"extractvalue %kz.str {path}, 1")}, 9223372036854775807"); // without the mark of a block
-                    var r = SysCall("CreateDirectories", $"ptr {c}, i64 {count}");
+                    var modeAt = SysCall("StatModeAt", ""); // the byte of `st_mode` in the architecture's `struct stat`, which its file gives
+                    var r = SysCall("CreateDirectories", $"ptr {c}, i64 {count}, i64 {modeAt}");
                     FreePath(c, path);
                     FailBelowZero(o, r, path);
                     Succeed(o, null);

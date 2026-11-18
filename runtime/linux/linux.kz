@@ -2211,8 +2211,9 @@ pub long DeleteDirectory(byte* path) {
 
 // The status of what has the path, by `stat`, which follows a link, as Rust's `fs::metadata` does,
 // into the thread's page: 0, or the failure, `ENOMEM` (12) where the page cannot be mapped. The page
-// holds x86-64's `struct stat` (the trace above reads x86-64's forms of a call): `st_mode` at its
-// byte 24 and `st_size` at its byte 48.
+// holds the `struct stat` of the architecture, x86-64's or AArch64's, the kernel's generic one, which
+// agree on `st_size` at byte 48 and `st_mtime` at byte 88 and differ in `st_mode`: at byte 24 on x86-64
+// and at byte 16 on AArch64, where 24 is `st_uid`, which each architecture's file gives (`StatModeAt`).
 long Status(byte* path) {
     mut long result = -12
     raw {
@@ -2306,15 +2307,16 @@ pub long FileModified(byte* path, mut long nanoseconds) {
     return 0
 }
 
-// Whether a directory has the path: its type in `st_mode` (`S_IFMT`, 0o170000) is `S_IFDIR` (0o40000).
-bool IsDirectory(byte* path) {
+// Whether a directory has the path: its type in `st_mode` (`S_IFMT`, 0o170000), at the byte `modeAt` of
+// the page (`Status`), is `S_IFDIR` (0o40000).
+bool IsDirectory(byte* path, long modeAt) {
     if Status(path) < 0 {
         return false
     }
 
     mut bool directory = false
     raw {
-        directory = (*Ptr<int>(status + 24) & 61440) == 16384
+        directory = (*Ptr<int>(status + modeAt) & 61440) == 16384
     }
 
     return directory
@@ -2322,14 +2324,15 @@ bool IsDirectory(byte* path) {
 
 // `mkdir` of the path with the permissions 0777 (511) less the `umask`: 0 where it made the directory,
 // or where a directory has the path and the failure is not `ENOENT` (2), as Rust's `create_dir_all`
-// takes a directory that is there; else the failure.
-long MakeDirectory(byte* path) {
+// takes a directory that is there, which `st_mode` at the byte `modeAt` of the status says (`IsDirectory`);
+// else the failure.
+long MakeDirectory(byte* path, long modeAt) {
     mut long result = 0
     raw {
         result = Checked(long(mkdir(path, 511)))
     }
 
-    if result < 0 && result != -2 && IsDirectory(path) {
+    if result < 0 && result != -2 && IsDirectory(path, modeAt) {
         return 0
     }
 
@@ -2340,8 +2343,10 @@ long MakeDirectory(byte* path) {
 // missing, as Rust's `fs::create_dir_all` creates them: where `mkdir` finds no directory above, the
 // one above is created first and `mkdir` made again. An empty path is created already. The byte after
 // the `count` is written NUL while the call runs and given back after it, so that a path ends where the
-// directory above ends: at its last `/` with bytes in front of it, without the `/`s at its end.
-pub long CreateDirectories(byte* path, long count) {
+// directory above ends: at its last `/` with bytes in front of it, without the `/`s at its end. `modeAt`
+// is the byte of `st_mode` in the architecture's `struct stat`, which the emitted call reads from the
+// architecture's file (`StatModeAt`), since this file calls none of that file's functions.
+pub long CreateDirectories(byte* path, long count, long modeAt) {
     if count == 0 {
         return 0
     }
@@ -2350,7 +2355,7 @@ pub long CreateDirectories(byte* path, long count) {
     raw {
         byte kept = path[count]
         path[count] = 0
-        result = MakeDirectory(path)
+        result = MakeDirectory(path, modeAt)
         if result == -2 {
             mut long end = count
             while end > 1 && path[end - 1] == 47 {
@@ -2365,9 +2370,9 @@ pub long CreateDirectories(byte* path, long count) {
                 end = end - 1
             }
 
-            result = CreateDirectories(path, end)
+            result = CreateDirectories(path, end, modeAt)
             if result == 0 {
-                result = MakeDirectory(path)
+                result = MakeDirectory(path, modeAt)
             }
         }
 

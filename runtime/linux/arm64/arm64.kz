@@ -1,8 +1,8 @@
 // The runtime's code for Linux on 64-bit Arm (design record, section 2, round 20, "Dir per arch"), read
 // into the folder `sys` beside `runtime/linux/linux.kz`: the switch of a thread to an actor's stack and
 // back under the AArch64 procedure call standard, and the first frame of an actor's stack (the owner,
-// 2026-11-15, #519, comment 6892812780, Q2, "Rust: AArch64 switch now"), and the lock word's wait and wake by
-// the number of `futex` on this architecture.
+// 2026-11-15, #519, comment 6892812780, Q2, "Rust: AArch64 switch now"), the lock word's wait and wake by
+// the number of `futex` on this architecture, and the byte of `st_mode` in the `struct stat` that `stat` fills.
 
 // The switch from the side whose save area is `from` to the side whose save area is `to` (design record,
 // section 2; section 3, `naked`, R12), as Rust's stackful coroutines switch on AArch64 (corosensei's
@@ -92,3 +92,9 @@ pub long LockWake(int* word) {
 
     return result
 }
+
+// The byte of `st_mode` in the `struct stat` that `stat` and `fstat` fill on AArch64, 16, after `st_dev` and `st_ino`,
+// where 24 is `st_uid` (the kernel's generic `include/uapi/asm-generic/stat.h`, as a system installs it, which Arm
+// Linux takes; the C library's struct on AArch64 not checked at source), where x86-64's is 24 (`IsDirectory` in
+// `runtime/linux/linux.kz`, which the emitted `Directory.Create` passes it to).
+pub long StatModeAt() => 16
