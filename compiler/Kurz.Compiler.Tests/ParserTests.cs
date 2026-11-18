@@ -1718,6 +1718,17 @@ public sealed class ParserTests
     }
 
     [Theory]
+    [InlineData("w = spawn Worker() on crash (c) {\n    stop; print(1)\n}", "(assign-or-declare w (spawn (call Worker) [on crash 1 block (lambda (c) {(decide stop) (call print (int 1))})]))")]
+    public void A_semicolon_after_a_decision_is_semicolon_and_the_statement_after_it_parses(string program, string tree)
+    {
+        // U29 with L5: a `;` after a decision ends its statement as L5 ends one, so that it is `semicolon` at its line, not `syntax`,
+        // and the statement after it on that line parses on its own (assumed: L5's end of a statement, read for a decision)
+        var (parsed, diagnostics) = Parse(program);
+        Assert.Equal([(ErrorIds.Semicolon, 2)], diagnostics.Items.Select(d => (d.Id, d.Line)));
+        Assert.Equal(tree, SyntaxPrinter.Print(parsed));
+    }
+
+    [Theory]
     [InlineData("c = spawn Worker() on crash ()", 1)] // U28: one name in the parentheses
     [InlineData("c = spawn Worker() on crash (c, d) {\n    stop\n}", 1)]
     [InlineData("c = spawn Worker() on crash (Crashed c) {\n    stop\n}", 1)] // U29: and no type (assumed: S3)
