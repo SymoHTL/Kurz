@@ -95,6 +95,7 @@ pub long LockWake(int* word) {
 
 // The byte of `st_mode` in the `struct stat` that `stat` and `fstat` fill on AArch64, 16, after `st_dev` and `st_ino`,
 // where 24 is `st_uid` (the kernel's generic `include/uapi/asm-generic/stat.h`, as a system installs it, which Arm
-// Linux takes; the C library's struct on AArch64 not checked at source), where x86-64's is 24 (`IsDirectory` in
-// `runtime/linux/linux.kz`, which the emitted `Directory.Create` passes it to).
+// Linux takes; the C library's struct on AArch64 not checked at source), where x86-64's is 24; the emitted
+// `Directory.Create` passes it to `CreateDirectories` in `runtime/linux/linux.kz`, which hands it through `MakeDirectory`
+// to `IsDirectory`, the reader of the byte.
 pub long StatModeAt() => 16
