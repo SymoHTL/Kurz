@@ -989,6 +989,22 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_message_whose_clauses_bound_is_the_name_of_a_property_is_built_in_a_heap_of_its_own()
+    {
+        // U39, U12, K7: a name that reads a property inside its class, `Bound`, is the call of its getter, which can raise, an index
+        // there, and the checker reads it as a call that can wait (`Checker.Calls`, `SemanticModel.CanWait`), so that its message is
+        // built in a heap of its own, as one whose bound runs a call is; the name of a field, `d`, raises nothing, and its message is
+        // built in the callee's heap: one call of `MessageHeapNew` in the IR, the property's
+        var compilation = Compile("actor Store {\n    pub int Get(List<int> xs) => xs[0]\n}\n\nclass Box {\n    List<duration> ds = [1s]\n"
+            + "    duration d = 1s\n\n    duration Bound => ds[0]\n\n    pub void Ask(Store store, List<int> items) {\n"
+            + "        print(store.Get(items) within Bound)\n        print(store.Get(items) within d)\n    }\n}\n\ns = spawn Store()\nBox().Ask(s, [1])\n",
+            Builder.CheckRuntime(Builder.HostTarget!.Value));
+        var program = compilation.Program;
+        Assert.True(program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        Assert.Equal(1, Regex.Count(program.Ir, @"call ptr @""[^""]+\.MessageHeapNew\.[0-9]+[^""]*""\(\)"));
+    }
+
+    [Fact]
     public void Remove_finds_the_slot_of_its_key_once_and_takes_the_slot_of_a_copy_at_its_offset()
     {
         // hashbrown's `remove_entry` finds the key's slot once, and so does the helper of `Remove`: where the block it found the slot in
