@@ -31,9 +31,10 @@ public sealed partial class Emitter
     private List<List<(string Value, KurzType Type)>> regions = [];
     private List<List<(string Slot, KurzType Type)>> scopes = [];
 
-    // the names among a region's temporaries that stand for what the region's end, or a jump out of it, lets go of in their place: a
-    // value a slot of a call took before the call's last argument (Taken), and the slot of a copy a call of more than one copy made
-    // before its last, loaded there (CopiedLate); a name of their own, which no IR value has, by the function they stand in
+    // the names among a region's temporaries that stand for what the region's end, or a jump out of it, lets go of in their place, by
+    // the function they stand in, of two kinds: a made-up name, which no IR value has, for a value a slot of a call took before the
+    // call's last argument (Taken), and the copy's own slot, an IR name, for a copy a call of more than one copy made before its
+    // last, loaded when it is let go of (CopiedLate)
     private readonly Dictionary<(IrFunction Function, string Name), Func<string>> standIns = new();
     private int takenNames;
 
