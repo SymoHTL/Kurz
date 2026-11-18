@@ -960,6 +960,46 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void A_message_to_the_name_of_a_per_node_actor_brings_what_its_start_throws_and_nothing_of_its_methods()
+    {
+        // U52 (assumed: T29 of issue 519, comment 6983903100): a call or a `send` through the name of a `per node` actor starts it where
+        // none stands, its defaults run on the caller's stack, whose throw is the caller's crash, as at a `spawn` (U3); the method the
+        // message runs runs in the callee, whose crash its caller gets as `callee-crashed` (U20), so that its throw adds nothing
+        const string text = """
+            data EStart
+            data EMethod
+
+            int Started() {
+                throw EStart
+            }
+
+            actor Cache per node {
+                int first = Started()
+
+                pub int Get() {
+                    throw EMethod
+                }
+
+                pub void Add() {
+                    throw EMethod
+                }
+            }
+
+            pub void Call() {
+                print(Cache.Get())
+            }
+
+            pub void Send() {
+                send Cache.Add()
+            }
+
+            """;
+        var own = Own(text);
+        Assert.Equal(["EStart", "RuntimeError"], RaisedIn(own, "Call"));
+        Assert.Equal(["EStart", "RuntimeError"], RaisedIn(own, "Send"));
+    }
+
+    [Fact]
     public void A_text_reads_each_instantiation_of_one_generic_type_it_holds()
     {
         // section 5: `Two` holds a `Box<int>` and a `Box<Quiet>`, and its text reads both, `Quiet`'s Text() through the second

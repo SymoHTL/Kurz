@@ -1738,7 +1738,8 @@ public sealed class Parser
     /// U1: the clauses after an actor's name, before its body, in any order (section 6, the owner, 2026-11-13, #519, comment 6847932993,
     /// Q10): each starts with <c>per</c>, <c>yield</c>, <c>inbox</c>, <c>stack</c> or <c>on crash</c>, words only there, which the parser
     /// keeps with their lines, and passes over the words that follow each, which the checker says <c>not supported</c> to, but for a
-    /// <c>:</c>, whose list stands in the head before the clauses (U1). <c>stack</c> takes one literal of bytes, <c>stack 8mb</c>, and a
+    /// <c>:</c>, whose list stands in the head before the clauses (U1), and keeps the words after <c>per</c> as its own, which the checker
+    /// reads, <c>per node</c> among them (U51). <c>stack</c> takes one literal of bytes, <c>stack 8mb</c>, and a
     /// size written another way, or a second <c>stack</c>, is <c>syntax</c>, as C# refuses a modifier written twice (U1; section 6, the
     /// owner, 2026-11-15, #519, comment 6892812780, Q3, "Build it now"). <c>on crash</c> takes the words of a policy, the type's default
     /// (U27, <see cref="ParseCrashPolicy"/>), its block <c>on crash (c) { ... }</c> among them (U28), so that the braces after the block
@@ -1749,6 +1750,7 @@ public sealed class Parser
     {
         var clauses = new List<ActorClause>();
         var passing = false; // whether the words after the last clause are its own, which the parser passes over
+        List<string>? words = null; // the words of the last clause where it is `per`, which the parser keeps (U51)
         while (!At(TokenKind.LeftBrace) && !At(TokenKind.Newline) && !At(TokenKind.EndOfFile))
         {
             if (Current is { Kind: TokenKind.Name, Text: "stack" })
@@ -1771,7 +1773,8 @@ public sealed class Parser
             else if (Current is { Kind: TokenKind.Name, Text: "per" or "yield" or "inbox" })
             {
                 var word = Advance();
-                clauses.Add(new ActorClause(word.Line, word.Text));
+                words = word.Text == "per" ? [] : null;
+                clauses.Add(new ActorClause(word.Line, word.Text, Words: words));
                 passing = true;
             }
             else if (Current is { Kind: TokenKind.Name, Text: "on" } && Peek() is { Kind: TokenKind.Name, Text: "crash" })
@@ -1800,7 +1803,8 @@ public sealed class Parser
             }
             else
             {
-                Advance(); // a word of the clause before it
+                var passed = Advance(); // a word of the clause before it
+                words?.Add(passed.Text); // kept where the clause is `per` (U51)
             }
         }
 

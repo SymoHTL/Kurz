@@ -104,7 +104,7 @@ internal static class SyntaxPrinter
 
         if (t.Clauses is { Count: > 0 } clauses)
         {
-            sb.Append(' ').Append(string.Join(" ", clauses.Select(c => c.Policy is { } policy ? Policy(policy) : c.Size is { } size ? $"[{c.Word} {c.Line} {Print(size)}]" : $"[{c.Word} {c.Line}]"))); // U1: each clause's word with its line, `stack`'s size, the type's policy (U27)
+            sb.Append(' ').Append(string.Join(" ", clauses.Select(c => c.Policy is { } policy ? Policy(policy) : c.Size is { } size ? $"[{c.Word} {c.Line} {Print(size)}]" : $"[{string.Join(" ", new[] { c.Word, $"{c.Line}" }.Concat(c.Words ?? []))}]"))); // U1: each clause's word with its line, `stack`'s size, the type's policy (U27), the words of `per` (U51)
         }
 
         if (t.Members is not null)

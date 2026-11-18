@@ -2155,8 +2155,9 @@ an overflow escalated to the top level writes the trace of the top-level code wh
 the stack the child overflowed on, whose state the signal's stack held, is not kept. What stays `not
 supported` of section 6's supervision: `attempt { ... }` and `retry { ... }`; a block whose child can
 throw a type the crossing copy does not copy (U12), a block in a file read without `std/`, and a block
-whose child's `Reason` grows by what the blocks of the program read, read five times, the first and four more; a policy after
-the name of a `per` actor with `per` itself (U1), a block there among it; the crash paths of the ESP32
+whose child's `Reason` grows by what the blocks of the program read, read five times, the first and four more; `per` with other
+words than `node`, `per cluster` with a text of its own, since it needs the directory of section 7, and a policy after such a
+name with it (U1, U51); the block `on crash (c) { ... }` after the name of a `per node` actor (U28, U54); the crash paths of the ESP32
 models, AVR and WebAssembly, for which the build has no target; and, on Windows, an actor's stack
 overflow, which ends the process as the system ends it whatever the policy (U19); a crash at the root, the top-level code, still ends
 the process with its error line, its trace and the exit code 1. A call whose caller crashed runs to its end and its result goes nowhere, which on
@@ -2226,6 +2227,32 @@ actor joining the kept blocks at the end; the line `actor-heaps-fenced` of `List
 actors freed whole and every result of their messages read after it, from the caller's heap; and `ActorTests` the deadlines, the bound of every target, the timers kept in the order of their
 deadlines, the inbox's drop of a message past its deadline, a `within` put back at every way out of it, and a wait that its
 deadline ends while a restart's pause runs.
+
+Of section 13 the build makes the actor declared `per node`, one in the process, addressed by its name (U51 to U55). The
+checker reads `Cache.M(...)` and `send Cache.M(...)` as a call through a reference (U4, U6), inside the actor as outside it
+(U55), and marks the call (`CallInfo.ByName`), so that the throws of the defaults of the actor's fields count among the call's
+(`ThrowSets`); `spawn` of it is `type-mismatch`, a parameter of its constructor and its name as a value `syntax`, a field
+named through its name `not-visible` (U8), and a method named through it with no call and its name called as a function,
+`Cache()`, `not supported`. The emitter gets the reference before the call's arguments from a function made once for each
+such type, `actor.per.<n>`, with three globals of its own: its cell, a lock word, the slot and the number of its one actor;
+its block of a restart, with no argument kept, a null function for `escalate` and none for `stop`; and its knobs where
+`after` or `max N in` is written, their last word 1 to mark a `per node` type's. The runtime's `PerFind` reads the cell: where
+its number names an actor `Lookup` finds, it gives that actor with no lock taken; else it takes the cell's lock and reads
+again, and where no actor stands there either it gives null with the lock held, and the function makes the actor's heap and
+record as a `spawn` does, its supervisor the code that runs, and `PerStarted` sets the pause of the type's block and the
+count of its knobs' ring back to 0, stores the slot and the number in the cell, the number with release, and lets go of the
+lock. The lock is held around the read, the making of the record and that store alone,
+never around a constructor or a wait, which the one thread of the build never contends (U35). The defaults then run on the
+caller's stack in the actor's heap, the actor BUILDING, so that a message that reaches it meanwhile waits in its inbox, and
+at their end `PerBuilt` makes the root its supervisor and ends its building as `ActorBuilt` does (U53). A throw in the
+defaults is the caller's crash, which ends its child, the actor half built, the calls queued in it raising `actor-gone`,
+and the message after it finds no actor in the cell and starts a fresh one (U52). The crash of a `per node` actor whose knobs
+carry the mark, past `max N in`, ends it with no `restart-limit` (`Fell`), and `on crash stop` ends it as at a `spawn`,
+the calls queued in it raising `actor-gone` and the message after it starting a fresh one (U54). It ends with the process,
+freed by the end's walk over the table as every actor is (U13). `ActorTests` pins the memory of each way a `per node` actor
+is freed, a restart in place, a stop, its limit and a start that throws, flat over 10,000 rounds, the first pause and the
+window of a fresh start, its defaults' heap after a wait, its heap freed at the end, and, under the fence with the heap word
+of a freed record written 16 before its free, that nothing reads an ended one.
 
 On Linux an exception that ends the process writes the trace of the calls below its error line
 (section 6), but `allocation-failed` and `random-failed`, which write no place and no trace (O11, M9): the runtime's `Trace` (`runtime/linux/linux.kz`) walks the stack it raised on with
@@ -2625,7 +2652,8 @@ that sit under a rule by its id. Every one is pinned by a test.
   before what can begin one, which is `syntax` there, as a statement form's word is. After an
   actor's name and its primary constructor the parser keeps each clause's first word, `per`, `yield`,
   `inbox`, `stack` or `on crash`, with its line, passes over the words that follow it up to the body,
-  but for `stack`'s literal and the words of a policy, and reads any other word there as `syntax`.
+  but for `stack`'s literal, the words of a policy and the words after `per`, which it keeps (U51), and
+  reads any other word there as `syntax`.
   The words of a policy after `on crash`, there and after the arguments of a `spawn`, which they end,
   are `restart`, `stop` or `escalate`, and after `restart` the knobs `after <duration>` and
   `max N in <duration>`, each once, in either order, each value a number literal with its sign where it

@@ -254,6 +254,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     {
         ["actors/crash-escalate-root.kz"] = (7, "Worker.Fail"),
         ["actors/block-escalate-root.kz"] = (6, "Worker.Fail"),
+        ["actors/per-node-escalate.kz"] = (7, "Cache.Fail"), // U53: a `per node` actor's, whose supervisor is the root
         ["actors/crash-restart-limit.kz"] = (18, "main"),
     };
 

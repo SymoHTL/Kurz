@@ -2783,6 +2783,16 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran((ended.Code, ended.Output, endedRest), 0, ["tick 2 1", "5", "2 2"], "");
     }
 
+    /// <summary>
+    /// The runtime under the allocator that makes every freed block inaccessible, whose <c>EndActor</c> writes 16 into the word of the heap
+    /// of a record it frees, before the free, since the pages of a freed heap stay mapped in the allocator's pool, which the fence does not
+    /// reach, so that a read of a freed record's heap ends the run.
+    /// </summary>
+    private static CheckedRuntime PoisonedEnds => ListTests.Edited([.. ListTests.Fence, ("runtime/common/runtime.kz", "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            std.HeapFree(state - 192)\n",
+            "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 192)\n"),
+            ("runtime/common/runtime.kz", "    } else if ended && (seen & 2) == 0 {\n        raw {\n            std.HeapFree(state - 192)\n",
+            "    } else if ended && (seen & 2) == 0 {\n        raw {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 192)\n")]);
+
     [Fact]
     public void A_child_whose_supervisor_ended_while_it_waited_takes_its_own_crash_and_writes_its_log_line()
     {
@@ -2836,11 +2846,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(s.Get())
 
             """;
-        var poisoned = ListTests.Edited([.. ListTests.Fence, ("runtime/common/runtime.kz", "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            std.HeapFree(state - 192)\n",
-            "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 192)\n"),
-            ("runtime/common/runtime.kz", "    } else if ended && (seen & 2) == 0 {\n        raw {\n            std.HeapFree(state - 192)\n",
-            "    } else if ended && (seen & 2) == 0 {\n        raw {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 192)\n")]);
-        var run = BuildAndRun(text, poisoned, "actor-orphan-crash");
+        var run = BuildAndRun(text, PoisonedEnds, "actor-orphan-crash");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Parent#3 crashed: thrown \"parent\" at program.kz:26", "Child#4 crashed: thrown \"child 7\" at program.kz:12"], crashes);
         Ran((run.Code, run.Output, rest), 0, ["0", "7"], "");
@@ -4391,6 +4397,331 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         // the bound is read against a reading: `Resident` gives -1 where it reads none, which a growth of 0 would hide
         Assert.True(long.Parse(run.Output[2], System.Globalization.CultureInfo.InvariantCulture) > 0, $"the resident memory before the run read {run.Output[2]}");
+    }
+
+    /// <summary>
+    /// The function a program of a test of the memory of `per node` actors reads its resident memory with, in KiB, -1 where it reads
+    /// none, and its probe, an actor whose answer runs after every message queued before it on the one thread (U35).
+    /// </summary>
+    private const string PerNodeMemory = """
+        long | IoError Resident() {
+            bytes = File.ReadAll("/proc/self/status")
+            text = string.FromUtf8(bytes) else {
+                InvalidUtf8 => ""
+            }
+
+            for line in text.Split('\n') {
+                if line.StartsWith("VmRSS:") {
+                    return long.Parse(line.Replace("VmRSS:", "").Replace("kB", "").Trim()) else {
+                        ParseError => -1
+                    }
+                }
+            }
+
+            return -1
+        }
+
+        actor Probe {
+            pub int Ping() => 0
+        }
+
+        p = spawn Probe()
+
+        """;
+
+    /// <summary>
+    /// The program of a test of the memory of `per node` actors: <paramref name="actors"/>, then <paramref name="round"/> run 1,000 times to
+    /// warm the pools and 10,000 times between two readings of the resident memory, with <c>i</c> its count, adding to <c>total</c>; it
+    /// prints the total, then the two readings.
+    /// </summary>
+    private static string PerNodeRounds(string actors, string round) => actors + PerNodeMemory + $$"""
+        mut total = 0
+        for i in 0..<1000 {
+        {{round}}
+        }
+
+        before = Resident() else {
+            IoError e => -1
+        }
+
+        for i in 0..<10000 {
+        {{round}}
+        }
+
+        after = Resident() else {
+            IoError e => -1
+        }
+
+        print(total)
+        print(before)
+        print(after)
+
+        """;
+
+    [Theory]
+    [InlineData("restart", "", "    send Flaky.Fail(\"r {i}\")\n    total = total + Flaky.Ping() + p.Ping()", 1)]
+    [InlineData("stop", " on crash stop", "    total = total + Flaky.Ping()\n    send Flaky.Fail(\"s {i}\")\n    total = total + p.Ping()", 1)]
+    [InlineData("limit", " on crash restart max 1 in 1min", "    send Flaky.Fail(\"a {i}\")\n    total = total + Flaky.Ping()\n    send Flaky.Fail(\"b {i}\")\n    total = total + p.Ping()", 2)]
+    public void Memory_stays_flat_over_ten_thousand_crashes_of_a_per_node_actor(string name, string policy, string round, int crashes)
+    {
+        // U54 (assumed: T30 of issue 519, comment 6983903100): a restart in place frees the crashed instance's heap whole (U21), and a
+        // crash under `stop` or past `max N in` ends the actor and frees its heap, its record and its slot, so that the message after it
+        // starts a fresh one in a heap of its own; 10,000 rounds after 1,000 that warm the pools grow the resident memory by less than
+        // 256 KiB, a tenth of what a page of 256 bytes kept per round would add; the pauses stood in for, and `Probe`'s answer runs after
+        // the crash that ends the actor, on the one thread (U35)
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // no `/proc/self/status` reads the resident memory on Windows
+        }
+
+        var actors = $$"""
+            actor Flaky per node{{policy}} {
+                mut List<string> seen = []
+
+                pub void Fail(string s) {
+                    seen.Add(s)
+                    throw "flaky fails at {s}"
+                }
+
+                pub int Ping() => seen.Count + 1
+            }
+
+
+            """;
+        var run = BuildAndRun(PerNodeRounds(actors, round), StoodIn(print: false), $"actor-per-memory-{name}");
+        Assert.Equal((0, 11000 * crashes), (run.Code, Logged(run.Error).Crashes.Count));
+        Assert.Equal("11000", run.Output[0]);
+        var grown = Grown(run.Output[1], run.Output[2]);
+        Assert.True(grown < 256, $"10,000 rounds of a `per node` actor under {name} grow the resident memory by {grown} KiB");
+    }
+
+    [Fact]
+    public void Memory_stays_flat_over_ten_thousand_starts_of_a_per_node_actor_that_throw()
+    {
+        // U52 (assumed: T29 of issue 519, comment 6983903100): the defaults of `Cache` throw on `User`'s stack, which is `User`'s crash,
+        // and its stop ends `Cache`, its child while it is built, freeing the heap its defaults allocated in, its record and its slot, so
+        // that 10,000 such starts after 1,000 that warm the pools grow the resident memory by less than 256 KiB
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // no `/proc/self/status` reads the resident memory on Windows
+        }
+
+        const string actors = """
+            List<string> Words(string s) {
+                words = ["start", s]
+                throw "start fails at {words[1]}"
+            }
+
+            actor Cache per node {
+                List<string> words = Words("cache")
+
+                pub int Get() => words.Count
+            }
+
+            actor User {
+                pub void Use() {
+                    print(Cache.Get())
+                }
+            }
+
+
+            """;
+        var run = BuildAndRun(PerNodeRounds(actors, "    u = spawn User() on crash stop\n    send u.Use()\n    total = total + p.Ping() + 1"), StoodIn(print: false), "actor-per-memory-start");
+        Assert.Equal((0, 11000), (run.Code, Logged(run.Error).Crashes.Count));
+        Assert.Equal("11000", run.Output[0]);
+        var grown = Grown(run.Output[1], run.Output[2]);
+        Assert.True(grown < 256, $"10,000 starts of a `per node` actor that throw grow the resident memory by {grown} KiB");
+    }
+
+    [Fact]
+    public void A_fresh_per_node_actor_past_its_limit_pauses_first_and_counts_its_window_from_its_start()
+    {
+        // U54 (assumed: a reading of the build, proposed with this record and not put to the owner): the second crash of each round
+        // passes `max 1 in 1min` and ends `Flaky`, and the fresh one the round after starts takes its first crash with a first pause, 100 ms
+        // within 20% either way, and restarts in place, the crash of the actor before it no longer in its window, where the pause the
+        // ended actor left would double and its count would end the fresh one at its first crash; read through the clock of the pauses,
+        // which this runtime stands in for
+        const string text = """
+            actor Flaky per node on crash restart max 1 in 1min {
+                pub void Fail() {
+                    throw "flaky"
+                }
+
+                pub int Ping() => 1
+            }
+
+            actor Probe {
+                pub int Ping() => 9
+            }
+
+            p = spawn Probe()
+            for i in 0..<3 {
+                send Flaky.Fail()
+                print(Flaky.Ping())
+                send Flaky.Fail()
+                print(p.Ping())
+            }
+
+            """;
+        var run = BuildAndRun(text, StoodIn(print: true), "actor-per-fresh-pause");
+        Assert.Equal((0, 6), (run.Code, Logged(run.Error).Crashes.Count));
+        Assert.Equal(9, run.Output.Count);
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.Equal(("1", "9"), (run.Output[(3 * i) + 1], run.Output[(3 * i) + 2]));
+            var slept = long.Parse(run.Output[3 * i]["pause ".Length..], System.Globalization.CultureInfo.InvariantCulture);
+            Assert.True(slept >= 80 && slept <= 120, $"round {i}: a pause of {slept} ms where 100 ms within 20% was expected");
+        }
+    }
+
+    [Fact]
+    public void A_per_node_actors_defaults_allocate_in_its_heap_after_a_wait_inside_a_message()
+    {
+        // section 3, U52 (assumed: T29 of issue 519, comment 6983903100): the defaults of a `per node` actor run on its first caller's
+        // stack in its own heap, as a `spawn`'s run (U3); a default whose call waits, inside `Owner`'s message, parks that message, and the
+        // runtime's `Wait` serves the heap of the actor being built again, so that the string the default makes after the call is a block of
+        // that heap, as it is for `Top`, which the top-level code starts
+        const string program = """
+            actor Sizes per node {
+                pub int Size() => 3
+            }
+
+            actor Top per node {
+                string name = "top {Sizes.Size()}"
+
+                pub string Name() => name
+
+                pub long Live() => HttpServer.HeapLive()
+            }
+
+            actor Pool per node {
+                string name = "pool {Sizes.Size()}"
+
+                pub string Name() => name
+
+                pub long Live() => HttpServer.HeapLive()
+            }
+
+            actor Owner {
+                pub long Started() => Pool.Live()
+            }
+
+            print(Top.Live())
+            print(spawn Owner().Started())
+
+            """;
+        Ran(BuildAndRun(program, HeapBlocks.Value, "actor-per-wait-heap"), 0, ["2", "2"], "");
+    }
+
+    [Fact]
+    public void Every_per_node_actors_heap_is_freed_whole_at_the_end_of_the_program()
+    {
+        // U53 (assumed: said back with T27 to T33 of issue 519, comment 6983903100): a `per node` actor ends with the process, its heap
+        // freed with every actor's (U13; ListTests.EndingActors, the runtime's `EndActors`), the one `stop` would end among them
+        const string program = """
+            actor Counter per node {
+                pub int Get() => 1
+            }
+
+            actor Stopping per node on crash stop {
+                pub int Get() => 2
+            }
+
+            print(Counter.Get() + Stopping.Get())
+            before = HttpServer.Heaps()
+            eprint("end actors")
+            print(before - HttpServer.Heaps())
+
+            """;
+        Ran(BuildAndRun(program, ListTests.Edited([.. HeapCount, ListTests.EndingActors]), "actor-per-heaps-ended"), 0, ["3", "2"], "");
+    }
+
+    [Fact]
+    public void A_per_node_actor_ended_by_a_start_that_threw_a_stop_or_its_limit_is_read_no_more_and_a_fresh_one_starts()
+    {
+        // U52, U54 (assumed: T29 and T30 of issue 519, comment 6983903100): `Failing`'s defaults throw on `User`'s stack, whose stop ends
+        // it while it is built, `Counter`'s crash under `stop` ends it, and `Limited`'s second crash passes its limit and ends it; each
+        // message after that finds no actor by the cell's slot and number and starts a fresh one, reading nothing of the record its end
+        // freed; under the allocator that makes every freed block inaccessible, with the word of the heap of a record its end frees
+        // written 16 before the free (PoisonedEnds)
+        const string text = """
+            List<string> Words(string s) {
+                words = ["start", s]
+                throw "start fails at {words[1]}"
+            }
+
+            actor Failing per node {
+                List<string> words = Words("failing")
+
+                pub int Get() => words.Count
+            }
+
+            actor Counter per node on crash stop {
+                mut List<string> seen = []
+
+                pub void Add(string s) {
+                    seen.Add(s)
+                }
+
+                pub void Fail() {
+                    throw "counter fails at {seen.Count}"
+                }
+
+                pub int Get() => seen.Count
+            }
+
+            actor Limited per node on crash restart max 1 in 1min {
+                mut List<string> seen = []
+
+                pub void Add(string s) {
+                    seen.Add(s)
+                }
+
+                pub void Fail() {
+                    throw "limited fails at {seen.Count}"
+                }
+
+                pub int Get() => seen.Count
+            }
+
+            actor User {
+                pub void Use() {
+                    print(Failing.Get())
+                }
+            }
+
+            actor Probe {
+                pub int Ping() => 9
+            }
+
+            p = spawn Probe()
+            print(Counter.Get())
+            send Counter.Fail()
+            print(p.Ping())
+            send Counter.Add("b")
+            print(Counter.Get())
+            send Limited.Add("a")
+            send Limited.Fail()
+            print(Limited.Get())
+            send Limited.Fail()
+            print(p.Ping())
+            print(Limited.Get())
+            for i in 0..<2 {
+                u = spawn User() on crash stop
+                send u.Use()
+                print(p.Ping())
+            }
+
+            """;
+        var run = BuildAndRun(text, PoisonedEnds, "actor-per-ends-poisoned");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal([
+            "Counter#2 crashed: thrown \"counter fails at 0\" at program.kz:20",
+            "Limited#4 crashed: thrown \"limited fails at 1\" at program.kz:34",
+            "Limited#4 crashed: thrown \"limited fails at 0\" at program.kz:34",
+            "User#6 crashed: thrown \"start fails at failing\" at program.kz:3",
+            "User#8 crashed: thrown \"start fails at failing\" at program.kz:3"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["0", "9", "1", "0", "9", "0", "9", "9"], "");
     }
 
     [Fact]

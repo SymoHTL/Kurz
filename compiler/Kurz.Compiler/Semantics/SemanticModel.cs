@@ -378,6 +378,12 @@ public sealed record CallInfo(
 
     /// <summary>The nanoseconds of one unit of the count a call of <see cref="CallKind.TimeFrom"/> takes (T38).</summary>
     public long TimeScale { get; init; }
+
+    /// <summary>
+    /// U51: a message of <see cref="CallKind.ActorCall"/> or <see cref="CallKind.ActorSend"/> addressed by the name of a <c>per node</c>
+    /// actor, <c>Cache.Get(1)</c>, whose one actor the call finds, or starts, before its arguments run (U52).
+    /// </summary>
+    public bool ByName { get; init; }
 }
 
 /// <summary>
