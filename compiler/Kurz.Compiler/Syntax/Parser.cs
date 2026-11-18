@@ -1482,7 +1482,7 @@ public sealed class Parser
             // literal alone, its sign included, as a knob of a policy takes one (U26), anything else there being `syntax` (U41;
             // assumed: T13 of comment 6967625156, the literal alone), its type read as U40 reads a bound by the checker (U41; assumed:
             // a reading of the build, any number literal and its sign); whether the declaration is one a clause applies to is the
-            // checker's (U41; T11)
+            // checker's (U41; assumed: T11 of comment 6967625156)
             Advance();
             within = PolicyValue("a number literal after `within`, `within 2s` (U41)");
             if (!At(TokenKind.Arrow) && !At(TokenKind.LeftBrace) && !EndsStatement())
@@ -2443,7 +2443,8 @@ public sealed class Parser
                 // U39, U41: the call clause `x.M() within d` bounds the one call (U39); its operand is a unary expression, as T35's
                 // constant operand is, and the clause stands before a postfix `else` (U41; assumed: T12 of comment 6967625156); a call
                 // takes one clause, the token right after the call, so that outside brackets it stands on the line where the call
-                // ends (U41; assumed: a reading of the build); whether the call is one a clause applies to is the checker's (U41; T11)
+                // ends (U41; assumed: a reading of the build); whether the call is one a clause applies to is the checker's (U41;
+                // assumed: T11 of comment 6967625156)
                 Advance();
                 expression = bounded with { Within = ParseUnary() };
                 continue;

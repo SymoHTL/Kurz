@@ -556,9 +556,15 @@ public sealed partial class Emitter
 
         // U39: the call's bound, that of its clause, run after the arguments, at every call it stands on, under a `within` block whose
         // deadline wins over it too (assumed: a reading of the build), else the literal of the method's declaration, the call's clause
-        // winning over the declaration's, which the runtime's `Enqueue` takes where no `within` block runs (assumed in section 6); the
-        // callee's reference and its heap, read before the arguments, stay the callee's while the bound runs, since a bound that
-        // changes the variable the callee was read from, `s.Get() within Swap(mut s)`, is `changed-while-held` (M7), as an argument is
+        // winning over the declaration's, which the runtime's `Enqueue` takes where no `within` block runs (assumed in section 6). The
+        // callee's reference, its two words read before the arguments as a receiver is (F12, U2), is the call's own while the bound
+        // runs; the callee's heap is read before the arguments too only where the message is built in it, its bound a literal or the
+        // name of a variable or a field, which runs no code, and a message built in a heap of its own reads it at its queueing alone.
+        // A bound that changes the variable the callee was read from, `s.Get() within Swap(mut s)`, or the list it was read from as an item,
+        // `ss[0].Get() within Clear(mut ss)`, is `changed-while-held` (M7), as an argument is; one that gives the field it was read from
+        // another actor, through its instance passed as `mut`, `b.s.Get() within Swap(mut b)`, or in a method of the actor the bound
+        // calls, `helper.Get() within Reset()`, leaves the call with the actor read before the bound, which stands while its slot holds
+        // its number (U2)
         var bound = c.Within is { } clause ? EmitExpression(clause) : f.Declaration!.Within is { } declared ? EmitExpression(declared) : null;
         var result = f.ReturnType;
         var reply = fn.Alloca(Reply(result), "reply");

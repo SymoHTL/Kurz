@@ -347,8 +347,9 @@ public sealed record TypeParameter(int Line, string Name, TypeSyntax? Limit, Typ
 /// <summary>
 /// A function or a method (F1 to F4, K7). Both bodies are null for the signature of an interface method. <paramref name="Property"/>
 /// marks a read-only property of a type body, <c>pub int Count => names.Count</c> (K7): a method without parameters, read without a call.
-/// <paramref name="Within"/> is the number literal of the declaration clause <c>pub T M(...) within d</c>, its sign included, whose type the
-/// checker holds to <c>duration</c> as U40 reads a bound (U39, U41, record section 6), null where the declaration writes none.
+/// <paramref name="Within"/> is the literal of the declaration clause <c>pub T M(...) within d</c> (U39; U41, assumed: T13 of comment
+/// 6967625156, the literal alone), a number literal, its sign included, whose type the checker holds to <c>duration</c> as U40 reads a
+/// bound (U41; assumed: a reading of the build, any number literal and its sign), null where the declaration writes none.
 /// </summary>
 public sealed record FunctionDeclaration(
     int Line,
