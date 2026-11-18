@@ -153,7 +153,7 @@ public sealed partial class Emitter
             {
                 var own = TypeOf(a);
                 copied = shared;
-                CopiedLate(a, held: true);
+                CopiedLate(a);
                 late.Add((arguments.Count, v => $"{Ir(parameter)} {Convert(Temp(v, own), own, parameter, a.Line)}"));
                 arguments.Add("");
                 continue;
