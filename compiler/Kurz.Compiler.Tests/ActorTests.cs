@@ -5070,6 +5070,77 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_constructor_that_a_spawn_runs_calls_under_the_chain_and_the_within_of_its_spawner()
+    {
+        // S4 (section 6, assumed, proposed with the record and not put to the owner): a constructor runs at its `spawn` in its spawner's
+        // code (U3), so that its call after 300 ms raises `call-timeout` at its line under the top-level code's `within`, under the
+        // `within` of a message and under the deadline of a message's chain, as a call of the spawner's own would; the raise of a
+        // constructor that a message runs is the crash of that message's actor, and the top-level code whose callee crashed once its own
+        // deadline had passed raises `call-timeout` (U43); with neither, the constructor's call answers
+        const string slow = Hold + """
+            actor Ticker {
+                pub int Ping() => 1
+            }
+
+            int Warm(Ticker ticker) {
+                Hold(300ms)
+                return ticker.Ping()
+            }
+
+            actor Slow(Ticker T) {
+                mut int pings = Warm(T)
+
+                pub int Pings() => pings
+            }
+
+            """;
+        const string atTop = slow + """
+            ticks = spawn Ticker()
+            within 100ms {
+                s = spawn Slow(ticks)
+                print(s.Pings())
+            }
+
+            """;
+        const string inMessage = slow + """
+            actor Maker(Ticker T) {
+                pub void Make() {
+                    within 100ms {
+                        s = spawn Slow(T)
+                        print("made {s.Pings()}")
+                    }
+                }
+
+                pub int Pings() {
+                    s = spawn Slow(T)
+                    return s.Pings()
+                }
+            }
+
+            ticks = spawn Ticker()
+            m = spawn Maker(ticks)
+            send m.Make()
+            print(m.Pings())
+            within 100ms {
+                print(m.Pings())
+            }
+
+            """;
+        var windows = ClockRefusedOnWindows(atTop);
+        ClockRefusedOnWindows(inMessage);
+        if (windows)
+        {
+            return;
+        }
+
+        Ran(BuildAndRun(atTop, toolchain.Runtime, "actor-deadline-constructor-top"), 1, [], "error: call-timeout at program.kz:12\n");
+        var run = BuildAndRun(inMessage, toolchain.Runtime, "actor-deadline-constructor");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Maker#2 crashed: call-timeout at program.kz:12", "Maker#2 crashed: call-timeout at program.kz:12"], crashes);
+        Ran((run.Code, run.Output, rest), 1, ["1"], "error: call-timeout at program.kz:39\n");
+    }
+
+    [Fact]
     public void A_block_that_runs_in_the_wait_of_the_top_level_code_calls_under_no_deadline_of_its_within()
     {
         // U33, U45, T9 of comment 6967625156: the block's call after 300 ms answers though the `within` of the top-level call it runs in
