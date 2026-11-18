@@ -7401,12 +7401,14 @@ public sealed class CheckerTests
     public void A_per_node_actors_name_stands_only_before_a_call_and_its_refusals_take_the_ids_of_their_forms()
     {
         // U51 (assumed: T31 and T32 of issue 519, comment 6983903100): `spawn` of it is `type-mismatch` (U14), a parameter of its
-        // constructor and its name as a value `syntax` (E4), at the line of each, the parameter's on a line of its own; a field through
+        // constructor and its name as a value `syntax` (E4), at the line of each, the parameter's on a line of its own, the
+        // name's text naming U51 where a class's names K1; a field through
         // its name is `not-visible` (U8), and a method without `pub` (U9), as through a reference; `send` of a method with a result is
         // `send-result` (U6), as through a reference; an actor that is not `per node` keeps K7's `static-mismatch` for its name's call
         Assert.Equal([(ErrorIds.TypeMismatch, 13)], Errors(PerCache + "c = spawn Cache()\nprint(c.Get())\n"));
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("actor Cache(\n    int Size\n) per node {\n    pub int Get() => Size\n}\n\nprint(Cache.Get())\n"));
         Assert.Equal([(ErrorIds.Syntax, 13)], Errors(PerCache + "c = Cache\nprint(c)\n"));
+        Assert.EndsWith("(U51, U10; E4)", ErrorText(PerCache + "c = Cache\nprint(c)\n"), StringComparison.Ordinal);
         Assert.Equal([(ErrorIds.Syntax, 14)], Errors(PerCache + "print(1)\nprint(Cache)\n"));
         Assert.Equal([(ErrorIds.NotVisible, 13)], Errors(PerCache + "print(Cache.hits)\n"));
         Assert.Equal([(ErrorIds.NotVisible, 13)], Errors(PerCache + "print(Cache.Hidden())\n"));
