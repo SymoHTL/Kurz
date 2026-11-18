@@ -5,7 +5,7 @@ of its method through its reference is a message (§6, "Actors"). This chapter h
 one machine and what a program writes of them: an actor's declaration, `spawn`, the call that waits
 for its result, `send`, and what crosses into a message, the crash of an actor, its restart by
 the default policy and its log line (U19 to U24), the words of a policy (U25 to U27), the block of a policy (U28
-to U34), the threads that run the actors (U35), the bounds of the calls that wait (U36 to U45) and the actors declared `per node` (U51 to U55). The scheduler but its threads, the stacks, deadlocks but the
+to U34), the threads that run the actors (U35), the bounds of the calls that wait (U36 to U45) and the actors declared `per node` (U51 to U55, no rule numbered U46 to U50). The scheduler but its threads, the stacks, deadlocks but the
 calls a waiting actor lets in (U17),
 the wait of the top-level code that nothing can end (U18) and the deadline of a call that waits in a message, which is nothing
 left to run (U42), the clauses after an actor's name but
@@ -3251,8 +3251,38 @@ actor Counter per node on crash stop {
 }
 
 send Counter.Fail()
-// the call waits in the inbox behind `Fail`, as one sender's messages run in the order it sent them (U5), and the stop at
-// `Fail`'s crash gives it `actor-gone`
+// the call waits in the inbox behind `Fail`, as one sender's messages run in the order it sent them (U5) and no worker thread
+// runs `Fail` before the top-level code waits (U35), and the stop at `Fail`'s crash gives it `actor-gone`
+print(Counter.Get())
+```
+
+Case: [actors/per-node-stop-sends.kz](../corpus/actors/per-node-stop-sends.kz)
+```kurz
+// `Counter`'s `Fail` runs before `Probe`'s `Ping`, as one thread runs the ready actors first in, first out (U35), and the stop
+// at its crash takes the `send` of `Add` queued behind it with the inbox (U25), so that the fresh start counts 0
+
+actor Counter per node on crash stop {
+    mut int count = 0
+
+    pub void Add() {
+        count = count + 1
+    }
+
+    pub void Fail() {
+        throw "counter fails"
+    }
+
+    pub int Get() => count
+}
+
+actor Probe {
+    pub int Ping() => 9
+}
+
+p = spawn Probe()
+send Counter.Fail()
+send Counter.Add()
+print(p.Ping())
 print(Counter.Get())
 ```
 
@@ -4240,12 +4270,17 @@ declared `per cluster` or `per node` and addressed by its type name"; §13, "Act
 by name"), the machine one process of the program, as an Erlang node is one virtual machine *(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*. A
 call or a `send` through its name is a message as one through a reference is (U4, U6, U9, U12), and
 reads the instance it reaches before its arguments, as a call through a reference reads its target
-*(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*. Its name stands only as the target of such a call, inside the actor as outside it (U55):
+*(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*. The instance is found there or started, its start run whole, before the first argument runs, and a
+message whose instance an argument ended, by a stop or past its limit (U54), gets `actor-gone` at the call's line, as one
+through a reference whose actor ended does (U6, U20) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. Its name stands only as the target of such a call, inside the actor as outside it (U55):
 `spawn Cache()` is `type-mismatch`, as U14 refuses a `spawn` of what it cannot make, and a parameter of
 its constructor and its name where a value stands are `syntax` (E4), as a class's name as a value is,
-each text naming the `per node` form *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. A field named through its name is `not-visible`, as one
-named through a reference is (U8), and a method named through it with no call, and its name called as
-a function, `Cache()`, are `not supported` *(assumed: a reading of the build, proposed with this record and not put to the owner)*. `per` with other words than `node` has no rule here
+each text naming the `per node` form *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. Whether its name can be written as a type, `Cache c = this`, a
+parameter `Cache c` or `List<Cache>`, is open, put to the owner as T38 of comment 6991862214; the build reads such a type
+as any actor's, whose value is a reference to one instance *(assumed: a reading of the build, put to the owner as T38 of comment 6991862214)*. A field named through its name is
+`not-visible`, as one named through a reference is (U8) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. A method named through it with no call, and its
+name called as a function, `Cache()`, have no rule here, their id put to the owner as T39 of comment 6991862214, and the
+build says `not supported` to both *(assumed: a reading of the build, said back in comment 6986934971 and put to the owner as T39 of comment 6991862214)*. `per` with other words than `node` has no rule here
 (U1), and the build says `not supported` at the clause: to `per cluster` with a text of its own, "the clause `per cluster`
 after an actor's name, one actor in the cluster, which needs the directory of section 7 (U1, U51)" *(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*, and to `per` written
 twice, `per node per node`, to `per` with any other words, `per caller` among them, and to a clause beside `per node` that
@@ -4346,18 +4381,27 @@ print(Cache.hits)
 ### U52 (assumed, §13) The start at its first message
 
 A `per node` actor starts at the first message that names it, a call or a `send`, from any code, the
-top-level code, a function, another actor or itself, and a program that names it nowhere starts none,
+top-level code, a function or another actor, and a program that names it nowhere starts none,
 as Orleans activates a grain at its first call (not checked at source) and C#'s `Lazy<T>` makes its value
-at the first read of its `Value` (§13) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*; a `send` starts it as a call does *(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*. Its constructor and its fields' defaults run on
+at the first read of its `Value` (§13) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*; a `send` starts it as a call does *(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*, so that a `send` through its name that starts it waits for the
+start and a throw there crashes its sender, the one exception to U6's message that nobody waits for *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. Its
+constructor and its fields' defaults run on
 the first caller's stack, as `spawn`'s do (U3), and a throw there is that caller's crash, under the
-caller's own policy: the half-built actor ends, the calls of other actors queued behind its start get
-`actor-gone`, and the first message after that starts it again, as Rust's `OnceLock::get_or_init`
-leaves its cell empty after a panic in its function (checked 2026-11-18: its documentation, "the cell remains uninitialized") *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. An actor its defaults spawn is its child, which a
+caller's own policy: the half-built actor ends, the calls queued behind its start, of other actors and of the top-level
+code, the root (O6), get `actor-gone`, and the first message after that starts it again, as Rust's `OnceLock::get_or_init`
+leaves its cell empty after a panic in its function (checked 2026-11-18: its documentation, "the cell remains uninitialized") *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*; the `send`s queued there go with its inbox, as the
+inbox of an actor that ended goes (U25) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. An actor its defaults spawn is its child, which a
 crash of it ends, as at a `spawn` (U3, U21) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. The crash names the line of the throw, as a
-throw in a constructor at `spawn` does *(assumed: a reading of the build, proposed with this record and not put to the owner)*. Messages that reach it while it is built wait in its
-inbox for its start, and a message to it from the code its own start runs, a default that calls a
+throw in a constructor at `spawn` does (U3) and as U24 gives a crash's place, where T29's option 1 of comment
+6983903100 words it "its throw is the caller's crash at the call's line": the build departs from T29's words, as the
+reading said back in comment 6986934971 states *(assumed: a reading of the build, said back in comment 6986934971 and put to the owner as T37 of comment 6991862214)*. Messages that reach it while it is built wait in its
+inbox for its start, and the first caller's own message joins that inbox after the call's arguments, behind them
+*(assumed: a reading of the build, proposed with this record and not put to the owner)*. A call that waits from the code its own start runs, a default that calls a
 function that calls `Cache.Get()`, waits for a start that waits for it, which the top-level code's
-wait on one thread reads as `deadlock` at that message's line (U18) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*.
+wait that finds nothing left to run reads as `deadlock` (U18) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*: at that call's line where the top-level
+code ran the start, a call in a function it called being its own (U18), and, where an actor's message runs the start, at
+the line of the top-level code's own call that waits, or, where the top-level code waits on nothing, the end of the program
+drops the loop (U13); a `send` from that code waits in the inbox behind the start *(assumed: a reading of the build, proposed with this record and not put to the owner)*.
 
 Case: [actors/per-node-first-message.kz](../corpus/actors/per-node-first-message.kz)
 ```kurz
@@ -4467,10 +4511,11 @@ Case: [actors/per-node-child.kz](../corpus/actors/per-node-child.kz)
 
 ### U53 (assumed, §6, §13) Its supervisor is the root
 
-The supervisor of a `per node` actor is the root, the top-level code, as for an actor the top-level code
-spawns, though its first caller started it: it outlives that caller, and `on crash escalate` after its
-name ends the process as the escalation of a child of the top-level code does (U25) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. It ends with
-the process (§6, "`per` actors end with the process"), its heap freed with every actor's at the end
+The supervisor of a `per node` actor is its first caller while it is built, whose crash a throw in its start is (U52),
+and the root, the top-level code, from the end of its start, as for an actor the top-level code spawns, though its first
+caller started it: it outlives that caller, and `on crash escalate` after its
+name ends the process as the escalation of a child of the top-level code does (U25) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. Unless a throw in its start (U52)
+or its policy (U54) ends it first, it ends with the process (§6, "`per` actors end with the process"), its heap freed with every actor's at the end
 (U13) *(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*.
 
 Case: [actors/per-node-outlives-caller.kz](../corpus/actors/per-node-outlives-caller.kz)
@@ -4479,15 +4524,17 @@ Case: [actors/per-node-escalate.kz](../corpus/actors/per-node-escalate.kz)
 
 ### U54 (decided, §6, §13) Its policy
 
-The words of a policy after a `per node` actor's name are its policy, which runs as at a `spawn` of the
-top-level code (U53) (§6, "Policy at `spawn`", the owner, 2026-11-13, #519, comment 6847932993, Q15):
+The words of a policy after a `per node` actor's name are its policy (§6, "Policy at `spawn`", the owner, 2026-11-13, #519,
+comment 6847932993, Q15), which runs as at a `spawn` of the top-level code (U53) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*:
 with none, or with `on crash restart`, a crash restarts it in place with fresh state and its inbox kept
 (U21, U22), and past the limit of `max N in` it ends and the first message after that starts a fresh
 one, its constructor run again, with no `restart-limit`, as the key of a `per` type does past its limit (U26; §6, the owner, 2026-11-17, #561, comment
 6945857315, Q2, "Key restarts fresh on next call") *(assumed: the one actor of a `per node` type read as the key of comment 6945857315, Q2; the product pass, comment 6983506072)* *(assumed, §6: the calls queued in it at the crash
 that passes the limit raise `actor-gone`)*. `on crash stop` ends it so: the calls queued in it get
-`actor-gone`, and the first message after that starts a fresh one *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. A fresh start begins the pause
-and the window of its policy again, as §6 counts the window from a fresh start *(assumed: a reading of the build, proposed with this record and not put to the owner)*. The block
+`actor-gone`, and the first message after that starts a fresh one *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. The `send`s queued in it at a crash
+that stops it or passes its limit go with its inbox, as the inbox of an actor that ended goes (U25) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. A
+fresh start begins the window of its policy again, as §6 gives the key of a `per` type past its limit "no limit across
+those starts" (comment 6945857315, Q2) *(assumed: the one actor of a `per node` type read as the key of comment 6945857315, Q2; the product pass, comment 6983506072)*, and the pause of its policy again *(assumed: a reading of the build, proposed with this record and not put to the owner)*. The block
 `on crash (c) { ... }` after its name has no rule here (U28), and `compiler/README.md` says what the
 build does with it.
 
@@ -4496,6 +4543,8 @@ Case: [actors/per-node-restart.kz](../corpus/actors/per-node-restart.kz)
 Case: [actors/per-node-stop.kz](../corpus/actors/per-node-stop.kz)
 
 Case: [actors/per-node-stop-gone.kz](../corpus/actors/per-node-stop-gone.kz)
+
+Case: [actors/per-node-stop-sends.kz](../corpus/actors/per-node-stop-sends.kz)
 
 Case: [actors/per-node-limit.kz](../corpus/actors/per-node-limit.kz)
 
