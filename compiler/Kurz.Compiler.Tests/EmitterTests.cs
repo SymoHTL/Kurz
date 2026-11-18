@@ -455,8 +455,8 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // S8, section 2, round 20, "Dir per arch": `Directory.Create` takes a directory that is there by the type in `st_mode`, at byte
         // 24 of x86-64's `struct stat` and at byte 16 of AArch64's, the kernel's generic one, where 24 is `st_uid`; each Linux
-        // architecture's file gives the byte (`StatModeAt`), the emitted call passes it to `CreateDirectories`, and `IsDirectory` reads
-        // the mode at the byte it was given
+        // architecture's file gives the byte (`StatModeAt`), the emitted call passes it to `CreateDirectories`, which hands it through
+        // `MakeDirectory` to `IsDirectory`, and `IsDirectory` reads the mode at the byte it was given
         const string text = "void | IoError Make() {\n    Directory.Create(\"made\")\n}\n\nMake() else {\n    IoError e => print(e)\n}\n";
         foreach (var (arch, at) in new[] { (Arch.X64, 24), (Arch.Arm64, 16) })
         {
@@ -481,6 +481,21 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             var read = Body(@"rt\.sys\.IsDirectory");
             Assert.True(Regex.IsMatch(read, @"store i64 %p1, ptr (%[\w.]+)\b[^\n]*\n(?:[^\n]*\n)*?[^\n]*?(%[\w.]+) = load i64, ptr \1\b[^\n]*\n(?:[^\n]*\n)*?[^\n]*?(%[\w.]+) = getelementptr i8, ptr %[\w.]+, i64 \2\b[^\n]*\n(?:[^\n]*\n)*?[^\n]*load i32, ptr \3\b"),
                 $"{arch}: `IsDirectory` reads `st_mode` at no byte its parameter gave:\n{read}");
+            // each function between the emitted call and that read hands on its own parameter: `CreateDirectories`' `modeAt` to its two
+            // calls of `MakeDirectory` and its call of itself, `MakeDirectory`'s to its call of `IsDirectory`, each a load of the slot
+            // the parameter was stored in, so that a byte of a function's own given on turns it red
+            const string chain = @"call [^\n@]*@""?rt\.sys\.(?:IsDirectory|MakeDirectory|CreateDirectories)\b[^\n(]*\(";
+            foreach (var (function, parameter, calls) in new[] { (@"rt\.sys\.CreateDirectories", "%p2", 3), (@"rt\.sys\.MakeDirectory", "%p1", 1) })
+            {
+                var passing = Body(function);
+                var slot = Regex.Match(passing, $@"store i64 {parameter}, ptr (%[\w.]+)\b");
+                Assert.True(slot.Success, $"{arch}: `{function}` stores no `{parameter}`:\n{passing}");
+                var loaded = Regex.Matches(passing, $@"(%[\w.]+) = load i64, ptr {Regex.Escape(slot.Groups[1].Value)}\b").Select(m => m.Groups[1].Value).ToHashSet();
+                var handed = Regex.Matches(passing, chain + @"[^\n]*, i64 ([%\w.-]+)\)").Select(m => m.Groups[1].Value).ToList();
+                Assert.True(handed.Count == calls && handed.All(loaded.Contains), $"{arch}: `{function}` hands on {string.Join(", ", handed)}, not {calls} loads of its `{parameter}`:\n{passing}");
+            }
+
+            Assert.Equal(5, Regex.Count(ir, chain)); // the emitted call and the four above, no other
         }
     }
 
