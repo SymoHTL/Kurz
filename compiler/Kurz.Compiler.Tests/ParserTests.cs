@@ -1798,10 +1798,11 @@ public sealed class ParserTests
     [InlineData("x = within(1) within 2s", "(assign-or-declare x (call within (int 1) (within (unit 2s))))")]
     public void A_within_after_a_call_is_its_clause_and_takes_a_unary_expression(string program, string tree)
     {
-        // U39: `x.M() within d` bounds the one call, its operand a unary expression, as T35's constant operand is, so that `* 2` applies
-        // to the call's result and a computed bound stands in parentheses, and the clause stands before a postfix `else` (O5), the `else`
-        // after a call in the operand that call's (assumed: T12 of comment 6967625156); whether the call is one a clause applies to is the
-        // checker's (T11)
+        // U39, U41: `x.M() within d` bounds the one call, its operand a unary expression, as T35's constant operand is, so that `* 2`
+        // applies to the call's result and a computed bound stands in parentheses, and the clause stands before a postfix `else` (O5)
+        // (U41; assumed: T12 of comment 6967625156), the `else` after a call in the operand that call's, as a unary expression takes its
+        // own postfix forms (T35) (U41; assumed: a reading of the build); whether the call is one a clause applies to is the checker's
+        // (U41; T11)
         Assert.Equal(tree, Tree(program));
     }
 
@@ -1812,8 +1813,9 @@ public sealed class ParserTests
     [InlineData("s = spawn Store() within 2s", 1)]
     public void A_clause_where_a_call_takes_none_is_syntax(string program, int line)
     {
-        // U39, T12: one clause on a call, standing before its postfix `else`; a `spawn`, whose constructor's call waits for no answer,
-        // takes none, as `spawn` and Elixir's `cast` take no timeout (assumed: T11 and T12 of comment 6967625156)
+        // U41: one clause on a call (assumed: a reading of the build), standing before its postfix `else` (assumed: T12 of comment
+        // 6967625156); a `spawn`, whose call is no call of an actor's method through a reference (U4), takes none, as `tokio::spawn`
+        // and Elixir's `cast` take no timeout (not checked at source) (assumed: T11 of comment 6967625156)
         Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
     }
 
@@ -1826,9 +1828,10 @@ public sealed class ParserTests
     [InlineData("int within() => 1", "(function int within() => (int 1))")]
     public void A_within_after_the_parameters_of_a_declaration_is_its_clause(string program, string tree)
     {
-        // U39: `pub T M(...) within d` bounds every call of the method, its operand a number literal, with its sign where it has one,
-        // as a knob of a policy takes one (U26), the checker reading its type (U40); whether the declaration is one a clause applies to
-        // is the checker's (assumed: T11 and T13 of comment 6967625156)
+        // U39, U41: `pub T M(...) within d` bounds every call of the method, its operand a literal alone (U41; assumed: T13 of comment
+        // 6967625156), a number literal of any type, with its sign where it has one, as a knob of a policy takes one (U26), the checker
+        // reading its type (U40) (U41; assumed: a reading of the build, apart from T11 and T13); whether the declaration is one a clause
+        // applies to is the checker's (U41; assumed: T11 of comment 6967625156)
         Assert.Equal(tree, Tree(program));
     }
 
@@ -1837,10 +1840,10 @@ public sealed class ParserTests
     [InlineData("actor Store {\n    pub int Get() within 2s * 2 => 1\n}", 2)]
     [InlineData("actor Store {\n    pub int Get() within (2s) => 1\n}", 2)]
     [InlineData("actor Store {\n    pub int Get() within Bound() => 1\n}", 2)]
-    public void The_clause_of_a_declaration_takes_a_duration_literal_alone(string program, int line)
+    public void The_clause_of_a_declaration_takes_a_number_literal_alone(string program, int line)
     {
-        // U39: anything but a literal after the declaration's `within` is `syntax`, as after a knob of a policy (U26) (assumed: T13 of
-        // comment 6967625156)
+        // U41: anything but a number literal, with its sign where it has one, after the declaration's `within` is `syntax`, as after a
+        // knob of a policy (U26) (assumed: T13 of comment 6967625156)
         Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
     }
 

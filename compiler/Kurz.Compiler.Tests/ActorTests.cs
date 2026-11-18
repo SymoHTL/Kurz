@@ -5456,10 +5456,14 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_clauses_bound_runs_after_the_arguments_and_a_declarations_literal_bounds_each_call()
     {
         // U39, F12: the bound of a call's clause runs after the call's arguments, as it is written after them, and the literal of a
-        // declaration's clause bounds every call of the method that names none, which answers within it
+        // declaration's clause bounds every call of the method that names none: `Add`'s answers within its 2 seconds, and `Late`'s, whose
+        // literal of 0 s is a deadline that has passed at each call (U41; assumed: a reading of the build), raises `call-timeout` at its
+        // line, which only that literal bounds
         const string text = """
             actor Store {
                 pub int Add(int x) within 2s => x + 1
+
+                pub int Late() within 0s => 0
             }
 
             int Note(string text, int x) {
@@ -5475,9 +5479,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             s = spawn Store()
             print(s.Add(Note("argument", 1)) within Bound("bound"))
             print(s.Add(2))
+            print(s.Late())
 
             """;
-        Ran(BuildAndRun(text, toolchain.Runtime, "actor-clause-order"), 0, ["argument", "bound", "2", "3"], "");
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-clause-order"), 1, ["argument", "bound", "2", "3"], "error: call-timeout at program.kz:20\n");
     }
 
     [Fact]

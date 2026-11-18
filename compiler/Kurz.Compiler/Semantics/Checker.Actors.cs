@@ -956,12 +956,12 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// U39: the clause <c>within d</c> on a call bounds a call of an actor's method through a reference that waits (U4), its bound read as
-    /// a block's is (U40, <see cref="CheckBound"/>), after the call's arguments, and recorded as one that can wait where it runs a call, as
-    /// an argument is (<see cref="RecordWaits"/>); on any other call, a <c>send</c>'s (U6), a function's, a class's method's or an actor's
-    /// own method called inside it, it is <c>syntax</c>, as <c>send</c> before what is no call of an actor's method is (U14) (assumed: T11
-    /// of comment 6967625156), the bound then read with no diagnostic, as is that of a call that reported its own error (E1), so that a
-    /// variable it reads counts as read.
+    /// U39, U41: the clause <c>within d</c> on a call bounds a call of an actor's method through a reference that waits (U4), its bound read
+    /// as a block's is (U40, <see cref="CheckBound"/>), after the call's arguments, and recorded as one that can wait where it runs a call,
+    /// as an argument is (<see cref="RecordWaits"/>); on any other call, a <c>send</c>'s (U6), a function's, a class's method's or an
+    /// actor's own method called inside it, it is <c>syntax</c>, as <c>send</c> before what is no call of an actor's method is (U14) (U41;
+    /// assumed: T11 of comment 6967625156), the bound then read with no diagnostic, as is that of a call that reported its own error (U41;
+    /// E1), so that a variable it reads counts as read.
     /// </summary>
     private void CallClause(CallExpression c, Expression bound, Typed result)
     {
@@ -975,8 +975,8 @@ public sealed partial class Checker
         if (kind != CallKind.ActorCall)
         {
             Report(ErrorIds.Syntax, bound.Line, kind == CallKind.ActorSend
-                ? "`within` bounds a call that waits, and a `send` waits for nothing (U39, U6)"
-                : "`within` after a call bounds a call of an actor's method through a reference, which waits, and this call is none (U39, U4)");
+                ? "`within` bounds a call that waits, and a `send` waits for nothing (U41, U6)"
+                : "`within` after a call bounds a call of an actor's method through a reference, which waits, and this call is none (U41, U4)");
             CheckLoosely(bound);
             return;
         }
@@ -989,11 +989,12 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// U39: the clause <c>within d</c> on a declaration bounds every call through a reference of a message, a <c>pub</c> method of an actor
-    /// (U4, U9), its duration literal read as a block's bound is (U40, <see cref="CheckBound"/>); on any other declaration, a function's,
-    /// a class's, a data type's or an interface's method, or an actor's method without <c>pub</c>, it is <c>syntax</c>, as <c>send</c>
-    /// before what is no call of an actor's method is (U14) (assumed: T11 of comment 6967625156). An actor the checker does not read has
-    /// its one diagnostic (<see cref="RefuseUnreadActors"/>; E1), and a <c>static</c> method of an actor its <c>not supported</c> (U1).
+    /// U39, U41: the clause <c>within d</c> on a declaration bounds every call through a reference of a message, a <c>pub</c> method of an
+    /// actor (U4, U9), its number literal, its sign included, read as a block's bound is (U40, <see cref="CheckBound"/>; U41, assumed: a
+    /// reading of the build); on any other declaration, a function's, a class's, a data type's or an interface's method, or an actor's
+    /// method without <c>pub</c>, it is <c>syntax</c>, as <c>send</c> before what is no call of an actor's method is (U14) (U41; assumed:
+    /// T11 of comment 6967625156). An actor the checker does not read has its one diagnostic (<see cref="RefuseUnreadActors"/>; U41, E1),
+    /// and a <c>static</c> method of an actor its <c>not supported</c> (U1).
     /// </summary>
     private void CheckDeclarationClauses(IReadOnlyList<Statement> statements)
     {
@@ -1019,7 +1020,7 @@ public sealed partial class Checker
                     continue;
                 }
 
-                Report(ErrorIds.Syntax, bound.Line, $"`within` on a declaration bounds the calls of a message, a `pub` method of an actor, and `{f.Name}` is none (U39, U4, U9)");
+                Report(ErrorIds.Syntax, bound.Line, $"`within` on a declaration bounds the calls of a message, a `pub` method of an actor, and `{f.Name}` is none (U41, U4, U9)");
             }
         }
     }

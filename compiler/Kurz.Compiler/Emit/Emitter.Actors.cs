@@ -535,8 +535,11 @@ public sealed partial class Emitter
             return "void";
         }
 
-        // U39: the call's bound, that of its clause, run after the arguments, else the literal of the method's declaration, the call's
-        // clause winning over the declaration's, which the runtime's `Enqueue` takes where no `within` block runs (assumed in section 6)
+        // U39: the call's bound, that of its clause, run after the arguments, at every call it stands on, under a `within` block whose
+        // deadline wins over it too (assumed: a reading of the build), else the literal of the method's declaration, the call's clause
+        // winning over the declaration's, which the runtime's `Enqueue` takes where no `within` block runs (assumed in section 6); the
+        // callee's reference and its heap, read before the arguments, stay the callee's while the bound runs, since a bound that
+        // changes the variable the callee was read from, `s.Get() within Swap(mut s)`, is `changed-while-held` (M7), as an argument is
         var bound = c.Within is { } clause ? EmitExpression(clause) : f.Declaration!.Within is { } declared ? EmitExpression(declared) : null;
         var result = f.ReturnType;
         var reply = fn.Alloca(Reply(result), "reply");
