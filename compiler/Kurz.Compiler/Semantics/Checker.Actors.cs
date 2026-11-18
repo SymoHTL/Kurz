@@ -1253,15 +1253,15 @@ public sealed partial class Checker
     /// <summary>
     /// U47, U12: what the block of the <c>attempt</c> <paramref name="a"/> takes crosses into its child as a message's arguments do: a
     /// value, an immutable class instance and an actor's reference with no word, and a value that needs a word only where each read of
-    /// it in the block, its <paramref name="names"/> outside the blocks of the <c>attempt</c>s inside it, which read it themselves, is the
-    /// argument of a call after <c>copy</c>, else <c>capture-needs-word</c> at the first such name (section 6, "What a body may change";
+    /// it in the block, its <paramref name="names"/>, is the argument of a call after <c>copy</c>, else <c>capture-needs-word</c> at
+    /// the first such name, a read inside an <c>attempt</c> in the block reported by that block alone, whose error leaves this block
+    /// unread (section 6, "What a body may change";
     /// assumed: T19 of comment 6980152255); a value no word makes cross, and one the build does not copy, is <c>not supported</c>, after
     /// the language's error. Whether it reported one.
     /// </summary>
     private bool AttemptCaptures(AttemptExpression a, LambdaInfo info, List<NameExpression> names)
     {
         var worded = new HashSet<NameExpression>(ReferenceEqualityComparer.Instance);
-        var inner = new HashSet<NameExpression>(ReferenceEqualityComparer.Instance);
         SyntaxCopy.Walk(a.Body, e =>
         {
             if (e is CallExpression c)
@@ -1271,22 +1271,12 @@ public sealed partial class Checker
                     worded.Add((NameExpression)Unwrap(x.Value));
                 }
             }
-            else if (e is AttemptExpression nested)
-            {
-                SyntaxCopy.Walk(nested.Body, x =>
-                {
-                    if (x is NameExpression n)
-                    {
-                        inner.Add(n);
-                    }
-                });
-            }
         });
         string? limit = null;
         var line = a.Line;
         foreach (var v in info.Captures)
         {
-            var reads = names.Where(n => !inner.Contains(n) && model.IsVariable(n) && ReferenceEquals(model.VariableOf(n), v)).OrderBy(n => n.Line).ToList();
+            var reads = names.Where(n => model.IsVariable(n) && ReferenceEquals(model.VariableOf(n), v)).OrderBy(n => n.Line).ToList();
             var (kind, why, limited) = CrossingOf(v.Type);
             if (kind == ActorCrossing.NeedsWord && reads.FirstOrDefault(n => !worded.Contains(n)) is { } bare)
             {
