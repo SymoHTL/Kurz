@@ -587,10 +587,10 @@ call passes, and one on a stream whose peer reset the connection fails with `ENO
 resolves, for the writer of a streamed response (W11), as Kestrel sets it on every connection: a small write then goes
 out at once, and not after the peer's acknowledgement of the one before.
 `LockWait` puts the thread to sleep on a lock word, a file's or one of the runtime's, while it holds
-the value given, and `LockWake` wakes one thread that sleeps on it, each by the `futex` call through `syscall`,
-as Rust's `futex_wait` and `futex_wake` do (S16), the wait by `FUTEX_WAIT_PRIVATE` (128), where Rust's waits by
-`FUTEX_WAIT_BITSET` with `FUTEX_PRIVATE_FLAG` and a bitset of every bit, and the wake by `FUTEX_WAKE_PRIVATE` (129)
-(Rust's operations not checked at source); each Linux architecture's file gives the two with the number of
+the value given, and `LockWake` wakes one thread that sleeps on it, each by the `futex` call through `syscall`
+(S16): the wait by `FUTEX_WAIT_PRIVATE` (128), where Rust's `futex_wait` waits by
+`FUTEX_WAIT_BITSET` with `FUTEX_PRIVATE_FLAG` and a bitset of every bit, and the wake by `FUTEX_WAKE_PRIVATE` (129),
+as Rust's `futex_wake` does (Rust's operations not checked at source); each Linux architecture's file gives the two with the number of
 `futex` there, 202 on x86-64, and 98 on AArch64, where 202 is `accept`, and the Windows runtime waits by
 `WaitOnAddress` and wakes by `WakeByAddressSingle`, as Rust's futex does there. `std/` gives the room a read makes in a list of bytes before it,
 `BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9), and the
@@ -989,12 +989,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `Vector128` field's 16 among it: the queue of many senders its messages are put on and the queue its
   blocks are posted on, 24 bytes each, an intrusive queue of many producers and one consumer (not checked at source),
   which a sender appends to by one atomic swap of its end and a release store of the link and which the
-  thread that holds the actor moves at its take, at `Ready`, at its crash's fall and at its end, and which a
-  child's thread moves on its supervisor, with no hold of it, where the child's crash escalates through the
-  supervisor (`Fall`) or ends it as the crash's taker (`EndActor`), which holds only while one thread runs every
-  program (U35), into the inbox and the side list of the activation that
-  waits in the message's chain, the blocks to the front of the inbox (the runtime's `Pushed`, `Popped`,
-  `Moved`; section 6), the name of its type and two words the emitted code holds (U2),
+  thread that holds the actor moves into the inbox and the side list of the activation that waits in the
+  message's chain, the blocks to the front of the inbox, at its take, at `Ready`, at its crash's fall and at its
+  end, and which a child's thread moves on its supervisor, with no hold of it, where the child's crash escalates
+  through the supervisor (`Fall`) or ends it as the crash's taker (`EndActor`), as the list of what holds only
+  while one thread runs every program names that move (U35; the runtime's `Pushed`, `Popped`, `Moved`; section 6), the name of its type and two words the emitted code holds (U2),
   whether it runs, waits for its restart or ended (U19, U22), an `int`,
   and beside it the actor's state word, an `int` reached only through `AtomicInt` (R19), whose bits say
   whether a thread holds the actor (RUNNING), whether an entry of it stands in the run queue (QUEUED),
@@ -1039,10 +1038,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   whose model takes every interleaving of a lookup of each of two actors while a third thread frees the first's
   slot and takes it for the second, but for the life of the table's directory and pages; and the futex's wait and wake
   (`sys.LockWait`, `sys.LockWake`), of Rust's futex shape (not checked at source). The models' moves are
-  sequentially consistent, so that the orders of the atomic operations are the ones the runtime's source writes,
-  each of which `EmitterTests` holds to one instruction of the IR of that order
-  (`An_atomic_member_with_its_order_written_is_one_llvm_instruction_of_that_order_aligned_to_its_word`), and no model
-  reads them. These hold only while one thread runs every program (U35), each a reading of the code that no run on
+  sequentially consistent, so that no model checks the orders of the atomic operations: they are the ones the
+  runtime's source writes, each of which `EmitterTests` holds to one instruction of the IR of that order
+  (`An_atomic_member_with_its_order_written_is_one_llvm_instruction_of_that_order_aligned_to_its_word`). These hold only while one thread runs every program (U35), each a reading of the code that no run on
   more than one thread checks (inferred): the run queue,
   a plain `static mut` (`Queue`, `RunOne`); the life of the table's directory and pages, each made in the own
   heap of the thread whose take made it, the main thread's (`SlotTake`, `Lookup`); the life of an actor a sender
@@ -1052,7 +1050,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   children with no hold, the ENDING bit set before the child's hold, and the siblings of a crashed child held
   in no one order (`EndChildren`); the gap between a restart's take off the queue of the pauses and its hold
   (`PauseEnded`, `Restart`); a block for the top-level code posted with no wake, which the main thread finds at
-  its wait's following turn (`Post`); the log line of a block's decision, which reads the child's record, the
+  its wait's following turn (`Post`); the make of the words the threads share by the first `spawn`, where the
+  system refused them at the start, with no lock (`Shared`); the log line of a block's decision, which reads the child's record, the
   return of the stack it raised on and the free of the block's message, made before the child's hold
   (`Decided`); and the plain stores that clear the table's slots at the end of the process (`EndActors`).
   `==` of two references
@@ -1377,8 +1376,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   one order in every run of one build (M10), and a block takes its keys with it;
   the Linux runtime's `Random` takes them as Rust's standard library takes the seed of a `HashMap`
   (`library/std/src/sys/pal/unix/rand.rs`, checked at the tag 1.82.0): `getrandom` with
-  `GRND_INSECURE`, `GRND_NONBLOCK` for the rest of the thread where the kernel refuses that flag with
-  `EINVAL`, the call made again for the bytes left and where `EINTR` interrupted it, and
+  `GRND_INSECURE`, `GRND_NONBLOCK` where the kernel refuses that flag with `EINVAL`, for the rest of the
+  thread, where Rust's holds for the rest of the process, the call made again for the bytes left and where `EINTR` interrupted it, and
   `/dev/urandom`, opened with `O_CLOEXEC` at its first read and kept open, where the system refuses
   `getrandom` with `ENOSYS` or `EPERM`, the thread keeping to the file from then on, or where the
   pool is not ready, `EAGAIN`; the two flags and the descriptor are `thread static mut`s where Rust
