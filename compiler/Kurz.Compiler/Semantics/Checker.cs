@@ -209,8 +209,8 @@ public sealed partial class Checker
 
     /// <summary>
     /// U30: the readings after the first of a program with a block of <c>on crash</c>, after which a <c>Reason</c> that still grows counts as
-    /// not found: the program is read at most this count and one more times, the first among them, besides the reading of one whose errors
-    /// stand in blocks alone made only for its sets (<see cref="Check(ProgramSyntax, DiagnosticBag)"/>).
+    /// not found: the program is read at most this count and one more times, the first among them, besides a reading made only for its
+    /// sets at each such reading whose errors stand in blocks alone (<see cref="Check(ProgramSyntax, DiagnosticBag)"/>).
     /// </summary>
     private const int CrashReadings = 4;
 

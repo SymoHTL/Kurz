@@ -5825,7 +5825,8 @@ pub byte* CopyNext() {
 // which a copy the memo gave can still wait to be filled while the map is filled. The maps are placed before
 // the session's last copy points the `weak` references of its copies (`CopyLeft`), and no key the checker
 // admits hashes a `weak` slot: a `weak` reference as a map's key or value is `not supported` (the checker's
-// `WeakUnread`), a key type that reaches one is no key it reads (its `KeyOf`), a class with a `weak` field
+// `WeakUnread`), a key type that reaches one through what `==` compares by content, a `data` value's field, an item or
+// a case, is no key it reads (its `KeyOf`), and a class with a `weak` field
 // compares and hashes by identity (K4), by its copy's address, which the pointing does not change, and an
 // `equal by` that names such a field is `not supported` (K8).
 pub void CopyAfter(byte* copy, byte* place) {

@@ -310,6 +310,31 @@ public sealed class CorpusTests
     }
 
     [Theory]
+    [InlineData("// expect: output\n// | 1\n// threads: 1\n// rules: U34\n\nx\n", "U34", 6)]
+    [InlineData("// expect: throws actor-gone at 7\n// | 0\n// system: linux\n// threads: 1\n// rules: U32\n\nx\n", "U32", 7)]
+    public void A_threads_line_of_one_thread_stands_before_the_rules_line(string text, string rules, int bodyLine)
+    {
+        // chapter 0: a case whose output follows one thread's order carries `// threads: 1` (U35; section 6, comment 6946657505, Q5), after
+        // its `system:` line where it has one; the build runs every actor on its one thread, so the runner does nothing more for it
+        var header = CaseHeader.Parse(text, out var problem);
+        Assert.Null(problem);
+        Assert.Equal((rules, bodyLine), (string.Join(", ", header!.Rules), header.BodyLine));
+    }
+
+    [Theory]
+    [InlineData("// expect: output\n// threads: 2\n// rules: U34\n\nx\n")]
+    [InlineData("// expect: output\n// threads: 0\n// rules: U34\n\nx\n")]
+    [InlineData("// expect: output\n// threads:\n// rules: U34\n\nx\n")]
+    [InlineData("// expect: output\n// threads: 1 2\n// rules: U34\n\nx\n")]
+    public void A_threads_line_of_another_count_is_refused_as_such(string text)
+    {
+        // chapter 0: the line is `// threads: 1` (assumed: the line as section 6's answer gives it); another count is named as the threads
+        // line it is, not as a missing rules line
+        Assert.Null(CaseHeader.Parse(text, out var problem));
+        Assert.Equal("the `// threads:` line is not `// threads: 1`", problem);
+    }
+
+    [Theory]
     [InlineData("// expects output\n// rules: V1\n\nx = 4\n")]
     [InlineData("// expect: output\n\nx = 4\n")]
     [InlineData("// expect: output\n// rules: v1\n\nx = 4\n")]

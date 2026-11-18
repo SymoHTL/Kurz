@@ -29,7 +29,7 @@ public sealed class Parser
     private bool noLambda; // the value of an operand of `asm`, where `=>` splits the operand (R11) and starts no lambda
     private int statementDepth; // the statements being parsed around the cursor: 1 at the top level of a file, more inside a block of code (R12, R16)
     private bool deciding; // U29: inside the block of `on crash (c) { ... }`, outside a lambda in it, where `restart`, `stop` and `escalate` are statements
-    private int headers; // the conditions, collections and subjects being parsed before their blocks, where a name before `{` is no `attempt`, outside brackets and braces (U28; assumed: section 6, comment 6847932993, Q10; Unheaded)
+    private int headers; // the conditions, collections and subjects being parsed before their blocks, where a name before `{` is no `attempt`, outside brackets and braces (U28; assumed: section 6, comment 6847932993, Q10; inside them the form, section 6, the owner, 2026-11-17, #570, comment 6961064167, Q3, "Block's words"; Unheaded)
     private readonly List<(int Index, Token Original)> tokenEdits = new(); // tokens a speculative parse rewrote (`>>`): undone with the rewind
 
     private Parser(SourceText source, IEnumerable<Token> tokens, DiagnosticBag diagnostics)
