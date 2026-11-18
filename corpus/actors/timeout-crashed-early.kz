@@ -1,0 +1,50 @@
+// expect: output
+// | CalleeCrashed
+// | done
+// threads: 1
+// rules: U43, U20, U30, U33
+
+// `Failing` crashes before `Caller`'s deadline, and `Holder`'s message, queued ahead of `Caller`, holds the one thread past
+// it: the crash's time, not the time `Caller` reads it, is held to the deadline
+
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Holder {
+    pub void Busy() {
+        Hold(300ms)
+    }
+}
+
+actor Failing(Holder H) {
+    pub int Fail() {
+        send H.Busy()
+        throw "early"
+    }
+}
+
+actor Caller(Failing F) {
+    pub void Go() {
+        within 100ms {
+            print(F.Fail())
+        }
+    }
+
+    pub string Done() => "done"
+}
+
+h = spawn Holder()
+f = spawn Failing(h)
+c = spawn Caller(f) on crash (e) {
+    match e.Reason {
+        RuntimeError r => print(r.Kind)
+    }
+
+    restart
+}
+send c.Go()
+print(c.Done())

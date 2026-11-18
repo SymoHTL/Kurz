@@ -4099,7 +4099,9 @@ pub void Replied(byte* reply) {
 // The reply `reply` of a call, which its owner took (`ReplyTaken`), set to `kind` with no result: 2 where its
 // callee crashed (U20), 3 where the actor that was to answer ended, 4 where its message was dropped at its
 // deadline (`Dropped`; U37); the waiter and its actor read before the
-// word's release store, and the activation that waits on it woken as `Replied` wakes it, where its actor
+// word's release store, and the clock at the set stored in the reply at 40 before it too, the time that `Wait`
+// holds a crash or an end to the call's deadline by, not the time the waiter reads the word (U43; assumed: T7 of
+// comment 6967625156, "the earlier of the two"); and the activation that waits on it woken as `Replied` wakes it, where its actor
 // neither waits for its restart or for the decision of its block nor ended, as C#'s `TaskCompletionSource` is
 // set faulted.
 void Signal(byte* reply, int kind) {
@@ -4110,6 +4112,7 @@ void Signal(byte* reply, int kind) {
             state = *Ptr<byte*>(waiter + 320)
         }
 
+        *Ptr<long>(reply + 40) = PauseClock()
         AtomicInt.FromPtr(Ptr<int>(reply)).Store(kind, MemoryOrder.Release)
         if state != null {
             int life = *Ptr<int>(state - 88)
@@ -4346,11 +4349,12 @@ void Discard(byte* message) {
 // first timer and the deadline. Inside a message the activation's reply joins the thread's timers while it
 // parks (`TimerAdd`), and the activation goes on where its deadline passed at the scheduler's turn (`Waited`),
 // its reply leaving the timers at every way out (`TimerRemove`). The reply's word is read once after the wait, and
-// an answer set before that read is the call's result (U36), the header then naming no reply. A call that left
+// a result set before that read is the call's result (U36), the header then naming no reply. A call that left
 // its wait with no answer raises `call-timeout` at its line, the crash of the waiting actor in its turn, whose
 // fall unhooks the reply, which the header still names (`Fall`; U20); so does a reply set `dropped` (`Dropped`),
-// and a reply set `callee crashed` or `gone` once the call's own deadline passed (U43; assumed: T7 of comment
-// 6967625156), as tonic reports a call's own deadline.
+// and a reply set `callee crashed` or `gone` at a time, which `Signal` stored in it, at or past the call's own
+// deadline, whenever the waiter reads it (U43; assumed: T7 of comment 6967625156), as tonic reports a call's own
+// deadline (not checked at source).
 pub void Wait(byte* reply, byte* message, string file, int line) {
     sys.Entered()
     raw {
@@ -4409,7 +4413,7 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
             *Ptr<byte*>(running + 432) = null
         }
 
-        if kind == 0 || kind == 4 || (kind != 1 && *Ptr<long>(reply + 16) <= PauseClock()) {
+        if kind == 0 || kind == 4 || (kind != 1 && *Ptr<long>(reply + 16) <= *Ptr<long>(reply + 40)) {
             Raise("call-timeout", file, line)
         }
 

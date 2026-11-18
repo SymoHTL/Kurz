@@ -605,7 +605,7 @@ public sealed class ModelTests
     /// The callee of a call with a deadline, once its message is queued: the scheduler's test of the message's deadline at its take
     /// (<c>RunOne</c>); before it, the run, the take of the reply (<c>ReplyTaken</c>) and, where it owns it, <c>Replied</c>, as
     /// <see cref="Callee"/> has them; past it, the drop (<c>Dropped</c>): the take of the reply, and where it owns it, <c>Signal</c>: the
-    /// waiter read, then the release store of the word <c>dropped</c>, then the wake of the waiter's actor.
+    /// waiter read, the clock stored in the reply, then the release store of the word <c>dropped</c>, then the wake of the waiter's actor.
     /// </summary>
     private static Strand TimedCallee(int at, Break broken)
     {
@@ -623,9 +623,10 @@ public sealed class ModelTests
             .. Woken(at, answer + 3, -1),
             .. Took(at, drop, broken == Break.DropSignalsNothing ? -1 : signal, -1, _ => true, broken),
             new("Signal", "byte* waiter = *Ptr<byte*>(reply + 8)", _ => true, s => { s[Touched] |= s[Gone]; s[at + 1] = s[Waiter]; s[at] = signal + 1; }),
-            new("Signal", ".Store(kind, MemoryOrder.Release)", _ => true, s => { s[Touched] |= s[Gone]; s[Answer] = 4; s[at] = signal + 2; }),
-            new("Signal", "Wake(state)", _ => true, s => { s[at] = s[at + 1] != 0 ? signal + 3 : -1; }),
-            .. Woken(at, signal + 3, -1),
+            new("Signal", "*Ptr<long>(reply + 40) = PauseClock()", _ => true, s => { s[Touched] |= s[Gone]; s[at] = signal + 2; }),
+            new("Signal", ".Store(kind, MemoryOrder.Release)", _ => true, s => { s[Touched] |= s[Gone]; s[Answer] = 4; s[at] = signal + 3; }),
+            new("Signal", "Wake(state)", _ => true, s => { s[at] = s[at + 1] != 0 ? signal + 4 : -1; }),
+            .. Woken(at, signal + 4, -1),
         ]);
     }
 

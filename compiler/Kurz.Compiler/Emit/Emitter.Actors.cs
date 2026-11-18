@@ -674,13 +674,14 @@ public sealed partial class Emitter
     /// The IR type of the reply of a call that waits, as tokio's <c>oneshot</c> holds its state, its receiver's task and its value: the
     /// word set once the result stands, an <c>i32</c> that the runtime stores with release and loads with acquire, the activation that
     /// waits on it, which the runtime's <c>ReplyWaiter</c> sets, the call's deadline and the replies before and after it among the
-    /// thread's timers, which the runtime's <c>Enqueue</c> and <c>Wait</c> set (U36), then, for a method with a result, the heap of the
-    /// caller, which the result is copied into (U12), the field <see cref="ReplyHeap"/>, and the result after it.
+    /// thread's timers, which the runtime's <c>Enqueue</c> and <c>Wait</c> set (U36), the clock at which a crash or an end set the word,
+    /// which the runtime's <c>Signal</c> stores and <c>Wait</c> holds to the deadline (U43), then, for a method with a result, the heap of
+    /// the caller, which the result is copied into (U12), the field <see cref="ReplyHeap"/>, and the result after it.
     /// </summary>
-    private string Reply(KurzType result) => Types.IsVoid(result) ? "{ i32, ptr, i64, ptr, ptr }" : $"{{ i32, ptr, i64, ptr, ptr, ptr, {Ir(result)} }}";
+    private string Reply(KurzType result) => Types.IsVoid(result) ? "{ i32, ptr, i64, ptr, ptr, i64 }" : $"{{ i32, ptr, i64, ptr, ptr, i64, ptr, {Ir(result)} }}";
 
     /// <summary>The field of the caller's heap in a reply (<see cref="Reply"/>), the result's the one after it.</summary>
-    private const int ReplyHeap = 5;
+    private const int ReplyHeap = 6;
 
     /// <summary>
     /// U37: the function that drops a message of the method <paramref name="f"/> unrun, the third of its call site's table, which the

@@ -1458,7 +1458,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         InOrder(Body(@"kz\.main"), @"store i32 0, ptr %v\.reply\.\d+", @"call void @""rt\.common\.ReplyWaiter\.\d+""\(ptr %v\.reply\.\d+\)",
             @"store ptr %v\.reply\.\d+, ptr %t\d+", @"call void @""rt\.common\.Enqueue\.\d+""", @"call void @""rt\.common\.Wait\.\d+""");
-        Assert.Contains("getelementptr { i32, ptr, i64, ptr, ptr, ptr, i64 }, ptr %v.reply.", ir, StringComparison.Ordinal); // U36: the deadline and the timers' links before the heap
+        Assert.Contains("getelementptr { i32, ptr, i64, ptr, ptr, i64, ptr, i64 }, ptr %v.reply.", ir, StringComparison.Ordinal); // U36, U43: the deadline, the timers' links and the time of a crash or an end before the heap
         InOrder(Body(@"""message\.Counter\.Get\.\d+"""), @"call i64 @""f\.Counter\.Get\.\d+""", @"call ptr @""rt\.common\.ReplyTaken\.\d+""\(ptr %a1\)",
             @"call void @""rt\.common\.Replied\.\d+""");
         InOrder(Runtime("ReplyTaken"), @"atomicrmw xchg ptr %t\d+, ptr null acq_rel, align 8");

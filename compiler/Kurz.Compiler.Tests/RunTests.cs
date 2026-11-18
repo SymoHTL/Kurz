@@ -187,7 +187,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         "system/arguments.kz", "system/args-parameter.kz", "system/args-in-lambda.kz", "system/args-new-list.kz", "system/clock.kz", "system/environment-missing.kz",
         "system/monotonic-clock.kz", "system/elapsed-order.kz", "functions/top-level-return.kz", "functions/top-level-return-end.kz",
         "actors/timeout-block.kz", "actors/timeout-callee-crash.kz", "actors/timeout-capped.kz", "actors/timeout-carried.kz", "actors/timeout-crashed.kz",
-        "actors/timeout-default.kz", "actors/timeout-send.kz", "actors/within-clauses.kz",
+        "actors/timeout-crashed-early.kz", "actors/timeout-default.kz", "actors/timeout-send.kz", "actors/within-clauses.kz",
     ];
 
     /// <summary>The cases of log calls that expect a run, which a build for Windows says <c>not supported</c> to (S11, P6).</summary>

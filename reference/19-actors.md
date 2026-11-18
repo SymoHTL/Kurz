@@ -2486,6 +2486,54 @@ within 100ms {
 }
 ```
 
+Case: [actors/timeout-crashed-early.kz](../corpus/actors/timeout-crashed-early.kz)
+```kurz
+// `Failing` crashes before `Caller`'s deadline, and `Holder`'s message, queued ahead of `Caller`, holds the one thread past
+// it: the crash's time, not the time `Caller` reads it, is held to the deadline
+
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Holder {
+    pub void Busy() {
+        Hold(300ms)
+    }
+}
+
+actor Failing(Holder H) {
+    pub int Fail() {
+        send H.Busy()
+        throw "early"
+    }
+}
+
+actor Caller(Failing F) {
+    pub void Go() {
+        within 100ms {
+            print(F.Fail())
+        }
+    }
+
+    pub string Done() => "done"
+}
+
+h = spawn Holder()
+f = spawn Failing(h)
+c = spawn Caller(f) on crash (e) {
+    match e.Reason {
+        RuntimeError r => print(r.Kind)
+    }
+
+    restart
+}
+send c.Go()
+print(c.Done())
+```
+
 Case: [actors/timeout-carried.kz](../corpus/actors/timeout-carried.kz)
 ```kurz
 // the thread held for `d`, with no call and no wait
@@ -3409,6 +3457,8 @@ Case: [actors/block-stop.kz](../corpus/actors/block-stop.kz)
 
 Case: [actors/block-type.kz](../corpus/actors/block-type.kz)
 
+Case: [actors/timeout-crashed-early.kz](../corpus/actors/timeout-crashed-early.kz)
+
 ### U31 (assumed, §6) What the block reads
 
 A block at a `spawn` in an actor's code reads and assigns the fields of that actor, the supervisor,
@@ -3485,6 +3535,8 @@ print(w.Fail())
 Case: [actors/block-reason.kz](../corpus/actors/block-reason.kz)
 
 Case: [actors/block-throw-root.kz](../corpus/actors/block-throw-root.kz)
+
+Case: [actors/timeout-crashed-early.kz](../corpus/actors/timeout-crashed-early.kz)
 
 ### U34 (assumed, §6) Pending blocks and the log line
 
@@ -3812,6 +3864,8 @@ comment 6967625156)*, against `callee-crashed` or `actor-gone` as U20 reads, the
 that raised it (U24). An answer set before the caller reads its deadline is the call's result (U36).
 
 Case: [actors/timeout-crashed.kz](../corpus/actors/timeout-crashed.kz)
+
+Case: [actors/timeout-crashed-early.kz](../corpus/actors/timeout-crashed-early.kz)
 
 ### U44 (assumed, §6) The deadline a call's message carries
 
