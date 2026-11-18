@@ -1,0 +1,10 @@
+// expect: error unknown-name at 7
+// rules: Y5
+
+total = 3
+
+test "reads the total" {
+    check total == 3
+}
+
+print(total)

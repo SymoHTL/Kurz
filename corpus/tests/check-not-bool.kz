@@ -1,0 +1,9 @@
+// expect: error type-mismatch at 6
+// rules: Y6, Y7
+
+// a test is checked by every command, so its error refuses the build of the program
+test "counts" {
+    check 1
+}
+
+print(1)

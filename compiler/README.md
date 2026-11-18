@@ -2692,6 +2692,15 @@ that sit under a rule by its id. Every one is pinned by a test.
   closing `"""`, so that the block's text is not read as code, and reads what follows the
   closing quotes on their line as code.
 
+- Y1, Y6, Y9: where `test`, `check`, `mock` and `advance` are words, inside D2's letter (issue 586, comment
+  6992687784). `test cluster` is the cluster test only where a token that can start an expression follows
+  `cluster`, so that `test cluster = 1` declares a variable `cluster` of a type named `test`; `mock` is the
+  statement only where a type, `with` and a type follow it, so that `mock x = 1` declares a variable `x` of
+  a type named `mock`; a `test` block in a class's body is the member parser's `syntax` at its line; and
+  the text of a `check` is its tokens as the source writes them, a `>` of a `>>` that type arguments took
+  apart among them, each run of spaces, line breaks and comments between two tokens one space. Pinned by
+  `ParserTests`.
+
 Six shapes still get two errors, or an uneven one, from the front end, each low: `if x print(1)
 else print(2)` is `braces-required` twice on one line, because the postfix `else` binds to the call
 and takes arms of its own; `if x` with its `{` on the next line, then `else if y` with its own, is
@@ -2984,8 +2993,11 @@ reaches a value of a type parameter, an instance of a class of `std/`, `HttpRequ
 reaches a handle, a hasher, a command or a child process by any path the copy follows, a lambda's capture and
 a field of any class among them, or a value of a type parameter, which the copy of its function for such a type
 argument makes one of them, whose copy would share the sender's block by its count (U12); `copy` at a call that is no message before a value that
-reaches a function value or an interface's value, which no word makes cross (U12); and a log call
-inside an actor (P8). The refusal of
+reaches a function value or an interface's value, which no word makes cross (U12); a log call
+inside an actor (P8); the cluster test of section 13, `test cluster N seed S { ... }`, whose words and
+block the parser passes over (Y8); and `mock X with Y` and `advance d`, whose questions are open (Y9, Y10),
+the duration of an `advance` checked as the bound of `within` is (U40) and its error reported beside the
+line. The refusal of
 the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered
 on 2026-11-14, comment 6880404917); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
@@ -3547,3 +3559,9 @@ round can ask about it by the rule's id.
 - A9 with A7 and A15: a `Text()` without `pub` makes `not-visible` every `print`, interpolation and
   `string.Join` (X6) of the instance, and of a list or a `data` value that holds one, inside the class and
   outside it.
+- Y6: a `check` tells the checker nothing after it, so that after `check x != null` the variable `x`
+  is still nullable (N2), as Rust's `assert!` narrows no type, where C#'s `Debug.Assert` tells its
+  flow analysis the condition held. A comparison shows its sides' values where it stands alone or in
+  parentheses and each side shows its value as a hole of an interpolation does; a test's name is its
+  own by its value, so that `"A"` and `"\u0041"` are one name. Pinned by
+  `CheckerTests`.
