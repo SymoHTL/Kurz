@@ -29,5 +29,9 @@ construct is emitted at puts its target on a line that nothing else the program 
 the line of a neighbour cannot pass for it.
 
 `HttpResponseTests.A_build_for_windows_says_not_supported_at_the_statement_that_made_a_lambda_whose_write_reaches_a_socket`
-holds the five rows: `first`, `lambda`, `capture`, `default` and `constructor`, each red under the
-mutation of its own enqueue or emission (579's description, "Tests").
+holds the five rows: `first`, `lambda`, `capture`, `default` and `constructor`. `lambda`, `capture`,
+`default` and `constructor` are each red under the mutation of their own enqueue or emission (579's
+description, "Tests"); `first`, whose line the lambda's mutation passed, is red under the mutation that gives
+a lambda that reads no variable the line 0 in its enqueue (`Origin = origin` to 0 in `Emitter.Lambdas.cs`), run
+on 2026-11-18 on the tree of 581's squash `3993b7ee`, which turned `first`, `lambda`, `default` and
+`constructor` red.

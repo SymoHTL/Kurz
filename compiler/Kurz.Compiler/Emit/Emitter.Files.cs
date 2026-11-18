@@ -281,7 +281,7 @@ public sealed partial class Emitter
                 {
                     var count = fn.Value($"and i64 {fn.Value($"extractvalue %kz.str {path}, 1")}, 9223372036854775807"); // without the mark of a block
                     // the byte of `st_mode` in the architecture's `struct stat`, which its file gives; emitted for Linux alone, since
-                    // `EmitFileCall` says `not supported` for every other target before it reaches a case (S11)
+                    // `EmitFileCall`, the one caller of `EmitPathCall`, says `not supported` for every other target first (S11)
                     var modeAt = SysCall("StatModeAt", "");
                     var r = SysCall("CreateDirectories", $"ptr {c}, i64 {count}, i64 {modeAt}");
                     FreePath(c, path);
