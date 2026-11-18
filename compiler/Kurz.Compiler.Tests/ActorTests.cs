@@ -2924,7 +2924,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(b)
 
             """;
-        var late = ListTests.Edited(("runtime/common/runtime.kz", "static mut long actorCount = 0\n", "static mut long actorCount = 9223372036854775806\n"));
+        var late = ListTests.Edited(("runtime/common/runtime.kz", "            sharedWords = SharedCleared(words)\n", "            sharedWords = SharedCleared(words)\n            *Ptr<long>(words + 24) = 9223372036854775806\n"));
         Ran(BuildAndRun(text, late, "actor-number-last"), 1, ["Idle#9223372036854775807"], "error: allocation-failed (112 bytes)\n");
     }
 

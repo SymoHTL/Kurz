@@ -60,6 +60,7 @@ public sealed partial class Emitter
     private readonly Unit program;
     private readonly Unit common;
     private readonly Unit sys;
+    private readonly Unit arch;
     private readonly Unit std;
     private readonly Target target;
     private readonly IReadOnlyList<Unit> units;
@@ -104,6 +105,7 @@ public sealed partial class Emitter
         this.program = program;
         this.common = common;
         this.sys = sys;
+        this.arch = arch;
         this.std = std;
         this.target = target;
         units = [program, common, sys, arch, std];

@@ -89,11 +89,15 @@ public sealed partial class Emitter
     /// <summary>The result of a call on a file being emitted: its union, the case <c>IoError</c>, the slot that takes the value and the block after it.</summary>
     private sealed record FileOutcome(UnionType Union, DataType Error, string Slot, string Done);
 
-    /// <summary>The IR name of a <c>pub</c> function of the runtime of the target, which only a program's calls on files and sockets call.</summary>
+    /// <summary>
+    /// The IR name of a <c>pub</c> function of the runtime of the target, which only a program's calls on files and sockets call: of the
+    /// target's file or of the architecture's, which the folder <c>sys</c> reads beside it (round 20, "Dir per arch"), as the lock word's
+    /// wait and wake by the number of <c>futex</c> on Linux.
+    /// </summary>
     private string SysFunction(string name) => Instance(
-        sys.Tree.Statements.OfType<FunctionDeclaration>()
+        new[] { sys, arch }.SelectMany(u => u.Tree.Statements.OfType<FunctionDeclaration>()
             .Where(d => d.Name == name && (d.Modifiers & Modifiers.Pub) != 0)
-            .Select(d => sys.Model.FunctionOf(d))
+            .Select(d => u.Model.FunctionOf(d)))
             .SingleOrDefault() ?? throw new InvalidOperationException($"{sys.File} has no `pub` function `{name}`, which a call on a file or a socket calls"),
         NoMap);
 

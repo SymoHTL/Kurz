@@ -415,6 +415,35 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void The_lock_word_s_wait_and_wake_call_futex_by_its_number_on_each_architecture_and_windows_waits_on_the_address()
+    {
+        // section 2, round 20, "Dir per arch": `futex` is 202 on x86-64 and 98 on AArch64, where 202 is `accept`, so each Linux
+        // architecture's file gives the lock word's wait and wake with its own number, which every program reaches through the lock of
+        // its streams (`Print`); Windows waits by `WaitOnAddress` and wakes by `WakeByAddressSingle`, as Rust's futex does there
+        foreach (var (target, arch, wait, wake) in new[]
+        {
+            (Target.Linux, Arch.X64, "@syscall(i64 202, ptr %", "@syscall(i64 202, ptr %"),
+            (Target.Linux, Arch.Arm64, "@syscall(i64 98, ptr %", "@syscall(i64 98, ptr %"),
+            (Target.Windows, Arch.X64, "@WaitOnAddress(", "@WakeByAddressSingle("),
+            (Target.Windows, Arch.Arm64, "@WaitOnAddress(", "@WakeByAddressSingle("),
+        })
+        {
+            var cpu = arch == Arch.X64 ? Cpu.Baseline : Cpu.ArmBaseline;
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", "print(1)\n"), [], Builder.CheckRuntime(target, arch), true, cpu: () => cpu);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var ir = compilation.Program.Ir;
+            foreach (var (function, call) in new[] { ("LockWait", wait), ("LockWake", wake) })
+            {
+                var body = Regex.Match(ir, $@"^define [^\n]*@""?rt\.sys\.{function}\b[^\n]*\n(.*?)\n\}}", RegexOptions.Multiline | RegexOptions.Singleline);
+                Assert.True(body.Success, $"{target} {arch}: no `{function}` in the module");
+                Assert.Contains(call, body.Groups[1].Value, StringComparison.Ordinal);
+            }
+
+            Assert.Equal(target == Target.Linux ? 2 : 0, Regex.Count(ir, @"@syscall\(i64 (202|98), ")); // no other number of the two
+        }
+    }
+
+    [Fact]
     public void A_build_refuses_a_runtime_of_another_architecture_than_its_cpus()
     {
         // round 20, "Dir per arch": a program for one architecture calls that architecture's switch, so a runtime checked for the other
