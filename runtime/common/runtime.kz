@@ -3497,9 +3497,9 @@ pub string ExitErrorText(ExitError e) {
 // so that the state keeps the alignment of the allocator's
 // block, as Rust's `ArcInner` pads its counts to what it holds: the queue of many senders its messages are
 // put on and the queue its blocks are posted on, 24 bytes each (`Pushed`), the name of the actor's type, whether the
-// actor runs (0), waits for its restart (1), ends after its current
-// message (2), ended (3) (U19, U22), has its constructor run at its `spawn` (4) (U3, U25) or waits for the
-// decision of the block of its policy (5) (U28), an `int`, and beside it the actor's state word, an `int`
+// actor runs (0), waits for its restart (1), ended (3) (U19, U22), has its constructor run at its `spawn` (4)
+// (U3, U25) or waits for the decision of the block of its policy (5) (U28), an `int`, and beside it the actor's
+// state word, an `int`
 // that only atomic operations read and change, which says whether a thread holds the actor and whether an
 // entry of it stands in the run queue (`StateWord`), the block of its
 // restart, which its supervisor's heap holds (U22), a block that names no function to run where its policy
@@ -3570,6 +3570,10 @@ static mut long slotFree = -1
 // The header of the activation whose message runs on the thread, null while the top-level code runs,
 // the scheduler's loop in its wait among it.
 thread static mut byte* running = null
+
+// The actor whose crash the thread takes, which it holds (`Run`, `Crashed`), null where it takes none, so that
+// the end of a supervisor that crash reaches acts on it under that hold, with no second one (`EndChildren`).
+thread static mut byte* holding = null
 
 // The heap of an actor `spawn` makes, whose first block holds the actor's record and a state of `size`
 // bytes behind it (design record, section 3), made before the arguments of `spawn`, which cross into it
@@ -4211,12 +4215,23 @@ byte* Taken(byte* list) {
 // bits set or clear: 1 RUNNING, a thread holds the actor, from its take off the run queue (`Claimed`) or its
 // restart (`Restart`) to the end of that hold (`LetGo`); 2 QUEUED, an entry of the actor stands in the run
 // queue; 4 NOTIFIED, a take found the actor held and dropped its entry, so that whoever holds it queues it
-// again as it lets go of it (`LetGo`, `ActorBuilt`); 8 BUILDING, its constructor runs at its `spawn` (U3).
-// With none set the actor is idle.
+// again as it lets go of it (`LetGo`, `ActorBuilt`); 8 BUILDING, its constructor runs at its `spawn` (U3); 16
+// ENDING, the actor ends after its current message, which the end of its supervisor sets by one atomic `or` and
+// no thread clears (`EndChildren`, `Ending`). With none of the first four set the actor is idle.
 AtomicInt StateWord(byte* state) {
     raw {
         return AtomicInt.FromPtr(Ptr<int>(state - 84))
     }
+}
+
+// Whether the end of the actor's supervisor set its ENDING bit (`EndChildren`), loaded with acquire.
+bool Ending(byte* state) {
+    mut int word = 0
+    raw {
+        word = StateWord(state).Load(MemoryOrder.Acquire)
+    }
+
+    return (word & 16) != 0
 }
 
 // The value the compare-exchange of the state word `word` from `seen` to `wanted` found there, `seen` where
@@ -4872,7 +4887,9 @@ void Run(byte* state, byte* header) {
         sys.StackGuard(null, 0)
         std.HeapUse(before)
         if *Ptr<long>(header + 448) != 0 {
+            holding = state
             Crashed(state, header)
+            holding = null
             LetGo(state, false)
             return
         }
@@ -4886,7 +4903,7 @@ void Run(byte* state, byte* header) {
             }
 
             Give(header)
-            if below == null && *Ptr<int>(state - 88) == 2 {
+            if below == null && Ending(state) {
                 EndActor(state)
                 LetGo(state, false)
                 return
@@ -5203,7 +5220,7 @@ void Fell(byte* state, byte* header, bool hasText, byte* id, long idCount, byte*
         }
 
         byte* side = *Ptr<byte*>(taker - 80)
-        if life == 2 || side == null {
+        if side == null {
             EndActor(taker)
             return
         }
@@ -5233,7 +5250,7 @@ byte* Taker(byte* state) {
         while at != null {
             int life = *Ptr<int>(at - 88)
             byte* side = *Ptr<byte*>(at - 80)
-            if life != 4 && (life != 0 || side == null || *Ptr<byte*>(side) != null) {
+            if (life != 4 || Ending(at)) && (life != 0 || side == null || *Ptr<byte*>(side) != null) {
                 return at
             }
 
@@ -5522,7 +5539,14 @@ void EndActor(byte* state) {
 // Each child of the actor whose state is `state`, each actor of the table its code spawned, from the highest
 // index down, ended at once where it has no activation, and else after its current message, with no restart
 // left to it and no supervisor, whose record its own end may free first, so that its crash is taken by its own
-// end (`Taker`) (U13; design record, section 6, assumed there).
+// end (`Taker`) (U13; design record, section 6, assumed there). One actor acts on another through the other's
+// state word, or under its hold (design record, section 6, the default for the acts of one actor on another):
+// the child's ENDING bit set by one atomic `or`, which its holder reads where its last activation ends (`Run`,
+// `Ending`), as tokio's `abort` sets a bit of the task's state (not checked at source); then, held as a restart
+// holds an actor (`HeldAlone`), the child, where its holder did not end it meanwhile, ended at once or its policy
+// and its supervisor cleared, and let go (`LetGo`), which frees the record of a child that ended where no entry of
+// it stands in the run queue. The child whose crash the thread takes is held by the thread already (`holding`),
+// and acted on under that hold, which `Run` lets go of once the crash was taken.
 void EndChildren(byte* state) {
     raw {
         mut long index = SlotsUsed() - 1
@@ -5530,12 +5554,22 @@ void EndChildren(byte* state) {
             byte* at = SlotState(index)
             if at != null {
                 if *Ptr<byte*>(at - 72) == state && *Ptr<int>(at - 88) != 3 {
-                    if *Ptr<byte*>(at - 8) == null {
-                        EndActor(at)
-                    } else {
-                        *Ptr<int>(at - 88) = 2
-                        *Ptr<byte*>(at - 80) = null
-                        *Ptr<byte*>(at - 72) = null
+                    StateWord(at).FetchOr(16, MemoryOrder.AcqRel)
+                    if at != holding {
+                        HeldAlone(at)
+                    }
+
+                    if *Ptr<int>(at - 88) != 3 {
+                        if *Ptr<byte*>(at - 8) == null {
+                            EndActor(at)
+                        } else {
+                            *Ptr<byte*>(at - 80) = null
+                            *Ptr<byte*>(at - 72) = null
+                        }
+                    }
+
+                    if at != holding {
+                        LetGo(at, false)
                     }
                 }
             }
@@ -5962,8 +5996,8 @@ void RootBlock(byte* message) {
 // The decision `word` of the block of the message `message` acted on for the actor whose state is
 // `child`, as the words of a policy act (U29): `restart` restarts it after its pause and `stop` ends it,
 // each after the crash's log line, written at the decision (U34; assumed: S10 of comment 6907441402), the
-// stack it raised on given back to the pool and the message freed; `escalate` crashes the supervisor
-// (`Escalate`).
+// stack it raised on given back to the pool and the message freed, each under the child's hold (`HeldAlone`,
+// `LetGo`), as one actor acts on another (`EndChildren`); `escalate` crashes the supervisor (`Escalate`).
 void Decided(byte* child, byte* message, long word) {
     raw {
         if word == 3 {
@@ -5983,12 +6017,15 @@ void Decided(byte* child, byte* message, long word) {
         }
 
         std.Free(message, 184)
+        HeldAlone(child)
         if word == 1 {
             *Ptr<int>(child - 88) = 1
             Pause(child)
         } else {
             EndActor(child)
         }
+
+        LetGo(child, false)
     }
 }
 

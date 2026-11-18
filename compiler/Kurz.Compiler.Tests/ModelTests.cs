@@ -11,7 +11,8 @@ namespace Kurz.Compiler.Tests;
 /// word, whose wakes, takes and ends of a hold say whether a thread holds the actor and whether an entry of it stands in the run queue,
 /// the reply of a call that waits, which its callee and the crash of its waiter each take by one atomic swap, and the queue of many
 /// senders an actor's messages are put on, which its holder moves into its own lists (<c>Pushed</c>, <c>Popped</c>), the lock of the words
-/// the threads share (<c>Lock</c>, <c>Unlock</c>) and the lookup of an actor's slot, which takes no lock (<c>Lookup</c>). Each move of a model
+/// the threads share (<c>Lock</c>, <c>Unlock</c>), the lookup of an actor's slot, which takes no lock (<c>Lookup</c>), and the end of a
+/// supervisor, which sets its child's ENDING bit and acts on the child under its hold (<c>EndChildren</c>). Each move of a model
 /// is one atomic operation of the runtime, or one plain read or write that no other thread races, and names the function of
 /// <c>runtime/common/runtime.kz</c> it transcribes, with the text of the atomic operation it is there and the texts of the masks of
 /// the state word's bits it decides by; a test holds every name and every such text to that file, a guard against a model that says
@@ -22,7 +23,8 @@ namespace Kurz.Compiler.Tests;
 /// timer that fires at a call's deadline wakes the waiter and owns no reply (U36, U37); no <c>Ready</c> reads the reply of a wait that
 /// returned, which <c>Wait</c> takes off its activation at its read of the set word; no message of a queue lost, moved twice or moved
 /// before an earlier message of its sender (U5), no two holders of a lock and no thread asleep on a free one, and no lookup that gives
-/// another actor's state; and it finds each of these broken in a model
+/// another actor's state, and no child of an ended supervisor that does not end, ends twice or has its record written while another thread
+/// holds it (U13); and it finds each of these broken in a model
 /// broken so, the cases of <see cref="Break"/>. Its moves are sequentially consistent: the orders of the runtime's atomic operations,
 /// acquire and release, are the IR's to show (<c>EmitterTests</c>), not the explorer's.
 /// </summary>
@@ -96,6 +98,12 @@ public sealed class ModelTests
 
         /// <summary><c>SlotFree</c> stores the link of the free slots before it clears the slot's number.</summary>
         LinkBeforeNumber,
+
+        /// <summary><c>Run</c> lets go of a child whose last activation ended with no read of its ENDING bit.</summary>
+        RunIgnoresEnding,
+
+        /// <summary><c>EndChildren</c> ends or clears the child once its bit is set, with no hold of it.</summary>
+        EndWithoutHold,
     }
 
     /// <summary>
@@ -1034,7 +1042,88 @@ public sealed class ModelTests
         return state;
     }
 
-    private static Model[] Models(Break broken) => [.. WordModels(broken), .. ReplyModels(broken), .. QueueModels(broken), .. SharedModels(broken)];
+    // The words of the end's model besides the state word, its entries and its holders: whether the child's activation waits in its
+    // message, whether the child ended, how often, and whether the end of the supervisor wrote the child's record while another thread
+    // held it.
+    private const int ChildWaits = 4, ChildEnds = 5, Trespass = 6;
+
+    /// <summary>
+    /// The end of the child's supervisor (<c>EndChildren</c>): the child's ENDING bit set by one atomic <c>or</c>, the hold of the child
+    /// outside the run queue (<c>HeldAlone</c>, waiting while a take holds it), the child ended where it has no activation and did not end
+    /// meanwhile, else its policy and supervisor cleared, and the end of the hold (<c>LetGo</c>).
+    /// </summary>
+    private static Strand Ender(int at, Break broken)
+    {
+        void Trespassed(int[] s) => s[Trespass] |= s[Holders] - s[at + 3] > 0 ? 1 : 0;
+        return new("ender", at,
+        [
+            new("EndChildren", "StateWord(at).FetchOr(16, MemoryOrder.AcqRel)", _ => true,
+                s => { s[Word] |= 16; s[at] = broken == Break.EndWithoutHold ? 3 : 1; }),
+            new("HeldAlone", "word.Load(MemoryOrder.Acquire)", _ => true, s => { s[at + 1] = s[Word]; s[at] = 2; }),
+            new("HeldAlone", "Exchanged(word, seen, seen | 1)", s => (s[at + 1] & Running) == 0 || s[Word] != s[at + 1], s =>
+            {
+                var seen = s[at + 1];
+                if (s[Word] != seen)
+                {
+                    s[at + 1] = s[Word];
+                    return;
+                }
+
+                s[Word] = seen | Running;
+                s[Holders]++;
+                s[at + 3] = 1;
+                s[at] = 3;
+            }, ["if (seen & 1) == 0 {"]),
+            new("EndChildren", "if *Ptr<byte*>(at - 8) == null {", _ => true, s =>
+            {
+                if (s[ChildEnds] == 0)
+                {
+                    Trespassed(s);
+                    s[ChildEnds] += s[ChildWaits] == 0 ? 1 : 0;
+                }
+
+                s[at + 2] = 0;
+                s[at] = s[at + 3] != 0 ? 4 : -1;
+            }, ["if *Ptr<int>(at - 88) != 3 {"]),
+            .. LetGone(at, 4, s => { s[at + 3] = 0; return -1; }, broken),
+        ]);
+    }
+
+    /// <summary>
+    /// A thread of the scheduler that takes the child's entry (<c>RunOne</c>, <c>Claimed</c>), resumes its activation, whose message then
+    /// ends: the child ended where its ENDING bit is set (<c>Run</c>), and the end of the hold (<c>LetGo</c>).
+    /// </summary>
+    private static Strand Resumer(int at, Break broken) => new("child", at,
+    [
+        .. Taken(at, 0, 3, broken),
+        new("Run", "if below == null && Ending(state) {", _ => true, s =>
+        {
+            s[ChildWaits] = 0;
+            if ((s[Word] & 16) != 0 && broken != Break.RunIgnoresEnding)
+            {
+                s[ChildEnds]++;
+            }
+
+            s[at + 2] = 0;
+            s[at] = 4;
+        }),
+        .. LetGone(at, 4, _ => -1, broken),
+    ]);
+
+    /// <summary>The model of the end of a supervisor while its child's activation waits in a message whose answer queued the child.</summary>
+    private static Model[] EndModels(Break broken) =>
+    [
+        new("the end of a supervisor while its child waits in a message", Start(2, (Word, Queued), (Entries, 1), (ChildWaits, 1)),
+            [Ender(At(0), broken), Resumer(At(1), broken)],
+            s => s[Holders] > 1 ? "two threads hold the actor"
+                : s[ChildEnds] > 1 ? "the child ended twice"
+                : s[Trespass] != 0 ? "the end of the supervisor wrote the child's record while another thread held it"
+                : null,
+            s => s[ChildEnds] == 0 ? "a child whose supervisor ended did not end" : null),
+    ];
+
+    private static Model[] Models(Break broken) =>
+        [.. WordModels(broken), .. ReplyModels(broken), .. QueueModels(broken), .. SharedModels(broken), .. EndModels(broken)];
 
     [Fact]
     public void The_state_word_and_the_reply_keep_every_interleaving_of_their_threads()
@@ -1076,11 +1165,52 @@ public sealed class ModelTests
     }
 
     [Fact]
+    public void A_child_whose_supervisor_ended_ends_once_after_its_current_message_in_every_interleaving()
+    {
+        // U13: the end of the supervisor sets the child's ENDING bit and acts on the child under its hold, while another thread resumes the
+        // child's activation; the child ends once, by the end of its supervisor or where its last activation ends, and nothing writes its
+        // record while another thread holds it
+        foreach (var model in EndModels(Break.None))
+        {
+            var (broken, states) = Explore(model);
+            Assert.True(broken is null, $"{model.Name}: {broken?.What} after {string.Join(", ", broken?.Path ?? [])}");
+            Assert.True(states >= 40, $"{model.Name}: {states} states");
+        }
+    }
+
+    [Fact]
+    public void Each_act_of_one_actor_on_another_is_made_under_the_other_s_hold()
+    {
+        // section 6, the default for the acts of one actor on another: the end of a supervisor ends its child or clears the child's policy
+        // and supervisor, and a block's decision restarts or ends the child, each between the hold of the child and its end
+        Held(
+        [
+            ("EndChildren", "HeldAlone(at)", "EndActor(at)", "LetGo(at, false)"),
+            ("EndChildren", "HeldAlone(at)", "*Ptr<byte*>(at - 80) = null", "LetGo(at, false)"),
+            ("Decided", "HeldAlone(child)", "Pause(child)", "LetGo(child, false)"),
+            ("Decided", "HeldAlone(child)", "EndActor(child)", "LetGo(child, false)"),
+        ]);
+    }
+
+    /// <summary>Each text <c>Access</c> of the function <c>Function</c> stands between the text <c>Take</c> and the text <c>End</c>.</summary>
+    private static void Held((string Function, string Take, string Access, string End)[] held)
+    {
+        foreach (var (function, take, access, end) in held)
+        {
+            var body = Body(function);
+            var taken = body.IndexOf(take, StringComparison.Ordinal);
+            var at = body.IndexOf(access, StringComparison.Ordinal);
+            Assert.True(taken >= 0 && at > taken && body.IndexOf(end, at, StringComparison.Ordinal) > at,
+                $"`{function}` holds no `{access}` between `{take}` and `{end}`");
+        }
+    }
+
+    [Fact]
     public void Each_word_the_threads_share_is_read_and_written_under_its_lock()
     {
         // section 6: the table of slots, the queue of the pauses, the blocks the top-level code's wait runs and the streams of `print`
         // and of the log are each read or written between the take of their lock and its end, which one thread cannot show
-        (string Function, string Take, string Access, string End)[] held =
+        Held(
         [
             ("Print", "StreamLock(fd)", "sys.WriteOut(fd, buffer + done, total - done)", "StreamUnlock(fd)"),
             ("LogLine", "StreamLock(2)", "sys.Write(2, logBuffer + done, n - done)", "StreamUnlock(2)"),
@@ -1093,15 +1223,7 @@ public sealed class ModelTests
             ("PauseEnded", "Lock(PauseLock())", "paused = *Ptr<byte*>(*Ptr<byte*>(paused - 80) + 40)", "Unlock(PauseLock())"),
             ("Post", "Lock(RootLock())", "Append(rootBlocks, message)", "Unlock(RootLock())"),
             ("RootTaken", "Lock(RootLock())", "message = Taken(rootBlocks)", "Unlock(RootLock())"),
-        ];
-        foreach (var (function, take, access, end) in held)
-        {
-            var body = Body(function);
-            var taken = body.IndexOf(take, StringComparison.Ordinal);
-            var at = body.IndexOf(access, StringComparison.Ordinal);
-            Assert.True(taken >= 0 && at > taken && body.IndexOf(end, at, StringComparison.Ordinal) > at,
-                $"`{function}` holds no `{access}` between `{take}` and `{end}`");
-        }
+        ]);
     }
 
     [Theory]
@@ -1126,6 +1248,8 @@ public sealed class ModelTests
     [InlineData(Break.WaitsOnOne, "three threads on one lock", "a lost wake")]
     [InlineData(Break.LookupReadsOnce, "a lookup while its slot is freed and taken again", "not its actor's")]
     [InlineData(Break.LinkBeforeNumber, "a lookup while its slot is freed and taken again", "not its actor's")]
+    [InlineData(Break.RunIgnoresEnding, "the end of a supervisor while its child waits in a message", "did not end")]
+    [InlineData(Break.EndWithoutHold, "the end of a supervisor while its child waits in a message", "while another thread held it")]
     public void The_explorer_finds_each_break_of_a_model_in_the_model_it_breaks(Break broken, string name, string what)
     {
         // each break found in the model it breaks, with the moves that reach it: the explorer's own red proof
