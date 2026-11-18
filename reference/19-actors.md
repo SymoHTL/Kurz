@@ -4311,6 +4311,27 @@ within 100ms {
 }
 ```
 
+Case: [actors/attempt-dropped-queued.kz](../corpus/actors/attempt-dropped-queued.kz)
+```kurz
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+// the deadline of the `within` block passed before the `attempt` queues its message, which is dropped unqueued, and the
+// `attempt` raises `call-timeout` at its line
+within 100ms {
+    Hold(150ms)
+    v = attempt { 1 } else {
+        Crashed c => 0
+    }
+
+    print(v)
+}
+```
+
 ### U50 (assumed, §6) The crash an `attempt` holds
 
 A crash of the block writes the one `Error` log line of a crash a supervisor handles (U24) as the case reaches the parent
