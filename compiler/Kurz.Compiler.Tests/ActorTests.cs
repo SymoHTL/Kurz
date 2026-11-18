@@ -2836,10 +2836,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(s.Get())
 
             """;
-        var poisoned = ListTests.Edited([.. ListTests.Fence, ("runtime/common/runtime.kz", "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            std.HeapFree(state - 144)\n",
-            "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 144)\n"),
-            ("runtime/common/runtime.kz", "    } else if ended && (seen & 2) == 0 {\n        raw {\n            std.HeapFree(state - 144)\n",
-            "    } else if ended && (seen & 2) == 0 {\n        raw {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 144)\n")]);
+        var poisoned = ListTests.Edited([.. ListTests.Fence, ("runtime/common/runtime.kz", "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            std.HeapFree(state - 192)\n",
+            "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 192)\n"),
+            ("runtime/common/runtime.kz", "    } else if ended && (seen & 2) == 0 {\n        raw {\n            std.HeapFree(state - 192)\n",
+            "    } else if ended && (seen & 2) == 0 {\n        raw {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 192)\n")]);
         var run = BuildAndRun(text, poisoned, "actor-orphan-crash");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Parent#3 crashed: thrown \"parent\" at program.kz:26", "Child#4 crashed: thrown \"child 7\" at program.kz:12"], crashes);
@@ -2924,8 +2924,84 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(b)
 
             """;
-        var late = ListTests.Edited(("runtime/common/runtime.kz", "static mut long actorCount = 0\n", "static mut long actorCount = 9223372036854775806\n"));
-        Ran(BuildAndRun(text, late, "actor-number-last"), 1, ["Idle#9223372036854775807"], "error: allocation-failed (112 bytes)\n");
+        var late = ListTests.Edited(("runtime/common/runtime.kz", "            sharedWords = SharedCleared(words)\n", "            sharedWords = SharedCleared(words)\n            *Ptr<long>(words + 24) = 9223372036854775806\n"));
+        Ran(BuildAndRun(text, late, "actor-number-last"), 1, ["Idle#9223372036854775807"], "error: allocation-failed (160 bytes)\n");
+    }
+
+    [Fact]
+    public void A_process_whose_start_got_no_block_for_the_shared_words_makes_it_at_its_first_spawn()
+    {
+        // section 6 (assumed): the start makes the block of the words the threads share, and where the system refuses it there, the first
+        // `spawn` makes it (`Shared`), the one thread taking no lock before it; here the start's allocation gives none
+        const string text = """
+            actor Counter {
+                mut int n = 0
+
+                pub int Add() {
+                    n = n + 1
+                    return n
+                }
+            }
+
+            print(0)
+            c = spawn Counter()
+            print(c.Add())
+            print(c.Add())
+
+            """;
+        var refused = ListTests.Edited(("runtime/common/runtime.kz", "        byte* words = std.AllocateIn(null, 48)\n", "        byte* words = null\n"));
+        Ran(BuildAndRun(text, refused, "actor-shared-at-spawn"), 0, ["0", "1", "2"], "");
+    }
+
+    [Fact]
+    public async Task A_print_after_a_print_the_system_refused_takes_its_stream_s_lock_and_raises_at_its_own_line()
+    {
+        // section 6: a `print` lets go of its stream's lock before it raises `print-failed`, so that the top-level code's `print` after
+        // the crash of `Printer`, whose `print` the system refused, takes the lock and raises `print-failed` at its own line, where a
+        // lock left taken waits on its word for ever
+        const string text = """
+            actor Printer {
+                pub void Spam() {
+                    mut i = 0
+                    while i < 100000000 {
+                        print("line")
+                        i = i + 1
+                    }
+                }
+
+                pub int Count() => 3
+            }
+
+            p = spawn Printer()
+            send p.Spam()
+            eprint(p.Count())
+            print("again")
+
+            """;
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], StoodIn(print: false), true);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var info = new System.Diagnostics.ProcessStartInfo(toolchain.Build(compilation.Program, "actor-print-again"))
+        {
+            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
+        };
+        info.Environment["KURZ_TRACE"] = "0";
+        using var process = System.Diagnostics.Process.Start(info)!;
+        try
+        {
+            process.StandardOutput.Close(); // the reader is gone: a write is refused (a closed pipe)
+            var error = process.StandardError.ReadToEndAsync();
+            Assert.True(process.WaitForExit(30_000), "the program did not end once its output was closed");
+            var (crashes, rest) = Logged(await error);
+            Assert.Equal(["Printer#1 crashed: print-failed at program.kz:5"], crashes);
+            Assert.Equal((1, "3\nerror: print-failed at program.kz:16\n"), (process.ExitCode, rest));
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill();
+            }
+        }
     }
 
     [Fact]

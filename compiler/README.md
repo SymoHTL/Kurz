@@ -584,9 +584,11 @@ call passes, and one on a stream whose peer reset the connection fails with `ENO
 `SetNoDelay` sets `TCP_NODELAY` (1) at the level `IPPROTO_TCP` (6), the stream's member that only `std/`'s checker
 resolves, for the writer of a streamed response (W11), as Kestrel sets it on every connection: a small write then goes
 out at once, and not after the peer's acknowledgement of the one before.
-`LockWait` puts the thread to sleep on a file's lock word while it holds
+`LockWait` puts the thread to sleep on a lock word, a file's or one of the runtime's, while it holds
 the value given, and `LockWake` wakes one thread that sleeps on it, each by the `futex` call through `syscall`,
-as Rust's `futex_wait` and `futex_wake` do (S16). `std/` gives the room a read makes in a list of bytes before it,
+as Rust's `futex_wait` and `futex_wake` do (S16); each Linux architecture's file gives the two with the number of
+`futex` there, 202 on x86-64 and 98 on AArch64, where 202 is `accept`, and the Windows runtime waits by
+`WaitOnAddress` and wakes by `WakeByAddressSingle`, as Rust's futex does there. `std/` gives the room a read makes in a list of bytes before it,
 `BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9), and the
 block of a map, its growth and the hash of its keys (M9, below).
 
@@ -978,14 +980,22 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   its tasks ("What the emitter does not emit" names what of section 6 this does not build): `spawn`
   constructs the state as an instance of the actor's body is constructed, both its counts at one (K1,
   K7), in the first block of the actor's own heap, which the runtime's `ActorHeapNew` makes and
-  `ActorNew` fills, the actor's record in the 96 bytes in front of it, the build's own layout, which no rule of the record names, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps
+  `ActorNew` fills, the actor's record in the 144 bytes in front of it, the build's own layout, which no rule of the record names, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps
   the alignment of the allocator's block, as Rust's `ArcInner` pads its counts to what it holds, a
-  `Vector128` field's 16 among it: the name of its type and two words the emitted code holds (U2),
-  whether it runs, waits for its restart, ends after its current message or ended (U19, U22), an `int`,
+  `Vector128` field's 16 among it: the queue of many senders its messages are put on and the queue its
+  blocks are posted on, 24 bytes each, an intrusive queue of many producers and one consumer, whose producers append by one
+  atomic swap of its tail (not checked at source),
+  which a sender appends to by one atomic swap of its end and a release store of the link and which the
+  thread that holds the actor moves at its take into the inbox and the side list of the activation that
+  waits in the message's chain, the blocks to the front of the inbox (the runtime's `Pushed`, `Popped`,
+  `Moved`; section 6), the name of its type and two words the emitted code holds (U2),
+  whether it runs, waits for its restart or ended (U19, U22), an `int`,
   and beside it the actor's state word, an `int` reached only through `AtomicInt` (R19), whose bits say
   whether a thread holds the actor (RUNNING), whether an entry of it stands in the run queue (QUEUED),
-  whether a take found it held and left the entry to its holder (NOTIFIED) and whether its constructor
-  runs (BUILDING), as tokio's task state keeps RUNNING and NOTIFIED bits (not checked at source), the
+  whether a take found it held and left the entry to its holder (NOTIFIED), whether its constructor
+  runs (BUILDING) and whether it ends after its current message, which the end of its supervisor sets by one
+  atomic `or` before it acts on the actor under its hold (ENDING; the runtime's `EndChildren`), as tokio's
+  task state keeps RUNNING and NOTIFIED bits (not checked at source), the
   block of its restart, which its supervisor's heap holds, null where it does not restart (U22), its
   supervisor, null for the top-level code (U13), its heap, the index of its slot in the runtime's
   table of the process (below), the size of the stack its messages run on, 2 MiB or what its
@@ -996,7 +1006,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   state word's BUILDING marks it, so that no message starts before its `spawn` returns, the block of a
   child's crash posted while the constructor waits among them (U17, U28), and the life of the record
   marks it, so that a crash passed up into an actor whose constructor runs at its `spawn` goes on to its spawner (U25, U3). The number
-  counts the actors of every type from 1, in the order `ActorNew` makes them (U2). The reference is
+  counts the actors of every type from 1, in the order `ActorNew` makes them, by one relaxed atomic add (U2). The reference is
   two words, 16 bytes, the index of the actor's slot in the runtime's table of the process and the
   actor's number, which nothing counts (section 6, the owner, 2026-11-16, comment 6919351399, "Erlang:
   id + generation"; the two words assumed there): a slot holds the address of the state and the
@@ -1004,7 +1014,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   with it, the next `spawn` takes the slot freed last again, and a call or a `send` through a reference
   whose number its slot no longer holds finds no actor and raises `actor-gone` at its line (the
   runtime's `Lookup`, `ActorHeap` and `Enqueue`; U6, U20); the table's pages double from 64 slots and
-  never move, their directory in the thread's own heap (assumed in section 6). `==` of two references
+  never move, their directory in the thread's own heap (assumed in section 6). The table is taken and freed
+  under a lock of its own and looked up with none, by three loads with acquire, the number, the state and the
+  number again, against the stores with release of `SlotTake` and `SlotFree` (section 6). The words the threads
+  share are one block the runtime's `Start` makes: the locks of the streams of `print` and of the log, of the
+  table of slots, of the queue of the pauses and of the blocks the top-level code's wait runs, each of Rust's
+  futex shape (`library/std/src/sys/sync/mutex/futex.rs`, not checked at source: a compare-exchange from 0 to 1, a spin, a swap of 2
+  and a sleep on the word while it holds 2, a swap of 0 and a wake where it found 2), the count of the actors
+  and the table of every block's message, made there once; a `print` writes its line whole under its stream's
+  lock, and a log line under the lock of standard error. `==` of two references
   compares their numbers, a reference's hash as a map's key is its number's, `this` as a value inside
   an actor is the reference its record holds (U2, U10), and the runtime's `ActorText` makes the text of
   a reference from its number, the name of the actor's type, `#` and its number, `Counter#1`, all three
@@ -1330,8 +1348,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `EINVAL`, the call made again for the bytes left and where `EINTR` interrupted it, and
   `/dev/urandom`, opened with `O_CLOEXEC` at its first read and kept open, where the system refuses
   `getrandom` with `ENOSYS` or `EPERM`, the process keeping to the file from then on, or where the
-  pool is not ready, `EAGAIN`; the two flags and the descriptor are plain `static mut`s where Rust
-  keeps `AtomicBool`s and a `OnceLock`, the runtime's code using no atomic type for them (R19), and the runtime runs one thread.
+  pool is not ready, `EAGAIN`; the two flags and the descriptor are `thread static mut`s where Rust
+  keeps `AtomicBool`s and a `OnceLock`, each thread finding the kernel's answer and opening the file for itself,
+  since the runtime's code takes no address of a static for an atomic view (R19) (assumed: each thread's own, as
+  Rust's `ThreadRng` is one per thread, not checked at source).
   Where Rust panics, with any other error of `getrandom`, an open or a read of the file that fails or
   a file that ends first, `Random` gives false and the first write into the thread's first map ends
   the program with `random-failed` before it takes a block (M9; the owner, 2026-10-30, "End with an

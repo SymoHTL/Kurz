@@ -1,7 +1,8 @@
 // The runtime's code for Linux on 64-bit Arm (design record, section 2, round 20, "Dir per arch"), read
 // into the folder `sys` beside `runtime/linux/linux.kz`: the switch of a thread to an actor's stack and
 // back under the AArch64 procedure call standard, and the first frame of an actor's stack (the owner,
-// 2026-11-15, #519, comment 6892812780, Q2, "Rust: AArch64 switch now").
+// 2026-11-15, #519, comment 6892812780, Q2, "Rust: AArch64 switch now"), and the lock word's wait and wake by
+// the number of `futex` on this architecture.
 
 // The switch from the side whose save area is `from` to the side whose save area is `to` (design record,
 // section 2; section 3, `naked`, R12), as Rust's stackful coroutines switch on AArch64 (corosensei's
@@ -57,4 +58,37 @@ pub void Enter(byte* side, byte* top, extern "C" () => void entry) {
         *Ptr<long>(side + 96) = 0
         *Ptr<extern "C" () => void>(side + 104) = entry
     }
+}
+
+// The system call `syscall` makes, by its number, which differs between the architectures: `futex` is
+// 98 on AArch64 (the kernel's generic table, `include/uapi/asm-generic/unistd.h`, which Arm Linux takes, as Rust's `libc` names it
+// `SYS_futex` for aarch64, not checked at source; 202 there is `accept`).
+extern "C" {
+    long syscall(long number, ...)
+}
+
+// The thread put to sleep while the lock word at `word` holds `expected`, by `futex` (98, its number on
+// AArch64) with `FUTEX_WAIT_PRIVATE` (128) and no time limit, where Rust's `futex_wait` always uses
+// `FUTEX_WAIT_BITSET_PRIVATE` with a full mask, which with no time limit waits as `FUTEX_WAIT_PRIVATE` does:
+// 0, or the failure, which the caller does not read, since it tries the lock again after every wake (S16,
+// and the runtime's own locks, `Lock`).
+pub long LockWait(int* word, int expected) {
+    mut long result = 0
+    raw {
+        result = syscall(98, word, long(128), long(expected), long(0))
+    }
+
+    return result
+}
+
+// One thread that sleeps on the lock word at `word` woken, by `futex` (98 on AArch64) with
+// `FUTEX_WAKE_PRIVATE` (129), as Rust's `futex_wake` wakes one: the count woken, or the failure, which the
+// caller does not read (S16, `Unlock`).
+pub long LockWake(int* word) {
+    mut long result = 0
+    raw {
+        result = syscall(98, word, long(129), long(1))
+    }
+
+    return result
 }

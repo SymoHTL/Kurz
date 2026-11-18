@@ -60,6 +60,7 @@ public sealed partial class Emitter
     private readonly Unit program;
     private readonly Unit common;
     private readonly Unit sys;
+    private readonly Unit arch;
     private readonly Unit std;
     private readonly Target target;
     private readonly IReadOnlyList<Unit> units;
@@ -104,6 +105,7 @@ public sealed partial class Emitter
         this.program = program;
         this.common = common;
         this.sys = sys;
+        this.arch = arch;
         this.std = std;
         this.target = target;
         units = [program, common, sys, arch, std];
@@ -232,17 +234,23 @@ public sealed partial class Emitter
             }
             else if (defaultsPending.Count > 0)
             {
-                var (symbol, name) = defaultsPending.Dequeue();
+                // S11, W1: each queued function is emitted with the program's statement that first needed it, which a refusal for
+                // Windows of what it reaches in the standard library names, never with the statement of the function emitted before it
+                var (symbol, name, from) = defaultsPending.Dequeue();
+                origin = from;
                 EmitClassDefaults(symbol, name);
             }
             else if (constructorsPending.Count > 0)
             {
-                var (made, name) = constructorsPending.Dequeue();
+                var (made, name, from) = constructorsPending.Dequeue();
+                origin = from;
                 EmitConstructor(made, name);
             }
             else if (lambdas.Count > 0)
             {
-                EmitLambdaFunction(lambdas.Dequeue());
+                var lambda = lambdas.Dequeue();
+                origin = lambda.Origin;
+                EmitLambdaFunction(lambda);
             }
             else if (prepared < tabled.Count)
             {

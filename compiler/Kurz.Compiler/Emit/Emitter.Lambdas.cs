@@ -27,6 +27,9 @@ public sealed partial class Emitter
     {
         /// <summary>The sets of the function the lambda is made in, which a test there guarded it with (R18).</summary>
         public System.Collections.Immutable.ImmutableSortedSet<string> Features { get; init; } = NoFeatures;
+
+        /// <summary>The program's statement the lambda is made in, or that reached the function it is made in, which a refusal for Windows names (S11, W1).</summary>
+        public int Origin { get; init; }
     }
 
     /// <summary>The function value of a lambda where it is made: its code, and an environment of the values it reads (F15), a temporary of the region.</summary>
@@ -42,7 +45,7 @@ public sealed partial class Emitter
         var captures = Model.LambdaOf(l).Captures;
         if (captures.Count == 0)
         {
-            lambdas.Enqueue(new PendingLambda(unit, l, map, name, null, captures, display) { Features = features });
+            lambdas.Enqueue(new PendingLambda(unit, l, map, name, null, captures, display) { Features = features, Origin = origin });
             return $"{{ ptr {name}, ptr null }}";
         }
 
@@ -54,7 +57,7 @@ public sealed partial class Emitter
 
         var environment = $"%\"env.{key}\"";
         module.Global($"{environment} = type {{ i64, ptr{string.Concat(types.Select(t => ", " + Ir(t)))} }}");
-        lambdas.Enqueue(new PendingLambda(unit, l, map, name, environment, captures, display) { Features = features });
+        lambdas.Enqueue(new PendingLambda(unit, l, map, name, environment, captures, display) { Features = features, Origin = origin });
         var drop = Helper($"drop.{key}", "void", ["ptr"], () =>
         {
             for (var i = 0; i < types.Count; i++)

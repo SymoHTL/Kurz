@@ -1,6 +1,7 @@
 // The runtime's code for Linux on x86-64 (design record, section 2, round 20, "Dir per arch"), read into
 // the folder `sys` beside `runtime/linux/linux.kz`: the switch of a thread to an actor's stack and back
-// under the System V calling convention, and the first frame of an actor's stack.
+// under the System V calling convention, the first frame of an actor's stack, and the lock word's wait and wake
+// by the number of `futex` on this architecture.
 
 // The switch from the side whose save area is `from` to the side whose save area is `to` (design record,
 // section 2; section 3, `naked`, R12), as Rust's stackful coroutines switch (corosensei's
@@ -44,4 +45,37 @@ pub void Enter(byte* side, byte* top, extern "C" () => void entry) {
         *Ptr<byte*>(side) = top - 16
         *Ptr<long>(side + 16) = 0
     }
+}
+
+// The system call `syscall` makes, by its number, which differs between the architectures: `futex` is
+// 202 on x86-64 (the kernel's `arch/x86/entry/syscalls/syscall_64.tbl`, as Rust's `libc` names it `SYS_futex` for x86_64; not
+// checked at source).
+extern "C" {
+    long syscall(long number, ...)
+}
+
+// The thread put to sleep while the lock word at `word` holds `expected`, by `futex` (202, its number on
+// x86-64) with `FUTEX_WAIT_PRIVATE` (128) and no time limit, where Rust's `futex_wait` always uses
+// `FUTEX_WAIT_BITSET_PRIVATE` with a full mask, which with no time limit waits as `FUTEX_WAIT_PRIVATE` does:
+// 0, or the failure, which the caller does not read, since it tries the lock again after every wake (S16,
+// and the runtime's own locks, `Lock`).
+pub long LockWait(int* word, int expected) {
+    mut long result = 0
+    raw {
+        result = syscall(202, word, long(128), long(expected), long(0))
+    }
+
+    return result
+}
+
+// One thread that sleeps on the lock word at `word` woken, by `futex` (202 on x86-64) with
+// `FUTEX_WAKE_PRIVATE` (129), as Rust's `futex_wake` wakes one: the count woken, or the failure, which the
+// caller does not read (S16, `Unlock`).
+pub long LockWake(int* word) {
+    mut long result = 0
+    raw {
+        result = syscall(202, word, long(129), long(1))
+    }
+
+    return result
 }
