@@ -579,6 +579,322 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(program, Blocks.Value, "actor-copy-left-early"), 0, ["4", "0"], "");
     }
 
+    [Fact]
+    public void A_construction_left_by_a_later_argument_lets_go_of_what_its_slots_took()
+    {
+        // a construction, of a data value and of an instance, and a call of a parameter written `move`, left by the case a later argument
+        // propagates out of the function, let go of every value a slot took from an argument before it, a copy, a count of a shared block
+        // and a new value, as Rust drops the operands it had evaluated (issue 569); a plain call, whose parameters borrow, the control;
+        // the blocks live across a second call of each, after one that warmed it up
+        const string program = """
+            data Missing
+
+            class Box(mut int N)
+            class Holder(mut Box B)
+            data Pair(Box A, Box B)
+            data Single(Box A)
+            data Triple(Box A, Box B, Box C)
+            class Kept(Box A, Box B)
+
+            Box | Missing Lose(Holder held) {
+                held.B = Box(2)
+                return Missing
+            }
+
+            Pair | Missing Copied(Holder held) {
+                return Pair(copy held.B, copy Lose(held))
+            }
+
+            Pair | Missing Shared(Holder held) {
+                return Pair(held.B, copy Lose(held))
+            }
+
+            Single | Missing Alone(Holder held) {
+                return Single(copy Lose(held))
+            }
+
+            Triple | Missing Two(Holder held) {
+                return Triple(Box(5), Box(6), copy Lose(held))
+            }
+
+            Kept | Missing Made(Holder held) {
+                return Kept(Box(5), copy Lose(held))
+            }
+
+            string Keep(move Box a, Box b) => "{a.N} {b.N}"
+
+            string | Missing MovedCopy(Holder held) {
+                return Keep(copy held.B, copy Lose(held))
+            }
+
+            string | Missing MovedNew(Holder held) {
+                return Keep(move Box(5), copy Lose(held))
+            }
+
+            string | Missing MovedOne(Holder held) {
+                return Keep(copy held.B, Lose(held))
+            }
+
+            string Both(Box a, Box b) => "{a.N} {b.N}"
+
+            string | Missing Called(Holder held) {
+                return Both(Box(5), copy Lose(held))
+            }
+
+            string | Missing CalledShared(Holder held) {
+                return Both(held.B, copy Lose(held))
+            }
+
+            Box | Missing Found(Holder held) {
+                return Box(3)
+            }
+
+            Pair | Missing Built(Holder held) {
+                return Pair(copy held.B, copy Found(held))
+            }
+
+            Triple | Missing BuiltNew(Holder held) {
+                return Triple(Box(5), held.B, copy Found(held))
+            }
+
+            int MissedPair(Pair | Missing r) {
+                match r {
+                    Pair p => return p.A.N + p.B.N - p.A.N - p.B.N
+                    Missing => return 1
+                }
+            }
+
+            int MissedSingle(Single | Missing r) {
+                match r {
+                    Single s => return 0
+                    Missing => return 1
+                }
+            }
+
+            int MissedTriple(Triple | Missing r) {
+                match r {
+                    Triple t => return t.A.N + t.B.N + t.C.N - t.A.N - t.B.N - t.C.N
+                    Missing => return 1
+                }
+            }
+
+            int MissedKept(Kept | Missing r) {
+                match r {
+                    Kept k => return 0
+                    Missing => return 1
+                }
+            }
+
+            int MissedText(string | Missing r) {
+                match r {
+                    string s => return 0
+                    Missing => return 1
+                }
+            }
+
+            int Run(int row, Holder held) {
+                if row == 0 {
+                    return MissedPair(Copied(held))
+                }
+
+                if row == 1 {
+                    return MissedPair(Shared(held))
+                }
+
+                if row == 2 {
+                    return MissedSingle(Alone(held))
+                }
+
+                if row == 3 {
+                    return MissedTriple(Two(held))
+                }
+
+                if row == 4 {
+                    return MissedKept(Made(held))
+                }
+
+                if row == 5 {
+                    return MissedText(MovedCopy(held))
+                }
+
+                if row == 6 {
+                    return MissedText(MovedNew(held))
+                }
+
+                if row == 7 {
+                    return MissedText(MovedOne(held))
+                }
+
+                if row == 8 {
+                    return MissedText(Called(held))
+                }
+
+                if row == 9 {
+                    return MissedText(CalledShared(held))
+                }
+
+                if row == 10 {
+                    return MissedPair(Built(held))
+                }
+
+                return MissedTriple(BuiltNew(held))
+            }
+
+            names = ["Copied", "Shared", "Alone", "Two", "Made", "MovedCopy", "MovedNew", "MovedOne", "Called", "CalledShared", "Built", "BuiltNew"]
+            h = Holder(Box(1))
+            mut missed = 0
+            for row in 0..<12 {
+                missed = missed + Run(row, h)
+                before = HttpServer.Live()
+                missed = missed + Run(row, h)
+                n = HttpServer.Live() - before
+                print("{names[row]} {n}")
+            }
+
+            print(missed)
+
+            """;
+        Ran(
+            BuildAndRun(program, Blocks.Value, "construction-left-early"),
+            0,
+            ["Copied 0", "Shared 0", "Alone 0", "Two 0", "Made 0", "MovedCopy 0", "MovedNew 0", "MovedOne 0", "Called 0", "CalledShared 0", "Built 0", "BuiltNew 0", "20"],
+            "");
+    }
+
+    /// <summary>
+    /// std/ whose <c>Free</c> notes the sizes of the last two blocks it was given and the number of blocks while the program records,
+    /// which <c>HttpServer.Record()</c> starts and <c>HttpServer.Stop()</c> ends, read through <c>HttpServer.LastFreedSmaller()</c>,
+    /// whether the last block was smaller than the one before it, and <c>HttpServer.FreedCount()</c>, a class of std/ the program sees
+    /// (W1).
+    /// </summary>
+    private static readonly Lazy<CheckedRuntime> FreeOrder = new(() => ListTests.Edited(
+        ("std/std.kz", "pub void Free(byte* p, long size) {\n", """
+            thread static mut long recording = 0
+            thread static mut long freedBefore = 0
+            thread static mut long freedLast = 0
+            thread static mut long freedCount = 0
+
+            pub void Free(byte* p, long size) {
+                raw {
+                    if recording == 1 {
+                        freedBefore = freedLast
+                        freedLast = size
+                        freedCount = freedCount + 1
+                    }
+                }
+
+
+            """),
+        ("std/std.kz", "pub class HttpServer {\n", """
+            pub class HttpServer {
+                pub static void Record() {
+                    raw {
+                        recording = 1
+                        freedCount = 0
+                    }
+                }
+
+                pub static void Stop() {
+                    raw {
+                        recording = 0
+                    }
+                }
+
+                pub static bool LastFreedSmaller() {
+                    mut bool smaller = false
+                    raw {
+                        smaller = freedLast < freedBefore
+                    }
+
+                    return smaller
+                }
+
+                pub static long FreedCount() {
+                    mut long n = 0
+                    raw {
+                        n = freedCount
+                    }
+
+                    return n
+                }
+
+            """)));
+
+    [Fact]
+    public void A_construction_left_by_a_later_argument_lets_go_of_what_its_slots_took_the_last_first()
+    {
+        // what the slots of a construction took before the argument that leaves it is let go of in the reverse of the order the
+        // arguments were evaluated, the copy of a call of two copies among them, and so are the arguments of a plain call, as Rust drops
+        // the operands of an expression that one of its operands leaves (the Rust Reference, "Destructors", drop scopes, operands;
+        // issue 569): the instance of the larger class, made second, is freed before the smaller one, made first, a copy where the
+        // call makes two, and no other block is freed while the program records but the tables of the session of those two copies,
+        // which its end frees first (`CopyAbort`)
+        const string program = """
+            data Missing
+
+            class Small(int N)
+            class Large(int A, int B, int C, int D)
+            class Holder(Small S)
+            data Two(Small A, Large B, Small C)
+
+            Small | Missing Lose() {
+                return Missing
+            }
+
+            Two | Missing Made() {
+                return Two(Small(1), Large(1, 2, 3, 4), Lose())
+            }
+
+            Two | Missing Copied(Holder h) {
+                return Two(copy h.S, Large(1, 2, 3, 4), copy Lose())
+            }
+
+            string Both(Small a, Large b, Small c) => "{a.N} {b.A} {c.N}"
+
+            string | Missing Called(Holder h) {
+                return Both(copy h.S, Large(1, 2, 3, 4), copy Lose())
+            }
+
+            int MissedTwo(Two | Missing r) {
+                match r {
+                    Two t => return 0
+                    Missing => return 1
+                }
+            }
+
+            int MissedText(string | Missing r) {
+                match r {
+                    string s => return 0
+                    Missing => return 1
+                }
+            }
+
+            int Order(int row, Holder h) {
+                mut missed = 0
+                HttpServer.Record()
+                if row == 0 {
+                    missed = MissedTwo(Made())
+                } else if row == 1 {
+                    missed = MissedTwo(Copied(h))
+                } else {
+                    missed = MissedText(Called(h))
+                }
+
+                HttpServer.Stop()
+                return missed
+            }
+
+            names = ["Made", "Copied", "Called"]
+            holder = Holder(Small(7))
+            for row in 0..<3 {
+                missed = Order(row, holder)
+                print("{names[row]} {HttpServer.LastFreedSmaller()} {HttpServer.FreedCount()} {missed}")
+            }
+
+            """;
+        Ran(BuildAndRun(program, FreeOrder.Value, "construction-left-early-order"), 0, ["Made true 2 1", "Copied true 3 1", "Called true 3 1"], "");
+    }
+
     /// <summary>
     /// std/ whose allocator counts the blocks each heap holds, in the word of the heap's record no field takes, one more at an allocation
     /// in the heap the entry serves and one less at the free of a block of the heap, read by the program through
