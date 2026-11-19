@@ -989,6 +989,26 @@ public sealed partial class Checker
     }
 
     /// <summary>
+    /// U58: <c>vouch</c> stands before a call of an actor's method through a reference that waits (U4), whose edge it takes out of U56's
+    /// graph (<see cref="CallLoops"/>); before any other call, a <c>send</c>'s (U6), a function's, a class's method's or an actor's own
+    /// method called inside it (U10), it is <c>syntax</c>, as <c>within</c> on such a call is (U39) (assumed: T50 of #519, comment
+    /// 7007991607); whether the call is one that waits, the <c>syntax</c> reported where it is none.
+    /// </summary>
+    private bool Vouched(CallExpression c)
+    {
+        var kind = model.TryCallOf(c)?.Kind;
+        if (kind == CallKind.ActorCall)
+        {
+            return true;
+        }
+
+        Report(ErrorIds.Syntax, c.Vouch, kind == CallKind.ActorSend
+            ? "`vouch` stands before a call that waits, and a `send` waits for nothing (U58, U6)"
+            : "`vouch` stands before a call of an actor's method through a reference, which waits, and this call is none (U58, U4)");
+        return false;
+    }
+
+    /// <summary>
     /// U39: the clause <c>within d</c> on a declaration bounds every call through a reference of a message, a <c>pub</c> method of an actor
     /// (U4, U9), its duration literal read as a block's bound is (U40, <see cref="CheckBound"/>); on any other declaration, a function's,
     /// a class's, a data type's or an interface's method, or an actor's method without <c>pub</c>, it is <c>syntax</c>, as <c>send</c>

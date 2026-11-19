@@ -1969,7 +1969,9 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // U17 (section 6, "Deadlocks", layer 1): `Save` waits on `Check`, which waits on `Verify`, which calls `Load` on the store that
         // waits in their chain; `Load` runs on a stack of its own above `Save` (Q6 of comment 6892835500, "Own pooled stack"), and each
-        // waiting message resumes once the calls above it ended, in a test build and a release build
+        // waiting message resumes once the calls above it ended, in a test build and a release build; the reference `Check` passes on to
+        // `Verify` is no callback of U57, which `Verify`'s caller does not hand its own reference (assumed: T49 of #519, comment
+        // 7007991607), and `vouch` takes the call through it out of U56's loop, a promise nothing checks (U58)
         const string chain = """
             actor Store(Checker Check) {
                 mut int saved = 0
@@ -1991,7 +1993,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             actor Verifier {
                 pub int Verify(Store store) {
                     print("verify waits")
-                    loaded = store.Load()
+                    loaded = vouch store.Load()
                     print("verify resumes")
                     return loaded * 10
                 }
@@ -2201,12 +2203,13 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // section 6, "Deadlocks" (the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level wait"): each `Ask` waits in
         // a chain of its own on the other actor, which waits in the other chain, so neither takes the other's call (layer 1), and the
         // top-level code's wait, in a function it called, finds nothing left to run: the process ends at that call's line, not at a
-        // line of the loop, with the exit code 1
+        // line of the loop, with the exit code 1; `vouch` takes `Left`'s call out of U56's loop, a promise nothing checks (U58; assumed:
+        // T57 and T58 of #519, comment 7007991607)
         const string text = """
             actor Left {
                 pub void Ask(Right other) {
                     print("left asks")
-                    print("left got {other.Value()}")
+                    print("left got {vouch other.Value()}")
                 }
 
                 pub int Value() => 1

@@ -170,6 +170,7 @@ internal static class SyntaxPrinter
         ThisExpression => "this",
         MemberAccess m => $"({(m.Conditional ? "?." : ".")} {Print(m.Target)} {m.Member})",
         TypeMemberAccess m => $"(. {Type(m.Type).TrimEnd()} {m.Member})",
+        CallExpression { Vouch: > 0 } c => $"(vouch {c.Vouch} {Print(c with { Vouch = 0 })})",
         CallExpression c => $"(call {Print(c.Callee)}{(c.TypeArguments.Count == 0 ? "" : "<" + string.Join(", ", c.TypeArguments.Select(t => Type(t).TrimEnd())) + ">")}{(c.Arguments.Count == 0 ? "" : " " + Arguments(c.Arguments))}{(c.Within is null ? "" : $" (within {Print(c.Within)})")})",
         IndexExpression i => $"(index {Print(i.Target)} {Print(i.Index)})",
         ListLiteral l => "(list" + string.Concat(l.Items.Select(item => " " + Print(item))) + ")",
