@@ -679,6 +679,47 @@ advance = 4
 print(test + check + mock + advance)
 ```
 
+Case: [source/check-call-is-the-statement.kz](../corpus/source/check-call-is-the-statement.kz)
+```kurz
+// `check(x)` at the start of a statement is the statement, a `check` of `(x)`, so that the function value the variable
+// `check` holds is not called there, and is called by another name
+check = (bool b) => print("called {b}")
+check(true)
+f = check
+f(false)
+```
+
+Case: [source/check-before-bracket-and-dot.kz](../corpus/source/check-before-bracket-and-dot.kz)
+```kurz
+// before `[` and `.` at the start of a statement the word `check` is a name, so that a variable named so keeps its meaning there
+mut check = [1, 2, 3]
+check[0] = 7
+check.Add(4)
+print(check[0])
+print(check.Count)
+```
+
+Case: [source/test-and-mock-as-type-names.kz](../corpus/source/test-and-mock-as-type-names.kz)
+```kurz
+// `test` before `cluster` and `=`, and `mock` before a name and `=`, start declarations of variables whose types are named so
+data test(int N)
+data mock(int N)
+
+test cluster = test(1)
+mock x = mock(2)
+print(cluster.N + x.N)
+```
+
+Case: [source/check-declaration-is-a-check.kz](../corpus/source/check-declaration-is-a-check.kz)
+```kurz
+// `check` before a name at the start of a statement is the statement, so that a declaration of a variable whose type is
+// named `check` is a `check` of `x` with `= check(1)` after it
+data check(int N)
+
+check x = check(1)
+print(x.N)
+```
+
 ### L19 (decided, §8) The names of the built-in types are core words
 
 The names of the built-in types are core words beside L18's list: `sbyte`, `byte`, `short`,

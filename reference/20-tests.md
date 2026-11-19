@@ -66,6 +66,47 @@ advance = 4
 print(test + check + mock + advance)
 ```
 
+Case: [source/check-call-is-the-statement.kz](../corpus/source/check-call-is-the-statement.kz)
+```kurz
+// `check(x)` at the start of a statement is the statement, a `check` of `(x)`, so that the function value the variable
+// `check` holds is not called there, and is called by another name
+check = (bool b) => print("called {b}")
+check(true)
+f = check
+f(false)
+```
+
+Case: [source/check-before-bracket-and-dot.kz](../corpus/source/check-before-bracket-and-dot.kz)
+```kurz
+// before `[` and `.` at the start of a statement the word `check` is a name, so that a variable named so keeps its meaning there
+mut check = [1, 2, 3]
+check[0] = 7
+check.Add(4)
+print(check[0])
+print(check.Count)
+```
+
+Case: [source/test-and-mock-as-type-names.kz](../corpus/source/test-and-mock-as-type-names.kz)
+```kurz
+// `test` before `cluster` and `=`, and `mock` before a name and `=`, start declarations of variables whose types are named so
+data test(int N)
+data mock(int N)
+
+test cluster = test(1)
+mock x = mock(2)
+print(cluster.N + x.N)
+```
+
+Case: [source/check-declaration-is-a-check.kz](../corpus/source/check-declaration-is-a-check.kz)
+```kurz
+// `check` before a name at the start of a statement is the statement, so that a declaration of a variable whose type is
+// named `check` is a `check` of `x` with `= check(1)` after it
+data check(int N)
+
+check x = check(1)
+print(x.N)
+```
+
 ### Y2 (assumed, §2, §11) `kurz test`, the tests it runs and their order
 
 `kurz test file.kz` runs every `test` block of the program that file starts, of its files and never of
@@ -130,10 +171,6 @@ test "adds" {
 test "counts" {
     names = ["a", "b", "c"]
     check names.Count == 2
-}
-
-test "throws" {
-    throw "down"
 }
 ```
 
@@ -246,6 +283,19 @@ test "child escalates" {
 }
 ```
 
+Case: [tests/two-tests-fail.kz](../corpus/tests/two-tests-fail.kz)
+```kurz
+// both tests fail, the run going on after the first, and `throws` names the words under the first `FAILED` line (E3)
+test "throws" {
+    throw "down"
+}
+
+test "throws again" {
+    print("ran")
+    throw "again"
+}
+```
+
 ### Y6 (assumed, §11) `check`
 
 `check condition` is a statement that stands in any code, the top-level code, a function, a method, a
@@ -273,12 +323,7 @@ takes, by a `check` of its own code or of a child that escalates into it (U25), 
 
 Case: [tests/check-not-bool.kz](../corpus/tests/check-not-bool.kz)
 ```kurz
-// a test is checked by every command, so its error refuses the build of the program
-test "counts" {
-    check 1
-}
-
-print(1)
+check 1
 ```
 
 Case: [tests/check-top-level.kz](../corpus/tests/check-top-level.kz)
@@ -309,7 +354,17 @@ one refuses `kurz build`, `kurz run` and `kurz exec` of its program as an error 
 of them runs a test *(assumed: Q5 of issue 586, comment 6992687784, built at the default while it waits
 for the owner)*.
 
-Case: [tests/check-not-bool.kz](../corpus/tests/check-not-bool.kz)
+Case: [tests/test-error-refuses-build.kz](../corpus/tests/test-error-refuses-build.kz)
+```kurz
+// a test is checked by every command, so that its error refuses the build of the program, which runs no test
+test "counts" {
+    n = 1
+    n = 2
+    print(n)
+}
+
+print(1)
+```
 
 ### Y8 (assumed, §11, §13) The cluster test
 
