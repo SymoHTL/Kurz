@@ -8,14 +8,16 @@ actor Child(Parent Up) {
 }
 
 actor Parent {
+    mut List<Child> kids = []
+
     pub int Count() => 3
 
-    pub int Make(Parent other) {
-        c = spawn Child(other)
-        return c.Seen()
+    pub void Make(Parent other) {
+        kids.Add(spawn Child(other))
     }
 }
 
 p = spawn Parent()
 q = spawn Parent()
-print(p.Make(q))
+p.Make(q)
+print(q.Count())

@@ -1,5 +1,5 @@
 // expect: error call-loop at 5
-// rules: U56
+// rules: U56, U57
 
 actor Left {
     pub int Ask(Right other) => other.Value() + 1

@@ -1,0 +1,15 @@
+// expect: output
+// | 2
+// rules: U58
+
+data vouch(int N)
+
+actor A {
+    pub int M() {
+        vouch c = vouch(2)
+        return c.N
+    }
+}
+
+a = spawn A()
+print(a.M())

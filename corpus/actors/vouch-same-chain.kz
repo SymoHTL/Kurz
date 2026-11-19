@@ -1,0 +1,17 @@
+// expect: output
+// | 3
+// rules: U58, U17
+
+// `vouch` says that the call reaches another `Node`, and it reaches the one that waits, in the same chain: it gets in (U17)
+actor Node {
+    pub int Size(Node other, int n) {
+        if n == 0 {
+            return 1
+        }
+
+        return vouch other.Size(other, n - 1) + 1
+    }
+}
+
+root = spawn Node()
+print(root.Size(root, 2))

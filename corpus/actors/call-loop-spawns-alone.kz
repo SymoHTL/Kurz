@@ -3,16 +3,16 @@
 // rules: U56
 
 actor Counter(int Left) {
-    pub void Start() {
-        if Left > 0 {
-            child = spawn Counter(Left - 1)
-            send child.Start()
-        }
-    }
+    mut List<Counter> made = []
 
-    pub int Count() => Left
+    pub int Start() {
+        if Left > 0 {
+            made.Add(spawn Counter(Left - 1))
+        }
+
+        return Left
+    }
 }
 
 c = spawn Counter(2)
-c.Start()
-print(c.Count())
+print(c.Start())

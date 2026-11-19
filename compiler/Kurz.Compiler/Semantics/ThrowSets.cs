@@ -174,8 +174,9 @@ public sealed class ThrowSets
     /// Section 6, "Deadlocks", layer 2 (U56, U57): the code of each actor of the program, by its entries, the construction first, then
     /// each method it declares, with each call through an actor's reference and each <c>spawn</c> that entry's code reaches by the walk of
     /// the sets, and the origins the receiver of each, and each of its arguments, can have in the entry's terms: a call of a function or a method passes each origin
-    /// of an argument to the parameter it fills, through a local without <c>mut</c> too, and any other edge, a lambda's, an override's
-    /// through an interface or a construction's among them, passes none, which reads as no callback. A <c>spawn</c> reaches the
+    /// of an argument to the parameter it fills, through a local without <c>mut</c> too, to the method it picks and to each of its
+    /// overrides and of the methods that implement it, a data type's method taking the value it is called on first (D16), and any other
+    /// edge, a lambda's or a construction's among them, passes none, which reads as no callback. A <c>spawn</c> reaches the
     /// construction of the actor it makes, whose code is that actor's, and the code under <c>escalate</c> is the child's: neither is the
     /// spawner's. The walk reads each unit once over all the actors, from the roots of the sets and every actor's code, and the reach of
     /// each unit is its own sites and those of the units it runs, read again as long as one grows.
@@ -199,8 +200,9 @@ public sealed class ThrowSets
 
     /// <summary>
     /// U57: every site that the roots of the sets reach after <see cref="ActorsCode"/>, the top-level code of the program and each of its
-    /// <c>pub</c> functions but the methods of its actor types, which run in their actor's messages: code that a caller outside the
-    /// messages of the program's actor types can run.
+    /// <c>pub</c> functions and of the <c>pub</c> methods of its classes and data types, a method that implements an interface (K7) and a
+    /// data type's method called from outside it (F9) among them, but the methods of its actor types, which run in their actor's
+    /// messages: code that a caller outside the messages of the program's actor types can run.
     /// </summary>
     public IReadOnlySet<ActorSite> Outside() => Roots().Where(r => r is not FunctionSymbol { Owner.IsActor: true, IsStatic: false })
         .SelectMany(r => units[r].Reach.Keys).ToHashSet(ReferenceEqualityComparer.Instance as IEqualityComparer<ActorSite>);
@@ -213,7 +215,7 @@ public sealed class ThrowSets
         return new ActorEntry(unit.Name, edge.Unit as FunctionSymbol, sites, direct);
     }
 
-    // each unit's reach: its own sites, then those of every unit it runs that runs no other actor's code, each origin of the receiver and
+    // each unit's reach: its own sites, then those of every unit it runs through an edge that does not cross into another actor's code (U56), each origin of the receiver and
     // of each argument passed through the edge, as long as one grows; the units were found from the callers to the callees, so the
     // reverse order reads most callees first
     private void Close()
@@ -288,10 +290,10 @@ public sealed class ThrowSets
     /// An edge from a unit to a unit it runs, with the type arguments the call gives the type parameters of that unit (T19); or, where it
     /// does not run it, from a unit to a lambda it makes, which brings what the lambda builds and nothing it throws (section 5), as Rust
     /// collects a closure's instance in the instance of the function that makes it.
-    /// </summary>
     /// <c>Arguments</c> says where each argument of a call of a function or a method comes from, by the callee's parameter, null where the
     /// edge passes none that the loops follow (U57); an edge that <c>Crosses</c> runs the code of another actor, the construction of one
     /// that a <c>spawn</c> makes or its code under <c>escalate</c>, which its crash brings and no loop of the spawner holds (U56).
+    /// </summary>
     private sealed record Edge(object Unit, IReadOnlyDictionary<TypeParameterSymbol, KurzType>? Map, bool Runs = true, IReadOnlyList<Origin>? Arguments = null, bool Crosses = false);
 
     /// <summary>The code of an actor (section 5): its construction, its constructors and every method it declares.</summary>
@@ -965,9 +967,9 @@ public sealed class ThrowSets
                     break;
                 case SpawnExpression s:
                     Call(s.Call);
-                    if (!model.HasCall(s.Call) || model.CallOf(s.Call).Target is not ClassType { Symbol: var actor })
+                    if ((sets.reach && !model.HasCall(s.Call)) || model.CallOf(s.Call).Target is not ClassType { Symbol: var actor })
                     {
-                        break; // a spawn that reported its own error
+                        break; // in the reach mode, a spawn that reported its own error
                     }
 
                     unit.Sites.Add(new ActorSite(s.Call, actor, null, SiteKind.Spawn, Origin.Other, [], file, s.Line)); // U56: the spawn's edge
@@ -981,12 +983,9 @@ public sealed class ThrowSets
                     }
 
                     break;
+                case AttemptExpression when sets.reach:
+                    break; // U56: the block the checker said `not supported` to (section 6, U28), which runs no code a program builds
                 default:
-                    if (sets.reach)
-                    {
-                        break; // U56: a node the checker said `not supported` to, which runs no code a program builds
-                    }
-
                     throw new InvalidOperationException($"the throw sets read no expression `{e.GetType().Name}` (line {e.Line})");
             }
         }
@@ -1082,11 +1081,6 @@ public sealed class ThrowSets
 
                     break;
                 default:
-                    if (sets.reach)
-                    {
-                        break; // U56: a node the checker said `not supported` to, which runs no code a program builds
-                    }
-
                     throw new InvalidOperationException($"the throw sets read no statement `{s.GetType().Name}` (line {s.Line})");
             }
         }
@@ -1250,7 +1244,8 @@ public sealed class ThrowSets
                         var targets = sets.Overrides(method).Prepend(method)
                             .Concat(sets.Implementers(method).SelectMany(g => sets.Overrides(g).Prepend(g)))
                             .Distinct();
-                        var arguments = info.Kind == CallKind.Method ? Slots(c, info) : null; // D16: a data method's value comes first
+                        // D16: a data method's function takes the value first, a value of a data type, which is no actor's reference
+                        Origin[] arguments = info.Kind == CallKind.Method ? Slots(c, info) : [Origin.Other, .. Slots(c, info)];
                         unit.Edges.AddRange(targets.Select(target => new Edge(target, map, Arguments: arguments)));
                         break;
                     }
@@ -1353,7 +1348,8 @@ public sealed class ThrowSets
         /// U57: where a reference comes from: <c>this</c> as a value inside an actor, its own reference (U10), or a local without
         /// <c>mut</c> that holds it, is the actor itself; a parameter of the function, which no <c>mut</c> lets change, is that
         /// parameter, by its place; anything else, a field, an item, a capture in a lambda, a call's result, is other. In a lambda
-        /// nothing is the actor's or a parameter (assumed: T49 of #519, comment 7007991607, and T61 of #519, comment 7009683539).
+        /// nothing is the actor's, a parameter or a local of the code around it, since its body is a unit read by a walk of its own,
+        /// whose locals hold none of that code's (assumed: T49 of #519, comment 7007991607, and T61 of #519, comment 7009683539).
         /// </summary>
         private Origin OriginOf(Expression e)
         {
@@ -1494,7 +1490,7 @@ public readonly record struct Origin(int Parameter)
     /// <summary><c>this</c> as a value inside an actor, its own reference (U10), or a local without <c>mut</c> that holds it.</summary>
     public static readonly Origin Self = new(-1);
 
-    /// <summary>A field, an item of a collection, a capture in a lambda, a call's result, or a parameter's that a <c>mut</c> lets change.</summary>
+    /// <summary>A field, an item of a collection, a capture in a lambda, a call's result, or a local with <c>mut</c>.</summary>
     public static readonly Origin Other = new(-2);
 }
 

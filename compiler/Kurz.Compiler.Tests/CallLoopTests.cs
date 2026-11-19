@@ -9,10 +9,11 @@ using Xunit;
 namespace Kurz.Compiler.Tests;
 
 /// <summary>
-/// Layer 2 of section 6's deadlocks (U56 to U59; assumed: T40 to T59 of issue 519, comment 7007991607, and T60 and T61 of issue 519,
-/// comment 7009683539, built at the lean while it waits for the owner): the line of each <c>call-loop</c> and how many a program gets,
-/// the loop its text names, read by the lines it names, the word <c>vouch</c> as the parser reads it, the lint <c>vouch-unneeded</c>,
-/// and the walk that reads each unit of code once. Every error is pinned by its id and its line, never by its wording.
+/// Layer 2 of section 6's deadlocks (U56 to U59; assumed: T40 to T45 and T48 to T59 of issue 519, comment 7007991607, T60 and T61 of
+/// issue 519, comment 7009683539, and T62 of issue 519, comment 7010568524, built at the lean while it waits for the owner): the line of
+/// each <c>call-loop</c> and how many a program gets, the loop its text names, read by the lines it names, the word <c>vouch</c> as the
+/// parser reads it, the lint <c>vouch-unneeded</c>, and the walk that reads each unit of code once. Every error is pinned by its id and
+/// its line; of a text, only the lines of a loop's hops are read, and for T56 the order of the words <c>send</c> and <c>vouch</c>.
 /// </summary>
 public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -114,6 +115,43 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     }
 
     [Fact]
+    public void Of_two_loops_of_the_fewest_hops_the_text_names_the_one_the_code_of_each_type_reaches_first()
+    {
+        // U56: `B` reaches `C` from its method at line 8 and `D` from its construction at line 12, and each of them waits on `A`: two
+        // loops of three hops through the call at line 2; the walk takes a type's construction before its methods, so that the text
+        // names the loop through `D`, where the order of the lines would name the one through `C`
+        const string program = """
+            actor A {
+                pub int Ask(B b) => b.Value()
+
+                pub int Value() => 1
+            }
+
+            actor B(D Keep) {
+                pub int Ask(C c) => c.Get()
+
+                pub int Value() => 2
+
+                int seen = Keep.Get()
+            }
+
+            actor C(A Back) {
+                pub int Get() => Back.Value()
+            }
+
+            actor D(A Back) {
+                pub int Get() => Back.Value()
+            }
+
+            print(1)
+
+            """;
+        var errors = Check(program).Diagnostics.Sorted;
+        Assert.Equal([(ErrorIds.CallLoop, 2)], errors.Select(d => (d.Id, d.Line)));
+        Assert.Equal([2, 12, 20], Named(errors[0]));
+    }
+
+    [Fact]
     public void A_group_of_types_that_reach_one_another_is_one_error_and_two_groups_are_two()
     {
         // T52: `A` waits on `B` and on `C`, which both wait on `A`: two loops in one group, one error at line 2; two groups apart, `A`
@@ -179,6 +217,38 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
 
             """;
         Assert.Equal([(ErrorIds.CallLoop, 2), (ErrorIds.CallLoop, 14)], Diagnostics(two));
+    }
+
+    [Fact]
+    public void A_call_whose_edge_leaves_its_group_is_none_of_the_group_s_calls()
+    {
+        // U56: `A` waits on `E` at line 2, a type on no loop, before it waits on `B` at line 4: the error stands at the first call whose
+        // edge stays in the group of `A` and `B`, and names the loop through it
+        const string program = """
+            actor A {
+                pub int ToE(E e) => e.Value()
+
+                pub int ToB(B b) => b.Value()
+
+                pub int Value() => 1
+            }
+
+            actor B {
+                pub int ToA(A a) => a.Value()
+
+                pub int Value() => 2
+            }
+
+            actor E {
+                pub int Value() => 3
+            }
+
+            print(1)
+
+            """;
+        var errors = Check(program).Diagnostics.Sorted;
+        Assert.Equal([(ErrorIds.CallLoop, 4)], errors.Select(d => (d.Id, d.Line)));
+        Assert.Equal([4, 10], Named(errors[0]));
     }
 
     [Fact]
@@ -515,6 +585,101 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
         Assert.Empty(Diagnostics(program.Replace("return store.Load()", "return vouch store.Load()", StringComparison.Ordinal)));
     }
 
+    // the origins the first argument of the call of `method` can have in the terms of the entry named `entry`, as the walk of the loops
+    // reads them (ThrowSets.ActorsCode)
+    private static IReadOnlyCollection<Origin> FirstArgument(string program, string entry, string method)
+    {
+        var (_, checker) = Check(program);
+        var code = new ThrowSets(checker, null, reach: true).ActorsCode();
+        return code.SelectMany(c => c.Entries).Single(e => e.Name == entry).Sites.Single(r => r.Site.Method?.Name == method).Arguments[0];
+    }
+
+    [Fact]
+    public void The_arguments_of_a_call_reach_its_overrides_its_implementers_and_a_data_method_after_the_value()
+    {
+        // U57, D16: `A.Save` passes `this` to a function that calls a method through a base class, one through an interface and a data
+        // type's method, and each passes it on to `B.Check`: the edge of the picked method's override, of the method that implements
+        // the interface's and of the data method, whose function takes the value first, each reads `this` at the call of `B.Check`; each
+        // of those methods is `pub`, code outside the actors' messages, so that none of these calls is a callback (ThrowSets.Outside)
+        const string actors = """
+
+            actor A(B Other) {
+                pub int Save() => Ask(Other, this) + 1
+
+                pub int Load() => 7
+            }
+
+            actor B {
+                pub int Check(A x) => x.Load() * 10
+            }
+
+            """;
+        const string overridden = """
+            class Base {
+                pub virtual int Run(B peer, A x) => 0
+            }
+
+            class Via : Base {
+                pub override int Run(B peer, A x) => peer.Check(x)
+            }
+
+            int Ask(B peer, A s) => Via().Run(peer, s)
+            """;
+        const string implemented = """
+            interface Checker {
+                int Run(B peer, A x)
+            }
+
+            class Via : Checker {
+                pub int Run(B peer, A x) => peer.Check(x)
+            }
+
+            int Through(Checker k, B peer, A s) => k.Run(peer, s)
+
+            int Ask(B peer, A s) => Through(Via(), peer, s)
+            """;
+        const string data = """
+            data Relay(int K) {
+                pub int Pass(B peer, A x) => peer.Check(x) + K
+            }
+
+            int Ask(B peer, A s) => Relay(1).Pass(peer, s)
+            """;
+        foreach (var (program, line) in new[] { (overridden, 6), (implemented, 6), (data, 2) })
+        {
+            Assert.Equal([Origin.Self], FirstArgument(program + actors, "`A.Save`", "Check"));
+            Assert.Equal([(ErrorIds.CallLoop, line)], Diagnostics(program + actors));
+        }
+    }
+
+    [Fact]
+    public void The_walk_of_the_sets_refuses_a_node_it_does_not_read_and_the_walk_of_the_loops_passes_an_attempt()
+    {
+        // U56: the block `attempt`, which the checker says `not supported` to (section 6, U28), runs no code; the walk of the loops,
+        // which reads a program beside its errors, passes it, and the walk of the sets, which reads a program with none, refuses it as
+        // a node it has no case for
+        const string program = """
+            pub int Go() {
+                x = attempt {
+                    y = 1
+                }
+
+                return 1
+            }
+
+            actor A {
+                pub int Get() => Go()
+            }
+
+            print(1)
+
+            """;
+        var (_, checker) = Check(program);
+        Assert.NotEmpty(new ThrowSets(checker, CorpusTests.StdChecker.Value, reach: true).ActorsCode());
+        var refused = Assert.Throws<InvalidOperationException>(() => new ThrowSets(checker, CorpusTests.StdChecker.Value).PubFunctions());
+        Assert.Contains(nameof(AttemptExpression), refused.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void The_text_names_a_send_before_vouch_for_a_loop_of_two_types_and_of_one()
     {
@@ -602,12 +767,14 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     [InlineData("x = vouch\nc.Size()", "(assign-or-declare x vouch) (call (. c Size))")]
     [InlineData("vouch c.Size()", "(vouch 1 (call (. c Size)))")]
     [InlineData("vouch c = 2", "(declare vouch c (int 2))")]
+    [InlineData("x = vouch c.Child().Size()", "(assign-or-declare x (vouch 1 (call (. (call (. c Child)) Size))))")]
     public void A_vouch_is_a_word_before_a_name_or_this_on_its_line_and_binds_to_the_call_after_it(string program, string tree)
     {
         // U58: the word before a name, `this` or `spawn` on its line, the call after it its node, with the call's clause and its `else`,
         // and as a statement, the record's own `vouch c.Size()`, which the statement parser reads as the call, where `vouch c = 2`, a
-        // name after a name and then `=`, declares `c` of a type `vouch`; anywhere else `vouch` is a name, a variable, a call or an
-        // operand (section 6, comment 6847932993, Q10)
+        // name after a name and then `=`, declares `c` of a type `vouch`, a statement read as a declaration first; of a chain of calls
+        // the word takes the last, `.Size()` of `c.Child().Size()`, the postfix expression's own node; anywhere else `vouch` is a name, a variable, a call or an
+        // operand (section 6, issue 519, comment 6847932993, Q10)
         var diagnostics = new DiagnosticBag();
         var parsed = Parser.Parse(SourceText.FromString("test.kz", program), diagnostics);
         Assert.Empty(diagnostics.Items);
@@ -618,14 +785,22 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     [InlineData("x = vouch spawn C()", 1)]
     [InlineData("x = vouch c.Count", 1)]
     [InlineData("x = 1\ny = vouch x", 2)]
-    [InlineData("x = f(vouch\n    c.Size())", 2)]
     public void A_vouch_before_what_is_no_call_is_syntax_at_the_word(string program, int line)
     {
-        // U58: after the word, what is no call, a `spawn` and a property among them, is `syntax` at the word's line (E4); inside brackets,
-        // where a line break is no end, a name on the next line leaves `vouch` a name, which a name after it makes `syntax` there
+        // U58: after the word, what is no call, a `spawn` and a property among them, is `syntax` at the word's line (E4)
         var diagnostics = new DiagnosticBag();
         Parser.Parse(SourceText.FromString("test.kz", program), diagnostics);
         Assert.Equal([(ErrorIds.Syntax, line)], diagnostics.Items.Select(d => (d.Id, d.Line)));
+    }
+
+    [Fact]
+    public void A_vouch_before_a_line_break_inside_brackets_is_a_name_and_syntax_at_the_name_after_it()
+    {
+        // U58: inside brackets, where a line break is no end, a name on the line after `vouch` leaves the word a name, and the name
+        // after it is text no rule gives a meaning, `syntax` at that name's line (E4), the third, which nothing else stands on
+        var diagnostics = new DiagnosticBag();
+        Parser.Parse(SourceText.FromString("test.kz", "x = f(1,\n    vouch\n    c.Size())"), diagnostics);
+        Assert.Equal([(ErrorIds.Syntax, 3)], diagnostics.Items.Select(d => (d.Id, d.Line)));
     }
 
     [Fact]
@@ -684,7 +859,7 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     {
         // U59: the graph is read with every `vouch` left out, so that each of the two covers the loop of `Left` and `Right`; with one
         // left out, the other is still needed (the control); and an actor the build does not read, `per node`, takes the warning away
-        // beside its `not supported`
+        // beside its `not supported`, where another error, an `unknown-name` at line 11, leaves it
         const string program = """
             actor Left {
                 pub int Ask(Right other) => vouch other.Value() + 1
@@ -721,7 +896,9 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
             """;
         var diagnostics = Check(unread).Diagnostics.Sorted;
         Assert.Equal([(DiagnosticKind.NotSupported, 5)], diagnostics.Select(d => (d.Kind, d.Line)));
-        Assert.Equal([(LintIds.VouchUnneeded, 10)], Diagnostics(unread.Replace("actor Keyed per node {", "actor Keyed {", StringComparison.Ordinal)));
+        var read = unread.Replace("actor Keyed per node {", "actor Keyed {", StringComparison.Ordinal);
+        Assert.Equal([(LintIds.VouchUnneeded, 10)], Diagnostics(read));
+        Assert.Equal([(LintIds.VouchUnneeded, 10), (ErrorIds.UnknownName, 11)], Diagnostics(read + "print(nope)\n"));
     }
 
     [Fact]

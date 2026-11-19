@@ -5,14 +5,18 @@ namespace Kurz.Compiler.Semantics;
 /// <summary>
 /// Section 6, "Deadlocks", layer 2: the compile error <c>call-loop</c> for loops of calls that wait between actor types (U56), with the
 /// call back to the caller that makes no edge (U57), the word <c>vouch</c> that takes its call's edge out (U58) and the lint
-/// <c>vouch-unneeded</c> (U59) (assumed: T40 to T59 of #519, comment 7007991607, and T60 and T61 of #519, comment 7009683539, built at
-/// the lean while it waits for the owner). The graph's points are the actor types; an edge goes from <c>A</c> to <c>B</c> for each call
+/// <c>vouch-unneeded</c> (U59) (assumed: T40 to T45 and T48 to T59 of #519, comment 7007991607, T60 and T61 of #519, comment
+/// 7009683539, and T62 of #519, comment 7010568524, built at the lean while it waits for the owner; and a reading of the build for T46
+/// and T47 of comment 7007991607, whose leans are not built, an actor behind an interface, a generic one and a <c>per</c> one staying
+/// <c>not supported</c>). The graph's points are the actor types; an edge goes from <c>A</c> to <c>B</c> for each call
 /// that waits on a method of <c>B</c> that the code of <c>A</c> reaches, its construction and every method it declares with what they
 /// run, as the walk of the throw sets reads it (<see cref="ThrowSets.ActorsCode"/>, the one definition of what code reaches), and for
 /// each <c>spawn</c> of <c>B</c> it reaches. A group of types that reach one another (a strongly connected component) that holds the
 /// edge of a call is one error, at its call that stands first in source order, naming the shortest loop through that call; a group of
-/// <c>spawn</c>s alone is none. The walk reads each unit of code once over all the actors, and the groups are found by one depth-first
-/// walk of the types (Tarjan's), so that the cost grows with the code and its calls, and no loop is listed one by one.
+/// <c>spawn</c>s alone is none. The walk reads each unit of code once over all the actors, and the groups are found by a depth-first
+/// walk of the types (Tarjan's) for each of the two graphs, the errors' and the warnings', so that no loop is listed one by one; the
+/// reach of the units and the callbacks are read to their fixed points, each round over every unit or every method, so that a
+/// reference handed on through a chain of methods takes a round for each of them.
 /// </summary>
 public sealed class CallLoops
 {
@@ -57,9 +61,9 @@ public sealed class CallLoops
 
     /// <summary>
     /// U56: one <c>call-loop</c> for each group of types that reach one another and hold the edge of a call, a call after <c>vouch</c>
-    /// making none (U58), at the call of the group that stands first in source order, the program's file first, then by line, naming
-    /// the shortest loop through it, each hop with its method and its line, as E1 puts <c>reference-cycle</c> at the first declaration of
-    /// the cycle.
+    /// making none (U58), at the call of the group that stands first in source order, the program's file first, then by line, of the
+    /// calls whose edge goes from a type of the group to a type of it, naming the shortest loop through it, each hop with its method and
+    /// its line, as E1 puts <c>reference-cycle</c> at the first declaration of the cycle.
     /// </summary>
     public IReadOnlyList<Diagnostic> Errors()
     {
@@ -83,9 +87,9 @@ public sealed class CallLoops
 
     /// <summary>
     /// U59: <c>vouch-unneeded</c> at each <c>vouch</c> of the program's file whose call is on no loop of U56's graph read with every
-    /// <c>vouch</c> left out, so that two on one loop keep each other, or whose call U57 takes out: a warning, which builds the program, as
-    /// rustc warns of an <c>unsafe</c> block that holds no unsafe operation; the caller gives none beside a <c>not supported</c>, since
-    /// an unread construct can hide an edge.
+    /// <c>vouch</c> left out, so that two on one loop keep each other, or whose call U57 takes out: a warning, which stops no build, as
+    /// rustc warns of an <c>unsafe</c> block that holds no unsafe operation; the caller gives it beside the program's other errors and
+    /// none beside a <c>not supported</c>, since an unread construct can hide an edge.
     /// </summary>
     public IReadOnlyList<Diagnostic> Warnings()
     {
@@ -102,7 +106,8 @@ public sealed class CallLoops
 
     /// <summary>
     /// U57: which parameters of the methods of the actors are callbacks: calls through a reference reach the method, every one of them
-    /// waits, stands in the code of the actors' entries alone, which no top-level code or <c>pub</c> function reaches, and fills the
+    /// waits, stands in the code of the actors' entries alone, which neither the top-level code nor a <c>pub</c> function or method of a
+    /// class or a data type reaches (<see cref="ThrowSets.Outside"/>), and fills the
     /// parameter, in the terms of each entry that reaches it, with the entry's own reference, as the call writes it, or with a
     /// parameter of the entry that is a callback, so that a reference handed on through a chain of calls that wait reaches the caller
     /// that waits at its start (assumed: T60 of #519, comment 7009683539, built at the lean while it waits for the owner); or none does
@@ -215,7 +220,8 @@ public sealed class CallLoops
     }
 
     // the fewest hops from one type of a group to another, by a breadth-first walk inside the group, each step the hop of the pair of
-    // types that stands first in source order
+    // types that stands first in source order; a type's successors are taken in the order its code first reaches them, its
+    // construction first, then its methods (U56), so that of two loops of the fewest hops the walk names the one it meets first
     private static List<Hop> Shortest(IReadOnlyList<Hop> inside, ClassSymbol from, ClassSymbol to)
     {
         var first = inside.GroupBy(h => (h.From, h.To)).Select(g => g.OrderBy(h => (h.Reached.Site.File, h.Reached.Site.Line)).First())
