@@ -30,11 +30,18 @@ last count (S5) shows it only outside the program.
 
 A jump out of a construction or of a call that is no message before its last argument, a case one of
 its arguments propagates among them, lets go of what it holds of the arguments before that one, the
-values they made and what the slots took, the last made first, as Rust drops the operands of an
-expression that one of its operands leaves (the Rust Reference, "Destructors",
-`destructors.scope.operands`, read on 2026-11-19: "Tuple expression doesn't finish evaluating so
-operands drop in reverse order") *(assumed: a reading of the build, proposed with this record and
-not put to the owner)*. No case shows that order either: nothing of the program runs at a release.
+values they made, what the slots took and each copy a call of more than one copy made, and of the
+callee or the receiver that the call made before its arguments, a lambda written at the call, a
+function value a call gave, or an instance a construction or a call gave, the last made first, so that
+the callee or the receiver goes last, as Rust drops the operands of an expression that one of its
+operands leaves (the Rust Reference, "Destructors", `destructors.scope.operands`, read on 2026-11-19:
+"Tuple expression doesn't finish evaluating so operands drop in reverse order"); such a copy goes after
+the end of its call's memo, which points the `weak` references of the call's copies (U12) *(assumed: a
+reading of the build, proposed with `kurz-design.md` section 3, the bullet "Lifetimes", and not put to
+the owner)*. The copies a message's arguments made before such a jump are outside that order: what
+becomes of them is section 6's reading, which stands open on T24 of issue 519 (comment 6981296432)
+*(assumed, §6: that reading, which T24 puts to the owner)*. No case shows that order either: nothing
+of the program runs at a release, nor between the end of a memo and the release of the copies.
 
 Case: [memory/long-chain-freed.kz](../corpus/memory/long-chain-freed.kz)
 ```kurz
