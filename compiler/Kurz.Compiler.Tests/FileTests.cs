@@ -2054,6 +2054,47 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(ClosedInBlock.Replace("        f.Close()\n", "", StringComparison.Ordinal), "lines-closed-block-open", ["one", "true", "two", "true"], grants: ["raw", "native"]);
     }
 
+    // S16, O5: three loops over the lines of the working directory, whose read fails, each opened by a path made while the program runs,
+    // of which the `IoError` of the failed pull holds a count (`Fail`) that the arm taking it lets go of at its end, as the arm of a
+    // call's `else` does
+    private const string FailedPulls = """
+        int Lines() {
+            mut t = 0
+            path = "x".Replace("x", ".")
+            f = File.Open(path) else {
+                IoError => return 100
+            }
+
+            for line in f.Lines() {
+                t = t + line.Bytes.Count
+            } else {
+                IoError e => {
+                    t = e.Path.Bytes.Count
+                }
+
+                InvalidUtf8 => {
+                    t = 2
+                }
+            }
+
+            return t
+        }
+
+        int Run() => Lines() + Lines() + Lines()
+
+        """;
+
+    [Fact]
+    public void The_case_an_arm_of_the_else_after_a_loop_over_the_lines_takes_is_let_go_of_once_at_the_arm_s_end()
+    {
+        // the blocks live across a second round, after one that warmed it up, under the allocator that counts them (`ActorTests.Blocks`)
+        const string counted = "sum = Run()\nbefore = HttpServer.Live()\nagain = Run()\nprint(\"{sum + again} {HttpServer.Live() - before}\")\n";
+        Ran(FailedPulls + counted, "lines-failed-freed", ["6 0"], runtimes: [ActorTests.Blocks.Value]);
+
+        // and the rounds on this machine's allocator and on the fenced one, where no read of the case follows its release
+        Ran(FailedPulls + "print(Run())\nprint(Run())\n", "lines-failed", ["3", "3"]);
+    }
+
     private const string Held = """
         void | IoError | InvalidUtf8 Show() {
             File.WriteAll("lines-held.txt", "one\ntwo\nthree\n".Bytes)
