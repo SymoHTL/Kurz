@@ -2250,6 +2250,33 @@ a = spawn A(b)
 print(a.Save(4))
 ```
 
+Case: [actors/callback-chain.kz](../corpus/actors/callback-chain.kz)
+```kurz
+actor Store(Checker Check) {
+    mut int saved = 0
+
+    pub int Save(int n) {
+        saved = n
+        return Check.Valid(this) + 1
+    }
+
+    pub int Load() => saved
+}
+
+actor Checker(Verifier V) {
+    pub int Valid(Store store) => V.Verify(store) * 10
+}
+
+actor Verifier {
+    pub int Verify(Store store) => store.Load() * 10
+}
+
+v = spawn Verifier()
+c = spawn Checker(v)
+s = spawn Store(c)
+print(s.Save(4))
+```
+
 Case: [actors/waits-one-message.kz](../corpus/actors/waits-one-message.kz)
 ```kurz
 actor Clock {
@@ -4271,18 +4298,24 @@ print(c.Count())
 
 A call through a reference that can only be the actor whose message makes it, `this` as a value outside a lambda or a local
 without `mut` that holds it, is no edge of U56's graph, and neither is a call through a parameter of an actor's method that
-calls through a reference reach, each of them a call that waits and passes `this` there, as the call writes it, or that no
-call through a reference reaches and the actor's own code calls directly (U10), whose callers read its calls with what they
-pass; the parameter is followed through locals without `mut` and through the arguments of the functions and methods the
-message calls. Such a call reaches the caller that waits, which takes it as a call of its chain (U17), as layer 1 runs
-`A.Load` inside `A.Save` (§6, "Deadlocks", layer 2, "Exempt without override: a callback through a reference the caller
-passed in that same call"). A reference that a `send` passes, that another caller passes as anything but `this`, that a
-field holds, a parameter of an actor's primary constructor among them, or an item of a collection, or that a lambda
-captures, `this` among them, gives no such callback, since a field outlives the message, so that another message's call
-through it can reach any instance, and a lambda can cross into another actor's message (U12); the walk keeps no context per call, so that one caller that passes another reference makes the parameter's calls
-edges for every caller *(assumed: T49 of issue 519, comment 7007991607, built at the lean while it waits for the owner)*. A method that nothing calls has no caller to call back, so that a loop
-through its parameters is refused, as U56 refuses a loop no code calls into *(assumed: a reading of the build, proposed with
-this record and not put to the owner)*.
+calls through a reference reach, each of them a call that waits and passes there `this`, as the call writes it, or a
+parameter of the method whose message makes the call that is such a callback itself, read to the least fixed point, so that
+a reference handed on through a chain of calls that wait is one and a cycle of parameters that no `this` fills is none
+*(assumed: T60 of issue 519, comment 7009683539, built at the lean while it waits for the owner)*, or that no call through a
+reference reaches and the actor's own code calls directly (U10), whose callers read its calls with what they pass; the
+parameter is followed through locals without `mut` and through the arguments of the functions and methods the message calls.
+Such a call reaches the caller that waits, which takes it as a call of its chain (U17), as layer 1 runs `A.Load` inside
+`A.Save` (§6, "Deadlocks", layer 2, "Exempt without override: a callback through a reference the caller passed in that same
+call"). A reference that a `send` passes, that another caller passes as anything but `this` or such a parameter, one that
+the top-level code or a `pub` function that is no actor's method passes among them, since code outside the actors' messages
+runs them, that a field holds, a parameter of an actor's primary constructor among them, or an item of a collection, or that
+a lambda captures, `this` among them, gives no such callback, since a field outlives the message, so that another message's
+call through it can reach any instance, and a lambda can cross into another actor's message (U12), one that runs in place, a
+key of `SortBy`, among them *(assumed: T61 of issue 519, comment 7009683539, built at the lean while it waits for the
+owner)*; the walk keeps no context per call, so that one caller that passes another reference makes the parameter's calls
+edges for every caller *(assumed: T49 of issue 519, comment 7007991607, built at the lean while it waits for the owner)*. A
+method that nothing calls has no caller to call back, so that a loop through its parameters is refused, as U56 refuses a
+loop no code calls into *(assumed: a reading of the build, proposed with this record and not put to the owner)*.
 
 Case: [actors/callback.kz](../corpus/actors/callback.kz)
 
@@ -4313,6 +4346,8 @@ b = spawn B()
 a = spawn A(b)
 print(a.Save(4))
 ```
+
+Case: [actors/callback-chain.kz](../corpus/actors/callback-chain.kz)
 
 Case: [actors/call-loop-passed-other.kz](../corpus/actors/call-loop-passed-other.kz)
 ```kurz
@@ -4348,6 +4383,32 @@ b = spawn B()
 a = spawn A(b)
 print(a.Save())
 print(b.Check(a))
+```
+
+Case: [actors/call-loop-chain-other.kz](../corpus/actors/call-loop-chain-other.kz)
+```kurz
+actor Store(Checker Check) {
+    pub int Save() => Check.Valid(this) + 1
+
+    pub int Audit(Store other) => Check.Valid(other) + 2
+
+    pub int Load() => 7
+}
+
+actor Checker(Verifier V) {
+    pub int Valid(Store store) => V.Verify(store) * 10
+}
+
+actor Verifier {
+    pub int Verify(Store store) => store.Load() * 10
+}
+
+v = spawn Verifier()
+c = spawn Checker(v)
+s = spawn Store(c)
+peer = spawn Store(c)
+print(s.Save())
+print(s.Audit(peer))
 ```
 
 Case: [actors/call-loop-send-this.kz](../corpus/actors/call-loop-send-this.kz)

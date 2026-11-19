@@ -173,7 +173,7 @@ public sealed class ThrowSets
     /// <summary>
     /// Section 6, "Deadlocks", layer 2 (U56, U57): the code of each actor of the program, by its entries, the construction first, then
     /// each method it declares, with each call through an actor's reference and each <c>spawn</c> that entry's code reaches by the walk of
-    /// the sets, and the origins the receiver of each can have in the entry's terms: a call of a function or a method passes each origin
+    /// the sets, and the origins the receiver of each, and each of its arguments, can have in the entry's terms: a call of a function or a method passes each origin
     /// of an argument to the parameter it fills, through a local without <c>mut</c> too, and any other edge, a lambda's, an override's
     /// through an interface or a construction's among them, passes none, which reads as no callback. A <c>spawn</c> reaches the
     /// construction of the actor it makes, whose code is that actor's, and the code under <c>escalate</c> is the child's: neither is the
@@ -197,16 +197,25 @@ public sealed class ThrowSets
     /// <summary>Every call through an actor's reference and every <c>spawn</c> of every unit the walk read, in the order it read them.</summary>
     public IReadOnlyList<ActorSite> Sites() => order.SelectMany(u => u.Sites).ToList();
 
+    /// <summary>
+    /// U57: every site that the roots of the sets reach after <see cref="ActorsCode"/>, the top-level code of the program and each of its
+    /// <c>pub</c> functions but the methods of its actor types, which run in their actor's messages: code that a caller outside the
+    /// messages of the program's actor types can run.
+    /// </summary>
+    public IReadOnlySet<ActorSite> Outside() => Roots().Where(r => r is not FunctionSymbol { Owner.IsActor: true, IsStatic: false })
+        .SelectMany(r => units[r].Reach.Keys).ToHashSet(ReferenceEqualityComparer.Instance as IEqualityComparer<ActorSite>);
+
     // an entry of an actor's code: its construction, or a method; a site that stands in another unit names it
     private ActorEntry Entry(Edge edge, bool direct)
     {
         var unit = units[edge.Unit];
-        var sites = unit.Reach.Select(p => new ReachedSite(p.Key, ReferenceEquals(owners![p.Key], unit) ? null : owners[p.Key].Name, p.Value)).ToList();
+        var sites = unit.Reach.Select(p => new ReachedSite(p.Key, ReferenceEquals(owners![p.Key], unit) ? null : owners[p.Key].Name, p.Value[0], p.Value[1..])).ToList();
         return new ActorEntry(unit.Name, edge.Unit as FunctionSymbol, sites, direct);
     }
 
-    // each unit's reach: its own sites, then those of every unit it runs that runs no other actor's code, each origin passed through the
-    // edge, as long as one grows; the units were found from the callers to the callees, so the reverse order reads most callees first
+    // each unit's reach: its own sites, then those of every unit it runs that runs no other actor's code, each origin of the receiver and
+    // of each argument passed through the edge, as long as one grows; the units were found from the callers to the callees, so the
+    // reverse order reads most callees first
     private void Close()
     {
         if (owners is not null)
@@ -219,7 +228,7 @@ public sealed class ThrowSets
         {
             foreach (var site in unit.Sites)
             {
-                unit.Reach[site] = [site.Receiver];
+                unit.Reach[site] = [[site.Receiver], .. site.Arguments.Select(a => new HashSet<Origin> { a })];
                 owners[site] = unit;
             }
         }
@@ -236,12 +245,15 @@ public sealed class ThrowSets
                     {
                         if (!unit.Reach.TryGetValue(site, out var into))
                         {
-                            unit.Reach[site] = into = [];
+                            unit.Reach[site] = into = origins.Select(_ => new HashSet<Origin>()).ToArray();
                         }
 
-                        foreach (var origin in origins.ToList())
+                        for (var k = 0; k < origins.Length; k++)
                         {
-                            grew |= into.Add(Passed(edge, origin));
+                            foreach (var origin in origins[k].ToList())
+                            {
+                                grew |= into[k].Add(Passed(edge, origin));
+                            }
                         }
                     }
                 }
@@ -317,8 +329,8 @@ public sealed class ThrowSets
         /// <summary>The calls through an actor's reference and the <c>spawn</c>s the unit's own code makes (U56).</summary>
         public List<ActorSite> Sites { get; } = [];
 
-        /// <summary>Each site the unit's code reaches, its own and those of the units it runs, with the origins its receiver can have in the unit's terms (U57).</summary>
-        public Dictionary<ActorSite, HashSet<Origin>> Reach { get; } = new(ReferenceEqualityComparer.Instance);
+        /// <summary>Each site the unit's code reaches, its own and those of the units it runs, with the origins its receiver, then each of its arguments by the parameter it fills, can have in the unit's terms (U57).</summary>
+        public Dictionary<ActorSite, HashSet<Origin>[]> Reach { get; } = new(ReferenceEqualityComparer.Instance);
 
         public List<Edge> Edges { get; } = [];
 
@@ -1341,7 +1353,7 @@ public sealed class ThrowSets
         /// U57: where a reference comes from: <c>this</c> as a value inside an actor, its own reference (U10), or a local without
         /// <c>mut</c> that holds it, is the actor itself; a parameter of the function, which no <c>mut</c> lets change, is that
         /// parameter, by its place; anything else, a field, an item, a capture in a lambda, a call's result, is other. In a lambda
-        /// nothing is the actor's or a parameter (assumed: T49 of #519, comment 7007991607).
+        /// nothing is the actor's or a parameter (assumed: T49 of #519, comment 7007991607, and T61 of #519, comment 7009683539).
         /// </summary>
         private Origin OriginOf(Expression e)
         {
@@ -1505,8 +1517,8 @@ public sealed record ActorSite(CallExpression Call, ClassSymbol Actor, FunctionS
     public int Vouch => Call.Vouch;
 }
 
-/// <summary>A site an entry of an actor's code reaches: <see cref="Through"/> names the unit it stands in where that is not the entry itself, and <see cref="Receivers"/> holds the origins its receiver can have in the entry's terms (U57).</summary>
-public sealed record ReachedSite(ActorSite Site, string? Through, IReadOnlyCollection<Origin> Receivers);
+/// <summary>A site an entry of an actor's code reaches: <see cref="Through"/> names the unit it stands in where that is not the entry itself, <see cref="Receivers"/> holds the origins its receiver can have in the entry's terms, and <see cref="Arguments"/> those of each of its arguments, by the parameter it fills (U57).</summary>
+public sealed record ReachedSite(ActorSite Site, string? Through, IReadOnlyCollection<Origin> Receivers, IReadOnlyList<IReadOnlyCollection<Origin>> Arguments);
 
 /// <summary>
 /// An entry of an actor's code (U56): its construction, whose <see cref="Method"/> is null, or a method it declares, with the sites its code

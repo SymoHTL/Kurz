@@ -5,14 +5,14 @@ namespace Kurz.Compiler.Semantics;
 /// <summary>
 /// Section 6, "Deadlocks", layer 2: the compile error <c>call-loop</c> for loops of calls that wait between actor types (U56), with the
 /// call back to the caller that makes no edge (U57), the word <c>vouch</c> that takes its call's edge out (U58) and the lint
-/// <c>vouch-unneeded</c> (U59) (assumed: T40 to T59 of #519, comment 7007991607, built at the lean while it waits for the owner). The
-/// graph's points are the actor types; an edge goes from <c>A</c> to <c>B</c> for each call that waits on a method of <c>B</c> that the
-/// code of <c>A</c> reaches, its construction and every method it declares with what they run, as the walk of the throw sets reads
-/// it (<see cref="ThrowSets.ActorsCode"/>, the one definition of what code reaches), and for each <c>spawn</c> of <c>B</c> it reaches. A
-/// group of types that reach one another (a strongly connected component) that holds the edge of a call is one error, at its call that
-/// stands first in source order, naming the shortest loop through that call; a group of <c>spawn</c>s alone is none. The walk reads
-/// each unit of code once over all the actors, and the groups are found by one depth-first walk of the types (Tarjan's), so that the
-/// cost grows with the code and its calls, and no loop is listed one by one.
+/// <c>vouch-unneeded</c> (U59) (assumed: T40 to T59 of #519, comment 7007991607, and T60 and T61 of #519, comment 7009683539, built at
+/// the lean while it waits for the owner). The graph's points are the actor types; an edge goes from <c>A</c> to <c>B</c> for each call
+/// that waits on a method of <c>B</c> that the code of <c>A</c> reaches, its construction and every method it declares with what they
+/// run, as the walk of the throw sets reads it (<see cref="ThrowSets.ActorsCode"/>, the one definition of what code reaches), and for
+/// each <c>spawn</c> of <c>B</c> it reaches. A group of types that reach one another (a strongly connected component) that holds the
+/// edge of a call is one error, at its call that stands first in source order, naming the shortest loop through that call; a group of
+/// <c>spawn</c>s alone is none. The walk reads each unit of code once over all the actors, and the groups are found by one depth-first
+/// walk of the types (Tarjan's), so that the cost grows with the code and its calls, and no loop is listed one by one.
 /// </summary>
 public sealed class CallLoops
 {
@@ -32,14 +32,15 @@ public sealed class CallLoops
         actors = code.Select(c => c.Actor).ToList();
         sites = sets.Sites().ToList();
         calls = sites.ToLookup(s => s.Method, ReferenceEqualityComparer.Instance as IEqualityComparer<FunctionSymbol?>);
+        Callbacks(code, sets.Outside());
         foreach (var (actor, entries) in code)
         {
             foreach (var entry in entries)
             {
                 foreach (var reached in entry.Sites.Where(r => r.Site.Kind != SiteKind.Send).OrderBy(r => (r.Site.File, r.Site.Line)))
                 {
-                    // U57: a call that waits through the actor itself, or through a parameter every caller that waits fills with its own
-                    // reference, reaches the caller that waits, which takes it as a call of its chain (U17): no edge
+                    // U57: a call that waits through the actor itself, or through a parameter that is a callback, reaches the caller that
+                    // waits, which takes it as a call of its chain (U17): no edge
                     if (reached.Site.Kind == SiteKind.Wait && reached.Receivers.All(o => o == Origin.Self || (o.Parameter >= 0 && Callback(entry, o.Parameter))))
                     {
                         continue;
@@ -100,33 +101,55 @@ public sealed class CallLoops
     }
 
     /// <summary>
-    /// U57: whether a parameter of the entry's method is a callback: calls through a reference reach the method, every one of them waits and
-    /// fills the parameter with its own reference, as the call writes it, so that a call through it reaches the caller that waits; or none
-    /// does and the actor's own code calls the method directly (U10), whose entries read its calls with the arguments they pass. The walk
-    /// keeps no context per call, so one caller that passes another reference makes the parameter's calls edges for every caller, and a
-    /// method that nothing calls has no caller to call back, so that its loop is refused as a loop no code reaches is (T53).
+    /// U57: which parameters of the methods of the actors are callbacks: calls through a reference reach the method, every one of them
+    /// waits, stands in the code of the actors' entries alone, which no top-level code or <c>pub</c> function reaches, and fills the
+    /// parameter, in the terms of each entry that reaches it, with the entry's own reference, as the call writes it, or with a parameter
+    /// of the entry that is a callback, so that a reference handed on through a chain of calls that wait reaches the caller that waits at
+    /// its start (assumed: T60 of #519, comment 7009683539, built at the lean while it waits for the owner); or none does and the actor's
+    /// own code calls the method directly (U10), whose entries read its calls with the arguments they pass. It is the least fixed point:
+    /// every parameter starts as no callback, and the rounds read each again as long as one changes, so that a cycle of parameters that
+    /// no <c>this</c> fills stays none. The walk keeps no context per call, so one caller that passes another reference makes the
+    /// parameter's calls edges for every caller, and a method that nothing calls has no caller to call back, so that its loop is refused
+    /// as a loop no code reaches is (T53).
     /// </summary>
-    private bool Callback(ActorEntry entry, int parameter)
+    private void Callbacks(IReadOnlyList<ActorCode> code, IReadOnlySet<ActorSite> outside)
     {
-        if (entry.Method is not { } method)
+        var reaching = code.SelectMany(c => c.Entries).SelectMany(e => e.Sites.Select(r => (Entry: e, Reached: r)))
+            .ToLookup(p => p.Reached.Site, ReferenceEqualityComparer.Instance as IEqualityComparer<ActorSite>);
+        var methods = code.SelectMany(c => c.Entries).Where(e => e.Method is not null).ToList();
+        foreach (var entry in methods)
         {
-            return false;
+            callbacks[entry] = new bool[entry.Method!.Parameters.Count];
         }
 
-        if (!callbacks.TryGetValue(entry, out var each))
+        for (var changed = true; changed;)
         {
-            var callers = calls[method].ToList();
-            each = new bool[method.Parameters.Count];
-            for (var i = 0; i < each.Length; i++)
+            changed = false;
+            foreach (var entry in methods)
             {
-                each[i] = callers.Count > 0 ? callers.All(s => s.Kind == SiteKind.Wait && i < s.Arguments.Count && s.Arguments[i] == Origin.Self) : entry.Direct;
+                var callers = calls[entry.Method].ToList();
+                var each = callbacks[entry];
+                for (var i = 0; i < each.Length; i++)
+                {
+                    if ((callers.Count > 0 ? callers.All(s => Fills(s, i)) : entry.Direct) != each[i])
+                    {
+                        each[i] = !each[i];
+                        changed = true;
+                    }
+                }
             }
-
-            callbacks[entry] = each;
         }
 
-        return parameter < each.Length && each[parameter];
+        // a caller that waits in the code of entries alone, each of which fills the parameter with its own reference or a callback of its own
+        bool Fills(ActorSite caller, int parameter) =>
+            caller.Kind == SiteKind.Wait && !outside.Contains(caller) && reaching[caller].Any()
+            && reaching[caller].All(r => parameter < r.Reached.Arguments.Count
+                && r.Reached.Arguments[parameter].All(o => o == Origin.Self || (o.Parameter >= 0 && Callback(r.Entry, o.Parameter))));
     }
+
+    // U57: whether the parameter of the entry's method is a callback, as the fixed point of Callbacks gave it
+    private bool Callback(ActorEntry entry, int parameter) =>
+        callbacks.TryGetValue(entry, out var each) && parameter < each.Length && each[parameter];
 
     // Tarjan's strongly connected components of the types under the hops, each type with the index of its group
     private Dictionary<ClassSymbol, int> Groups(IReadOnlyList<Hop> graph)

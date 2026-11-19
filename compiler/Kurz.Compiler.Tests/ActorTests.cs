@@ -1969,9 +1969,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // U17 (section 6, "Deadlocks", layer 1): `Save` waits on `Check`, which waits on `Verify`, which calls `Load` on the store that
         // waits in their chain; `Load` runs on a stack of its own above `Save` (Q6 of comment 6892835500, "Own pooled stack"), and each
-        // waiting message resumes once the calls above it ended, in a test build and a release build; the reference `Check` passes on to
-        // `Verify` is no callback of U57, which `Verify`'s caller does not hand its own reference (assumed: T49 of #519, comment
-        // 7007991607), and `vouch` takes the call through it out of U56's loop, a promise nothing checks (U58)
+        // waiting message resumes once the calls above it ended, in a test build and a release build
         const string chain = """
             actor Store(Checker Check) {
                 mut int saved = 0
@@ -1993,7 +1991,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             actor Verifier {
                 pub int Verify(Store store) {
                     print("verify waits")
-                    loaded = vouch store.Load()
+                    loaded = store.Load()
                     print("verify resumes")
                     return loaded * 10
                 }

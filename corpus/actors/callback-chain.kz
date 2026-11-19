@@ -1,0 +1,27 @@
+// expect: output
+// | 401
+// rules: U17, U57
+
+actor Store(Checker Check) {
+    mut int saved = 0
+
+    pub int Save(int n) {
+        saved = n
+        return Check.Valid(this) + 1
+    }
+
+    pub int Load() => saved
+}
+
+actor Checker(Verifier V) {
+    pub int Valid(Store store) => V.Verify(store) * 10
+}
+
+actor Verifier {
+    pub int Verify(Store store) => store.Load() * 10
+}
+
+v = spawn Verifier()
+c = spawn Checker(v)
+s = spawn Store(c)
+print(s.Save(4))

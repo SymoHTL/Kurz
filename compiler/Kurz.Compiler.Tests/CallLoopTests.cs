@@ -9,10 +9,10 @@ using Xunit;
 namespace Kurz.Compiler.Tests;
 
 /// <summary>
-/// Layer 2 of section 6's deadlocks (U56 to U59; assumed: T40 to T59 of issue 519, comment 7007991607, built at the lean while it waits
-/// for the owner): the line of each <c>call-loop</c> and how many a program gets, the loop its text names, read by the lines it names,
-/// the word <c>vouch</c> as the parser reads it, the lint <c>vouch-unneeded</c>, and the walk that reads each unit of code once. Every
-/// error is pinned by its id and its line, never by its wording.
+/// Layer 2 of section 6's deadlocks (U56 to U59; assumed: T40 to T59 of issue 519, comment 7007991607, and T60 and T61 of issue 519,
+/// comment 7009683539, built at the lean while it waits for the owner): the line of each <c>call-loop</c> and how many a program gets,
+/// the loop its text names, read by the lines it names, the word <c>vouch</c> as the parser reads it, the lint <c>vouch-unneeded</c>,
+/// and the walk that reads each unit of code once. Every error is pinned by its id and its line, never by its wording.
 /// </summary>
 public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -301,6 +301,181 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
             """;
         Assert.Empty(Diagnostics(program));
         Assert.Equal([(ErrorIds.CallLoop, 2)], Diagnostics(program + "print(b.Peek(spawn A(b)))\n"));
+    }
+
+    [Fact]
+    public void A_reference_handed_on_through_calls_that_wait_is_a_callback_read_to_the_least_fixed_point()
+    {
+        // U57, T60: `Store.Save` hands `this` to `Checker.Valid`, which hands it on to `Verifier.Verify`, and that to `Reader.Read`, each
+        // by a call that waits: each parameter is a callback, read again round by round, the types declared from the last callee to the
+        // first caller, so that a round of the fixed point takes the chain one step; a top-level call of `Valid` with another `Store`
+        // makes every parameter of the chain none, and the loop of four types is one error, at line 2
+        const string program = """
+            actor Reader {
+                pub int Read(Store store) => store.Load() + 1
+            }
+
+            actor Verifier(Reader R) {
+                pub int Verify(Store store) => R.Read(store) * 10
+            }
+
+            actor Checker(Verifier V) {
+                pub int Valid(Store store) => V.Verify(store) * 10
+            }
+
+            actor Store(Checker Check) {
+                pub int Save() => Check.Valid(this) + 1
+
+                pub int Load() => 7
+            }
+
+            r = spawn Reader()
+            v = spawn Verifier(r)
+            c = spawn Checker(v)
+            s = spawn Store(c)
+            print(s.Save())
+
+            """;
+        Assert.Empty(Diagnostics(program));
+        Assert.Equal([(ErrorIds.CallLoop, 2)], Diagnostics(program + "print(c.Valid(spawn Store(c)))\n"));
+    }
+
+    [Fact]
+    public void A_reference_a_send_hands_on_is_no_callback()
+    {
+        // U57, T60: `Checker.Valid` hands the `Store` it was given on to `Verifier.Verify` by a `send`, which gives no callback (T49), so
+        // that `Verify`'s call of `Load` is an edge, and the loop of three types, through `Valid`'s wait on `Verifier.Count`, is one
+        // error, at line 2; the same call made as one that waits hands the callback on, and the program has no error
+        const string program = """
+            actor Store(Checker Check) {
+                pub int Save() => Check.Valid(this) + 1
+
+                pub int Load() => 7
+            }
+
+            actor Checker(Verifier V) {
+                pub int Valid(Store store) {
+                    send V.Verify(store)
+                    return V.Count()
+                }
+            }
+
+            actor Verifier {
+                pub void Verify(Store store) {
+                    print(store.Load())
+                }
+
+                pub int Count() => 3
+            }
+
+            v = spawn Verifier()
+            c = spawn Checker(v)
+            s = spawn Store(c)
+            print(s.Save())
+
+            """;
+        Assert.Equal([(ErrorIds.CallLoop, 2)], Diagnostics(program));
+        Assert.Empty(Diagnostics(program.Replace("send V.Verify(store)", "V.Verify(store)", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void A_cycle_of_parameters_that_no_this_fills_is_no_callback()
+    {
+        // U57, T60: `Checker.Valid` and `Verifier.Verify` call each other back through the reference each passes as `this`, and hand the
+        // `Store` on to each other, which no caller fills with `this`: the least fixed point leaves both parameters none, so that
+        // `Valid`'s call of `Load` is an edge, and the loop with `Store`'s call of `Checker.Size` is one error, at line 2; without that
+        // call of `Load` the program has no error
+        const string program = """
+            actor Store(Checker Check) {
+                pub int Load() => Check.Size() + 1
+            }
+
+            actor Checker {
+                pub int Valid(Verifier v, Store store) => v.Verify(this, store) + store.Load()
+
+                pub int Size() => 3
+            }
+
+            actor Verifier {
+                pub int Verify(Checker c, Store store) => c.Valid(this, store)
+            }
+
+            k = spawn Checker()
+            st = spawn Store(k)
+            print(st.Load())
+
+            """;
+        Assert.Equal([(ErrorIds.CallLoop, 2)], Diagnostics(program));
+        Assert.Empty(Diagnostics(program.Replace(" + store.Load()", "", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void A_caller_in_a_function_the_top_level_code_runs_too_hands_on_no_callback()
+    {
+        // U57, T60: `Relay` passes `Checker.Valid` its parameter, which `Store.Save` fills with `this`, so that the reference handed on is
+        // a callback and the program has no error; a top-level call of `Relay`, code outside the actors' messages, makes it none, and so
+        // does a `Save` that passes `Relay` another `Store`: the loop of three types is one error, at line 1, in `Relay`
+        const string program = """
+            int Relay(Checker c, Store s) => c.Valid(s)
+
+            actor Store(Checker Check) {
+                pub int Save() => Relay(Check, this) + 1
+
+                pub int Load() => 7
+            }
+
+            actor Checker(Verifier V) {
+                pub int Valid(Store store) => V.Verify(store) * 10
+            }
+
+            actor Verifier {
+                pub int Verify(Store store) => store.Load() * 10
+            }
+
+            ver = spawn Verifier()
+            chk = spawn Checker(ver)
+            sto = spawn Store(chk)
+            print(sto.Save())
+
+            """;
+        Assert.Empty(Diagnostics(program));
+        Assert.Equal([(ErrorIds.CallLoop, 1)], Diagnostics(program + "print(Relay(chk, sto))\n"));
+        var other = program.Replace("pub int Save() => Relay(Check, this) + 1", "pub int Save(Store other) => Relay(Check, other) + 1", StringComparison.Ordinal)
+            .Replace("print(sto.Save())", "print(sto.Save(sto))", StringComparison.Ordinal);
+        Assert.Equal([(ErrorIds.CallLoop, 1)], Diagnostics(other));
+    }
+
+    [Fact]
+    public void A_call_in_a_lambda_that_no_code_runs_hands_on_no_callback()
+    {
+        // U57, T61: `Keep` adds to a list a lambda that calls `Checker.Valid` with `this`, and no code calls it: no entry's code reaches
+        // that caller, which hands on no callback, as `this` inside a lambda gives none, so that `Valid`'s call of `Load` is an edge, and
+        // the loop of two types is one error, at line 2; without `Keep` the program has no error
+        const string program = """
+            actor Store(Checker Check) {
+                pub int Save() => Check.Valid(this) + 1
+
+                pub int Keep() {
+                    mut kept = List<() => int>()
+                    kept.Add(() => Check.Valid(this))
+                    return kept.Count
+                }
+
+                pub int Load() => 7
+            }
+
+            actor Checker {
+                pub int Valid(Store store) => store.Load() * 10
+            }
+
+            c = spawn Checker()
+            s = spawn Store(c)
+            print(s.Save())
+
+            """;
+        Assert.Equal([(ErrorIds.CallLoop, 2)], Diagnostics(program));
+        const string keep = "    pub int Keep() {\n        mut kept = List<() => int>()\n        kept.Add(() => Check.Valid(this))\n        return kept.Count\n    }\n\n";
+        Assert.Empty(Diagnostics(program.Replace(keep, "", StringComparison.Ordinal)));
     }
 
     [Fact]
