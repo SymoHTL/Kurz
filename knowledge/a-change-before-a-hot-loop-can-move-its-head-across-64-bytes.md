@@ -8,7 +8,7 @@ metadata:
 ## What happened
 
 Issue 157's sweep found the rows `cyrillic` (`ToLower` of a Cyrillic text) and `upper-cyrillic` (`ToUpper` of it)
-about 20% slower than at the head of pull request 167, and the bisect (issue 157, comment 7001076813) found the step
+about 20% slower than at the head of pull request 167, and the bisect (issue 157, comment 7001076813) put the gap
 at the merge of pull request 197 into that branch: `Copy`'s branches for up to 16 bytes (two words of 8, two of 4,
 three bytes) inlined into `std.UnicodeCase`, where a byte loop stood, and the head of the walk after them moved from
 0 to 32 mod 64. It did not say which of the two cost the time. Read on 2026-11-19 (checked):
@@ -33,9 +33,9 @@ three bytes) inlined into `std.UnicodeCase`, where a byte loop stood, and the he
   In a second run, 16 bytes on gave -15.0% and -15.8%, and `-falign-loops=64`, which puts every loop's head at 64
   bytes, -16.1% and -16.4%. So `Copy`'s branches cost nothing that shows; the whole gap was the walk's place.
 - Forms of the standard library measured against it in one run (checked): the copy as the byte loop it had before
-  pull request 197, +3.7% and +0.9%, since the head stands at 32 mod 64 with it; the copy as a call of a function
+  pull request 197, +3.7% and +0.9%, the head at 32 mod 64 with it; the copy as a call of a function
   that is not inlined, -4.0% and -4.6%; `Copy`'s path for more than 16 bytes made such a call, +0.9% and -0.1%. Each
-  moves the head by its own size: none of them is a mechanism, and the next change of the function moves it again.
+  moves the head by its own size (inferred): none of them is a mechanism, and any change of the function moves it again.
   `-falign-loops=64`, in one sweep of every row of issue 157 on 2026-11-19 (checked, one run, best of 11), took the
   two rows back by 16.1% and made 42 of 102 rows slower beyond the band of two copies of `main`, by up to 12.2%: no free fix
   either, and a choice of the build's layout, as the alignment of functions of pull request 240 was the owner's.
