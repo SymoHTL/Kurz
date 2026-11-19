@@ -1132,7 +1132,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   A `move` before an argument of a call that crosses nothing copies nothing and, of a value whose
   place it empties, changes no count (U12): a variable's value leaves its place, which is stored null, or a string of no block, the count
   it held going to the parameter written `move` the argument fills, which its function owns and lets go of where it
-  leaves; the item of a loop that takes its list leaves its place in the list the same way where the
+  leaves, a lambda's too where the type of the function value called writes `move` there, whose call hands the argument
+  over as a direct call does (issue 587); the item of a loop that takes its list leaves its place in the list the same way where the
   place has an empty value, an address or a string, an item of another type staying there, counted
   once more, and the release of a list of an item type such a loop takes, read from every unit's model before the first
   helper is built, tests each item for null, so that the list lets go of every item it still holds
@@ -1150,7 +1151,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   to the frees on a branch, in a loop that takes its list, after a reassignment and through a
   parameter written `move`; the line `actor-move-fenced` of `ListTests` a branch, a loop that takes
   its list, a variable moved and assigned again in a loop, and a parameter written `move` left by a
-  `return` or moved on.
+  `return` or moved on; and the calls of a function value whose type writes `move` at a parameter, given a new value, a moved
+  variable, a loop's item, an inline `data` value, a copy, the first of two copies and a lambda that moves its parameter on,
+  and left by an argument after the `move`, `ActorTests` by the count of blocks and the line `value-move-fenced` of `ListTests` under the
+  fence (issue 587).
   A call that waits (U4), wherever it stands, passes a reply in its own frame, the
   one-shot slot of section 6, an `int` word, the activation that waits on it and the result, whose
   waiter the runtime's `ReplyWaiter` stores before `Enqueue` queues the message, so that whoever
@@ -1664,7 +1668,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - lambdas (F7) and function values (F11): a function value is the address of its lambda's code and
   of its environment, which holds the values the lambda read when it was made (F15); a lambda that
   reads no variable has none and allocates nothing, and a call of a function value calls its code
-  with its environment (section 4, the owner, 2026-10-25, "Pair + heap env");
+  with its environment (section 4, the owner, 2026-10-25, "Pair + heap env") and takes its arguments as a direct call takes
+  them: an argument of a parameter its type writes `move` is handed over to the lambda, which lets go of it at its end, and
+  every other is borrowed for the call (U12; issue 587);
 - `print`, `eprint`, which writes the same line to standard error (A17), and the text of a value in
   a string's holes (A1, A2, A8, L6), `==` on strings by
   their bytes (T18), and `<`, `<=`, `>` and `>=` on strings by the first byte in which they differ,

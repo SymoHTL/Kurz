@@ -134,35 +134,20 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// F11: a call of a function value, its code given its environment and the arguments, which it borrows for the call. The value
-    /// it calls and each argument are borrowed across the arguments after them: the checker holds them there (M7), refuses a change
-    /// of a list among them, <c>f(xs, Push(mut xs))</c>, and marks a read of a copied type that a change meets, <c>f</c> in
-    /// <c>f(Swap(mut f))</c>, which <see cref="HeldCopy"/> counts.
+    /// F11: a call of a function value, its code given its environment and the arguments, taken as a direct call takes them
+    /// (<see cref="Arguments"/>): an argument of a parameter its type writes <c>move</c> is handed over to the lambda, which owns it
+    /// and lets go of it at its end (<see cref="OwningMoved"/>), a value <see cref="Taken"/> lists to the call's last
+    /// argument, so that a jump out of the call that an argument after it takes lets go of it there (issue 587); every other argument it
+    /// borrows for the call. The value it calls and each argument it borrows are borrowed across the arguments after them: the
+    /// checker holds them there (M7), refuses a change of a list among them, <c>f(xs, Push(mut xs))</c>, and marks a read of a copied
+    /// type that a change meets, <c>f</c> in <c>f(Swap(mut f))</c>, which <see cref="HeldCopy"/> counts.
     /// </summary>
     private string EmitFunctionValueCall(CallExpression c, FunctionType type)
     {
         var callee = EmitExpression(c.Callee);
-        var arguments = new List<string> { $"ptr {fn.Value($"extractvalue %kz.fn {callee}, 1")}" };
-        var late = new List<(int Index, Func<string, string> Read)>(); // U12: the copies read after the call's last copy (CopiedLate)
-        string? copied = null;
-        for (var i = 0; i < c.Arguments.Count; i++)
-        {
-            var a = c.Arguments[i].Value;
-            var parameter = type.Parameters[i];
-            if (copySessions.TryGetValue(a, out var shared))
-            {
-                var own = TypeOf(a);
-                copied = shared;
-                CopiedLate(a);
-                late.Add((arguments.Count, v => $"{Ir(parameter)} {Convert(Temp(v, own), own, parameter, a.Line)}"));
-                arguments.Add("");
-                continue;
-            }
-
-            arguments.Add($"{Ir(parameter)} {Convert(EmitExpression(a), TypeOf(a), parameter, a.Line)}");
-        }
-
-        ReadLate(copied, (k, v) => arguments[late[k].Index] = late[k].Read(v));
+        var environment = $"ptr {fn.Value($"extractvalue %kz.fn {callee}, 1")}";
+        var arguments = Arguments(c, Model.CallOf(c), j => type.Parameters[j], _ => false, _ => null, cConvention: false, owned: false);
+        arguments.Insert(0, environment);
 
         var call = $"call {Ir(type.Result)} {fn.Value($"extractvalue %kz.fn {callee}, 0")}({string.Join(", ", arguments)})";
         return Types.IsVoid(type.Result) ? Emitted(call) : fn.Value(call);

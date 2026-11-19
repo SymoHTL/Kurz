@@ -787,6 +787,36 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             "");
     }
 
+    [Fact]
+    public void A_function_value_whose_type_writes_move_takes_the_argument_there_and_every_block_is_let_go_of_once()
+    {
+        // U12, F11 (issue 587): each row of `ListTests.ValueMoves`, a call of a function value whose type writes `move` at a parameter,
+        // hands that argument over to the lambda, which lets go of it at its end, as a direct call does (`Arguments`), and a call left by
+        // the case an argument after it propagates lets go of it there; the blocks live across a second call of each row, after one that
+        // warmed it up, and the sum of every row's value twice
+        const string main = """
+            names = ["Through", "Variable", "Item", "Inline", "Copied", "Copies", "Forwarded", "Left", "LeftVariable", "LeftCopy", "Borrowed"]
+            h = Holder(Box(5))
+            o = Box(7)
+            mut sum = 0
+            for row in 0..<11 {
+                sum = sum + Run(row, h, o)
+                before = HttpServer.Live()
+                sum = sum + Run(row, h, o)
+                n = HttpServer.Live() - before
+                print("{names[row]} {n}")
+            }
+
+            print(sum)
+
+            """;
+        Ran(
+            BuildAndRun(ListTests.ValueMoves + main, Blocks.Value, "value-move-freed"),
+            0,
+            ["Through 0", "Variable 0", "Item 0", "Inline 0", "Copied 0", "Copies 0", "Forwarded 0", "Left 0", "LeftVariable 0", "LeftCopy 0", "Borrowed 0", "816"],
+            "");
+    }
+
     /// <summary>
     /// std/ whose <c>Free</c> notes the sizes of the last two blocks it was given and the number of blocks while the program records,
     /// which <c>HttpServer.Record()</c> starts and <c>HttpServer.Stop()</c> ends, read through <c>HttpServer.LastFreedSmaller()</c>,
