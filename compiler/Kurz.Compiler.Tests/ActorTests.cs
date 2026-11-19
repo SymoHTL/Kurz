@@ -900,10 +900,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // the operands of an expression that one of its operands leaves (the Rust Reference, "Destructors", drop scopes, operands;
         // issue 569): the instance of the larger class, made second, is freed before the smaller one, made first, a copy where the
         // call makes two, and no other block is freed while the program records but the tables of the session of those two copies,
-        // which its end frees first (`CopyAbort`), before the instance made after the first copy, larger than the instances of `Small`
-        // (24 bytes) and of `Large` (32); a call's one copy is let go of among the values its arguments made, the last made first, so
-        // that the copy, made second, goes before the instance made first, and the instance, made second, before the copy made first,
-        // after the tables of the copy's own session, which its copy ends (R1)
+        // which its end frees first (`CopyAbort`), before the instance made after the first copy, the tables larger than the instances
+        // of `Small` (24 bytes) and of `Large` (32); a call's one copy is let go of among the values its arguments made, the last made
+        // first, so that the copy, made second, goes before the instance made first, and the instance, made second, before the copy
+        // made first, after the tables of the copy's own session, which ends when the copy is made (R1)
         const string program = """
             data Missing
 
