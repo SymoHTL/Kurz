@@ -6067,10 +6067,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void A_test_has_no_bound_of_time_while_each_call_it_makes_keeps_its_own()
+    public void A_test_has_no_bound_of_time_so_that_it_calls_on_past_the_default_bound_of_a_call()
     {
-        // D6, Y7: the test's message carries no deadline, so a test that holds its thread past the default bound of a call calls on, the
-        // call with that bound of its own, here 10 ms for the run; a read of the clock is `not supported` in a build for Windows (S11)
+        // D6, Y5: the test's message carries no deadline, so a test that holds its thread past the default bound of a call, here 10 ms
+        // for the run, calls on and its call is answered; a read of the clock is `not supported` in a build for Windows (S11)
         if (!OperatingSystem.IsLinux())
         {
             return;

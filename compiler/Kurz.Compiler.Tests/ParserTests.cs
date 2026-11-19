@@ -1069,8 +1069,9 @@ public sealed class ParserTests
     [InlineData("advance(d)", "(advance (paren d))")]
     public void A_test_block_check_mock_and_advance_take_their_forms(string program, string tree)
     {
-        // Y1: `test "name" { ... }`, the name kept as written (F19); Y6: `check condition`, its text kept; Y9: `mock X with Y`, two types;
-        // Y10: `advance d`, an expression (assumed: Q1, Q8, D2 and D3 of issue 586, comment 6992687784)
+        // Y1: `test "name" { ... }`, the name kept as written (F19); Y6: `check condition`, its text kept; Y9: `mock X with Y`, two types,
+        // and Y10: `advance d`, an expression, the forms of section 11's samples, `mock UserStore with FakeStore` and `advance 60days`, while
+        // Y9 and Y10 are open on Q7 and Q8 (assumed: Q1, D2 and D3 of issue 586, comment 6992687784)
         Assert.Equal(tree, Tree(program));
     }
 

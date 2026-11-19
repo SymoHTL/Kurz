@@ -7093,7 +7093,8 @@ public sealed class CheckerTests
     public void A_second_test_of_one_name_is_syntax_at_its_line_naming_the_first()
     {
         // Y1 with E4: a test's name is its own in its file, compared by its value; the text of the second names the line of the first
-        // (assumed: D3 of issue 586, comment 6992687784)
+        // (assumed: D3 of issue 586, comment 6992687784, and for the value Q10 of comment 6994632453, built at the lean while it waits
+        // for the owner)
         Assert.Equal([(ErrorIds.Syntax, 4)], Errors("test \"a\" {\n}\n\ntest \"a\" {\n}"));
         Assert.Contains("line 3", ErrorText("print(1)\n\ntest \"a\" {\n}\n\ntest \"a\" {\n}"), StringComparison.Ordinal);
         Assert.Equal([(ErrorIds.Syntax, 6), (ErrorIds.Syntax, 8)], Errors("test \"a\" {\n}\n\ntest \"b\" {\n}\ntest \"a\" {\n}\ntest \"b\" {\n}"));
@@ -7105,7 +7106,7 @@ public sealed class CheckerTests
     public void A_check_narrows_nothing_after_it()
     {
         // Y6: after `check n != null` the variable is still nullable (N2), as Rust's `assert!` narrows no type; an `if` is the control
-        // (the reading in compiler/README.md)
+        // (assumed in Y6: Q9 of issue 586, comment 6994632453, built at the lean while it waits for the owner)
         Assert.Equal([(ErrorIds.NullableUnchecked, 3)], Errors("int? n = null\ncheck n != null\nprint(n + 1)"));
         Assert.Empty(Errors("int? n = null\nif n != null {\n    print(n + 1)\n}"));
     }
@@ -7138,7 +7139,8 @@ public sealed class CheckerTests
     public void The_condition_of_a_check_is_a_bool_as_a_condition_is(string program, string? id)
     {
         // Y6 with C3: a condition of another type is `type-mismatch` at its line, a nullable one N2's `nullable-unchecked`, and a call
-        // with a `void` success O10's `syntax` (assumed: Q1 of issue 586, comment 6992687784, and F8 of comment 6993110710)
+        // with a `void` success O10's `syntax`, as Y6 reads a check's condition as a condition is read (assumed: Q1 of issue 586, comment
+        // 6992687784)
         var line = program.Split('\n').Length;
         Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
     }
@@ -7222,7 +7224,7 @@ public sealed class CheckerTests
     {
         // Y8: the cluster test of section 13, once at its line, its body unread; Y9 and Y10: `mock` and `advance`, whose questions are
         // open, once at their line, in a test or not; the duration's variables count as read (E1) (assumed: D7 of issue 586, comment
-        // 6992687784, and F20 of comment 6993110710)
+        // 6992687784, F20 of comment 6993110710 for `mock`, and for `advance` a reading of the build said back in comment 6994632453)
         NotSupportedAt(1, "Y8", "test cluster 3 seed 42 {\n    a = spawn Store()\n    split 2 | 3\n    check a.Count() == 1\n}");
         Assert.Empty(Check("test cluster 3 seed 42 {\n}").Checker.Model.Tests); // no test of `kurz test`
         NotSupportedAt(2, "Y9", "test \"a\" {\n    mock Clock with FakeClock\n}");
