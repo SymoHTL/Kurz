@@ -1,0 +1,25 @@
+// expect: error call-loop at 5
+// rules: U57
+
+actor Store(Checker Check) {
+    pub int Save() => Check.Valid(this) + 1
+
+    pub int Audit(Store other) => Check.Valid(other) + 2
+
+    pub int Load() => 7
+}
+
+actor Checker(Verifier V) {
+    pub int Valid(Store store) => V.Verify(store) * 10
+}
+
+actor Verifier {
+    pub int Verify(Store store) => store.Load() * 10
+}
+
+v = spawn Verifier()
+c = spawn Checker(v)
+s = spawn Store(c)
+peer = spawn Store(c)
+print(s.Save())
+print(s.Audit(peer))

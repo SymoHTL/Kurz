@@ -2201,12 +2201,13 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // section 6, "Deadlocks" (the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level wait"): each `Ask` waits in
         // a chain of its own on the other actor, which waits in the other chain, so neither takes the other's call (layer 1), and the
         // top-level code's wait, in a function it called, finds nothing left to run: the process ends at that call's line, not at a
-        // line of the loop, with the exit code 1
+        // line of the loop, with the exit code 1; `vouch` takes `Left`'s call out of U56's loop, a promise nothing checks (U58; assumed:
+        // T57 and T58 of #519, comment 7007991607)
         const string text = """
             actor Left {
                 pub void Ask(Right other) {
                     print("left asks")
-                    print("left got {other.Value()}")
+                    print("left got {vouch other.Value()}")
                 }
 
                 pub int Value() => 1

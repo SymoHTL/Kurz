@@ -1,0 +1,36 @@
+// expect: error call-loop at 17
+// rules: U56
+
+actor Child {
+    pub int Work(int n) {
+        if n == 0 {
+            throw "zero"
+        }
+
+        return n
+    }
+}
+
+actor Boss(Peer P) {
+    pub int Run(int n) {
+        c = spawn Child() on crash (crash) {
+            print("seen {P.Seen()}")
+            restart
+        }
+
+        return c.Work(n)
+    }
+
+    pub int Seen() => 1
+}
+
+actor Peer {
+    pub int Ask(Boss boss) => boss.Seen()
+
+    pub int Seen() => 2
+}
+
+p = spawn Peer()
+b = spawn Boss(p)
+print(b.Run(1))
+print(p.Ask(b))
