@@ -58,11 +58,11 @@ COMMAND = ["dotnet", "test", SOLUTION, "--nologo", "-c", "Release", "-p:RestoreL
 # section 2; the owner, 2026-11-15, #519, comment 6892835500, Q8, "GitHub Arm runner job"): the actors, the check of the runtime
 # for every target and architecture, the naked function and the switch of every pair, and the actors' corpus cases; the floor is
 # the count of those tests, taken on x86-64 on 2026-11-19, which no test of them skips on Arm: the compiler-arm run 44429248756
-# of the head of pull request 590 printed "compiler tests: 344 passed, 0 failed, 0 skipped, 344 total, 0 errors", and the six cases
-# of layer 2 that expect a run (U56 to U58) add 12 rows of RunTests, counted in the suite's log on x86-64 on 2026-11-19
+# of the head of pull request 590 printed "compiler tests: 344 passed, 0 failed, 0 skipped, 344 total, 0 errors", and the seven cases
+# of layer 2 that expect a run (U56 to U58) add 14 rows of RunTests, counted in the suite's log on x86-64 on 2026-11-19
 ARM_FILTER = ("FullyQualifiedName~ActorTests|FullyQualifiedName~RuntimeTests|FullyQualifiedName~EmitterTests.On_an_arm"
               "|FullyQualifiedName~EmitterTests.The_switch|(FullyQualifiedName~RunTests&DisplayName~actors/)")
-ARM_FLOOR = 356  # 132 of ActorTests, 32 of RuntimeTests, 2 of EmitterTests and 190 rows of the actors' cases of RunTests, each case run twice
+ARM_FLOOR = 358  # 132 of ActorTests, 32 of RuntimeTests, 2 of EmitterTests and 192 rows of the actors' cases of RunTests, each case run twice
 ARM_COMMAND = COMMAND + ["--filter", ARM_FILTER]
 # the command the test run built, run without a build of its own; the dotnet host reads global.json from CWD as for the tests
 VERSION_COMMAND = ["dotnet", "run", "--project", "Kurz", "-c", "Release", "--no-build", "--", "--version"]
@@ -346,7 +346,7 @@ def self_test():
     cases.append(("the Arm run is the gate's command with the actors' filter alone",
                   ARM_COMMAND == COMMAND + ["--filter", ARM_FILTER] and "ActorTests" in ARM_FILTER and "RunTests&DisplayName~actors/" in ARM_FILTER,
                   ARM_COMMAND))
-    cases.append(("the Arm floor is at least 356 tests", ARM_FLOOR >= 356, ARM_FLOOR))
+    cases.append(("the Arm floor is at least 358 tests", ARM_FLOOR >= 358, ARM_FLOOR))
     with kit.scratch("compiler-gate-arm-") as root:
         os.makedirs(os.path.join(root, "compiler"))
         with open(os.path.join(root, CONFIG), "w", encoding="utf-8") as f:
