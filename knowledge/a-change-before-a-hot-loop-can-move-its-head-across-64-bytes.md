@@ -34,9 +34,10 @@ three bytes) inlined into `std.UnicodeCase`, where a byte loop stood, and the he
   bytes, -16.1% and -16.4%. So the gap goes with where the function stands, not with `Copy`'s branches, which the moved builds
   all hold. That the cause is the head of the walk against 64 bytes is a reading (inferred): a move of the function
   moves the walk's inner blocks as well, and no hardware counter was read (none in the container). The table's builds
-  put the nops after the function's `.cfi_startproc`, where they run on every call; with the nops before its label
-  instead, where they never run, 16 bytes on gave `cyrillic` -15.5% and -15.6% and `upper-cyrillic` -15.5% in each of
-  two more runs (checked, issue 157, comment 7004204396).
+  put the nops after the function's `.cfi_startproc`, where they run on every call, and moved that one function;
+  with 16 bytes of nops before the label of every function of the program instead, where they never run, so that
+  every function moved 16 bytes within its 64, `cyrillic` took -15.5% and -15.6% and `upper-cyrillic` -15.5% in each
+  of two more runs (checked, issue 157, comment 7004204396).
 - Forms of the standard library measured against it in one run (checked): the copy as the byte loop it had before
   pull request 197, +3.7% and +0.9%, the head at 32 mod 64 with it; the copy as a call of a function
   that is not inlined, -4.0% and -4.6%, with the walk's head at 0 mod 64 but the function shorter and the walk's
@@ -68,7 +69,9 @@ three bytes) inlined into `std.UnicodeCase`, where a byte loop stood, and the he
   with clang's assembler and the feature `+fast-15bytenop` (`clang-23 -cc1as -triple x86_64-pc-linux-gnu -filetype
   obj -target-cpu x86-64 -target-feature +fast-15bytenop -mrelocation-model pic`), without which the assembler pads
   an alignment with nops of at most 10 bytes where the direct build's are of 15, link it as the build links
-  (`clang-23 -O2`, `-lgcc_s -lm`, the libraries `Clang.Arguments` in the same file adds on Linux), and check that
+  (`clang-23 -O2`, `-lgcc_s -lm`: `Clang.Arguments` in the same file passes each library the C functions of a
+  program come from (R16) as `-l`, `gcc_s` named by the runtime's `extern "C" in "gcc_s"` in
+  `runtime/linux/linux.kz`, and adds `-lm` on Linux), and check that
   the unmoved build made that way has the instructions of the direct build (an `objdump -d` with addresses, branch
   targets and nops taken out shows no difference) and, with that feature, the same bytes in `.text`.
 - Read where the loop's head stands, `objdump -d` of the function and its address mod 64, in both builds of every
