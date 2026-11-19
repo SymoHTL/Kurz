@@ -614,8 +614,10 @@ folder (§8, the owner, 2026-11-03), is a core word too *(assumed, §8: as C# re
 word right after a constructor's `:` (K14) and a name everywhere else (§4, the owner, 2026-11-03).
 `actor`, `spawn` and `send`, which chapter 19 uses as syntax, are core words too (U1). `test`, `check`,
 `mock` and `advance`, which chapter 20 uses as syntax, are words only where its forms stand, `check(x)`
-among them, and names everywhere else, a variable named so among them (Y1; §11, assumed there: D2 of issue
-586, comment 6992687784).
+among them, and names everywhere else, a variable named so among them, but for a call of a variable named
+`check` or `advance` at the start of a statement, which is the statement, as every other `const assert(`
+there is, so that a function value so named is not called there and `check x = 1` is a `check` with `= 1`
+after it, `syntax` (Y1; §11, assumed there: D2 of issue 586, comment 6992687784).
 
 Case: [source/core-word-as-name.kz](../corpus/source/core-word-as-name.kz)
 ```kurz

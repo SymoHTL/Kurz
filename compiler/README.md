@@ -2739,10 +2739,14 @@ that sit under a rule by its id. Every one is pinned by a test.
   6992687784). `test cluster` is the cluster test only where a token that can start an expression follows
   `cluster`, so that `test cluster = 1` declares a variable `cluster` of a type named `test`; `mock` is the
   statement only where a type, `with` and a type follow it, so that `mock x = 1` declares a variable `x` of
-  a type named `mock`; a `test` block in a class's body is the member parser's `syntax` at its line; and
-  the text of a `check` is its tokens as the source writes them, a `>` of a `>>` that type arguments took
-  apart among them, each run of spaces, line breaks and comments between two tokens one space. Pinned by
-  `ParserTests`.
+  a type named `mock`; `check` and `advance` are the statements before a token that can start an expression
+  and is no `[`, with no look at what the name is, and fall back to no declaration, so that a call of a
+  variable so named at the start of a statement is the statement, a function value named `check` is not
+  called there, and `check x = 1`, a declaration of a variable of a type named `check`, is a `check` of `x`
+  with `= 1` after it, `syntax` at its line; a `test` block in a class's body is the member parser's
+  `syntax` at its line; and the text of a `check` is its tokens as the source writes them, a `>` of a `>>`
+  that type arguments took apart among them, each run of spaces, line breaks and comments between two tokens
+  one space. Pinned by `ParserTests`.
 
 Six shapes still get two errors, or an uneven one, from the front end, each low: `if x print(1)
 else print(2)` is `braces-required` twice on one line, because the postfix `else` binds to the call

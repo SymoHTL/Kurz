@@ -24,9 +24,12 @@ of a statement before a string literal, or before `cluster` and a token that can
 `check` and `advance` at the start of a statement before a token that can start an expression and is no
 `[`, so that `check(x)` and `advance(d)` are those statements, as `const assert(` is the statement of T37;
 and `mock` at the start of a statement where a type, `with` and a type follow it. Before `=`, `.` and
-`[`, and everywhere else, each is a name, and a variable named so keeps its meaning *(assumed: D2 of
-comment 6992687784, said back there, and F9 of comment 6993110710, a reading of the build said back
-there)*.
+`[`, and everywhere else, each is a name, and a variable named so keeps its meaning there. A call of a
+variable named `check` or `advance` at the start of a statement is the statement, as every other
+`const assert(` at the start of a statement is (T37): a function value so named is not called there, and
+a declaration of a variable whose type is so named, `check x = 1`, is a `check` of `x` with `= 1` after
+it, `syntax` at its line (E4) *(assumed: D2 of comment 6992687784, said back there, and F9 of comment
+6993110710, a reading of the build said back there)*.
 
 Case: [tests/test-in-function.kz](../corpus/tests/test-in-function.kz)
 ```kurz
