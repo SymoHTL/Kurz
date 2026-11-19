@@ -31,9 +31,10 @@ public sealed partial class Emitter
     private List<List<(string Value, KurzType Type)>> regions = [];
     private List<List<(string Slot, KurzType Type)>> scopes = [];
 
-    // the names among a region's temporaries that stand for what the region's end, or a jump out of it, lets go of in their place: a
-    // value a slot of a call took before the call's last argument (Taken), and the slot of a copy a call of more than one copy made
-    // before its last, loaded there (CopiedLate); a name of their own, which no IR value has, by the function they stand in
+    // the names among a region's temporaries that stand for what the region's end, or a jump out of it, lets go of in their place, by
+    // the function they stand in, of two kinds: a made-up name, which no IR value has, for a value a slot of a call took before the
+    // call's last argument (Taken), and the copy's own slot, an IR name, for a copy a call of more than one copy made before its
+    // last, loaded when it is let go of (CopiedLate)
     private readonly Dictionary<(IrFunction Function, string Name), Func<string>> standIns = new();
     private int takenNames;
 
@@ -108,7 +109,7 @@ public sealed partial class Emitter
     /// The value a slot of a call takes, a field of a construction or a parameter written <c>move</c>, listed among the temporaries of
     /// the region under a name of its own (<see cref="standIns"/>) until the call has its last argument, when <paramref name="taken"/>
     /// is taken off again (<see cref="Arguments"/>): a jump out of the call that a later argument takes, a case it propagates among
-    /// them, lets go of it there with the region's other temporaries, the last made first, as Rust drops the operands of an expression
+    /// them, lets go of it there with the region's other temporaries, the last made first (R1), as Rust drops the operands of an expression
     /// that one of its operands leaves (the Rust Reference, "Destructors", the drop scopes of operands; issue 569). The name is its own,
     /// since the value may be a literal or a constant, which another read gives by the same name and which <see cref="Take"/> would
     /// then take for that read. A value of no counted type holds nothing to let go of, nor does null, a list's or a map's without items,

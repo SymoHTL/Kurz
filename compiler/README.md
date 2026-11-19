@@ -1037,7 +1037,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   lock; the lock of the table of slots and its lookup with none (`SlotTake`, `SlotFree`, `SlotsUsed`, `Lookup`),
   whose model takes every interleaving of a lookup of each of two actors while a third thread frees the first's
   slot and takes it for the second, but for the life of the table's directory and pages; and the futex's wait and wake
-  (`sys.LockWait`, `sys.LockWake`), of Rust's futex shape (not checked at source). The models' moves are
+  (`sys.LockWait`, `sys.LockWake`), the wake as Rust's `futex_wake` and the wait by `FUTEX_WAIT_PRIVATE`, where
+  Rust's waits by `FUTEX_WAIT_BITSET` (not checked at source). The models' moves are
   sequentially consistent, so that no model checks the orders of the atomic operations: they are the ones the
   runtime's source writes, each of which `EmitterTests` holds to one instruction of the IR of that order
   (`An_atomic_member_with_its_order_written_is_one_llvm_instruction_of_that_order_aligned_to_its_word`). These hold only while one thread runs every program (U35), each a reading of the code that no run on
@@ -1112,9 +1113,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `corpus/actors/copy-two-arguments.kz`, `copy-two-at-call.kz`, `copy-weak-across-arguments.kz`,
   `copy-weak-argument.kz` and `copy-weak-at-call.kz` the memo of a call, `copy-left-to-right.kz` the order, `copy-memo-keeps-block.kz` a block the memo
   holds living to the call's last copy and `copy-left-early.kz` a call left before it, whose copies
-  the call had not read yet are let go of (`ActorTests`, by the count of blocks, and for a construction
-  and a parameter written `move`, whose slots take their copies, by the count and by the order of the
-  frees, issue 569); and
+  the call had not read yet are let go of (`ActorTests`, by the count of blocks, and, issue 569, by the
+  count and by the order of the frees for a construction, a plain call and a function value's call,
+  and by the count alone for a parameter written `move`, whose slot takes its copy); and
   `corpus/actors/copy-derived.kz` an instance of a derived class held as its base. The copy of a map whose
   keys reach a class instance is the copy of its block's bytes, with its source's hash and keys, each key
   and each value copied in its slot, and then each entry placed again under its copied key's hash, by
@@ -1818,7 +1819,7 @@ it, a field of the construction or a parameter written `move`, and each copy a c
 copy made before it, the last made first, as Rust drops the operands of an expression that one of its
 operands leaves (the Rust Reference, "Destructors", read on 2026-11-18; issue 569); and where a value
 that holds the list ends. At zero the lists the items hold are let
-go of in turn, and the block goes back to `Free`. A parameter borrows its argument and changes no
+go of in turn, and the block goes back to `Free`. A parameter not written `move` borrows its argument and changes no
 count: nothing changes the value it borrows while the call runs, since the checker refuses a read of
 what a call takes as `mut` that the expression still holds when the call runs, or when an assignment
 or a `mut` method in an arm's statement inside the expression changes it (M7), and such a read of a

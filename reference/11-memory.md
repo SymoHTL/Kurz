@@ -28,6 +28,14 @@ base's fields out first)* No case shows the
 order: a release runs no code of the program between two fields, and a handle that closes at its
 last count (S5) shows it only outside the program.
 
+A jump out of a construction or of a call that is no message before its last argument, a case one of
+its arguments propagates among them, lets go of what it holds of the arguments before that one, the
+values they made and what the slots took, the last made first, as Rust drops the operands of an
+expression that one of its operands leaves (the Rust Reference, "Destructors",
+`destructors.scope.operands`, read on 2026-11-19: "Tuple expression doesn't finish evaluating so
+operands drop in reverse order") *(assumed: a reading of the build, proposed with this record and
+not put to the owner)*. No case shows that order either: nothing of the program runs at a release.
+
 Case: [memory/long-chain-freed.kz](../corpus/memory/long-chain-freed.kz)
 ```kurz
 class Link(int Value, Link? Next)
