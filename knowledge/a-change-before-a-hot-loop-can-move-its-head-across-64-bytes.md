@@ -33,16 +33,27 @@ three bytes) inlined into `std.UnicodeCase`, where a byte loop stood, and the he
   In a second run, 16 bytes on gave -15.0% and -15.8%, and `-falign-loops=64`, which puts every loop's head at 64
   bytes, -16.1% and -16.4%. So the gap goes with where the function stands, not with `Copy`'s branches, which the moved builds
   all hold. That the cause is the head of the walk against 64 bytes is a reading (inferred): a move of the function
-  moves the walk's inner blocks as well, and no hardware counter was read (none in the container).
+  moves the walk's inner blocks as well, and no hardware counter was read (none in the container). The table's builds
+  put the nops after the function's `.cfi_startproc`, where they run on every call; with the nops before its label
+  instead, where they never run, 16 bytes on gave `cyrillic` -15.5% and -15.6% and `upper-cyrillic` -15.5% in each of
+  two more runs (checked, issue 157, comment 7004204396).
 - Forms of the standard library measured against it in one run (checked): the copy as the byte loop it had before
   pull request 197, +3.7% and +0.9%, the head at 32 mod 64 with it; the copy as a call of a function
   that is not inlined, -4.0% and -4.6%, with the walk's head at 0 mod 64 but the function shorter and the walk's
   inner blocks moved as well, where the shift of 16 bytes that put the head at 0 mod 64 took 16%, so the head
   alone does not set the time; `Copy`'s path for more than 16 bytes made such a call, +0.9% and -0.1%. Each
   moves the head by its own size (inferred): none of them is a mechanism, and any change of the function moves it again.
-  `-falign-loops=64`, in one sweep of every row of issue 157 on 2026-11-19 (checked, one run, best of 11), took the
-  two rows back by 16.1% and made 42 of 102 rows slower beyond the band of two copies of `main`, by up to 12.2%: no free fix
+  `-falign-loops=64`, in a sweep of every row of issue 157 on 2026-11-19 (checked, a run of its own, neither of the
+  two runs of the shifts, best of 11), took `cyrillic` from 84.69 to 71.08 ms and `upper-cyrillic` from 83.83 to
+  70.35 ms, -16.1% each, and made 42 of 102 rows slower beyond the band of two copies of `main`, by up to 12.2%: no free fix
   either, and a choice of the build's layout, as the alignment of functions of pull request 240 was the owner's.
+- Every row of issue 157 moved the same way (checked, 2026-11-19, issue 157, comment 7004204396): `main` ad2239c9
+  and six layouts of its instructions, every function moved by 64, 256 or 4096 bytes or by 16, 32 or 48 bytes within
+  its 64, in two runs of 102 and 101 rows, best of 11. Two copies of `main` differed by 0.7% and 0.5% at the median
+  row; the largest change one layout made in both runs the same way was 1.8% at the median, over 2% on 49 of 102 rows
+  and up to 33.5% (`parse-ulong`). The moves within 64 bytes made most of it: over 5% on 48 of 303 pairs of a row and
+  a layout, against 6 of 303 for whole functions moved by 64 to 4096 bytes. Which spread is the noise of "no row
+  slower beyond noise" is the owner's choice (question S3 of that comment).
 
 ## What to do
 
@@ -51,11 +62,17 @@ three bytes) inlined into `std.UnicodeCase`, where a byte loop stood, and the he
   place, and a change of its code that only moves it is no cure.
 - The recipe: keep the IR a release build hands clang (a script named `clang-23` first on `PATH` that copies the
   `.ll` it is given, as knowledge/kurz-ir-marks-no-parameter-noundef.md describes), compile it to assembly with the
-  release build's options (`-O2 -mllvm -align-all-functions=6 -S`), put `.nops N` after the `.cfi_startproc` of the
-  function's label, assemble and link it as the build links (`-O2`, `-lgcc_s -lm`), and check that the unmoved build
-  made that way has the instructions of the direct build (an `objdump -d` with addresses, branch targets and nops
-  taken out shows no difference).
+  release build's options (`-O2 -mllvm -align-all-functions=6 -S`, `Clang.Release` in
+  `compiler/Kurz.Compiler/Build/Clang.cs`, read at ad2239c9 on 2026-11-19), put `.nops N` just before the function's
+  label, after its `.p2align 6`, where they never run (after `.cfi_startproc` they run on every call), assemble it
+  with clang's assembler and the feature `+fast-15bytenop` (`clang-23 -cc1as -triple x86_64-pc-linux-gnu -filetype
+  obj -target-cpu x86-64 -target-feature +fast-15bytenop -mrelocation-model pic`), without which the assembler pads
+  an alignment with nops of at most 10 bytes where the direct build's are of 15, link it as the build links
+  (`clang-23 -O2`, `-lgcc_s -lm`, the libraries `Clang.Arguments` in the same file adds on Linux), and check that
+  the unmoved build made that way has the instructions of the direct build (an `objdump -d` with addresses, branch
+  targets and nops taken out shows no difference) and, with that feature, the same bytes in `.text`.
 - Read where the loop's head stands, `objdump -d` of the function and its address mod 64, in both builds of every
   speed change of a function with a hot loop, and name it beside the times.
 
-No CI job runs a benchmark, so nothing goes red when a change skips this: `judgment step`.
+On 2026-11-19, at ad2239c9, no workflow of `.github/workflows/` runs a benchmark, so nothing goes red when a change
+skips this: `judgment step`.
