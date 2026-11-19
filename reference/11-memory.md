@@ -46,9 +46,9 @@ references of the call's copies (U12) *(assumed: a reading of the build, propose
 section 3, the bullet "Lifetimes", and not put to the owner)*. What becomes of the copies a message's
 arguments made, and where the memo of those copies ends, at a jump out of a message before its last
 argument, is T24 of issue 519 (comment 6981296432), a question put to the owner, of which this rule states
-nothing; its options there are the copies freed where the raise leaves, the message built in a heap of its
-own; freed by the crash path; every argument evaluated before any is copied, so that a raise leaves no copy;
-or the copies kept in the callee's heap to its restart or its end, as the record reads it. No case shows
+nothing; its options there are four: the copies freed where the raise leaves, by building the message in a
+heap of its own; freed by the crash path; every argument evaluated before any is copied, so that a raise
+leaves no copy; or kept in the callee's heap to its restart or its end, as the record reads it. No case shows
 that order either: nothing of the program runs at a release, nor between the end of a memo and the release
 of the copies.
 
