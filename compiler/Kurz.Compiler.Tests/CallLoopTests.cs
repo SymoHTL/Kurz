@@ -479,6 +479,89 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     }
 
     [Fact]
+    public void A_cycle_of_parameters_that_a_this_enters_is_no_callback()
+    {
+        // U57, T62: `Store.Save` hands `this` to `Checker.Valid`, which hands it to `Verifier.Verify`, and that back to `Valid`, a
+        // recursion that layer 1 runs as nested calls: the least fixed point reads the cycle of the two parameters as none, though a
+        // `this` enters it, so that `Valid`'s call of `Load` is an edge, and the loop with `Store`'s call of `Valid` is one error, at
+        // line 2; with `vouch` on that call of `Load` the program has no error
+        const string program = """
+            actor Store(Checker Check) {
+                pub int Save() => Check.Valid(this, 2) + 1
+
+                pub int Load() => 7
+            }
+
+            actor Checker(Verifier V) {
+                pub int Valid(Store store, int n) {
+                    if n == 0 {
+                        return store.Load()
+                    }
+                    return V.Verify(this, store, n - 1)
+                }
+            }
+
+            actor Verifier {
+                pub int Verify(Checker c, Store store, int n) => c.Valid(store, n)
+            }
+
+            ver = spawn Verifier()
+            chk = spawn Checker(ver)
+            sto = spawn Store(chk)
+            print(sto.Save())
+
+            """;
+        Assert.Equal([(ErrorIds.CallLoop, 2)], Diagnostics(program));
+        Assert.Empty(Diagnostics(program.Replace("return store.Load()", "return vouch store.Load()", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void The_text_names_a_send_before_vouch_for_a_loop_of_two_types_and_of_one()
+    {
+        // T56: the text of `call-loop` names a `send` where no result is needed, or a change of the code, before `vouch`, for a loop
+        // through two types and for one through one type, each text read by where the two words stand in it and not by its wording
+        const string two = """
+            actor Left {
+                pub int Ask(Right other) => other.Value() + 1
+
+                pub int Value() => 1
+            }
+
+            actor Right {
+                pub int Ask(Left other) => other.Value() + 2
+
+                pub int Value() => 2
+            }
+
+            l = spawn Left()
+            r = spawn Right()
+            print(l.Ask(r))
+            print(r.Ask(l))
+
+            """;
+        const string one = """
+            actor Node {
+                pub int Size(Node other) => other.Count() + 1
+
+                pub int Count() => 1
+            }
+
+            n = spawn Node()
+            print(n.Size(spawn Node()))
+
+            """;
+        foreach (var (program, hops) in new[] { (two, 2), (one, 1) })
+        {
+            var error = Assert.Single(Check(program).Diagnostics.Sorted);
+            Assert.Equal((ErrorIds.CallLoop, 2), (error.Id, error.Line));
+            Assert.Equal(hops, Named(error).Count);
+            var send = error.Message.IndexOf("`send`", StringComparison.Ordinal);
+            var vouch = error.Message.IndexOf("`vouch`", StringComparison.Ordinal);
+            Assert.True(send >= 0 && vouch > send, error.Message);
+        }
+    }
+
+    [Fact]
     public void The_text_of_a_loop_through_a_spawn_names_the_construction_of_the_spawned_type()
     {
         // U56: the construction of `Child` runs in `Child` (U3), so that its call at line 8 is `Child`'s hop and the `spawn` at line 4
@@ -517,10 +600,14 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     [InlineData("x = vouch(3)", "(assign-or-declare x (call vouch (int 3)))")]
     [InlineData("x = vouch + 1", "(assign-or-declare x (+ vouch (int 1)))")]
     [InlineData("x = vouch\nc.Size()", "(assign-or-declare x vouch) (call (. c Size))")]
+    [InlineData("vouch c.Size()", "(vouch 1 (call (. c Size)))")]
+    [InlineData("vouch c = 2", "(declare vouch c (int 2))")]
     public void A_vouch_is_a_word_before_a_name_or_this_on_its_line_and_binds_to_the_call_after_it(string program, string tree)
     {
-        // U58: the word before a name, `this` or `spawn` on its line, the call after it its node, with the call's clause and its `else`;
-        // anywhere else `vouch` is a name, a variable, a call or an operand (section 6, comment 6847932993, Q10)
+        // U58: the word before a name, `this` or `spawn` on its line, the call after it its node, with the call's clause and its `else`,
+        // and as a statement, the record's own `vouch c.Size()`, which the statement parser reads as the call, where `vouch c = 2`, a
+        // name after a name and then `=`, declares `c` of a type `vouch`; anywhere else `vouch` is a name, a variable, a call or an
+        // operand (section 6, comment 6847932993, Q10)
         var diagnostics = new DiagnosticBag();
         var parsed = Parser.Parse(SourceText.FromString("test.kz", program), diagnostics);
         Assert.Empty(diagnostics.Items);

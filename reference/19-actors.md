@@ -2220,7 +2220,7 @@ starts, and the parked message resumes once the calls above it end (§6, the own
 it is queued, the newest message its target has started and not ended, running or parked in a wait,
 carries its chain, so that a call that a message makes through a reference to its own actor gets in
 too *(assumed in §6)*. A loop of calls that wait between actor types, which two chains can enter at once, is U56's compile
-error, and a call back to the caller that waits makes no edge of it (U57). An actor under construction takes no
+error, and a call back to the caller that waits makes no edge of it (U57) *(assumed in §6)*. An actor under construction takes no
 message until its `spawn` returns, one of its chain neither *(assumed in §6)*. The chain ID is 16 bytes,
 drawn at random from a generator of its thread that the system's randomness seeds once, and a system
 that gives no randomness when a thread starts its first chain ends the program with `random-failed`,
@@ -3996,18 +3996,24 @@ called directly (U10), constructor and lambda that code runs, as §5's throw set
 every lambda of the program whose type fits, wherever it was written, and a call through an interface every method that
 implements it; and an edge from `A` to `B` for each `spawn` of `B` that code reaches, whose construction's calls are `B`'s.
 A `send` makes no edge (U6), a bound takes none out (U36, U39), and the top-level code, which nothing waits on, is no point
-of the graph. A group of types that reach one another (a strongly connected component of the graph) that holds the edge of
-a call, one type with an edge to itself among them, is the compile error `call-loop`, one for each such group, at the call
-of the group that stands first in source order, naming the shortest loop through that call with each hop's method, its
-line and the function or lambda it stands in, so that two chains that cross in it, each actor of the loop busy in one and
-waiting on the other, are refused before they can hang (§6, "Deadlocks", layer 2); a group of `spawn`s alone reaches new
-actors only and is none. The text names a `send` where no result is needed, or a change of the code so that its calls do
-not come back, before `vouch` (U58). A call back to the caller is no edge (U57), and neither is a call after `vouch` (U58).
-The graph is read on every program that declares an actor, after every body and beside the other errors, a call that
-reported its own error making no edge, the walk reading each unit of code once, and a loop with a call in the program's own
-files is refused whether any code calls into it or not, as `reference-cycle` is (R2) *(assumed: T40 to T45, T48, T52 to T56
-and T59 of issue 519, comment 7007991607, built at the lean while it waits for the owner)*. An actor with a part the build does not read, an interface after its name, a type parameter or `per`, is
-`not supported` (U1), and its calls make no edge *(assumed: T46 and T47 of issue 519, comment 7007991607, built at the lean while it waits for the owner)*.
+of the graph. A group of types that reach one another (a strongly connected component of the graph) that holds the edge of a
+call, one type with an edge to itself among them, is the compile error `call-loop`, one for each such group, at the call of
+the group that stands first in source order, naming the shortest loop through that call with each hop's method, its line and
+the function or lambda it stands in, so that two chains that cross in it, each actor of the loop busy in one and waiting on
+the other, are refused before they can hang (§6, "Deadlocks", layer 2); a group of `spawn`s alone reaches new actors only
+and is none. The text names a `send` where no result is needed, or a change of the code so that its calls do not come back,
+before `vouch` (U58). A call back to the caller is no edge (U57), and neither is a call after `vouch` (U58). The graph is
+read on every program that declares an actor, after every body and beside the other errors, a call that reported its own
+error making no edge, the walk reading each unit of code once, and a loop with a call in the program's own files is refused
+whether any code calls into it or not, as `reference-cycle` is (R2) *(assumed: T40 to T45, T48, T52 to T56 and T59 of issue
+519, comment 7007991607, built at the lean while it waits for the owner)*. An actor with a part the build does not read, an
+interface after its name, a type parameter or `per`, is `not supported` (U1), and its calls make no edge *(assumed: a
+reading of the build, proposed with this record and not put to the owner)*: the lean of T46 of issue 519, comment
+7007991607, an edge to every implementer, and the lean of T47, an edge and `syntax` at a `vouch` before a `per` actor's
+call, are not built, since each of those constructs is `not supported` on `main`. No parallel form (§6, "Parallel work") is
+built, so that the graph reads none, and the body of one, where one exists, is code of its caller's method, as Q9 of issue
+525, comment 6850177383, reads it for layer 2 *(assumed: a reading of the build, proposed with this record and not put to
+the owner)*.
 
 Case: [actors/call-loop.kz](../corpus/actors/call-loop.kz)
 ```kurz
@@ -4301,21 +4307,23 @@ without `mut` that holds it, is no edge of U56's graph, and neither is a call th
 calls through a reference reach, each of them a call that waits and passes there `this`, as the call writes it, or a
 parameter of the method whose message makes the call that is such a callback itself, read to the least fixed point, so that
 a reference handed on through a chain of calls that wait is one and a cycle of parameters that no `this` fills is none
-*(assumed: T60 of issue 519, comment 7009683539, built at the lean while it waits for the owner)*, or that no call through a
-reference reaches and the actor's own code calls directly (U10), whose callers read its calls with what they pass; the
-parameter is followed through locals without `mut` and through the arguments of the functions and methods the message calls.
-Such a call reaches the caller that waits, which takes it as a call of its chain (U17), as layer 1 runs `A.Load` inside
-`A.Save` (§6, "Deadlocks", layer 2, "Exempt without override: a callback through a reference the caller passed in that same
-call"). A reference that a `send` passes, that another caller passes as anything but `this` or such a parameter, one that
-the top-level code or a `pub` function that is no actor's method passes among them, since code outside the actors' messages
-runs them, that a field holds, a parameter of an actor's primary constructor among them, or an item of a collection, or that
-a lambda captures, `this` among them, gives no such callback, since a field outlives the message, so that another message's
-call through it can reach any instance, and a lambda can cross into another actor's message (U12), one that runs in place, a
-key of `SortBy`, among them *(assumed: T61 of issue 519, comment 7009683539, built at the lean while it waits for the
-owner)*; the walk keeps no context per call, so that one caller that passes another reference makes the parameter's calls
-edges for every caller *(assumed: T49 of issue 519, comment 7007991607, built at the lean while it waits for the owner)*. A
-method that nothing calls has no caller to call back, so that a loop through its parameters is refused, as U56 refuses a
-loop no code calls into *(assumed: a reading of the build, proposed with this record and not put to the owner)*.
+*(assumed: T60 of issue 519, comment 7009683539, built at the lean while it waits for the owner)*, a cycle that a `this`
+enters, a recursion through two actor types that hands the reference back and forth, among them *(assumed: T62 of issue 519,
+comment 7010568524, built at the lean while it waits for the owner)*, or that no call through a reference reaches and the
+actor's own code calls directly (U10), whose callers read its calls with what they pass; the parameter is followed through
+locals without `mut` and through the arguments of the functions and methods the message calls. Such a call reaches the
+caller that waits, which takes it as a call of its chain (U17), as layer 1 runs `A.Load` inside `A.Save` (§6, "Deadlocks",
+layer 2, "Exempt without override: a callback through a reference the caller passed in that same call"). A reference that a
+`send` passes, that another caller passes as anything but `this` or such a parameter, one that the top-level code or a `pub`
+function that is no actor's method passes among them, since code outside the actors' messages runs them, that a field holds,
+a parameter of an actor's primary constructor among them, or an item of a collection, or that a lambda captures, `this`
+among them, gives no such callback, since a field outlives the message, so that another message's call through it can reach
+any instance, and a lambda can cross into another actor's message (U12), one that runs in place, a key of `SortBy`, among
+them *(assumed: T61 of issue 519, comment 7009683539, built at the lean while it waits for the owner)*; the walk keeps no
+context per call, so that one caller that passes another reference makes the parameter's calls edges for every caller
+*(assumed: T49 of issue 519, comment 7007991607, built at the lean while it waits for the owner)*. A method that nothing
+calls has no caller to call back, so that a loop through its parameters is refused, as U56 refuses a loop no code calls into
+*(assumed: a reading of the build, proposed with this record and not put to the owner)*.
 
 Case: [actors/callback.kz](../corpus/actors/callback.kz)
 

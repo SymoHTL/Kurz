@@ -103,14 +103,15 @@ public sealed class CallLoops
     /// <summary>
     /// U57: which parameters of the methods of the actors are callbacks: calls through a reference reach the method, every one of them
     /// waits, stands in the code of the actors' entries alone, which no top-level code or <c>pub</c> function reaches, and fills the
-    /// parameter, in the terms of each entry that reaches it, with the entry's own reference, as the call writes it, or with a parameter
-    /// of the entry that is a callback, so that a reference handed on through a chain of calls that wait reaches the caller that waits at
-    /// its start (assumed: T60 of #519, comment 7009683539, built at the lean while it waits for the owner); or none does and the actor's
-    /// own code calls the method directly (U10), whose entries read its calls with the arguments they pass. It is the least fixed point:
-    /// every parameter starts as no callback, and the rounds read each again as long as one changes, so that a cycle of parameters that
-    /// no <c>this</c> fills stays none. The walk keeps no context per call, so one caller that passes another reference makes the
-    /// parameter's calls edges for every caller, and a method that nothing calls has no caller to call back, so that its loop is refused
-    /// as a loop no code reaches is (T53).
+    /// parameter, in the terms of each entry that reaches it, with the entry's own reference, as the call writes it, or with a
+    /// parameter of the entry that is a callback, so that a reference handed on through a chain of calls that wait reaches the caller
+    /// that waits at its start (assumed: T60 of #519, comment 7009683539, built at the lean while it waits for the owner); or none does
+    /// and the actor's own code calls the method directly (U10), whose entries read its calls with the arguments they pass. It is the
+    /// least fixed point: every parameter starts as no callback, and the rounds read each again as long as one changes, so that a cycle
+    /// of parameters that no <c>this</c> fills stays none, and so does one that a <c>this</c> enters (assumed: T62 of #519, comment
+    /// 7010568524, built at the lean while it waits for the owner). The walk keeps no context per call, so one caller that passes
+    /// another reference makes the parameter's calls edges for every caller, and a method that nothing calls has no caller to call
+    /// back, so that its loop is refused as a loop no code reaches is (T53).
     /// </summary>
     private void Callbacks(IReadOnlyList<ActorCode> code, IReadOnlySet<ActorSite> outside)
     {
