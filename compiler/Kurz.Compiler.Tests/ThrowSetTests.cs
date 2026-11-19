@@ -1055,6 +1055,59 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void An_instantiation_built_only_in_a_test_is_built()
+    {
+        // Y5, Y7, section 5: each test is a root of what the program builds, in every reading, since every command checks every test,
+        // so the text of `Sub<Shouty>`, built in a test alone, is in the actor's `Reason`; `Sub<Hushed>`, built in a function nothing
+        // calls, is built nowhere
+        const string text = """
+            data EShouty
+            data EHushed
+
+            data Plain(int N)
+
+            data Sub<U>(U X) : Plain
+
+            class Shouty(int N) {
+                pub string Text() {
+                    throw EShouty
+                }
+            }
+
+            class Hushed(int N) {
+                pub string Text() {
+                    throw EHushed
+                }
+            }
+
+            void Show(Plain p) {
+                print(p)
+            }
+
+            void Muted() {
+                Show(Sub<Hushed>(1, Hushed(1)))
+            }
+
+            actor Printer {
+                pub void Go() {
+                    Show(Plain(1))
+                }
+            }
+
+            test "shows" {
+                Show(Sub<Shouty>(1, Shouty(1)))
+            }
+
+            printer = spawn Printer()
+            send printer.Go()
+
+            """;
+        var own = Own(text);
+        var printer = own.Checker.Model.ClassOf(own.Tree.Statements.OfType<TypeDeclaration>().Single(t => t.Name == "Printer"));
+        Assert.Equal(["EShouty", "RuntimeError"], Names(own.Sets.ReasonOf(printer)));
+    }
+
+    [Fact]
     public void A_call_of_a_C_function_value_reaches_the_functions_named_as_values_of_its_type()
     {
         // R17: a function of the C calling convention named as a value is a value of a C function type, and a call through it runs such

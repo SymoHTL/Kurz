@@ -4785,6 +4785,43 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(sortByChange, fenced, "sortby-change-fenced"), 0, ["1", "0", "6", "3", "20", "0", "z", "2", "0", "[1, 2, 3]", "[0]", "2", "[9, 3, 1, 1]", "0"], "");
+
+        // Y6: the failure of a `check` shows each side after its text, and the `Text()` of the left side replaces the field the right
+        // side was read through, a `mut` parameter, the place of its caller's, whose read takes no count of its own where nothing after it
+        // in the statement calls (a field read holds its block to the statement's end); the path of the failure counts each side before it
+        // makes a text, so that the right side's text reads the instance the field held, and lets go of both after
+        const string checkOperands = """
+            class Box(mut Probe Right) {
+                pub void Run(Probe left) {
+                    Check(left, mut Right)
+                }
+
+                void Check(Probe left, mut Probe right) {
+                    check left == right
+                }
+
+                pub void Swap() {
+                    Right = Probe(null, 9)
+                }
+            }
+
+            class Probe(mut weak Box? Home, int N) {
+                pub string Text() {
+                    if Home != null {
+                        Home.Swap()
+                    }
+
+                    return "probe {N}"
+                }
+            }
+
+            first = Probe(null, 1)
+            box = Box(Probe(null, 2))
+            first.Home = box
+            box.Run(first)
+
+            """;
+        Ran(BuildAndRun(checkOperands, fenced, "check-operands-fenced"), 1, [], "error: check-failed at program.kz:7:\nleft == right (probe 1 == probe 2)\n");
         // U17, M7: a call that waits parks its message, and a call of its chain runs the actor's own methods while it waits (section 6,
         // "Deadlocks", layer 1), so that one assigns a field the parked message read: a field passed to a `mut` parameter and read before
         // the wait, or before a direct call of the method that assigns it, which the count of such a read holds to its statement's end; a

@@ -15,8 +15,8 @@ namespace Kurz.Compiler.Semantics;
 /// <c>string.Join</c> call on the types they make text of, and for a generic <c>data</c> type derived from such a type the text of each
 /// instantiation of it that the program builds (section 5, the owner, 2026-11-16); the construction of an actor it spawns, whose throw is
 /// its crash (U3); and the code of an actor it spawns under <c>escalate</c>, whose crash passes up whole (U25). The instantiations a
-/// program builds are found as Rust's monomorphization finds its instances: from the roots, the top-level code and every <c>pub</c>
-/// function, a generic one and each actor's <c>pub</c> methods among them, through the type arguments each call gives, with the fixed
+/// program builds are found as Rust's monomorphization finds its instances: from the roots, the top-level code, every <c>pub</c>
+/// function, a generic one and each actor's <c>pub</c> methods among them, and every test (Y5), through the type arguments each call gives, with the fixed
 /// point's edges, a lambda's in the unit that makes it, and each with no type parameter left, read again with the text of each
 /// instantiation found until they grow no more. A call through an actor's
 /// reference reaches none of the callee's code, whose crash its caller gets as <c>callee-crashed</c> (U20). The text of a thrown value
@@ -404,8 +404,11 @@ public sealed class ThrowSets
     // list holds, a generic one among them, whose instantiations with every type argument named are built whatever type argument a
     // call gives it (section 5, the owner, 2026-11-17, #560, comment 6952257456, "(b) As built (Recommended)"); the list holds each
     // actor's `pub` methods, which alone take messages (U9), so that what an actor builds is built: its other methods run from its own
-    // code alone, and its construction from a `spawn` that a root reaches
-    private IEnumerable<object> Roots() => Pub().Prepend<object>(new TopLevel(program.Model));
+    // code alone, and its construction from a `spawn` that a root reaches; and each test of the file, which the build of `kurz test`
+    // runs as a function of its own (Y5), as Rust's `cargo test` builds each `#[test]` function as a root of its harness, in every
+    // reading, since the checker reads every test whatever command the build is for (Y7), so that a `Reason` is one set under every
+    // command
+    private IEnumerable<object> Roots() => Pub().Concat(program.Model.Tests.Select(program.Model.TestOf)).Prepend<object>(new TopLevel(program.Model));
 
     // a type once, at the earliest place that throws it
     private static bool Add(List<Thrown> set, Thrown thrown)
