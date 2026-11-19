@@ -184,8 +184,9 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     [Fact]
     public void A_loop_is_reported_beside_the_other_errors_and_a_call_with_its_own_error_makes_no_edge()
     {
-        // T54: the loop of `Left` and `Right` and a variable read before it is declared, each at its line; a call that reported its own
-        // error, a method that is no `pub` one (U9), makes no edge, and the same call of a `pub` method closes the loop (the control)
+        // T54: the loop of `Left` and `Right` and a name nothing declares, each at its line; a call that reported its own error, of a
+        // method that is no `pub` one (U9), makes no edge and runs none of that method's code as the caller's, which would make the wait
+        // of `Hidden` at line 8 one of `Left` on itself, and the same call of a `pub` method closes the loop (the control)
         const string beside = """
             actor Left {
                 pub int Ask(Right other) => other.Value() + 1
@@ -210,20 +211,16 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
                 pub int Value() => 1
             }
 
-            actor Right {
-                pub int Ask(Left other) => other.Value() + 2
-
-                int Hidden() => 2
+            actor Right(Left Back) {
+                int Hidden() => Back.Value()
             }
 
             l = spawn Left()
-            r = spawn Right()
+            r = spawn Right(l)
             print(l.Ask(r))
-            print(r.Ask(l))
 
             """;
-        Assert.DoesNotContain(Diagnostics(own), d => d.Id == ErrorIds.CallLoop);
-        Assert.Contains(Diagnostics(own), d => d.Line == 2);
+        Assert.Equal([(ErrorIds.NotVisible, 2)], Diagnostics(own));
         Assert.Equal([(ErrorIds.CallLoop, 2)], Diagnostics(own.Replace("    int Hidden()", "    pub int Hidden()", StringComparison.Ordinal)));
     }
 
@@ -285,32 +282,30 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     [Fact]
     public void The_text_of_a_loop_through_a_spawn_names_the_construction_of_the_spawned_type()
     {
-        // U56: the construction of `Child` runs in `Child` (U3), so that its call at line 2 is `Child`'s hop and the `spawn` at line 11
-        // `Parent`'s: two hops, where a construction read as the spawner's code would make one hop of `Parent` to itself at line 2
+        // U56: the construction of `Child` runs in `Child` (U3), so that its call at line 8 is `Child`'s hop and the `spawn` at line 4
+        // `Parent`'s: two hops, where a construction read as the spawner's code would make the call at line 8 a hop of `Parent` to
+        // itself too, which stands first, since `Parent` is declared first, and a loop of one hop
         const string program = """
+            actor Parent {
+                pub int Count() => 3
+
+                pub Child Make(Parent other) => spawn Child(other)
+            }
+
             actor Child(Parent Up) {
                 int seen = Up.Count()
 
                 pub int Seen() => seen
             }
 
-            actor Parent {
-                pub int Count() => 3
-
-                pub int Make(Parent other) {
-                    c = spawn Child(other)
-                    return c.Seen()
-                }
-            }
-
             p = spawn Parent()
             q = spawn Parent()
-            print(p.Make(q))
+            print(p.Make(q).Seen())
 
             """;
         var errors = Check(program).Diagnostics.Sorted;
-        Assert.Equal([(ErrorIds.CallLoop, 2)], errors.Select(d => (d.Id, d.Line)));
-        Assert.Equal([2, 11], Named(errors[0]));
+        Assert.Equal([(ErrorIds.CallLoop, 8)], errors.Select(d => (d.Id, d.Line)));
+        Assert.Equal([8, 4], Named(errors[0]));
     }
 
     [Theory]
@@ -318,14 +313,15 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     [InlineData("x = n + vouch c.Size()", "(assign-or-declare x (+ n (vouch 1 (call (. c Size)))))")]
     [InlineData("x = vouch c.Size() within 1s", "(assign-or-declare x (vouch 1 (call (. c Size) (within (unit 1s)))))")]
     [InlineData("x = vouch this.Size()", "(assign-or-declare x (vouch 1 (call (. this Size))))")]
+    [InlineData("x = vouch s.Find(1) else {\n    Gone => 0\n}", "(assign-or-declare x (else (vouch 1 (call (. s Find) (int 1))) [((type Gone) => (int 0))]))")]
     [InlineData("vouch = 2", "(assign-or-declare vouch (int 2))")]
     [InlineData("x = vouch(3)", "(assign-or-declare x (call vouch (int 3)))")]
     [InlineData("x = vouch + 1", "(assign-or-declare x (+ vouch (int 1)))")]
     [InlineData("x = vouch\nc.Size()", "(assign-or-declare x vouch) (call (. c Size))")]
     public void A_vouch_is_a_word_before_a_name_or_this_on_its_line_and_binds_to_the_call_after_it(string program, string tree)
     {
-        // U58: the word before a name, `this` or `spawn` on its line, the call after it its node, with the call's clause; anywhere else
-        // `vouch` is a name, a variable, a call or an operand (section 6, comment 6847932993, Q10)
+        // U58: the word before a name, `this` or `spawn` on its line, the call after it its node, with the call's clause and its `else`;
+        // anywhere else `vouch` is a name, a variable, a call or an operand (section 6, comment 6847932993, Q10)
         var diagnostics = new DiagnosticBag();
         var parsed = Parser.Parse(SourceText.FromString("test.kz", program), diagnostics);
         Assert.Empty(diagnostics.Items);
