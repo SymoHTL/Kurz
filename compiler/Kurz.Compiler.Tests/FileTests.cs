@@ -2087,12 +2087,19 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void The_case_an_arm_of_the_else_after_a_loop_over_the_lines_takes_is_let_go_of_once_at_the_arm_s_end()
     {
+        // the rounds on this machine's allocator and on the fenced one, where no read of the case follows its release; on Windows, the
+        // refusal of a call on a file
+        Ran(FailedPulls + "print(Run())\nprint(Run())\n", "lines-failed", ["3", "3"]);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            // the count reads `HttpServer.Live`, which the standard library has under the counting allocator alone, while the refusal
+            // of `Ran` compiles the program with this machine's
+            return;
+        }
+
         // the blocks live across a second round, after one that warmed it up, under the allocator that counts them (`ActorTests.Blocks`)
         const string counted = "sum = Run()\nbefore = HttpServer.Live()\nagain = Run()\nprint(\"{sum + again} {HttpServer.Live() - before}\")\n";
         Ran(FailedPulls + counted, "lines-failed-freed", ["6 0"], runtimes: [ActorTests.Blocks.Value]);
-
-        // and the rounds on this machine's allocator and on the fenced one, where no read of the case follows its release
-        Ran(FailedPulls + "print(Run())\nprint(Run())\n", "lines-failed", ["3", "3"]);
     }
 
     private const string Held = """
