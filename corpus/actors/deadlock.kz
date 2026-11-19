@@ -1,13 +1,14 @@
-// expect: throws deadlock at 28
+// expect: throws deadlock at 29
 // threads: 1
-// rules: U18, U35, U42
+// rules: U18, U35, U42, U58
 
 // `Left`'s `Ask` waits on `Right`'s `Value` while `Right`'s `Ask` stands ahead of it in `Right`'s inbox, as one thread
 // runs the ready actors first in, first out (U35)
+// `vouch` takes `Left`'s call out of U56's loop, a promise nothing checks: the two chains still wait on each other (U58)
 
 actor Left {
     pub void Ask(Right other) {
-        print("left got {other.Value()}")
+        print("left got {vouch other.Value()}")
     }
 
     pub int Value() => 1

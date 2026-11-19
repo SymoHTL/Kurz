@@ -1,0 +1,21 @@
+// expect: error call-loop at 5
+// rules: U56
+
+actor Child(Parent Up) {
+    int seen = Up.Count()
+
+    pub int Seen() => seen
+}
+
+actor Parent {
+    pub int Count() => 3
+
+    pub int Make(Parent other) {
+        c = spawn Child(other)
+        return c.Seen()
+    }
+}
+
+p = spawn Parent()
+q = spawn Parent()
+print(p.Make(q))

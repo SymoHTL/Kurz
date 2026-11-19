@@ -1,0 +1,18 @@
+// expect: output
+// | 2
+// rules: U56
+
+actor Counter(int Left) {
+    pub void Start() {
+        if Left > 0 {
+            child = spawn Counter(Left - 1)
+            send child.Start()
+        }
+    }
+
+    pub int Count() => Left
+}
+
+c = spawn Counter(2)
+c.Start()
+print(c.Count())
