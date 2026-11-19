@@ -14,8 +14,10 @@ printed as written, and a hole in it is `syntax` at its line (E4) *(assumed: F19
 6993110710, a reading of the build said back there)*. A `test` block inside a declaration or a block, a
 function's, a lambda's, an `if`'s, a class's or another test's, is `syntax` at the line of its `test`
 (E4), and the parser reads the block and goes on with what follows it; a second test of one name in a
-program, the names compared by their value, is `syntax` at the line of the second, its text naming the
-line of the first *(assumed: D3 of issue 586, comment 6992687784, said back there)*.
+program is `syntax` at the line of the second, its text naming the line of the first *(assumed: D3 of
+issue 586, comment 6992687784, said back there)*. The names are compared by their value, so that `"A"`
+and `"\u0041"` are one name *(assumed: Q10 of issue 586, comment 6994632453, built at the lean while it
+waits for the owner)*.
 
 `test`, `check`, `mock` and `advance` are words only where their form stands (L18): `test` at the start
 of a statement before a string literal, or before `cluster` and a token that can start an expression;
@@ -140,18 +142,22 @@ expect; `CommandTests` holds its line, its `help:` line and its exit code.
 
 ### Y5 (assumed, §11) A test runs in an actor of its own
 
-Each test runs in an actor of its own, a child of the runner, named `test` in the log line of a crash
-(U24) *(assumed: F2 of issue 586, comment 6993110710, a reading of the build said back there)*. The test
-fails where that actor crashes, by a `throw`, a failed `check` (Y6), an overflow or a deadline, or where
-the runner's wait for it meets `deadlock` (U18), which then names the test's line, `deadlock at
-users.kz:4`, since a parked wait keeps no place of its own; the run goes on with the test after it
-*(assumed: Q2 of issue 586, comment 6992687784, built at the default while it waits for the owner, and F5
-of comment 6993110710, a reading of the build said back there)*. The crash of a test's own actor writes no
+Each test runs in an actor of its own, a child of the runner. The test fails where that actor crashes, by
+a `throw`, a failed `check` (Y6), an overflow or a deadline, or where the runner's wait for it meets
+`deadlock` (U18), which then names the test's line, `deadlock at users.kz:4`, since a parked wait keeps no
+place of its own; the run goes on with the test after it *(assumed: Q2 of issue 586, comment 6992687784,
+built at the default while it waits for the owner, and F5 of comment 6993110710, a reading of the build
+said back there)*. An error that ends the process wherever it happens (U19), `allocation-failed` among
+them, ends the run inside a test too: its error line stands on standard error, and neither that test's
+line, nor the tests after it, nor the counts are written, and the exit code is 1 *(assumed: a reading of
+the build, proposed with this record and not put to the owner)*. The crash of a test's own actor writes no
 line on standard error, its words standing under the test's `FAILED` line (Y3), and the crash of an actor
 the test spawned keeps its line (U24). At a test's end every actor it made is dropped at once, parked ones
-too, as U13 drops what is queued at a program's end; the clock's offset goes back to 0 for the test after
-it, the numbers of actors (U2) go on counting, and a socket or a file its actors hold stays open
-*(assumed: F3, F6 and F22 of comment 6993110710, readings of the build said back there)*.
+too, as U13 drops what is queued at a program's end; the numbers of actors (U2) go on counting, so that
+the actors of a test are numbered after those of the tests before it, and a socket or a file its actors
+hold stays open *(assumed: F3, F6 and F22 of comment 6993110710, readings of the build said back there)*.
+No line names a test's own actor, since its crash writes none: the name `test` that F2 of comment
+6993110710 gives it in the log line of a crash is a reading with no case.
 
 A test is checked as a function of its file with no parameter and a `void` result is: its body reads no
 variable of the top-level code, `unknown-name` at the read and `redeclared` at a declaration of its name
@@ -218,7 +224,10 @@ test "child escalates" {
 lambda and a test, in every build *(assumed: F8 and F9 of issue 586, comment 6993110710, readings of the
 build said back there)*. Its condition is a `bool`, read as a condition is (C3): a value of another type
 is `type-mismatch` at its line, a nullable one `nullable-unchecked` (N2), and a call with a `void` success
-`syntax` (O10).
+`syntax` (O10). A `check` narrows nothing: after `check x != null` the variable `x` is still nullable in
+the statements after it, `nullable-unchecked` at a use that needs its value (N2), as Rust's `assert!`
+leaves an `Option` an `Option` *(assumed: Q9 of issue 586, comment 6994632453, built at the lean while it
+waits for the owner)*.
 
 A false condition crashes the actor that runs it with the run-time error `check-failed`, at the file and
 the line of the `check`. Its text is the condition as the source writes it, each run of spaces, line
