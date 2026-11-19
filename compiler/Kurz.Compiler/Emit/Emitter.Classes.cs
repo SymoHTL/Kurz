@@ -639,6 +639,13 @@ public sealed partial class Emitter
             NameExpression n => (This(n, n.Line), ClassOfThis(n, n.Line)),
             _ => throw new InvalidOperationException($"a method called through `{c.Callee.GetType().Name}` at line {c.Line}"),
         };
+        if (f.Interface is not null)
+        {
+            // T19: a call through a limit, in a copy that binds a class: the class's method, as a call on the class's value runs it,
+            // directly or through the class's own table (K7)
+            f = Implementing(receiverType.Symbol, f);
+        }
+
         var arguments = Arguments(
             c,
             info,

@@ -25,6 +25,9 @@ public sealed partial class Checker
     private readonly Dictionary<string, InterfaceSymbol> interfaces = new(StringComparer.Ordinal);
     private readonly List<InterfaceSymbol> interfaceDeclared = [];
 
+    /// <summary>T19: the names of the generic interfaces, which the checker does not read (K6), so that one named as a limit is refused by its form.</summary>
+    private readonly HashSet<string> genericInterfaces = new(StringComparer.Ordinal);
+
     /// <summary>
     /// K1, K7: a class the checker reads is declared with its methods; one that writes what the checker does not read is <c>not
     /// supported</c> at that line, and its name joins the types the checker does not read, so that a use of it carries nothing more (E1).
@@ -86,6 +89,11 @@ public sealed partial class Checker
         {
             NotSupported(unread.Line, unread.Construct);
             unsupportedTypes.Add(d.Name);
+            if (d.TypeParameters.Count > 0)
+            {
+                genericInterfaces.Add(d.Name); // T19: one named as a limit is refused there by its form, which section 14 leaves open
+            }
+
             return;
         }
 

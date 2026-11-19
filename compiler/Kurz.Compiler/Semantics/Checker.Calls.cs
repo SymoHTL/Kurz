@@ -78,7 +78,13 @@ public sealed partial class Checker
         /// <summary>The first argument whose own type does not fit its parameter, with the parameter's type after substitution.</summary>
         public (int Argument, KurzType Parameter)? Misfit { get; set; }
 
-        public bool Fits => BindingError is null && !CannotInfer && Misfit is null;
+        /// <summary>T19: the first limit that a type argument, inferred or written, does not meet, with the parameter and the argument; null where each meets all.</summary>
+        public (TypeParameterSymbol Parameter, InterfaceSymbol Limit, KurzType Argument)? Unmet { get; set; }
+
+        /// <summary>The name of the data type a construction builds, which an unmet limit's message names where no function stands (T19).</summary>
+        public string? Of { get; init; }
+
+        public bool Fits => BindingError is null && !CannotInfer && Misfit is null && Unmet is null;
 
         public bool Exact { get; set; }
 
@@ -1445,7 +1451,7 @@ public sealed partial class Checker
         }
 
         var slots = data.ConstructorFields.Select(f => new Slot(f.Name, f.Type, false, f.HasDefault, data.TypeParameters.Any(p => Types.Mentions(f.Type, p)))).ToList();
-        var candidate = new Candidate { Slots = slots, TypeParameters = data.TypeParameters, Result = Types.Void }; // the result is built below from the type arguments
+        var candidate = new Candidate { Slots = slots, TypeParameters = data.TypeParameters, Result = Types.Void, Of = data.Name }; // the result is built below from the type arguments
         if (c.TypeArguments.Count > 0)
         {
             if (c.TypeArguments.Count != data.TypeParameters.Count)
@@ -1646,6 +1652,16 @@ public sealed partial class Checker
         {
             CheckArgumentsLoosely(c);
             return Typed.Error;
+        }
+
+        if (target.Type is TypeParameterType { Symbol: { } limited })
+        {
+            return CallThroughLimits(limited, m, c); // T19
+        }
+
+        if (ViewedLimit(m.Target) is { } viewed)
+        {
+            return CallThroughLimits(viewed, m, c); // T19, T33: in a copy, through a parameter or a local of a type parameter with limits
         }
 
         if (target.Type is VectorType vector)
@@ -2693,6 +2709,13 @@ public sealed partial class Checker
         {
             Fit(candidate, pres, only);
         }
+
+        if (candidate.Fits)
+        {
+            // T19: the types inferred or written are checked against the limits after the inference (T27), and a function whose limit
+            // they do not meet does not fit the call (F13) *(assumed: Q10 of issue 605, built at the lean while it waits for the owner)*
+            candidate.Unmet = Unmet(candidate.TypeParameters.Where(candidate.Map.ContainsKey).Select(p => (p, candidate.Map[p])));
+        }
     }
 
     /// <summary>
@@ -3203,6 +3226,12 @@ public sealed partial class Checker
             return;
         }
 
+        if (bound.Unmet is { } unmet)
+        {
+            Report(ErrorIds.TypeMismatch, c.Line, UnmetText(unmet, bound.Function?.Name ?? bound.Of!)); // T19: at the line of the call
+            return;
+        }
+
         var (index, parameter) = bound.Misfit!.Value;
         var pre = pres[index];
         var own = ArgumentType(bound, pres, index);
@@ -3298,6 +3327,11 @@ public sealed partial class Checker
         if (candidate.CannotInfer)
         {
             return $"its type arguments are neither written nor inferable from the arguments{GivesNothing(candidate, pres)} (T27)";
+        }
+
+        if (candidate.Unmet is { } unmet)
+        {
+            return UnmetText(unmet, candidate.Function?.Name ?? candidate.Of!); // T19
         }
 
         var (index, parameter) = candidate.Misfit!.Value;

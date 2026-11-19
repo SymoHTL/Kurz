@@ -985,6 +985,59 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void The_text_of_a_type_parameter_reaches_the_types_its_limits_let_in()
+    {
+        // T19 with A10: the text of a `T` limited to `Shaped`, which declares `string Text()`, is the Text() of each class that implements
+        // it, and not `Other`'s; the text of one limited to `Plain`, the interface of a text alone, is that of every class and data type
+        const string text = """
+            data ERing
+            data EOther
+            data ENote
+
+            interface Shaped {
+                string Text()
+                int Size()
+            }
+
+            interface Plain {
+                string Text()
+            }
+
+            class Ring(int N) : Shaped {
+                pub string Text() {
+                    throw ERing
+                }
+
+                pub int Size() => N
+            }
+
+            class Other(int N) {
+                pub string Text() {
+                    throw EOther
+                }
+            }
+
+            data Note(int N) {
+                pub string Text() {
+                    throw ENote
+                }
+            }
+
+            pub void Show<T: Shaped>(T item) {
+                print(item)
+            }
+
+            pub void ShowAny<T: Plain>(T item) {
+                print(item)
+            }
+
+            """;
+        var own = Own(text);
+        Assert.Equal(["ERing", "RuntimeError"], RaisedIn(own, "Show"));
+        Assert.Equal(["ERing", "EOther", "ENote", "RuntimeError"], RaisedIn(own, "ShowAny"));
+    }
+
+    [Fact]
     public void An_instantiation_built_only_in_a_pub_method_of_an_actor_is_built()
     {
         // U9, section 5: a message reaches a `pub` method alone, and each is a root of what the program builds, so the text of

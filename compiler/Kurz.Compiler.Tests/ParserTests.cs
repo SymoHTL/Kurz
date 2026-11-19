@@ -922,6 +922,7 @@ public sealed class ParserTests
     [InlineData("(int) => int? h = null", "(declare (int) => int? h null)")]
     [InlineData("T First<T>(List<T> items) => items[0]", "(function T First<T>(List<T> items) => (index items (int 0)))")]
     [InlineData("int AreaOf<T: Shape>(T item) => item.Area()", "(function int AreaOf<T: Shape>(T item) => (call (. item Area)))")]
+    [InlineData("void Show<T: Shape & Named, U>(T item, U other) {\n}", "(function void Show<T: Shape & Named, U>(T item, U other) {})")]
     [InlineData("void Fill(mut List<int> xs) {\n    xs.Add(1)\n}", "(function void Fill(mut List<int> xs) {(call (. xs Add) (int 1))})")]
     [InlineData("void Greet(string name, string word = \"hello\") {\n}", "(function void Greet(string name, string word = (string \"hello\")) {})")]
     public void A_function_declares_its_types_first(string program, string tree)
@@ -1624,7 +1625,11 @@ public sealed class ParserTests
     [Fact]
     public void A_type_parameter_limit_is_one_type_by_name()
     {
-        // T19: a limit names an interface, so a union, a function type or a parenthesized type there is `syntax` (E4)
+        // T19: a limit names an interface, so a union, a function type or a parenthesized type there is `syntax` (E4), after a `&` too
+        // *(assumed: Q4 of issue 605)*, and a `&` names one more
+        Assert.Equal("(data Box<T: A & B & C>(T Item))", Tree("data Box<T: A & B & C>(T Item)"));
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("data Box<T: A & (B | C)>(T Item)"));
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("data Box<T: A &>(T Item)"));
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("data Box<T: A | B>(T Item)"));
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("data Box<T: (A | B)>(T Item)"));
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("data Box<T: (int) => int>(T Item)"));

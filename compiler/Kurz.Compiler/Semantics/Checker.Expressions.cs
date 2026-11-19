@@ -439,8 +439,9 @@ public sealed partial class Checker
         InterfaceType face => face.Symbol.TextMethod is not null, // A10: a value of an interface that declares `string Text()`
         WeakRefType w => HasText(w.Target, seen), // A4 with R3: the text of what its read gives
         PointerType or CFunctionType => true, // its text is not read (HoldsRaw), and decides nothing here
-        TypeParameterType p => seen.Any(s => s.TypeParameters.Contains(p.Symbol)), // a parameter of a data type whose fields are read: its argument is judged where the type is used
-        _ => false, // a function value; a type parameter of a function, which has no limit the checker reads (A10)
+        TypeParameterType p => p.Symbol.LimitUnread || p.Symbol.Limits.Any(face => face.TextMethod is not null) // A10: a limit that declares `string Text()`
+            || seen.Any(s => s.TypeParameters.Contains(p.Symbol)), // a parameter of a data type whose fields are read: its argument is judged where the type is used
+        _ => false, // a function value
     };
 
     private static bool ArgumentsHaveText(DataType d, List<DataSymbol> seen) =>
@@ -734,6 +735,11 @@ public sealed partial class Checker
         }
 
         var target = CheckExpression(m.Target, null);
+        if (!target.IsError && ViewedLimit(m.Target) is { } viewed)
+        {
+            return MemberOf(new TypeParameterType(viewed), m.Member, m.Line); // T19, T33: in a copy, the limits' members alone
+        }
+
         if (target.Type is ClassType owner && Property(owner.Symbol, m.Member) is { } property)
         {
             return ReadProperty(m, owner, property); // K7: a call at every read, which no test narrows (N9)
@@ -909,8 +915,10 @@ public sealed partial class Checker
             case UnionType:
                 Report(ErrorIds.TypeMismatch, line, $"{Types.A(type)} is one of its cases only after a `match` (D9)");
                 return Typed.Error;
-            case TypeParameterType { Symbol.HasLimit: true }:
-                NotSupported(line, "a member of a type parameter with a limit (T19)");
+            case TypeParameterType { Symbol.LimitUnread: true }:
+                return Typed.Error; // T19: its limit's diagnostic is reported (E1)
+            case TypeParameterType p when p.Symbol.Limits.Any(face => face.Methods.Any(f => f.Name == member)):
+                NotSupported(line, "a method as a value, named without a call (K7, F11)"); // T19: a limit's method, as a class's
                 return Typed.Error;
             default:
                 break;

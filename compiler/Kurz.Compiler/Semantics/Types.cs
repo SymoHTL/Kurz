@@ -727,6 +727,13 @@ public static class Types
             return ic.Symbol.Implements(face.Symbol); // K6: an instance of a class that implements the interface where it is required
         }
 
+        if (from is TypeParameterType limited && to is InterfaceType limit)
+        {
+            // T19: a value of a type parameter where an interface among its limits is required, as C# converts it; not one that a type
+            // meets by its text alone (A10), whose value a type without the interface can be
+            return limited.Symbol.Limits.Contains(limit.Symbol) && !limit.Symbol.TextOnly;
+        }
+
         if (from is ListType fl && to is ListType tl)
         {
             return Same(fl.Element, tl.Element);
