@@ -41,7 +41,11 @@ the wait sleeps on (2), and
 against both tables before it goes in.
 
 A test of an offset in the IR follows the value from its store to the load, through each function that hands it
-on, and looks for no constant operand. In the directory test's first form (581's commit `42832a42`) `IsDirectory` read
+on, and looks for no constant operand: the emitter writes the literal offset of a pointer's read as a value,
+`*Ptr<int>(p + 24)` as `sext i32 24 to i64` and a `getelementptr` by that value, and `IsDirectory`'s offset reaches its
+load through its parameter `modeAt`, stored and loaded again before its `getelementptr` (the IR of `main` at `8ab06f49`,
+probed on 2026-11-19: a function of a program that reads at `p + 24`, and the directory test's program for each Linux
+architecture). The directory test's first form (581's commit `42832a42`) is the evidence: there `IsDirectory` read
 `st_mode` at a literal offset, which the emitter turned into a value (`sext i32 24 to i64`), so that the offset of that
 read was no constant operand: that form held `IsDirectory` to no pointer offset by a constant 16 or 24, and the mutation
 that read 24 on every architecture passed it (GREEN on `42832a42`); since 2026-11-18 the test follows `StatModeAt`'s result into `CreateDirectories`, through `MakeDirectory` into
