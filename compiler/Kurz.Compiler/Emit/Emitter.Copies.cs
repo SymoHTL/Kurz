@@ -127,7 +127,7 @@ public sealed partial class Emitter
     /// there in the call's session (<see cref="Late"/>): the slot of its copy, which the call reads after its last copy. The slot is a
     /// temporary of the region from its copy to that read (<see cref="ReadLate"/>), whether the slot of the call takes the copy or the
     /// callee borrows it, so that a jump out of the call before the read lets go of the copy with the region's other temporaries, the
-    /// last made first, as Rust drops the operands it had evaluated (<see cref="Taken"/>; issue 569), after the session's end has pointed
+    /// last made first (R1), as Rust drops the operands it had evaluated (<see cref="Taken"/>; issue 569), after the session's end has pointed
     /// the <c>weak</c> references the slot holds itself (<see cref="EndSessions"/>).
     /// </summary>
     private string CopiedLate(Expression e)

@@ -851,7 +851,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // what the slots of a construction took before the argument that leaves it is let go of in the reverse of the order the
         // arguments were evaluated, the copy of a call of two copies among them, and so are the arguments of a plain call and of a
-        // function value's, as Rust drops
+        // function value's, as R1 states for a jump out of a construction or a call (assumed: a reading of the build), as Rust drops
         // the operands of an expression that one of its operands leaves (the Rust Reference, "Destructors", drop scopes, operands;
         // issue 569): the instance of the larger class, made second, is freed before the smaller one, made first, a copy where the
         // call makes two, and no other block is freed while the program records but the tables of the session of those two copies,
