@@ -283,12 +283,23 @@ words (the owner, 2026-10-29, "Keep these words"), the first on Linux and the se
 no child inherits the lock file, they check on Linux alone, reading `/proc`: on Windows nothing
 checks either.
 
+`kurz test [--release] [--lines] [--cpu <name>] <file.kz>` builds the file's tests in place of its
+top-level code, which does not run, and runs them in a place of its own as `kurz run` runs a program,
+with no word for the program: `--` and an argument after the file are the usage's, since a test reads no
+`args` (Y2, F17). It writes `test "name" ... ok` or `test "name" ... FAILED` for each test, in the order of
+the file, after the lines the test printed, the words of a failed test's crash indented under its
+`FAILED` line, and then the counts, `2 tests: 1 passed, 1 failed`, `1 test:` for one (Y3), and ends with
+0 where every test passed and 1 where one failed (Q4). A program the checker accepts with no test gets
+`error: no test in <file>` and a `help:` line naming the form, and the exit code 1 (Y4, Q6).
+`CommandTests` holds each of these.
+
 Any other command line gets the usage on standard error and the exit code 1:
 
     usage: kurz --version [--verbose]
            kurz build [--release] [--lines] [--cpu <name>] <file.kz> [-o <output>]
            kurz run [--release] [--lines] [--cpu <name>] <file.kz> [-- <argument>...]
            kurz exec [--release] [--lines] [--cpu <name>] "<program text>" [-- <argument>...]
+           kurz test [--release] [--lines] [--cpu <name>] <file.kz>
            run and exec pass the words after -- to the program
 
 ### Readings the record leaves open to the command
@@ -2081,6 +2092,32 @@ choice Rust refuses raises `invalid-ordering-at-run-time` at the call's line (`E
 `EmitterTests` pins the instructions and the choice). A view crossing into an actor is
 `not supported`, as a pointer's crossing is (U12).
 
+### The tests and `check`
+
+`check condition` (Y6) is emitted in every build: its condition, and where it is one of the six
+comparisons whose sides show their values, each side once, compared as the comparison compares them; on
+the path of its failure the runtime's `CheckFailed` gets the condition's text, the values after it in
+parentheses, `names.Count == 2 (3 == 2)`, and the file and the line as constants, and crashes the actor
+that runs it, at the top level the end of the process with `error: check-failed at <file>:<n>:` and the
+text on the line after it. That path takes a count of each counted side before it makes the texts, since
+the `Text()` of one side may assign the place the other was read through, a `mut` parameter's, whose read
+takes no count, and lets go of them once the text is joined (`ListTests`, the line `check-operands-fenced`). A `test` block emits nothing in the build of
+`kurz build`, `kurz run` and `kurz exec` (Q5). In the build of `kurz test` the top-level code is the
+table of the tests, each test's function, its name as written and its line, and a call of the runtime's
+`RunTests`, which runs each test in an actor of its own, a child of the top-level code with the policy
+`stop`, by one message with no deadline (D6), and waits for it as the top-level code waits for a call
+(`RootWait`, the loop `Wait` runs). The test passes where the actor answered, and fails where it crashed,
+the words of its crash kept for the line under `FAILED` and no log line written for it (F1, F3), or where
+the wait found nothing left to run, `deadlock at <file>:<the test's line>` (F5). Then every actor the
+test made ends at once, parked ones too (F6): the records of the run queue, each activation's stack back
+in the pool with its open copy sessions ended, the stack a pending block keeps, every heap, the heaps of
+messages, the timers, the pauses and the deadline of the top-level code's `within`, so that no timer and
+no message heap names a heap freed; the numbers of actors go on counting (U2). A socket or a file a
+test's actors hold at that end stays open, as nothing of an actor's end closes one (F22). The test's own
+actor is named `test` (F2), a name no log line shows, since its crash writes none (F3). `ActorTests`
+holds the end of a test's actors and the bound of a test's message, `CommandTests` what the command
+writes, and the corpus's `tests/` cases what a case of `kurz test` shows (E3).
+
 ### What the emitter does not emit
 
 A program that uses one of these gets one `not supported` at the construct's line, in the
@@ -2092,7 +2129,7 @@ command line, the environment or the clock, and a log call, in a build for Windo
 map, a field or a union and a lambda that reads a variable of a vector's type, whose places are not
 aligned to it, and on a 64-bit Arm machine a test of a class under `Arm`, whose intrinsics are not
 built (R18), and an `asm`, whose operands the checker reads for x86-64 alone (R11), where a `naked` function, whose
-operands are `sym` and `const` alone, builds (R12), `check` and a `test` block (Y6, Y1), and a construct of the other chapters the
+operands are `sym` and `const` alone, builds (R12), and a construct of the other chapters the
 checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use"); a call on a socket or a file that a

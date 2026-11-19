@@ -1,0 +1,21 @@
+// expect: output
+// | in first
+// | test "first" ... ok
+// | in second
+// | test "second" ... ok
+// | 2 tests: 2 passed, 0 failed
+// command: test
+// rules: Y2
+
+// the top-level code does not run under `kurz test`, and the tests run in the order of the file
+print("top")
+
+test "first" {
+    print("in first")
+}
+
+print("between")
+
+test "second" {
+    print("in second")
+}

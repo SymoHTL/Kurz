@@ -69,6 +69,22 @@ name, no seed, no parallel tests and no format of its output but text *(assumed:
 `// command: test` (chapter 0) *(assumed: the corpus line of comment 6993110710, a reading of the build
 said back there)*.
 
+Case: [tests/two-tests-in-order.kz](../corpus/tests/two-tests-in-order.kz)
+```kurz
+// the top-level code does not run under `kurz test`, and the tests run in the order of the file
+print("top")
+
+test "first" {
+    print("in first")
+}
+
+print("between")
+
+test "second" {
+    print("in second")
+}
+```
+
 ### Y3 (assumed, §2) What `kurz test` writes, and its exit code
 
 `kurz test` writes a line for each test on standard output, in the order the tests run: `test "name" ...
@@ -90,11 +106,37 @@ the build said back there)*. The command exits with 0 where every test passed an
 the code of a refused program (§2) *(assumed: Q4 of comment 6992687784, built at the default while it
 waits for the owner)*.
 
+Case: [tests/check-fails-in-test.kz](../corpus/tests/check-fails-in-test.kz)
+```kurz
+test "adds" {
+    check 1 + 1 == 2
+}
+
+test "counts" {
+    names = ["a", "b", "c"]
+    check names.Count == 2
+}
+
+test "throws" {
+    throw "down"
+}
+```
+
+Case: [tests/one-test.kz](../corpus/tests/one-test.kz)
+```kurz
+test "adds" {
+    check 1 + 1 == 2
+}
+```
+
 ### Y4 (assumed, §2) A program with no test
 
 `kurz test` on a program with no `test` block writes `error: no test in users.kz`, with a `help:` line that
 names the form, and exits with 1, so that a run that checked nothing does not look like a pass
 *(assumed: Q6 of issue 586, comment 6992687784, built at the default while it waits for the owner)*.
+
+No case: the refusal of a program with no test is the command's own, with no id (E2), which a case cannot
+expect; `CommandTests` holds its line, its `help:` line and its exit code.
 
 ### Y5 (assumed, §11) A test runs in an actor of its own
 
@@ -128,6 +170,48 @@ test "reads the total" {
 print(total)
 ```
 
+Case: [tests/test-deadlock.kz](../corpus/tests/test-deadlock.kz)
+```kurz
+// the block of the child's policy runs in the test's actor once its message ends, and that message waits on the child
+actor Worker {
+    pub void Fail() {
+        throw "down"
+    }
+
+    pub int Get() => 1
+}
+
+test "waits on its own block" {
+    w = spawn Worker() on crash (c) {
+        restart
+    }
+
+    send w.Fail()
+    print(w.Get())
+}
+
+test "after" {
+    print("after")
+}
+```
+
+Case: [tests/test-child-escalates.kz](../corpus/tests/test-child-escalates.kz)
+```kurz
+actor Worker {
+    pub void Fail() {
+        throw "down"
+    }
+
+    pub int Get() => 1
+}
+
+test "child escalates" {
+    w = spawn Worker() on crash escalate
+    send w.Fail()
+    print(w.Get())
+}
+```
+
 ### Y6 (assumed, §11) `check`
 
 `check condition` is a statement that stands in any code, the top-level code, a function, a method, a
@@ -156,6 +240,27 @@ test "counts" {
 
 print(1)
 ```
+
+Case: [tests/check-top-level.kz](../corpus/tests/check-top-level.kz)
+```kurz
+names = ["a", "b", "c"]
+print("before")
+check names.Count == 2
+print("after")
+```
+
+Case: [tests/check-in-function.kz](../corpus/tests/check-in-function.kz)
+```kurz
+void Positive(int n) {
+    check n > 0
+}
+
+Positive(1)
+print("ok")
+Positive(-1)
+```
+
+Case: [tests/check-fails-in-test.kz](../corpus/tests/check-fails-in-test.kz)
 
 ### Y7 (assumed, §11) `build`, `run` and `exec` check every test
 
