@@ -1,6 +1,6 @@
 ---
 name: a-change-before-a-hot-loop-can-move-its-head-across-64-bytes
-description: Issue 157's bisect put 20% of the Cyrillic rows of `ToLower` and `ToUpper` on the small-count branches that pull request 197 gave `Copy`, inlined into `UnicodeCase` before its walk; the same machine code moved 16 bytes on took 72.3 ms against 86.2, so the whole gap was where the walk's head stood against 64 bytes, and no instruction of the walk had changed (2026-11-19, clang 23.1.4). A gap between two builds is read as the code's only after the function was moved by 16, 32 and 48 bytes
+description: Issue 157's bisect put 20% of the Cyrillic rows of `ToLower` and `ToUpper` on the small-count branches that pull request 197 gave `Copy`, inlined into `UnicodeCase` before its walk; the same machine code moved 16 bytes on took 72.3 ms against 86.2, no instruction of the walk changed, so the gap was the function's place (read as the walk's head against 64 bytes, inferred) (2026-11-19, clang 23.1.4). A gap between two builds is read as the code's only after the function was moved by 16, 32 and 48 bytes
 metadata:
   type: feedback
 ---
@@ -31,10 +31,14 @@ three bytes) inlined into `std.UnicodeCase`, where a byte loop stood, and the he
   | 32 mod 64 (moved 48 bytes) | 86.93 | 85.69 |
 
   In a second run, 16 bytes on gave -15.0% and -15.8%, and `-falign-loops=64`, which puts every loop's head at 64
-  bytes, -16.1% and -16.4%. So `Copy`'s branches cost nothing that shows; the whole gap was the walk's place.
+  bytes, -16.1% and -16.4%. So the gap goes with where the function stands, not with `Copy`'s branches, which the moved builds
+  all hold. That the cause is the head of the walk against 64 bytes is a reading (inferred): a move of the function
+  moves the walk's inner blocks as well, and no hardware counter was read (none in the container).
 - Forms of the standard library measured against it in one run (checked): the copy as the byte loop it had before
   pull request 197, +3.7% and +0.9%, the head at 32 mod 64 with it; the copy as a call of a function
-  that is not inlined, -4.0% and -4.6%; `Copy`'s path for more than 16 bytes made such a call, +0.9% and -0.1%. Each
+  that is not inlined, -4.0% and -4.6%, with the walk's head at 0 mod 64 but the function shorter and the walk's
+  inner blocks moved as well, where the shift of 16 bytes that put the head at 0 mod 64 took 16%, so the head
+  alone does not set the time; `Copy`'s path for more than 16 bytes made such a call, +0.9% and -0.1%. Each
   moves the head by its own size (inferred): none of them is a mechanism, and any change of the function moves it again.
   `-falign-loops=64`, in one sweep of every row of issue 157 on 2026-11-19 (checked, one run, best of 11), took the
   two rows back by 16.1% and made 42 of 102 rows slower beyond the band of two copies of `main`, by up to 12.2%: no free fix
@@ -43,8 +47,8 @@ three bytes) inlined into `std.UnicodeCase`, where a byte loop stood, and the he
 ## What to do
 
 - Before a gap between two builds is read as the code's, move the function that holds the loop by 16, 32 and 48
-  bytes and time each beside the unmoved build: where one of them closes the gap, the gap is the loop's place, and
-  no change of its code is its cause or its cure.
+  bytes and time each beside the unmoved build: where one of them closes the gap, the gap goes with the function's
+  place, and a change of its code that only moves it is no cure.
 - The recipe: keep the IR a release build hands clang (a script named `clang-23` first on `PATH` that copies the
   `.ll` it is given, as knowledge/kurz-ir-marks-no-parameter-noundef.md describes), compile it to assembly with the
   release build's options (`-O2 -mllvm -align-all-functions=6 -S`), put `.nops N` after the `.cfi_startproc` of the
