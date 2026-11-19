@@ -1,0 +1,10 @@
+// expect: error unknown-name at 8
+// rules: T19
+
+interface Shape {
+    int Area()
+}
+
+int Fresh<T: Shape>() => T.Create()
+
+print(1)

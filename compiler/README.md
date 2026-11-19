@@ -2717,9 +2717,9 @@ brace. Each is pinned as it is, so that a fix shows.
 ## What the checker reads
 
 The checker (`Semantics/`) takes a tree the parser read without an error and checks it against
-chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type parameters and the
-type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
-generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
+chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type parameters, their
+limits on a function and a `data` type, and the type arguments a use names or leaves to be
+inferred, without a generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
 class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
 a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D20, of D16 the methods of a body, each with a body as a method of a class has one, `syntax` without (K7, F2), its `Text()` and its fields, with their initializers, under inheritance too, `virtual` and `override` among its methods), 6 (values: M1 to M7,
 M9 for lists and maps, and M11), 7 (classes: K1 to K20, for a class with its primary constructor or none and the constructors of its body,
@@ -2968,7 +2968,9 @@ not declare is `unknown-name` as after a type without a body (V10), and a method
 call, and `equal by` (K8); among the bases of a `data` type a class or an interface
 (chapter 7, K10), the explicit form of inheritance (K17) and a
 generic data type (T19), each of which leaves the data type, and every data type derived from it,
-unread; the limit of a type parameter and a member of a type parameter with one (T19); a function
+unread; a generic interface as a limit, which section 14 leaves open, and with a limit that a type
+meets by its text alone a call of its method and a value of the type parameter where it is required
+(T19, A10); a function
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
 type or a time type (T10, T29);
@@ -3099,8 +3101,8 @@ round can ask about it by the rule's id.
   `unknown-name` at the dot: V10 gives that id to a name that is not visible at the place it
   stands, and a member no rule gives the type is such a name; so is a member after the name of a
   type or a function (`int.Parse(s)`, `print.Count`), which stands before a dot, where the parser
-  reads a member access, and not where a value stands, and a member of a type parameter without a
-  limit, since only a limit gives a type parameter members (T19); a member of a union is
+  reads a member access, and not where a value stands, and a member of a type parameter that none of
+  its limits declares, since only a limit gives a type parameter members (T19); a member of a union is
   `type-mismatch`, since a union is one of its cases only after a `match` (D9).
 - V7 with C8 and M9: an assignment to a loop variable is `assign-immutable`, since C8 names it a
   variable and V7 makes a second assignment to a variable without `mut` that error; so is an
@@ -3188,6 +3190,13 @@ round can ask about it by the rule's id.
   without its type arguments (`Pair p`): T19 lets a use name them or leave them to be inferred, and
   a written type has nothing to infer them from. A count that is neither none nor the type's is
   E4's `syntax` (above).
+- T19 with T33: a copy of a function that reads its type reaches the limits' members alone through
+  a parameter whose type is a type parameter with limits, a local written with that type and a
+  local without a written type that takes the value of one of them; a value reached through a
+  call, an item or a field is read on the type the copy binds. A type parameter of such a function
+  meets a limit by that type too, since the function is checked in its copies alone: `int M<T>(T
+  item)` that reads `T.Kind` and calls `AreaOf(item)` compiles for a `Square`, where Q8 of issue
+  605 refuses the call in a function checked on its text.
 - F12: of two functions that do not differ in their parameters the second is `duplicate-function`,
   and it is left out of overload resolution, so a call of the name gets no second error (E1).
 - O5: an arm of a postfix `else` that names a type the call cannot return beside its success, and

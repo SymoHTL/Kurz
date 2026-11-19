@@ -1,0 +1,10 @@
+// expect: error syntax at 8
+// rules: T19
+
+class Animal {
+    pub string Sound() => "quiet"
+}
+
+string Speak<T: Animal>(T a) => a.Sound()
+
+print(1)

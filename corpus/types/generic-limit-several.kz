@@ -1,0 +1,24 @@
+// expect: output
+// | 9
+// | square
+// rules: T19
+
+interface Shape {
+    int Area()
+}
+
+interface Named {
+    string Name()
+}
+
+class Square(int Side) : Shape, Named {
+    pub int Area() => Side * Side
+    pub string Name() => "square"
+}
+
+void Show<T: Shape & Named>(T item) {
+    print(item.Area())
+    print(item.Name())
+}
+
+Show(Square(3))

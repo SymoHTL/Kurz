@@ -402,6 +402,36 @@ void Show<T>(T item) {
 Show(1)
 ```
 
+Case: [classes/text-through-limit.kz](../corpus/classes/text-through-limit.kz)
+```kurz
+interface Texty {
+    string Text()
+}
+
+void Show<T: Texty>(T item) {
+    print(item)
+}
+
+Show(1)
+```
+
+Case: [classes/text-through-limit-union.kz](../corpus/classes/text-through-limit-union.kz)
+```kurz
+interface Texty {
+    string Text()
+}
+
+void Show<T: Texty>(T item) {
+    print(item)
+}
+
+void Use(int | string u) {
+    Show(u)
+}
+
+Use("hi")
+```
+
 ### A6 (decided, §8) The text of a map
 
 A map shows its entries between `[` and `]`, each as `key: value` and with `, ` between them, in

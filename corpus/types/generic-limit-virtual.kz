@@ -1,0 +1,20 @@
+// expect: output
+// | 4
+// rules: T19
+
+interface Shape {
+    int Area()
+}
+
+class Base : Shape {
+    pub virtual int Area() => 1
+}
+
+class Big : Base {
+    pub override int Area() => 4
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+Base b = Big()
+print(AreaOf(b))
