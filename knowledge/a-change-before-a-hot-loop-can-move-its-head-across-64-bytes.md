@@ -1,6 +1,6 @@
 ---
 name: a-change-before-a-hot-loop-can-move-its-head-across-64-bytes
-description: Issue 157's bisect put 20% of the Cyrillic rows of `ToLower` and `ToUpper` on the small-count branches that pull request 197 gave `Copy`, inlined into `UnicodeCase` before its walk; the same machine code moved 16 bytes on took 72.3 ms against 86.2, no instruction of the walk changed, so the gap was the function's place (read as the walk's head against 64 bytes, inferred) (2026-11-19, clang 23.1.4). A gap between two builds is read as the code's only after the function was moved by 16, 32 and 48 bytes
+description: Issue 157's bisect put 20% of the Cyrillic rows of `ToLower` and `ToUpper` on the small-count branches that pull request 197 gave `Copy`, inlined into `UnicodeCase` before its walk; the same machine code moved 16 bytes on, by nops at its entry that ran on every call, took 72.3 ms against 86.2, no instruction of the walk changed, so the gap was the function's place (read as the walk's head against 64 bytes, inferred) (2026-11-19, clang 23.1.4). A gap between two builds is read as the code's only after the function was moved by 16, 32 and 48 bytes
 metadata:
   type: feedback
 ---
@@ -48,12 +48,13 @@ three bytes) inlined into `std.UnicodeCase`, where a byte loop stood, and the he
   two runs of the shifts, best of 11), took `cyrillic` from 84.69 to 71.08 ms and `upper-cyrillic` from 83.83 to
   70.35 ms, -16.1% each, and made 42 of 102 rows slower beyond the band of two copies of `main`, by up to 12.2%: no free fix
   either, and a choice of the build's layout, as the alignment of functions of pull request 240 was the owner's.
-- Every row of issue 157 moved the same way (checked, 2026-11-19, issue 157, comment 7004204396): `main` ad2239c9
-  and six layouts of its instructions, every function moved by 64, 256 or 4096 bytes or by 16, 32 or 48 bytes within
-  its 64, in two runs of 102 and 101 rows, best of 11. Two copies of `main` differed by 0.7% and 0.5% at the median
-  row; the largest change one layout made in both runs the same way was 1.8% at the median, over 2% on 49 of 102 rows
-  and up to 33.5% (`parse-ulong`). The moves within 64 bytes made most of it: over 5% on 48 of 303 pairs of a row and
-  a layout, against 6 of 303 for whole functions moved by 64 to 4096 bytes. Which spread is the noise of "no row
+- Every row of issue 157, timed with its program moved in those ways (checked, 2026-11-19, issue 157, comment 7004204396):
+  `main` ad2239c9 and six layouts of its instructions, every function moved by 64, 256 or 4096 bytes or by 16, 32 or
+  48 bytes within its 64, in two runs of 102 and 101 rows, best of 11; the 102nd row, `crc`'s one, timed in the
+  first run alone, is read from that run. Two copies of `main` differed by 0.7% and 0.5% at the median row; the
+  largest change one layout made in both runs the same way was 1.8% at the median, over 2% on 49 of the 102 rows and
+  up to 33.5% (`parse-ulong`). The moves within 64 bytes made most of it: over 5% on 48 of 303 pairs of a row and a
+  layout, against 6 of 303 for whole functions moved by 64 to 4096 bytes. Which spread is the noise of "no row
   slower beyond noise" is the owner's choice (question S3 of that comment).
 
 ## What to do
@@ -68,7 +69,9 @@ three bytes) inlined into `std.UnicodeCase`, where a byte loop stood, and the he
   label, after its `.p2align 6`, where they never run (after `.cfi_startproc` they run on every call), assemble it
   with clang's assembler and the feature `+fast-15bytenop` (`clang-23 -cc1as -triple x86_64-pc-linux-gnu -filetype
   obj -target-cpu x86-64 -target-feature +fast-15bytenop -mrelocation-model pic`), without which the assembler pads
-  an alignment with nops of at most 10 bytes where the direct build's are of 15, link it as the build links
+  an alignment with nops of at most 10 bytes where the direct build's are of 15 (clang 23.1.4, seen on 2026-11-19:
+  the `.text` of the unmoved build made without it and of the direct build, compared in hex, differed in
+  padding nops alone, every instruction the same and at the same address), link it as the build links
   (`clang-23 -O2`, `-lgcc_s -lm`: `Clang.Arguments` in the same file passes each library the C functions of a
   program come from (R16) as `-l`, `gcc_s` named by the runtime's `extern "C" in "gcc_s"` in
   `runtime/linux/linux.kz`, and adds `-lm` on Linux), and check that
