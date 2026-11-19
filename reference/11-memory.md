@@ -28,20 +28,26 @@ base's fields out first)* No case shows the
 order: a release runs no code of the program between two fields, and a handle that closes at its
 last count (S5) shows it only outside the program.
 
-A jump out of a construction or of a call that is no message before its last argument, a case one of
-its arguments propagates among them, lets go of what it holds of the arguments before that one, the
-values they made, what the slots took and each copy a call of more than one copy made, and of the
-callee or the receiver that the call made before its arguments, a lambda written at the call, a
-function value a call gave, or an instance a construction or a call gave, the last made first, so that
-the callee or the receiver goes last, as Rust drops the operands of an expression that one of its
-operands leaves (the Rust Reference, "Destructors", `destructors.scope.operands`, read on 2026-11-19:
-"Tuple expression doesn't finish evaluating so operands drop in reverse order"); such a copy goes after
-the end of its call's memo, which points the `weak` references of the call's copies (U12) *(assumed: a
-reading of the build, proposed with `kurz-design.md` section 3, the bullet "Lifetimes", and not put to
-the owner)*. The copies a message's arguments made before such a jump are outside that order: what
-becomes of them is section 6's reading, which stands open on T24 of issue 519 (comment 6981296432)
-*(assumed, §6: that reading, which T24 puts to the owner)*. No case shows that order either: nothing
-of the program runs at a release, nor between the end of a memo and the release of the copies.
+A jump out of a construction or of a call that is no message before its last argument, a case one of its
+arguments propagates among them, lets go of what it holds of the arguments before that one, the values
+they made, a call's one copy among them, what the slots took and each copy a call of more than one copy
+made, and of the callee or the receiver that the call made before its arguments, a lambda written at the
+call, a function value a call gave, or an instance a construction or a call gave, the last made first,
+so that the callee or the receiver goes last, as Rust drops the operands of an expression that one of
+its operands leaves (the Rust Reference, "Destructors", `destructors.scope.operands`, read on
+2026-11-19: "Tuple expression doesn't finish evaluating so operands drop in reverse order"), the callee
+and the receiver being operands of the call as Rust's function operand and receiver are
+(`expr.call.intro`, "an expression, called the *function operand*", and `expr.method.intro`, "an
+expression (the *receiver*)", read the same day). The memo of a call's one copy ends with that copy, and
+the memo of a call of more than one copy ends at its last copy or, where such a jump comes after its
+first copy and before its last, first, before anything the jump lets go of, the values made after the
+first copy among them; so each copy goes after the end of its call's memo, which points the `weak`
+references of the call's copies (U12) *(assumed: a reading of the build, proposed with `kurz-design.md`
+section 3, the bullet "Lifetimes", and not put to the owner)*. What becomes of the copies a message's
+arguments made, at a jump out of a message before its last argument, is T24 of issue 519 (comment
+6981296432), a question put to the owner, of which this rule states nothing. No case shows that order
+either: nothing of the program runs at a release, nor between the end of a memo and the release of the
+copies.
 
 Case: [memory/long-chain-freed.kz](../corpus/memory/long-chain-freed.kz)
 ```kurz

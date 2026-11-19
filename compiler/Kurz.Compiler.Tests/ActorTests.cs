@@ -818,10 +818,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>
-    /// std/ whose <c>Free</c> notes the sizes of the last two blocks it was given and the number of blocks while the program records,
-    /// which <c>HttpServer.Record()</c> starts and <c>HttpServer.Stop()</c> ends, read through <c>HttpServer.LastFreedSmaller()</c>,
-    /// whether the last block was smaller than the one before it, and <c>HttpServer.FreedCount()</c>, a class of std/ the program sees
-    /// (W1).
+    /// std/ whose <c>Free</c> notes the sizes of the first and the last two blocks it was given and the number of blocks while the
+    /// program records, which <c>HttpServer.Record()</c> starts and <c>HttpServer.Stop()</c> ends, read through
+    /// <c>HttpServer.LastFreedSmaller()</c>, whether the last block was smaller than the one before it, <c>HttpServer.FirstFreed()</c>,
+    /// the size of the first, and <c>HttpServer.FreedCount()</c>, a class of std/ the program sees (W1).
     /// </summary>
     private static readonly Lazy<CheckedRuntime> FreeOrder = new(() => ListTests.Edited(
         ("std/std.kz", "pub void Free(byte* p, long size) {\n", """
@@ -829,10 +829,15 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             thread static mut long freedBefore = 0
             thread static mut long freedLast = 0
             thread static mut long freedCount = 0
+            thread static mut long freedFirst = 0
 
             pub void Free(byte* p, long size) {
                 raw {
                     if recording == 1 {
+                        if freedCount == 0 {
+                            freedFirst = size
+                        }
+
                         freedBefore = freedLast
                         freedLast = size
                         freedCount = freedCount + 1
@@ -847,6 +852,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
                     raw {
                         recording = 1
                         freedCount = 0
+                        freedFirst = 0
                     }
                 }
 
@@ -863,6 +869,15 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
                     }
 
                     return smaller
+                }
+
+                pub static long FirstFreed() {
+                    mut long n = 0
+                    raw {
+                        n = freedFirst
+                    }
+
+                    return n
                 }
 
                 pub static long FreedCount() {
@@ -885,7 +900,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // the operands of an expression that one of its operands leaves (the Rust Reference, "Destructors", drop scopes, operands;
         // issue 569): the instance of the larger class, made second, is freed before the smaller one, made first, a copy where the
         // call makes two, and no other block is freed while the program records but the tables of the session of those two copies,
-        // which its end frees first (`CopyAbort`)
+        // which its end frees first (`CopyAbort`), before the instance made after the first copy, larger than the instances of `Small`
+        // (24 bytes) and of `Large` (32); a call's one copy is let go of among the values its arguments made, the last made first, so
+        // that the copy, made second, goes before the instance made first, and the instance, made second, before the copy made first,
+        // after the tables of the copy's own session, which its copy ends (R1)
         const string program = """
             data Missing
 
@@ -900,6 +918,18 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             Two | Missing Made() {
                 return Two(Small(1), Large(1, 2, 3, 4), Lose())
+            }
+
+            string One(Large b, Small s, Small c) => "{b.A} {s.N} {c.N}"
+
+            string | Missing Single(Holder h) {
+                return One(Large(1, 2, 3, 4), copy h.S, Lose())
+            }
+
+            string OneFirst(Small s, Large b, Small c) => "{s.N} {b.A} {c.N}"
+
+            string | Missing SingleFirst(Holder h) {
+                return OneFirst(copy h.S, Large(1, 2, 3, 4), Lose())
             }
 
             Two | Missing Copied(Holder h) {
@@ -940,23 +970,27 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
                     missed = MissedTwo(Copied(h))
                 } else if row == 2 {
                     missed = MissedText(Called(h))
-                } else {
+                } else if row == 3 {
                     missed = MissedText(Valued(h))
+                } else if row == 4 {
+                    missed = MissedText(Single(h))
+                } else {
+                    missed = MissedText(SingleFirst(h))
                 }
 
                 HttpServer.Stop()
                 return missed
             }
 
-            names = ["Made", "Copied", "Called", "Valued"]
+            names = ["Made", "Copied", "Called", "Valued", "Single", "SingleFirst"]
             holder = Holder(Small(7))
-            for row in 0..<4 {
+            for row in 0..<6 {
                 missed = Order(row, holder)
-                print("{names[row]} {HttpServer.LastFreedSmaller()} {HttpServer.FreedCount()} {missed}")
+                print("{names[row]} {HttpServer.LastFreedSmaller()} {HttpServer.FreedCount()} {missed} {HttpServer.FirstFreed() > 32}")
             }
 
             """;
-        Ran(BuildAndRun(program, FreeOrder.Value, "construction-left-early-order"), 0, ["Made true 2 1", "Copied true 3 1", "Called true 3 1", "Valued true 3 1"], "");
+        Ran(BuildAndRun(program, FreeOrder.Value, "construction-left-early-order"), 0, ["Made true 2 1 false", "Copied true 3 1 true", "Called true 3 1 true", "Valued true 3 1 true", "Single false 3 1 true", "SingleFirst true 3 1 true"], "");
     }
 
     /// <summary>

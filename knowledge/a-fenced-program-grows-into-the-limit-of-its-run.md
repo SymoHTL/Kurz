@@ -7,10 +7,11 @@ metadata:
 
 ## What happened
 
-`Toolchain.Run` runs a built program with a limit of 30 s, the bound of a hang (`Processes.Capture`). `RegexTests.HoldToNet` builds
-one program of every pattern and text a test holds to .NET's matches and runs it twice: with the runtime, and with the fence
+`Toolchain.Run` runs a built program with a limit of 30 s, the bound of a hang (`Processes.Capture`). `RegexTests.HoldToNet` built
+one program of every pattern and text a test holds to .NET's matches and ran it twice: with the runtime, and with the fence
 (`ListTests.Fenced`), which gives every block pages of its own, mapped at its allocation with an inaccessible page after it, and
-made inaccessible and given back at its free.
+made inaccessible and given back at its free. Since 2026-11-19 it runs the fenced program in ranges of the patterns, and the
+program without the fence stays one (the section "What to do").
 
 `RegexTests.The_backtracking_engine_reads_backreferences_look_arounds_and_atomic_groups_as_net_does` failed three times in the
 `gates` job with its fenced program ended at that limit, exit -1, on heads that could not reach it, each green when run again:
@@ -19,7 +20,9 @@ run 43260266243 (pull request 514, comment 6830144334), run 43624514303 (pull re
 first 50 characters, so the line that says where the program stood is lost
 ([an-assert-of-a-tuple-cuts-the-text-it-shows.md](an-assert-of-a-tuple-cuts-the-text-it-shows.md)).
 
-Measured on 2026-11-19 in the dev container, with the test's own programs, each run five times:
+Measured on 2026-11-19 in the dev container, with the test's own programs, each run five times through `Processes.Capture` by
+a scratch test; the blocks counted by a scratch edit of the standard library's `Allocate` and `Free`, each of which adds one to
+its count, printed at the program's end:
 
 | program | without the fence | fenced, alone | fenced, while the whole suite ran |
 |---|---|---|---|
@@ -42,9 +45,10 @@ Measured on 2026-11-19 in the dev container, with the test's own programs, each 
 - Split such a program's work into programs that each stay well within the limit, the same rows in the same order, rather than
   give it a longer limit: the limit bounds a hang, as the compiler gate's own does
   ([a-suite-grows-into-its-timeout.md](a-suite-grows-into-its-timeout.md)). `HoldToNet` runs its fenced program in ranges of the
-  patterns of at most `FencedRows` rows, 1500, each of at most 192222 blocks (23.5 percent of the one program's) and 0.4 to 2.0 s
-  while the whole suite ran, and holds the ranges' lines to .NET's in the order of the patterns; the program without the fence
-  stays one.
+  patterns of at most `FencedRows` rows, 1500, and holds the ranges' lines to .NET's in the order of the patterns; the program
+  without the fence stays one. The backtracking test's five ranges made at most 192222 blocks each (23.5 percent of the one
+  program's) and ran 0.4 to 2.0 s while the whole suite ran; the matches test's five ranges ran 0.8 to 1.8 s there, and their
+  blocks were not counted.
 - The text a program builds is not the first cost to cut: count the blocks of the program without it.
 
 Gate: `compiler-tests` for the ranges (the two tests through `HoldToNet`, which a range that passes over a pattern, ends one
