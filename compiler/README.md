@@ -1833,8 +1833,19 @@ made (the owner, 2026-10-25, "Copied"), and no state
 outside a function holds a list or a string, which R13 refuses, so a callee reaches a list or a
 string its caller lent it through its parameters alone. The name an arm of a `match` binds holds a count of its value, as a
 variable does, so that the arm can change the subject's variable and the name keeps its value (M3).
+The case an arm of a postfix `else` takes, after a call or after a loop over a file's lines (O5, S16), holds the count the result
+gave it, which no place holds: the arm holds it as a variable of its block, a name bound or not, and the arm of `else` the whole
+value, and lets go of it at the block's end and at a `return`, a `break` or a `continue` that leaves the block, unless a `move`
+of the name emptied its place, as Rust drops the variables a `match` arm binds when the arm ends and none a move left
+uninitialized (the Rust Reference, "Destructors", `destructors.scope.bindings.match-arm` and `destructors.intro`, and "Match
+expressions", `expr.match.scrutinee-value`, read on 2026-11-19); a `return` of the name counts it once more for the caller.
+Pinned by `ListTests` under an allocator that counts the blocks and under the fenced one, the arm of a `match` the control, and
+by `FileTests` for the loop's arms.
 Counted are a list, a string, a function value, an instance of a class, a value of a block type, a plain
-`data` value that holds one of them in a field and a union with a case that holds one. A string made while the program runs holds a block
+`data` value that holds one of them in a field and a union with a case that holds one; a plain `data` value lets go of each such
+field where it ends, a union field by the case it holds (`ListTests`, under an allocator that counts the blocks and under the
+fenced one: a plain data case, an instance and a list in a union field, at a variable's end, at its reassignment, in a list's
+item and in the copy a call makes, the same field of a class the control). A string made while the program runs holds a block
 of `std/` in front of its bytes, laid out as the block of a list of bytes: the count of the values that
 hold it, 8 bytes, then the count of its bytes, which `string.FromRaw` writes, and the room
 `string.Allocate` gave, 4 bytes each, so that `s.Bytes` and a string of a list of bytes share the
