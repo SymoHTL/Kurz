@@ -982,11 +982,14 @@ public sealed class CheckerTests
     [Fact]
     public void A_limit_that_names_nothing_is_unknown_name_and_nothing_more()
     {
-        // V10: the limit's name resolves as a type's does; the parameter's members, its text and the arguments for it report nothing more (E1)
+        // V10: the limit's name resolves as a type's does; the parameter's members, its text, the arguments for it and its value passed
+        // to another limit report nothing more (E1), as an argument with no type reports nothing beside its own error
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("int F<T: Shap>(T item) => item.Area()\n\nprint(F(1))"));
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("int F<T: Shap>(T item) => item.Side\n\nprint(F(1))"));
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("void Show<T: Shap>(T item) {\n    print(item)\n}\n\nShow(1)"));
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("data Box<T: Shap>(T Item)\n\nb = Box(5)\nprint(b.Item)"));
+        Assert.Equal([(ErrorIds.UnknownName, 11)], Errors(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nint Wrap<U: Shap>(U item) => AreaOf(item)\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.UnknownName, 11)], Errors(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nprint(AreaOf(nope))")); // an argument with no type
     }
 
     [Fact]
