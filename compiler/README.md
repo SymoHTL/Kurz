@@ -1038,7 +1038,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   whose model takes every interleaving of a lookup of each of two actors while a third thread frees the first's
   slot and takes it for the second, but for the life of the table's directory and pages; and the futex's wait and wake
   (`sys.LockWait`, `sys.LockWake`), the wake as Rust's `futex_wake` and the wait by `FUTEX_WAIT_PRIVATE`, where
-  Rust's waits by `FUTEX_WAIT_BITSET` (not checked at source). The models' moves are
+  Rust's waits by `FUTEX_WAIT_BITSET` (`library/std/src/sys/sync/futex/unix.rs` of Rust 1.100.0, read on 2026-11-19: on
+  Linux `futex_wait` calls `futex` with `libc::FUTEX_WAIT_BITSET | libc::FUTEX_PRIVATE_FLAG` and `!0u32`, "A full bitmask,
+  to make it behave like a regular FUTEX_WAIT", and `futex_wake` with `libc::FUTEX_WAKE | libc::FUTEX_PRIVATE_FLAG` and 1,
+  which is `FUTEX_WAKE_PRIVATE`). The models' moves are
   sequentially consistent, so that no model checks the orders of the atomic operations: they are the ones the
   runtime's source writes, each of which `EmitterTests` holds to one instruction of the IR of that order
   (`An_atomic_member_with_its_order_written_is_one_llvm_instruction_of_that_order_aligned_to_its_word`). These hold only while one thread runs every program (U35), each a reading of the code that no run on
@@ -1816,8 +1819,9 @@ the end of its statement for a value that a call, a `with`, a `match` or an `els
 nothing keeps; where a case an argument propagates, or another jump, leaves a construction or a call
 that is no message before its last argument, for each value a slot took from the arguments before
 it, a field of the construction or a parameter written `move`, and each copy a call of more than one
-copy made before it, the last made first, as Rust drops the operands of an expression that one of its
-operands leaves (the Rust Reference, "Destructors", read on 2026-11-18; issue 569); and where a value
+copy made before it, the last made first, as R1 states (assumed: a reading of the build) and as Rust drops
+the operands of an expression that one of its operands leaves (the Rust Reference, "Destructors", read on
+2026-11-18; issue 569); and where a value
 that holds the list ends. At zero the lists the items hold are let
 go of in turn, and the block goes back to `Free`. A parameter not written `move` borrows its argument and changes no
 count: nothing changes the value it borrows while the call runs, since the checker refuses a read of
