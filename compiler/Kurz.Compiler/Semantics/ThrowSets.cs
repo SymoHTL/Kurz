@@ -1328,10 +1328,10 @@ public sealed class ThrowSets
         // the type the checker gave an expression; in the reach mode null where it gave none, a node of a reported error
         private KurzType? Typed(Expression e) => !sets.reach || model.HasType(e) ? model.TypeOf(e).Type : null;
 
-        // U57: a local without `mut` that a declaration makes holds its value's origin
+        // U57: a local that a declaration makes holds its value's origin, which a read of it takes where it has no `mut` (OriginOf)
         private void Local(object declaration, Expression value)
         {
-            if (model.Declares(declaration) && model.DeclarationOf(declaration) is { Mut: false, Kind: VariableKind.Local } variable)
+            if (model.Declares(declaration) && model.DeclarationOf(declaration) is { Kind: VariableKind.Local } variable)
             {
                 locals[variable] = OriginOf(value);
             }

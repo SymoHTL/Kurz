@@ -184,9 +184,10 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     [Fact]
     public void A_loop_is_reported_beside_the_other_errors_and_a_call_with_its_own_error_makes_no_edge()
     {
-        // T54: the loop of `Left` and `Right` and a name nothing declares, each at its line; a call that reported its own error, of a
-        // method that is no `pub` one (U9), makes no edge and runs none of that method's code as the caller's, which would make the wait
-        // of `Hidden` at line 8 one of `Left` on itself, and the same call of a `pub` method closes the loop (the control)
+        // T54: the loop of `Left` and `Right` and a name nothing declares, each at its line; a call that reported its own error makes no
+        // edge and runs none of the callee's code as the caller's, which would make the wait in `Hidden` one of `Left` on itself: a call
+        // of a method that is no `pub` one (U9), which the checker records no call for, and a call with a `mut` argument, which it records
+        // as the method it picked; the same calls without their errors close the loop (the controls)
         const string beside = """
             actor Left {
                 pub int Ask(Right other) => other.Value() + 1
@@ -222,6 +223,29 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
             """;
         Assert.Equal([(ErrorIds.NotVisible, 2)], Diagnostics(own));
         Assert.Equal([(ErrorIds.CallLoop, 2)], Diagnostics(own.Replace("    int Hidden()", "    pub int Hidden()", StringComparison.Ordinal)));
+        const string picked = """
+            actor Left {
+                pub int Ask(Right other) {
+                    mut k = 1
+                    return other.Hidden(mut k) + k
+                }
+
+                pub int Value() => 1
+            }
+
+            actor Right(Left Back) {
+                pub int Hidden(mut int n) => Back.Value() + n
+            }
+
+            l = spawn Left()
+            r = spawn Right(l)
+            print(l.Ask(r))
+
+            """;
+        Assert.Equal([(ErrorIds.MutInMessage, 4)], Diagnostics(picked));
+        var fine = picked.Replace("mut k = 1", "k = 1", StringComparison.Ordinal).Replace("Hidden(mut k)", "Hidden(k)", StringComparison.Ordinal)
+            .Replace("Hidden(mut int n)", "Hidden(int n)", StringComparison.Ordinal);
+        Assert.Equal([(ErrorIds.CallLoop, 4)], Diagnostics(fine));
     }
 
     [Fact]
@@ -332,9 +356,11 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     [InlineData("x = vouch spawn C()", 1)]
     [InlineData("x = vouch c.Count", 1)]
     [InlineData("x = 1\ny = vouch x", 2)]
+    [InlineData("x = f(vouch\n    c.Size())", 2)]
     public void A_vouch_before_what_is_no_call_is_syntax_at_the_word(string program, int line)
     {
-        // U58: after the word, what is no call, a `spawn` and a property among them, is `syntax` at the word's line (E4)
+        // U58: after the word, what is no call, a `spawn` and a property among them, is `syntax` at the word's line (E4); inside brackets,
+        // where a line break is no end, a name on the next line leaves `vouch` a name, which a name after it makes `syntax` there
         var diagnostics = new DiagnosticBag();
         Parser.Parse(SourceText.FromString("test.kz", program), diagnostics);
         Assert.Equal([(ErrorIds.Syntax, line)], diagnostics.Items.Select(d => (d.Id, d.Line)));
