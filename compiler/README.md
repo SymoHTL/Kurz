@@ -590,7 +590,8 @@ out at once, and not after the peer's acknowledgement of the one before.
 the value given, and `LockWake` wakes one thread that sleeps on it, each by the `futex` call through `syscall`
 (S16): the wait by `FUTEX_WAIT_PRIVATE` (128), where Rust's `futex_wait` waits by
 `FUTEX_WAIT_BITSET` with `FUTEX_PRIVATE_FLAG` and a bitset of every bit, and the wake by `FUTEX_WAKE_PRIVATE` (129),
-as Rust's `futex_wake` does (Rust's operations not checked at source); each Linux architecture's file gives the two with the number of
+as Rust's `futex_wake` does (Rust's operations as `library/std/src/sys/sync/futex/unix.rs` of Rust 1.100.0 gives them, read on
+2026-11-19); each Linux architecture's file gives the two with the number of
 `futex` there, 202 on x86-64, and 98 on AArch64, where 202 is `accept`, and the Windows runtime waits by
 `WaitOnAddress` and wakes by `WakeByAddressSingle`, as Rust's futex does there. `std/` gives the room a read makes in a list of bytes before it,
 `BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9), and the
