@@ -1455,7 +1455,8 @@ name the interface *(assumed: Q8 of issue 605, built at the lean while it waits 
 issue 605, built at the leans while they wait for the owner)*, but an interface whose only member
 is `string Text()`, which every type with a text meets (A10); with such a limit, a call of its
 method and a value of `T` where the interface is required are `not supported`, since a type without
-the interface meets it. Inference comes first (T27): `cannot-infer` is reported before a limit
+the interface meets it *(assumed: a reading of the build, proposed with this record and not put to
+the owner)*. Inference comes first (T27): `cannot-infer` is reported before a limit
 *(assumed: a default of issue 605, built while it waits for the owner)*, and the type inferred, or written *(assumed: Q20 of issue 605, built at the lean while it waits for the
 owner)*, is checked against it. An argument whose type does not meet the limit is `type-mismatch`
 at the first line of the call, "`int` does not implement `Shape`, the limit of `T` of `AreaOf`
