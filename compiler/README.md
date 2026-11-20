@@ -2968,9 +2968,12 @@ not declare is `unknown-name` as after a type without a body (V10), and a method
 call, and `equal by` (K8); among the bases of a `data` type a class or an interface
 (chapter 7, K10), the explicit form of inheritance (K17) and a
 generic data type (T19), each of which leaves the data type, and every data type derived from it,
-unread; a generic interface as a limit, which section 14 leaves open, and with a limit that a type
-meets by its text alone a call of its method and a value of the type parameter where it is required
-(T19, A10; Q21 of issue 605); in a copy that binds an interface type to a type parameter, `T.Kind`,
+unread; a generic interface as a limit, which Q15 of issue 605 lets stand (T19); a property and a
+field of a class limit read through a value of a type parameter, and a `static` member of a class
+limit reached through the type parameter, where Q2 of issue 605 lets a body reach a property and a
+`static` member (T19); a second class among the limits of a type parameter, and a class after an
+interface there (T19); with a limit that a type meets by its text alone, a value of the type
+parameter where it is required (T19, A10; Q21 of issue 605); in a copy that binds an interface type to a type parameter, `T.Kind`,
 a loop over `T.Fields` and `T.Make`, since T33 names no kind of an interface type (T33, T19); a function
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
@@ -3103,8 +3106,8 @@ round can ask about it by the rule's id.
   stands, and a member no rule gives the type is such a name; so is a member after the name of a
   type or a function (`int.Parse(s)`, `print.Count`), which stands before a dot, where the parser
   reads a member access, and not where a value stands, and a member of a type parameter that none of
-  its limits declares, since only a limit gives a type parameter members, and a member named through
-  a type parameter itself, `T.Create()`, whose text names both (T19); a member of a union is
+  its limits declares, since only a limit gives a type parameter members, and a name through a type
+  parameter itself, `T.Create()`, that no limit declares as a `static` member (T19); a member of a union is
   `type-mismatch`, since a union is one of its cases only after a `match` (D9).
 - V7 with C8 and M9: an assignment to a loop variable is `assign-immutable`, since C8 names it a
   variable and V7 makes a second assignment to a variable without `mut` that error; so is an
@@ -3194,12 +3197,21 @@ round can ask about it by the rule's id.
   E4's `syntax` (above).
 - T19 with T33: a copy of a function that reads its type reaches the limits' members alone through
   a parameter whose type is a type parameter with limits, a local written with that type and a
-  local without a written type that takes the value of one of them; a value reached through a
-  call, an item or a field is read on the type the copy binds. A type parameter of such a function
-  meets a limit by that type too, since the function is checked in its copies alone: `int M<T>(T
-  item)` that reads `T.Kind` and calls `AreaOf(item)` compiles for a `Square`, and its copy for an
-  `int` is `type-mismatch` at that call, where Q8 of issue 605 refuses the call in a function checked
-  on its text: Q22 of issue 605 (comment 7016425853), built at its default (a).
+  local without a written type that takes the value of one of them. Q8 of issue 605 holds in its
+  copies too (Q22, comment 7051071380): where a call in a copy passes a parameter whose type is
+  written with a type parameter, a local written with one, a local that takes the value of either or
+  an item of a parameter written as a list of one, the call meets its limits by the type the
+  function's text writes, so `int M<T>(T item)` that reads `T.Kind` and calls `AreaOf(item)` is
+  `type-mismatch` at that call in every copy, with the text of a type parameter of the caller. A value
+  that a call or a field gives is read on the type the copy binds, so `AreaOf(Id(item))` compiles in
+  the copy for a `Square`: the build's reading, which the record marks.
+- T19 with K6, K7 and A10: a class as a limit (Q5 of issue 605, comment 7051071380) gives a value of
+  the type parameter the class's visible methods, before the methods of its interfaces among the
+  limits, and the class's text; the value converts to the class, to a base of it and to an interface
+  the class implements, as C# converts a value of a type parameter to its class constraint; and a
+  method that the class and an interface among the limits declare with the same parameters is
+  `ambiguous-call`, as for two interfaces, where C# takes the class's member. These are the build's
+  readings, which the record marks.
 - F12: of two functions that do not differ in their parameters the second is `duplicate-function`,
   and it is left out of overload resolution, so a call of the name gets no second error (E1).
 - O5: an arm of a postfix `else` that names a type the call cannot return beside its success, and

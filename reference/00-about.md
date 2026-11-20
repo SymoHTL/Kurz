@@ -375,6 +375,10 @@ the reference's reading, accepted by its id on 2026-10-09 without its text shown
 generic function, which would have reported an error at a call site for a line inside another
 function; the cost is that a generic function that prints its argument needs the limit, and that the
 standard library would declare one interface for it.
+Through such a limit a call of its method, `item.Text()`, gives in each copy the text of the type
+the copy binds, and a value of the type parameter where the interface is required is `not
+supported`, since a type without the interface meets it (T19, §4: the owner, 2026-11-20, issue 605,
+comment 7051071380, Q21).
 
 Case: [classes/text-through-interface.kz](../corpus/classes/text-through-interface.kz)
 ```kurz
@@ -430,6 +434,26 @@ void Use(int | string u) {
 }
 
 Use("hi")
+```
+
+Case: [classes/text-call-through-limit.kz](../corpus/classes/text-call-through-limit.kz)
+```kurz
+interface Texty {
+    string Text()
+}
+
+class Tag {
+    pub string Text() => "tag"
+}
+
+data Point(int X, int Y)
+
+string Show<T: Texty>(T item) => item.Text()
+
+print(Show(1))
+print(Show("ok"))
+print(Show(Point(1, 2)))
+print(Show(Tag()))
 ```
 
 ### A6 (decided, §8) The text of a map
