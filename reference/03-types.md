@@ -1424,54 +1424,73 @@ types that implement both *(assumed: Q4 of issue 605, built at the lean while it
 owner)*. A limit that names a class, a `data` type, an `enum`, a number type or a type parameter is
 `syntax` there, as a union or a function type is *(assumed: Q5 and Q6 of issue 605, built at the
 leans while they wait for the owner)*, and so is an interface named twice in one list *(assumed:
-Q19 of issue 605, built at the lean while it waits for the owner)*; a name no declaration gives is
-`unknown-name` (V10). A parameter that holds a constant (T35) takes no limit *(assumed: a default
-of issue 605, built while it waits for the owner)*. The build says
+Q19 of the product pass on issue 605, comment 7014593721, built at its default while it waits for
+the owner)*; a name no declaration gives is `unknown-name` (V10) *(assumed: a default of issue 605,
+built while it waits for the owner)*. A parameter that holds a constant (T35) takes no limit
+*(assumed: a default of issue 605, built while it waits for the owner)*. The build says
 `not supported` to a generic interface as a limit, which §14 leaves open *(assumed: Q15 of issue
 605, built at the lean while it waits for the owner)*, and to a generic class, a generic interface,
 a generic actor and a method with type parameters of its own, with their limits, each by a text
-that names it *(assumed: Q18 of issue 605, built at the lean while it waits for the owner)*.
+that names it *(assumed: Q18 of the product pass on issue 605, comment 7014593721, built at its
+default while it waits for the owner)*.
 
 The body of a generic function is checked once, at its definition, against its limits: a value of
 `T` has the methods of its limits and no other member, so a method or a field no limit declares,
 and a `static` call through `T`, is `unknown-name` at its line, whether a call reaches the function
-or not *(assumed: Q1 and Q2 of issue 605, built at the leans while they wait for the owner)*. A
-method of a limit named without a call is a method as a value (K7, F11). A method that two limits
-declare with the same parameters is `ambiguous-call` at the call (F13), as C#'s CS0121 *(assumed:
-a default of issue 605, built while it waits for the owner)*. No operator reaches through a limit: `a < b` on two values of `T` is `type-mismatch` (T18) *(assumed: Q3 of
-issue 605, built at the lean while it waits for the owner)*. A value of `T` stands where an
-interface among its limits is required, as C# converts it, and a member of a `T?` needs its check
-(N2) *(assumed: two defaults of issue 605, built while they wait for the owner)*. A function that
-reads its type (T33), which is checked in its copies alone, reaches in each
-copy the limits' members alone, through a parameter of `T`, a local written `T` and a local that
-takes the value of one of them *(assumed: Q13 of issue 605, built at the lean while it waits for
-the owner)*.
+or not *(assumed: Q1 and Q2 of issue 605, built at the leans while they wait for the owner)*; a
+member named through `T` itself says "`T.Create` names no member: a limit gives a value of `T` its
+methods alone (V10, T19)" *(assumed: the wording of this change, proposed with this record and not
+put to the owner)*. A method of a limit named without a call is `not supported`, as a class's
+method named so is (K7, F11) *(assumed: a reading of the build, proposed with this record and not
+put to the owner)*. A method that two limits declare with the same parameters is `ambiguous-call`
+at the call (F13), as C#'s CS0121 *(assumed: a default of issue 605, built while it waits for the
+owner)*, "`M` is declared with the same parameters by the limits `A` and `B` of `T`, so the call
+fits both (F13, T19)" *(assumed: the wording of this change, proposed with this record and not put
+to the owner)*. No operator reaches through a limit: `a < b` on two values of `T` is
+`type-mismatch` (T18) *(assumed: Q3 of issue 605, built at the lean while it waits for the
+owner)*. A value of `T` stands where an interface among its limits is required, as C# converts it,
+and a member of a `T?` needs its check (N2) *(assumed: two defaults of issue 605, built while they
+wait for the owner)*. A function that reads its type (T33), which is checked in its copies alone,
+reaches in each copy the limits' members alone, through a parameter of `T`, a local written `T` and
+a local that takes the value of one of them *(assumed: Q13 of issue 605, built at the lean while it
+waits for the owner)*. Each copy meets a limit by the type it binds: such a function passes its `T`
+on to a limited function where the copy's type meets the limit, and the copy for another type is
+`type-mismatch` at that call, with Q9's text *(assumed: Q22 of issue 605, comment 7016425853, built
+at its default while it waits for the owner)*. In a copy that binds an interface type, which a
+value whose type is the interface gives `T`, `T.Kind`, a loop over `T.Fields` and `T.Make` are
+`not supported`, since T33 names no kind of an interface type *(assumed: a reading of the build,
+proposed with this record and not put to the owner)*.
 
 A type argument, inferred or written, meets a limit where it is a class that names the interface,
-itself or through a base (K6), or the interface itself *(assumed: Q11 and Q17 of issue 605, built
-at the leans while they wait for the owner)*, or a type parameter of the caller whose own limits
+itself or through a base (K6), or the interface itself *(assumed: Q11 of issue 605, built at the
+lean while it waits for the owner; Q17 of the product pass on issue 605, comment 7014593721, built
+at its default while it waits for the owner)*, or a type parameter of the caller whose own limits
 name the interface *(assumed: Q8 of issue 605, built at the lean while it waits for the owner)*. A
-`data` type, a built-in type, a union and a nullable type meet no limit *(assumed: Q12 and Q17 of
-issue 605, built at the leans while they wait for the owner)*, but an interface whose only member
+`data` type, a built-in type, a union and a nullable type meet no limit *(assumed: Q12 of issue
+605, built at the lean while it waits for the owner; Q17 of the product pass on issue 605, comment
+7014593721, built at its default while it waits for the owner)*, but an interface whose only member
 is `string Text()`, which every type with a text meets (A10); with such a limit, a call of its
 method and a value of `T` where the interface is required are `not supported`, since a type without
-the interface meets it *(assumed: a reading of the build, proposed with this record and not put to
-the owner)*. Inference comes first (T27): `cannot-infer` is reported before a limit
-*(assumed: a default of issue 605, built while it waits for the owner)*, and the type inferred, or written *(assumed: Q20 of issue 605, built at the lean while it waits for the
-owner)*, is checked against it. An argument whose type does not meet the limit is `type-mismatch`
-at the first line of the call, "`int` does not implement `Shape`, the limit of `T` of `AreaOf`
-(T19)", and for a type parameter of the caller "`U` has no limit `Shape`, which `T` of `AreaOf`
-requires (T19)" *(assumed: Q9 of issue 605, built at the lean while it waits for the owner)*. A
-function whose limit a call does not meet does not fit the call (F13), so that another function of
-the name can take it, and a call that fits none of them is `argument-mismatch` *(assumed: Q10 of
-issue 605, built at the lean while it waits for the owner)*.
+the interface meets it *(assumed: Q21 of issue 605, comment 7016425853, built at its default while
+it waits for the owner)*. Inference comes first (T27): `cannot-infer` is reported before a limit,
+which takes no part in the inference *(assumed: a default of issue 605, built while it waits for
+the owner)*, and the type inferred, or written *(assumed: Q20 of the product pass on issue 605,
+comment 7014593721, built at its default while it waits for the owner)*, is checked against it. An
+argument whose type does not meet the limit is `type-mismatch` at the first line of the call,
+"`int` does not implement `Shape`, the limit of `T` of `AreaOf` (T19)", and for a type parameter of
+the caller "`U` has no limit `Shape`, which `T` of `AreaOf` requires (T19)" *(assumed: Q9 of issue
+605, built at the lean while it waits for the owner)*. A function whose limit a call does not meet
+does not fit the call (F13), so that another function of the name can take it, and a call that
+fits none of them is `argument-mismatch` *(assumed: Q10 of issue 605, built at the lean while it
+waits for the owner)*.
 
 The limit of a generic `data` type's parameter, `data Box<T: Shape>(T Item)`, is checked at every
 use that names the type with its arguments, written or inferred: a construction, and the type of a
 parameter, a field or a variable, with the type's name in the text, "`int` does not implement
-`Shape`, the limit of `T` of `Box` (T19)" *(assumed: Q16 of issue 605, built at the lean while it
-waits for the owner)*. It is never implied: a signature over `Box<U>` writes the limit on its own
-`U` *(assumed: Q7 of issue 605, built at the lean while it waits for the owner)*.
+`Shape`, the limit of `T` of `Box` (T19)" *(assumed: Q16 of the product pass on issue 605, comment
+7014593721, built at its default while it waits for the owner)*. It is never implied: a signature
+over `Box<U>` writes the limit on its own `U` *(assumed: Q7 of issue 605, built at the lean while
+it waits for the owner)*.
 
 In each copy (§4, "Copy per instance"), a call through a limit calls the method of the type the
 copy binds: the class's method, directly, or through the class's own table where the method is
