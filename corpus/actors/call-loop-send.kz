@@ -10,17 +10,17 @@ actor Left {
     pub int Value() => 1
 }
 
-actor Right {
-    mut int noted = 0
+actor Right(Left Up) {
+    mut int noted = Up.Value()
 
     pub void Note(int n) {
-        noted = n
+        noted = Up.Value() + n
     }
 
-    pub int Ask(Left other) => other.Value() + noted
+    pub int Ask() => noted
 }
 
 l = spawn Left()
-r = spawn Right()
+r = spawn Right(l)
 l.Tell(r)
-print(r.Ask(l))
+print(r.Ask())

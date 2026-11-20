@@ -373,19 +373,22 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     public void A_method_its_own_actor_calls_directly_reads_its_calls_with_what_its_callers_pass()
     {
         // U57: `B.Peek` is called by no call through a reference, only by `B.Check` directly (U10), which `A.Save` calls with `this`: the
-        // call through `Peek`'s parameter reaches the caller that waits, and the program has no error; a top-level call of `Check` with
-        // another `A` makes the call in `Peek` an edge of `Check`, and the loop of `A.Save` and `B.Check` is one error, at line 2
+        // call through `Peek`'s parameter reaches the caller that waits, read so in `Peek`'s own entry too, whose call of `A.Load`, which
+        // waits on `B.Count`, would come back to `B`, and the program has no error; a top-level call of `Check` with another `A` makes the
+        // call in `Peek` an edge of `Check`, and the loop of `A.Save` and `B.Check` is one error, at line 2
         const string program = """
             actor A(B Other) {
                 pub int Save() => Other.Check(this) + 1
 
-                pub int Load() => 7
+                pub int Load() => Other.Count() + 7
             }
 
             actor B {
                 pub int Peek(A x) => x.Load()
 
                 pub int Check(A x) => Peek(x) * 10
+
+                pub int Count() => 1
             }
 
             b = spawn B()

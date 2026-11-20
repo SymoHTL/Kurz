@@ -4041,8 +4041,9 @@ another's, a method on a loop of each of the two types reaching a call that wait
 loops through one method of a third type that waits on both are one group, and two that pass through two different methods
 of a third type, each waiting on one of them, are two; the calls of a group are those that wait on a loop of it; the
 shortest loop through the call starts at the method of the type it comes back to that reaches the call in the fewest
-edges, the construction before the methods, and of those the first declared, and comes back by the call that waits on that
-type that a walk from the call meets first, taking at each method its calls in source order *(assumed: a reading of T40 (c) of comment 7051071630)*. The text names a `send` where no result is needed, or a change of the code so that its calls do not come back,
+edges, the construction before the methods, and of those the first declared, of two types it comes back to in as few edges
+the first declared, and comes back by the call that waits on that type that a walk from the call meets first, taking at each
+method its calls in source order *(assumed: a reading of T40 (c) of comment 7051071630)*. The text names a `send` where no result is needed, or a change of the code so that its calls do not come back,
 before `vouch` (U58). A call back to the caller is no edge (U57), and neither is a call after `vouch` (U58). The graph is
 read on every program that declares an actor, after every body and beside the other errors, a call that reported its own
 error making no edge, the walk reading each unit of code once, and a loop with a call in the program's own files is refused
@@ -4346,20 +4347,20 @@ actor Left {
     pub int Value() => 1
 }
 
-actor Right {
-    mut int noted = 0
+actor Right(Left Up) {
+    mut int noted = Up.Value()
 
     pub void Note(int n) {
-        noted = n
+        noted = Up.Value() + n
     }
 
-    pub int Ask(Left other) => other.Value() + noted
+    pub int Ask() => noted
 }
 
 l = spawn Left()
-r = spawn Right()
+r = spawn Right(l)
 l.Tell(r)
-print(r.Ask(l))
+print(r.Ask())
 ```
 
 Case: [actors/call-loop-spawns-alone.kz](../corpus/actors/call-loop-spawns-alone.kz)
