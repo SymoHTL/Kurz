@@ -1819,10 +1819,14 @@ is lowered where a holder ends: at the end of the block that declared a variable
 the end of its statement for a value that a call, a `with`, a `match` or an `else` made and that
 nothing keeps; where a case an argument propagates, or another jump, leaves a construction or a call
 that is no message before its last argument, for each value a slot took from the arguments before
-it, a field of the construction or a parameter written `move`, and each copy a call of more than one
-copy made before it, the last made first, as R1 states (assumed: a reading of the build) and as Rust drops
+it, a field of the construction or a parameter written `move`, each copy the call made before it, a
+call's one copy among the values its arguments made, and the callee or the receiver the call made
+before its arguments, the last made first, so that the callee or the receiver goes last, each copy
+after the end of its call's memo, which a jump between a call's first copy and its last ends first,
+as R1 states (assumed: a reading of the build) and as Rust drops
 the operands of an expression that one of its operands leaves (the Rust Reference, "Destructors", read on
-2026-11-18; issue 569); and where a value
+2026-11-18; issue 569), the callee and the receiver being operands of the call as Rust's function operand and
+receiver are (`expr.call.intro` and `expr.method.intro`, read on 2026-11-19); and where a value
 that holds the list ends. At zero the lists the items hold are let
 go of in turn, and the block goes back to `Free`. A parameter not written `move` borrows its argument and changes no
 count: nothing changes the value it borrows while the call runs, since the checker refuses a read of
