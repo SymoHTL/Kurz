@@ -1462,8 +1462,9 @@ public sealed partial class Checker
                 return Types.Error;
             }
 
-            // T19: the limits at every use that names the type with its arguments, never implied by a signature *(assumed: Q7 and Q16
-            // of issue 605, built at the lean while they wait for the owner)*
+            // T19: the limits at every use that names the type with its arguments, never implied by a signature *(assumed: Q7 of issue
+            // 605, built at the lean while it waits for the owner; Q16 of the product pass on issue 605, comment 7014593721, built at its
+            // default while it waits for the owner)*
             if (Unmet(data.TypeParameters.Zip(arguments)) is { } unmet)
             {
                 Report(ErrorIds.TypeMismatch, n.Line, UnmetText(unmet, data.Name));
@@ -1649,8 +1650,8 @@ public sealed partial class Checker
     /// T19: the interfaces the limits of a type parameter name, read with the type parameters of its declaration in scope. A limit
     /// that names a type that is no interface, a class, a data type, an enum, a number type or a type parameter, is <c>syntax</c>, as
     /// a union or a function type there is in the parser *(assumed: Q5 and Q6 of issue 605, built at the lean while it waits for the
-    /// owner)*, and an interface named twice in one list is <c>syntax</c> *(assumed: Q19 of issue 605, built at the lean while it waits
-    /// for the owner)*; a generic interface as a limit is <c>not supported</c>, which section 14 leaves open (T19). Each limit that is
+    /// owner)*, and an interface named twice in one list is <c>syntax</c> *(assumed: Q19 of the product pass on issue 605, comment
+    /// 7014593721, built at its default while it waits for the owner)*; a generic interface as a limit is <c>not supported</c>, which section 14 leaves open (T19). Each limit that is
     /// not read leaves the parameter with a limit unread, whose members and arguments report nothing more (E1).
     /// </summary>
     private void ResolveLimits(TypeParameter p, TypeParameterSymbol parameter)

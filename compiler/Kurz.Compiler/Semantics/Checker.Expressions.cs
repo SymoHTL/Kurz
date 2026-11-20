@@ -672,12 +672,12 @@ public sealed partial class Checker
 
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
         {
-            if (KindOfCopy(n.Name, m.Member) is { } kind)
+            if (KindOfCopy(n.Name, m.Member, m.Line) is { } kind)
             {
                 return kind; // T33: `T.Kind` in a copy, a constant
             }
 
-            if (IsUnreadName(n.Name) || UnreadTypeMember(n.Name, m.Member, m.Line))
+            if (IsUnreadName(n.Name) || UnreadTypeMember(n.Name, m.Member, m.Line) || TypeParameterMember(n.Name, m.Member, m.Line))
             {
                 return Typed.Error;
             }

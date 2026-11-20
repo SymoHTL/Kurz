@@ -1517,7 +1517,7 @@ public sealed partial class Checker
 
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
         {
-            if (IsUnreadName(n.Name) || ProcessNameAsValue(n.Name, n.Line) || UnreadTypeMember(n.Name, m.Member, m.Line))
+            if (IsUnreadName(n.Name) || ProcessNameAsValue(n.Name, n.Line) || UnreadTypeMember(n.Name, m.Member, m.Line) || TypeParameterMember(n.Name, m.Member, m.Line))
             {
                 CheckArgumentsLoosely(c);
                 return Typed.Error;

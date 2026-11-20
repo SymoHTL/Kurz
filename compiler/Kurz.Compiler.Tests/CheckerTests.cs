@@ -964,7 +964,8 @@ public sealed class CheckerTests
     [Fact]
     public void An_interface_named_twice_among_the_limits_is_syntax_and_the_limit_holds()
     {
-        // T19 *(assumed: Q19 of issue 605)*: `T: Shape & Shape` is `syntax` at the second name, and `T` keeps the limit
+        // T19 *(assumed: Q19 of the product pass on issue 605)*: `T: Shape & Shape` is `syntax` at the second name, and `T` keeps the
+        // limit
         Assert.Equal([(ErrorIds.Syntax, 9)], Errors(Limited + "int AreaOf<T: Shape & Shape>(T item) => item.Area()\n\nprint(AreaOf(Square(2)))"));
         Assert.Equal("`Shape` is named twice among the limits of `T` (T19)", ErrorText(Limited + "int AreaOf<T: Shape & Shape>(T item) => item.Area()\n\nprint(AreaOf(Square(2)))"));
     }
@@ -997,14 +998,17 @@ public sealed class CheckerTests
     {
         // T19 *(assumed: Q1 and Q2 of issue 605)*: the body is checked once, on its text, whether a call reaches it or not: a method of a
         // limit, of either of two limits, is called; a method or a field of a class that implements it, a `static` call through `T` and an
-        // operator (T18 *(assumed: Q3 of issue 605)*) are not; a method named without a call is a method as a value (K7, F11); a member of
-        // a `T?` needs its check (N2)
+        // operator (T18 *(assumed: Q3 of issue 605)*) are not; a method named without a call is `not supported`, as a class's is (K7, F11);
+        // a member of a `T?` needs its check (N2); a member named through `T` itself names `T` and the member, on a `T` without a limit too
         Clean(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nprint(AreaOf(Square(3)))");
         Clean(Limited + "interface Named {\n    string Name()\n}\n\nstring F<T: Shape & Named>(T item) => item.Name()\n\nprint(1)");
         Assert.Equal([(ErrorIds.UnknownName, 9)], Errors(Limited + "int Perim<T: Shape>(T item) => item.Perimeter()\n\nprint(1)"));
         Assert.Equal("a `T` has no member `Perimeter` (V10)", ErrorText(Limited + "int Perim<T: Shape>(T item) => item.Perimeter()\n\nprint(1)"));
         Assert.Equal([(ErrorIds.UnknownName, 9)], Errors(Limited + "int F<T: Shape>(T item) => item.Side\n\nprint(1)"));
         Assert.Equal([(ErrorIds.UnknownName, 9)], Errors(Limited + "int F<T: Shape>() => T.Create()\n\nprint(1)"));
+        Assert.Equal("`T.Create` names no member: a limit gives a value of `T` its methods alone (V10, T19)", ErrorText(Limited + "int F<T: Shape>() => T.Create()\n\nprint(1)"));
+        Assert.Equal("`T.Size` names no member: a limit gives a value of `T` its methods alone (V10, T19)", ErrorText(Limited + "int F<T: Shape>() => T.Size\n\nprint(1)"));
+        Assert.Equal("`U.Create` names no member: a limit gives a value of `U` its methods alone (V10, T19)", ErrorText("int F<U>() => U.Create()\n\nprint(1)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 9)], Errors(Limited + "bool Before<T: Shape>(T a, T b) => a < b\n\nprint(1)"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Limited + "int F<T: Shape>(T? item) => item.Area()\n\nprint(1)"));
         Assert.Equal(["10: a method as a value, named without a call (K7, F11)"], NotSupported(Limited + "int F<T: Shape>(T item) {\n    g = item.Area\n    return 1\n}\n\nprint(1)"));
@@ -1013,8 +1017,13 @@ public sealed class CheckerTests
     [Fact]
     public void A_method_that_two_limits_declare_is_ambiguous_call()
     {
-        // T19 with F13, as C#'s CS0121
+        // T19 with F13, as C#'s CS0121 *(assumed: a default of issue 605)*, with a text that names the method and both limits; two
+        // methods of the name with other parameters are picked by the arguments
         Assert.Equal([(ErrorIds.AmbiguousCall, 9)], Errors("interface A {\n    int M()\n}\n\ninterface B {\n    int M()\n}\n\nint Both<T: A & B>(T x) => x.M()\n\nprint(1)"));
+        Assert.Equal(
+            "`M` is declared with the same parameters by the limits `A` and `B` of `T`, so the call fits both (F13, T19)",
+            ErrorText("interface A {\n    int M()\n}\n\ninterface B {\n    int M()\n}\n\nint Both<T: A & B>(T x) => x.M()\n\nprint(1)"));
+        Clean("interface A {\n    int M(int n)\n}\n\ninterface B {\n    int M(string s)\n}\n\nint Both<T: A & B>(T x) => x.M(1) + x.M(\"s\")\n\nprint(1)");
     }
 
     [Fact]
@@ -1031,7 +1040,7 @@ public sealed class CheckerTests
     [Fact]
     public void A_type_argument_meets_a_limit_by_naming_the_interface()
     {
-        // T19 *(assumed: Q11 and Q17 of issue 605)*: a class that names the interface, itself or through a base (K6), and the interface
+        // T19 *(assumed: Q11 of issue 605, Q17 of its product pass)*: a class that names the interface, itself or through a base (K6), and the interface
         // itself meet the limit; a class with the method that does not name it, a data type and a number type do not, at the call's line
         Clean(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nShape s = Square(2)\nprint(AreaOf(s))");
         Clean(Limited + "class Base : Shape {\n    pub int Area() => 1\n}\n\nclass Big : Base {\n}\n\nint AreaOf<T: Shape>(T item) => item.Area()\n\nprint(AreaOf(Big()))");
@@ -1073,8 +1082,8 @@ public sealed class CheckerTests
     [Fact]
     public void An_unmet_limit_is_reported_at_the_line_of_the_call_after_the_inference()
     {
-        // T19 *(assumed: Q9 and Q20 of issue 605)*: at the call's first line, for an inferred type argument and a written one; T27's
-        // `cannot-infer` comes first
+        // T19 *(assumed: Q9 of issue 605, Q20 of its product pass)*: at the call's first line, for an inferred type argument and a
+        // written one; T27's `cannot-infer` comes first, the limit taking no part in the inference *(assumed: a default of issue 605)*
         Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nprint(AreaOf(\n    5))"));
         Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nprint(AreaOf<int>(5))"));
         Assert.Equal([(ErrorIds.CannotInfer, 11)], Errors(Limited + "int Count<T: Shape>() => 1\n\nprint(Count())"));
@@ -1083,7 +1092,7 @@ public sealed class CheckerTests
     [Fact]
     public void The_limit_of_a_data_type_holds_at_every_use_and_is_never_implied()
     {
-        // T19 *(assumed: Q7, Q16 and Q20 of issue 605)*: a construction, a written type of a parameter or a field, and a signature over
+        // T19 *(assumed: Q7 of issue 605, Q16 and Q20 of its product pass)*: a construction, a written type of a parameter or a field, and a signature over
         // `Box<U>` without the limit are `type-mismatch` at their line, the type declared after its use among them
         var box = Limited + "data Box<T: Shape>(T Item)\n\n";
         Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors(box + "b = Box(5)\nprint(b.Item)"));
@@ -1115,6 +1124,46 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 12)], Errors(square + "    return item.Side\n}\n\nprint(Measure(Square(3)))"));
         Assert.Equal([(ErrorIds.UnknownName, 13)], Errors(square + "    T x = item\n    return x.Perimeter()\n}\n\nprint(Measure(Square(3)))"));
         Assert.Equal([(ErrorIds.UnknownName, 13)], Errors(square + "    x = item\n    return x.Perimeter()\n}\n\nprint(Measure(Square(3)))"));
+        Assert.Equal("`T.Create` names no member: a limit gives a value of `T` its methods alone (V10, T19)", ErrorText(square + "    return T.Create()\n}\n\nprint(Measure(Square(3)))"));
+    }
+
+    [Fact]
+    public void A_carrier_the_build_does_not_read_is_not_supported_with_its_limit_by_a_text_that_names_it()
+    {
+        // T19 *(assumed: Q18 of the product pass on issue 605)*: a generic class, interface and actor and a method with type parameters
+        // of its own with a limit are `not supported` at their declaration, by the text that names the carrier, their limits unread (E1)
+        Assert.Equal(["9: not supported: a generic class (T19, chapter 7)"], Check(Limited + "class Box<T: Shape>(T Item)\n\nprint(1)").Diagnostics.Sorted.Select(d => d.ToString()));
+        Assert.Equal(["9: not supported: a generic interface (T19, K6)"], Check(Limited + "interface Store<T: Shape> {\n    int Count()\n}\n\nprint(1)").Diagnostics.Sorted.Select(d => d.ToString()));
+        Assert.Equal(["9: not supported: a generic actor (U1, T19)"], Check(Limited + "actor Worker<T: Shape> {\n}\n\nprint(1)").Diagnostics.Sorted.Select(d => d.ToString()));
+        Assert.Equal(["10: not supported: a method with type parameters of its own (section 4, T19)"], Check(Limited + "class Tool {\n    pub int Same<T: Shape>(T item) => 1\n}\n\nprint(1)").Diagnostics.Sorted.Select(d => d.ToString()));
+    }
+
+    [Fact]
+    public void A_copy_meets_a_limit_by_the_type_it_binds()
+    {
+        // T19 with T33 *(assumed: Q22 of issue 605, comment 7016425853)*: a function that reads its type passes its unlimited `T` on to a
+        // limited function, and each copy meets the limit by the type it binds: the copy for `Square` compiles, the one for `int` is
+        // Q9's `type-mismatch` at the inner call's line
+        var reader = Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nint M<T>(T item) {\n    print(T.Kind)\n    return AreaOf(item)\n}\n\n";
+        Clean(reader + "print(M(Square(3)))");
+        Assert.Equal([(ErrorIds.TypeMismatch, 13)], Errors(reader + "print(M(5))"));
+        Assert.Equal("`int` does not implement `Shape`, the limit of `T` of `AreaOf` (T19)", ErrorText(reader + "print(M(5))"));
+    }
+
+    [Fact]
+    public void The_kind_of_an_interface_type_in_a_copy_is_not_supported_at_the_member()
+    {
+        // T33 with T19 (Q11 of issue 605): a value whose type is an interface gives a copy the interface type, whose kind T33 does not name,
+        // so `T.Kind`, a `match` on it, a loop over `T.Fields` and `T.Make` are `not supported` there, with a limit and without one; the
+        // copy for a class reads its kind
+        const string Shape = "Shape s = Square(4)\n";
+        Clean(Limited + "int Measure<T: Shape>(T item) {\n    print(T.Kind)\n    return item.Area()\n}\n\nprint(Measure(Square(4)))");
+        const string Kind = "`T.Kind` where `T` is the interface type `Shape`, whose kind T33 does not name (T33)";
+        Assert.Equal(["10: " + Kind], NotSupported(Limited + "int Measure<T: Shape>(T item) {\n    print(T.Kind)\n    return item.Area()\n}\n\nShape s = Square(4)\nprint(Measure(s))"));
+        Assert.Equal(["10: " + Kind], NotSupported(Limited + "int Measure<T>(T item) {\n    print(T.Kind)\n    return 1\n}\n\nShape s = Square(4)\nprint(Measure(s))"));
+        Assert.Equal(["9: " + Kind], NotSupported(Limited + "string Name<T: Shape>(T item) => match T.Kind {\n    TypeKind.Class => \"class\"\n    else => \"other\"\n}\n\n" + Shape + "print(Name(s))"));
+        Assert.Equal(["10: `T.Fields` where `T` is the interface type `Shape`, whose kind T33 does not name (T33)"], NotSupported(Limited + "void Walk<T: Shape>(T item) {\n    for f in T.Fields {\n        print(f.Name)\n    }\n}\n\n" + Shape + "Walk(s)"));
+        Assert.Equal(["9: `T.Make` where `T` is the interface type `Shape`, whose kind T33 does not name (T33)"], NotSupported(Limited + "T Fresh<T: Shape>(T item) => T.Make(f => 0)\n\n" + Shape + "print(Fresh(s).Area())"));
     }
 
     // ---- functions (chapter 8) ----------------------------------------------------------------------
