@@ -4418,7 +4418,7 @@ function that calls `Cache.Get()`, waits for a start that waits for it, which th
 wait that finds nothing left to run reads as `deadlock` (U18) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*: at that call's line where the top-level
 code ran the start, a call in a function it called being its own (U18), and, where an actor's message runs the start, at
 the line of the top-level code's own call that waits, or, where the top-level code waits on nothing, the end of the program
-drops the loop (U13); a `send` from that code waits in the inbox behind the start *(assumed: a reading of the build, proposed with this record and not put to the owner)*.
+drops the loop (U13) *(assumed: a reading of the build, proposed with this record and not put to the owner)*; a `send` from that code waits in the inbox behind the start *(assumed: a reading of the build, proposed with this record and not put to the owner)*.
 
 Case: [actors/per-node-first-message.kz](../corpus/actors/per-node-first-message.kz)
 ```kurz
