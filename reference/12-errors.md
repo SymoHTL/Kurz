@@ -274,8 +274,9 @@ reading of issue 39, comment 6926929175, which the answer of 2026-11-16 on pull 
 A case that runs its program's tests carries the line `// command: test` (chapter 0, Y2), its `// |` lines what
 `kurz test` writes on standard output (Y3), and where a test of it fails it names with `throws` the id and the line
 of the words under the first `FAILED` line, its exit code the 1 of a failed test *(assumed: the corpus line of issue
-586, comment 6993110710, a reading of the build said back there)*, the first `FAILED` line where more than one test
-fails (§2, the owner, 2026-11-20, issue 586, comment 7051499099: the reading of comment 6994632453 stands).
+586, comment 6993110710, a reading of the build said back there)*, the first `FAILED` line where more
+than one test fails (§2, the owner, 2026-11-20, issue 586, comment 7051499099: the reading of comment
+6994632453 stands).
 The program's exit code is pinned with it (O6). The owner chose this on 2026-10-03, against a
 header that says only that something is thrown; the cost is a word the runtime carries in every
 exception.

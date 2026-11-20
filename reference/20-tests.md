@@ -15,13 +15,12 @@ empty name, `""` or `r""`, and a `"""` block (L13), raw or not, are `syntax` at 
 (§11, the owner, 2026-11-20, issue 586, comment 7051499099, Q12 (a) of comment 6998786049, which replaces
 the reading of the build said back there, every literal with no hole a name). A hole in the name is `syntax`
 at its line (E4) *(assumed: F19 of issue 586, comment 6993110710, a reading of the build said back there)*.
-A `test` block inside a declaration or a block, a
-function's, a lambda's, an `if`'s, a class's or another test's, is `syntax` at the line of its `test`
-(E4), and the parser reads the block and goes on with what follows it; a second test of one name in a
-program is `syntax` at the line of the second, its text naming the line of the first *(assumed: D3 of
-issue 586, comment 6992687784, said back there)*. The names are compared by their value, so that `"A"`
-and `"\u0041"` are one name (§11, the owner, 2026-11-20, issue 586, comment 7051499099, Q10 (a) of comment
-6994632453 at its lean).
+A `test` block inside a declaration or a block, a function's, a lambda's, an `if`'s, a class's or another
+test's, is `syntax` at the line of its `test` (E4), and the parser reads the block and goes on with what
+follows it; a second test of one name in a program is `syntax` at the line of the second, its text naming
+the line of the first *(assumed: D3 of issue 586, comment 6992687784, said back there)*. The names are
+compared by their value, so that `"A"` and `"\u0041"` are one name (§11, the owner, 2026-11-20, issue
+586, comment 7051499099, Q10 (a) of comment 6994632453 at its lean).
 
 `test`, `check`, `mock` and `advance` are words only where their form stands (L18): `test` at the start
 of a statement before a string literal, or before `cluster` and a token that can start an expression and
@@ -138,12 +137,12 @@ compared code point by code point (§2, the owner, 2026-11-20, issue 586, commen
 comment 6998786049 at its lean), an order the build, which reads one file and follows none, does not
 reach. It takes `--release`, `--lines` and `--cpu <name>` before the file, as `kurz run` takes them (§2,
 the owner, 2026-11-20, comment 7051499099: reading m of comment 6998786049, a reading of the build said
-back there, stands), and no argument after the file: `--` or another argument there is an error of its usage, since a
-test reads no `args` (Y5) *(assumed: F17 of comment 6993110710, a reading of the build said back there)*.
-It has no filter by name, no seed, no parallel tests and no format of its output but text *(assumed: D4
-of comment 6992687784, said back there)*. A case of the corpus that runs its program's tests carries the
-header line `// command: test` (chapter 0) *(assumed: the corpus line of comment 6993110710, a reading of
-the build said back there)*.
+back there, stands), and no argument after the file: `--` or another argument there is an error of its
+usage, since a test reads no `args` (Y5) *(assumed: F17 of comment 6993110710, a reading of the build said
+back there)*. It has no filter by name, no seed, no parallel tests and no format of its output but text
+*(assumed: D4 of comment 6992687784, said back there)*. A case of the corpus that runs its program's tests
+carries the header line `// command: test` (chapter 0) *(assumed: the corpus line of comment 6993110710, a
+reading of the build said back there)*.
 
 Case: [tests/two-tests-in-order.kz](../corpus/tests/two-tests-in-order.kz)
 ```kurz
@@ -229,23 +228,24 @@ one chain (U17), and the runner's wait meets `deadlock` where the test's actor w
 can run, a block of its child's policy among them, as `tests/test-deadlock.kz` shows. The runner is the
 root actor, which runs the tests in place of the program's statements, and each test's actor is its child
 with the policy `stop` (U25), so that a crash of the test's actor fails that test and nothing restarts
-(§11, the owner, 2026-11-20, comment 7051499099, Q13 (a) of comment 6998786049 at its lean). An error
-that ends the process wherever it happens (U19), `allocation-failed` among them, and on Windows an
-overflow of an actor's stack, at which the build ends the process as the system ends it (U19), ends the
-run inside a test too: its error line stands on standard error, and neither that test's line, nor the
-tests after it, nor the counts are written, and the exit code is 1 (§11, the owner, 2026-11-20, comment
-7051499099: reading l of comment 6997332522, a reading of the build said back there, stands). The crash of a test's own actor writes no line on standard
-error, its words standing under the test's `FAILED` line (Y3), and the crash of an actor the test spawned
-keeps its line (U24). At a test's end every actor it made is dropped at once, parked ones too, as U13
-drops what is queued at a program's end; the numbers of actors (U2) go on counting, each test's own actor
-taking one as a spawned actor does, so that the actors of a test are numbered after those of the tests
-before it, so that where each of two tests spawns one child, the first test's child is `#2` and the
-second's `#4`, and a socket or a file its actors hold stays open *(assumed: F3, F6 and F22 of comment
-6993110710, readings of the build said back there)*. No line names a test's own actor, since its crash
-writes none: the name `test` that F2 of comment 6993110710 gives it in the log line of a crash is a
-reading with no case. A test has no bound of time: a test that waits on a wait the runtime does not own,
-a call on a file, whose wait runs on the pool of threads for blocking calls, or a `raw` call of a C
-function that blocks (§11), holds the run *(assumed: D6 of comment 6992687784, said back there)*.
+(§11, the owner, 2026-11-20, comment 7051499099, Q13 (a) of comment 6998786049 at its lean). An error that
+ends the process wherever it happens (U19), `allocation-failed` among them, and on Windows an overflow of
+an actor's stack, at which the build ends the process as the system ends it (U19), ends the run inside a
+test too: its error line stands on standard error, and neither that test's line, nor the tests after it,
+nor the counts are written, and the exit code is 1 (§11, the owner, 2026-11-20, comment 7051499099:
+reading l of comment 6997332522, a reading of the build said back there, stands). The crash of a test's
+own actor writes no line on standard error, its words standing under the test's `FAILED` line (Y3), and
+the crash of an actor the test spawned keeps its line (U24). At a test's end every actor it made is
+dropped at once, parked ones too, as U13 drops what is queued at a program's end; the numbers of actors
+(U2) go on counting, each test's own actor taking one as a spawned actor does, so that the actors of a
+test are numbered after those of the tests before it, so that where each of two tests spawns one child,
+the first test's child is `#2` and the second's `#4`, and a socket or a file its actors hold stays open
+*(assumed: F3, F6 and F22 of comment 6993110710, readings of the build said back there)*. No line names a
+test's own actor, since its crash writes none: the name `test` that F2 of comment 6993110710 gives it in
+the log line of a crash is a reading with no case. A test has no bound of time: a test that waits on a
+wait the runtime does not own, a call on a file, whose wait runs on the pool of threads for blocking
+calls, or a `raw` call of a C function that blocks (§11), holds the run *(assumed: D6 of comment
+6992687784, said back there)*.
 
 A test is checked as a function of its file with no parameter and a `void` result is: its body reads no
 variable of the top-level code, `unknown-name` at the read, and a declaration in the test of a name the
@@ -323,12 +323,12 @@ test "throws again" {
 
 `check condition` is a statement that stands in any code, the top-level code, a function, a method, a
 lambda and a test, in every build *(assumed: F8 of issue 586, comment 6993110710, a reading of the build
-said back there)*, `check(x)` among its forms (Y1). Its condition is a `bool`, read as a condition is (C3): a value of another type
-is `type-mismatch` at its line, a nullable one `nullable-unchecked` (N2), and a call with a `void` success
-`syntax` (O10). A `check` narrows nothing: after `check x != null` the variable `x` is still nullable in
-the statements after it, `nullable-unchecked` at a use that needs its value (N2), as Rust's `assert!`
-leaves an `Option` an `Option` (§11, the owner, 2026-11-20, issue 586, comment 7051499099, Q9 (a) of
-comment 6994632453 at its lean).
+said back there)*, `check(x)` among its forms (Y1). Its condition is a `bool`, read as a condition is
+(C3): a value of another type is `type-mismatch` at its line, a nullable one `nullable-unchecked` (N2),
+and a call with a `void` success `syntax` (O10). A `check` narrows nothing: after `check x != null` the
+variable `x` is still nullable in the statements after it, `nullable-unchecked` at a use that needs its
+value (N2), as Rust's `assert!` leaves an `Option` an `Option` (§11, the owner, 2026-11-20, issue 586,
+comment 7051499099, Q9 (a) of comment 6994632453 at its lean).
 
 A false condition crashes the actor that runs it with the run-time error `check-failed`, at the file and
 the line of the `check`. Its text is the condition as the source writes it, each run of spaces, line
