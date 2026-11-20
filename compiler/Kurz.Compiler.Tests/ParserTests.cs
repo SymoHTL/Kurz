@@ -1070,8 +1070,8 @@ public sealed class ParserTests
     public void A_test_block_check_mock_and_advance_take_their_forms(string program, string tree)
     {
         // Y1: `test "name" { ... }`, the name kept as written (F19); Y6: `check condition`, its text kept; Y9: `mock X with Y`, two types,
-        // and Y10: `advance d`, an expression, the forms of section 11's samples, `mock UserStore with FakeStore` and `advance 60days`, while
-        // Y9 and Y10 are open on Q7 and Q8 (assumed: Q1, D2 and D3 of issue 586, comment 6992687784)
+        // and Y10: `advance d`, an expression, the forms of section 11's samples, `mock UserStore with FakeStore` and `advance 60days` (the
+        // owner's answers of 2026-11-20, issue 586, comment 7051499099, Q1, Q7 and Q8 of comment 6992687784; assumed: D2 and D3 there)
         Assert.Equal(tree, Tree(program));
     }
 
@@ -1112,6 +1112,50 @@ public sealed class ParserTests
         Assert.IsType<VariableDeclaration>(tree.Statements[^1]);
     }
 
+    [Theory]
+    [InlineData("test \"\" {\n}\nint x = 1")]
+    [InlineData("test r\"\" {\n}\nint x = 1")]
+    [InlineData("test r#\"\"# {\n}\nint x = 1")]
+    public void An_empty_name_of_a_test_is_syntax_at_its_line(string program)
+    {
+        // Y1 with E4: a test's name has at least one character, plain or raw, so that no result line reads `test "" ... ok`; the block is
+        // read all the same (the owner's answers of 2026-11-20, issue 586, comment 7051499099, Q12 (a) of comment 6998786049)
+        var (tree, diagnostics) = Parse(program);
+        Assert.Equal([(ErrorIds.Syntax, 1)], diagnostics.Items.Select(d => (d.Id, d.Line)));
+        Assert.Contains("at least one character", diagnostics.Items.Single().Message);
+        Assert.IsType<VariableDeclaration>(tree.Statements[^1]);
+    }
+
+    [Theory]
+    [InlineData("test \"\"\"\n    adds\n    \"\"\" {\n}\nint x = 1")]
+    [InlineData("test r\"\"\"\n    adds\n    \"\"\" {\n}\nint x = 1")]
+    [InlineData("test \"\"\"\n    \"\"\" {\n}\nint x = 1")]
+    public void A_name_of_a_test_in_a_block_of_lines_is_syntax_at_the_line_of_its_test(string program)
+    {
+        // Y1 with E4: a test's name is a literal of one line, so that it fits its result line; a `"""` block, raw or not (L13, L20), an
+        // empty one among them, is one `syntax` at the line of the `test`, and the block is read all the same (the owner's answers of
+        // 2026-11-20, issue 586, comment 7051499099, Q12 (a) of comment 6998786049)
+        var (tree, diagnostics) = Parse(program);
+        Assert.Equal([(ErrorIds.Syntax, 1)], diagnostics.Items.Select(d => (d.Id, d.Line)));
+        Assert.Contains("of one line", diagnostics.Items.Single().Message);
+        Assert.IsType<VariableDeclaration>(tree.Statements[^1]);
+    }
+
+    [Theory]
+    [InlineData("test \"a\" {\n}", "\"a\"")]
+    [InlineData("test \" \" {\n}", "\" \"")]
+    [InlineData("test \"\\u0041\" {\n}", "\"\\u0041\"")]
+    [InlineData("test r\"a\\b{c}\" {\n}", "r\"a\\b{c}\"")]
+    [InlineData("test r#\"say \"hi\"\"# {\n}", "r#\"say \"hi\"\"#")]
+    public void A_name_of_a_test_is_a_literal_of_one_line_plain_or_raw_with_one_character_or_more(string program, string written)
+    {
+        // Y1: the positive control of the two refusals before this test: a literal of one line, plain or raw (L20), one character and a
+        // space among them, is a name, kept as written (the owner's answers of 2026-11-20, issue 586, comment 7051499099, Q12 (a))
+        var (tree, diagnostics) = Parse(program);
+        Assert.Empty(diagnostics.Items);
+        Assert.Equal(written, Assert.IsType<TestDeclaration>(tree.Statements.Single()).Written);
+    }
+
     [Fact]
     public void A_mock_whose_type_no_with_follows_is_no_mock()
     {
@@ -1134,7 +1178,8 @@ public sealed class ParserTests
     public void The_text_of_a_check_is_its_condition_as_written_on_one_line(string program, string text)
     {
         // Y6: the text of the failure is the condition as the source writes it, each run of spaces, line breaks and comments between two
-        // tokens one space (assumed: Q1 of issue 586, comment 6992687784, and F10 of comment 6993110710)
+        // tokens one space (the owner's answers of 2026-11-20, issue 586, comment 7051499099, Q1 of comment 6992687784, and F10 of
+        // comment 6993110710 as comment 6994632453 said it back)
         Assert.Equal(text, Assert.IsType<AssertionStatement>(Parse(program).Program.Statements.Single()).Text);
     }
 

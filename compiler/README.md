@@ -2759,9 +2759,12 @@ that sit under a rule by its id. Every one is pinned by a test.
   declaration, so that a call of a variable so named at the start of a statement is the statement, a
   function value named `check` is not called there, and `check x = 1`, a declaration of a variable of a type
   named `check`, is a `check` of `x` with `= 1` after it, `syntax` at its line; a `test` block in a class's
-  body is the member parser's `syntax` at its line; and the text of a `check` is its tokens as the source
-  writes them, a `>` of a `>>` that type arguments took apart among them, each run of spaces, line breaks
-  and comments between two tokens one space. Pinned by `ParserTests`.
+  body is the member parser's `syntax` at its line; a test's name is a string literal of one line with at
+  least one character, so that the empty name, `""` or `r""`, and a `"""` block, raw or not, are `syntax`
+  at the line of its `test` (Q12 (a) of comment 6998786049, the owner's answer of 2026-11-20, comment
+  7051499099); and the text of a `check` is its tokens as the source writes them, a `>` of a `>>` that
+  type arguments took apart among them, each run of spaces, line breaks and comments between two tokens
+  one space. Pinned by `ParserTests`.
 
 Six shapes still get two errors, or an uneven one, from the front end, each low: `if x print(1)
 else print(2)` is `braces-required` twice on one line, because the postfix `else` binds to the call
@@ -3057,7 +3060,7 @@ a field of any class among them, or a value of a type parameter, which the copy 
 argument makes one of them, whose copy would share the sender's block by its count (U12); `copy` at a call that is no message before a value that
 reaches a function value or an interface's value, which no word makes cross (U12); a log call
 inside an actor (P8); the cluster test of section 13, `test cluster N seed S { ... }`, whose words and
-block the parser passes over (Y8); and `mock X with Y` and `advance d`, whose questions are open (Y9, Y10),
+block the parser passes over (Y8); and `mock X with Y` and `advance d`, whose answers of 2026-11-20 it does not build (Y9, Y10),
 the duration of an `advance` checked as the bound of `within` is (U40) and its error reported beside the
 line. The refusal of
 the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered

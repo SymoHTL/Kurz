@@ -2,26 +2,26 @@
 
 A program's tests are `test` blocks at the top level of its files, which `kurz test file.kz` runs one at a
 time, each in an actor of its own, and `check`, a statement that stands in any code (§2, §11; issue 586,
-comments 6992687784 and 6993110710, each rule marked as it stands while the questions of the first comment
-wait for the owner). The cluster test of §13, `mock` and `advance` are read and answered `not supported`
+comments 6992687784 and 6993110710, and the owner's answers of 2026-11-20, comment 7051499099, each rule
+marked as it stands). The cluster test of §13, `mock` and `advance` are read and answered `not supported`
 (Y8 to Y10).
 
-### Y1 (assumed, §11) `test "name" { ... }`, and its words
+### Y1 (decided, §11) `test "name" { ... }`, and its words
 
-A test is a block `test "name" { ... }` at the top level of a file: the word `test`, a plain string
-literal, its name, and a block that opens on the line of the name, as an `if`'s does (C1). The name is
-printed as written, and a hole in it is `syntax` at its line (E4) *(assumed: F19 of issue 586, comment
-6993110710, a reading of the build said back there)*. Which forms of a string literal a name takes, the
-empty name `""`, a raw literal (L20) and a `"""` block (L13) among them, is open (Q12 of issue 586,
-comment 6998786049); the build takes every string literal with no hole, those three among them, and
-prints a `"""` name as written, across lines *(assumed: a reading of the build, said back in comment
-6998786049, while Q12 waits for the owner)*. A `test` block inside a declaration or a block, a
+A test is a block `test "name" { ... }` at the top level of a file: the word `test`, a string literal of
+one line, plain or raw (L20), with at least one character, its name, and a block that opens on the line of
+the name, as an `if`'s does (C1). The name is printed as written, so that it fits its result line (Y3); the
+empty name, `""` or `r""`, and a `"""` block (L13), raw or not, are `syntax` at the line of the `test` (E4)
+(§11, the owner, 2026-11-20, issue 586, comment 7051499099, Q12 (a) of comment 6998786049, which replaces
+the reading of the build said back there, every literal with no hole a name). A hole in the name is `syntax`
+at its line (E4) *(assumed: F19 of issue 586, comment 6993110710, a reading of the build said back there)*.
+A `test` block inside a declaration or a block, a
 function's, a lambda's, an `if`'s, a class's or another test's, is `syntax` at the line of its `test`
 (E4), and the parser reads the block and goes on with what follows it; a second test of one name in a
 program is `syntax` at the line of the second, its text naming the line of the first *(assumed: D3 of
 issue 586, comment 6992687784, said back there)*. The names are compared by their value, so that `"A"`
-and `"\u0041"` are one name *(assumed: Q10 of issue 586, comment 6994632453, built at the lean while it
-waits for the owner)*.
+and `"\u0041"` are one name (§11, the owner, 2026-11-20, issue 586, comment 7051499099, Q10 (a) of comment
+6994632453 at its lean).
 
 `test`, `check`, `mock` and `advance` are words only where their form stands (L18): `test` at the start
 of a statement before a string literal, or before `cluster` and a token that can start an expression and
@@ -33,7 +33,10 @@ there. A call of a variable named `check` or `advance` at the start of a stateme
 every other `const assert(` at the start of a statement is (T37): a function value so named is not called
 there, and a declaration of a variable whose type is so named, `check x = 1`, is a `check` of `x` with
 `= 1` after it, `syntax` at its line (E4) *(assumed: D2 of comment 6992687784, said back there, and F9 of
-comment 6993110710, a reading of the build said back there)*.
+comment 6993110710, a reading of the build said back there, for `advance(d)` and for the declaration)*.
+That `check(x)` at the start of a statement is the statement, so that a program that calls a function value
+named `check` there reads as a `check`, is F9 as comment 6994632453 said it back (§11, the owner,
+2026-11-20, issue 586, comment 7051499099: that reading stands).
 
 Case: [tests/test-in-function.kz](../corpus/tests/test-in-function.kz)
 ```kurz
@@ -54,6 +57,24 @@ test "adds" {
 
 test "adds" {
     check 2 + 2 == 4
+}
+```
+
+Case: [tests/test-name-empty.kz](../corpus/tests/test-name-empty.kz)
+```kurz
+// a test's name has at least one character, so that no result line reads `test "" ... ok`
+test "" {
+    check 1 + 1 == 2
+}
+```
+
+Case: [tests/test-name-block.kz](../corpus/tests/test-name-block.kz)
+```kurz
+// a test's name is a string literal of one line, so that it fits its result line, and a `"""` block is none
+test """
+    adds
+    """ {
+    check 1 + 1 == 2
 }
 ```
 
@@ -111,11 +132,13 @@ print(x.N)
 
 `kurz test file.kz` runs every `test` block of the program that file starts, of its files and never of
 `std/`'s, one at a time, in the order of the blocks in each file, and runs no top-level code of the
-program *(assumed: D1 of issue 586, comment 6992687784, said back there)*. The order of a program's
-files, which D1 names and does not give, is open (§14; Q11 of issue 586, comment 6998786049): the build
-reads one file and follows none. It takes `--release`, `--lines` and `--cpu <name>` before the file, as
-`kurz run` takes them (§2) *(assumed: reading m of comment 6998786049, a reading of the build said back
-there)*, and no argument after the file: `--` or another argument there is an error of its usage, since a
+program *(assumed: D1 of issue 586, comment 6992687784, said back there)*. The files, which D1 names and
+does not order, run in §4's order of a program's files, their paths relative to the program's root
+compared code point by code point (§2, the owner, 2026-11-20, issue 586, comment 7051499099, Q11 (a) of
+comment 6998786049 at its lean), an order the build, which reads one file and follows none, does not
+reach. It takes `--release`, `--lines` and `--cpu <name>` before the file, as `kurz run` takes them (§2,
+the owner, 2026-11-20, comment 7051499099: reading m of comment 6998786049, a reading of the build said
+back there, stands), and no argument after the file: `--` or another argument there is an error of its usage, since a
 test reads no `args` (Y5) *(assumed: F17 of comment 6993110710, a reading of the build said back there)*.
 It has no filter by name, no seed, no parallel tests and no format of its output but text *(assumed: D4
 of comment 6992687784, said back there)*. A case of the corpus that runs its program's tests carries the
@@ -138,16 +161,16 @@ test "second" {
 }
 ```
 
-### Y3 (assumed, §2) What `kurz test` writes, and its exit code
+### Y3 (decided, §2) What `kurz test` writes, and its exit code
 
 `kurz test` writes a line for each test on standard output, in the order the tests run, unless an error
 ends the process (Y5): `test "name" ... ok`, or `test "name" ... FAILED` with the words that failed it
 indented under it, the words of the log line of the crash that failed it (U24), after its `crashed: `, or
 those of Y5's `deadlock`, which is no crash; then a summary, `<n> tests: <p> passed, <f> failed`, each
 count written, a zero among them, and `test` in place of `tests` where the program has one,
-`1 test: 1 passed, 0 failed` *(assumed: Q3 of issue 586, comment 6992687784, built at the default while
-it waits for the owner, F1 and F21 of comment 6993110710, readings of the build said back there, and
-reading n of comment 6998786049, a reading of the build said back there)*:
+`1 test: 1 passed, 0 failed` (§2, the owner, 2026-11-20, issue 586, comment 7051499099, Q3 of comment
+6992687784 at its lean, and reading n of comment 6998786049, a reading of the build said back there,
+which stands) *(assumed: F1 and F21 of comment 6993110710, readings of the build said back there)*:
 
 ```text
 test "rename fails for unknown user" ... ok
@@ -159,8 +182,8 @@ test "survives 60 days" ... FAILED
 A test's own `print` goes to standard output as it runs, so that its lines stand before the line of its
 result *(assumed: D5 of comment 6992687784, said back there, and F4 of comment 6993110710, a reading of
 the build said back there)*. The command exits with 0 where every test passed and with 1 where one failed,
-the code of a refused program (§2) *(assumed: Q4 of comment 6992687784, built at the default while it
-waits for the owner)*.
+the code of a refused program (§2, the owner, 2026-11-20, comment 7051499099, Q4 of comment 6992687784
+at its lean).
 
 Case: [tests/check-fails-in-test.kz](../corpus/tests/check-fails-in-test.kz)
 ```kurz
@@ -181,37 +204,37 @@ test "adds" {
 }
 ```
 
-### Y4 (assumed, §2) A program with no test
+### Y4 (decided, §2) A program with no test
 
 `kurz test` on a program with no `test` block writes `error: no test in users.kz` on standard error, and
 after it, on standard error too, a `help:` line that names the form, ``help: write a test as
-`test "name" { ... }` at the top level of the file``, indented by two spaces *(assumed: reading k of
-comment 6997332522, a reading of the build said back there)*, and exits with 1, so that a run that
-checked nothing does not look like a pass *(assumed: Q6 of issue 586, comment 6992687784, built at the
-default while it waits for the owner)*.
+`test "name" { ... }` at the top level of the file``, indented by two spaces (§2, the owner, 2026-11-20,
+issue 586, comment 7051499099: reading k of comment 6997332522, a reading of the build said back there,
+stands), and exits with 1, so that a run that checked nothing does not look like a pass (§2, the owner,
+2026-11-20, comment 7051499099, Q6 of comment 6992687784 at its lean).
 
 No case: the refusal of a program with no test is the command's own, with no id (E2), which a case cannot
 expect; `CommandTests` holds its line, its `help:` line and its exit code.
 
-### Y5 (assumed, §11) A test runs in an actor of its own
+### Y5 (decided, §11) A test runs in an actor of its own
 
 Each test runs in an actor of its own, a child of the runner. The test fails where that actor crashes, by
 a `throw`, a failed `check` (Y6), `overflow` in a test build (T5), an overflow of the test's own stack,
 the crash of its actor on Linux (U19), or a deadline, or where the runner's wait for it meets `deadlock`
 (U18), which then names the test's line, `deadlock at users.kz:4`, since a parked wait keeps no place of
-its own; the run goes on with the test after it *(assumed: Q2 of issue 586, comment 6992687784, built at
-the default while it waits for the owner, and F5 of comment 6993110710, a reading of the build said back
-there)*. A test's code runs as its actor's, its calls of one chain (U17), and the runner's wait meets
-`deadlock` where the test's actor waits on a message only it can run, a block of its child's policy among
-them, as `tests/test-deadlock.kz` shows. Which actor is the runner, and which policy the test's actor
-has, are open (Q13 of issue 586, comment 6998786049): the build runs the tests in the root actor, in
-place of the program's statements, and spawns each test's actor as its child with the policy `stop` (U25)
-*(assumed: a reading of the build, said back in comment 6998786049, while Q13 waits for the owner)*. An
-error that ends the process wherever it happens (U19), `allocation-failed` among them, and on Windows an
+its own; the run goes on with the test after it (§11, the owner, 2026-11-20, issue 586, comment
+7051499099, Q2 of comment 6992687784 at its lean) *(assumed: F5 of comment 6993110710, a reading of the
+build said back there, for the line `deadlock` names)*. A test's code runs as its actor's, its calls of
+one chain (U17), and the runner's wait meets `deadlock` where the test's actor waits on a message only it
+can run, a block of its child's policy among them, as `tests/test-deadlock.kz` shows. The runner is the
+root actor, which runs the tests in place of the program's statements, and each test's actor is its child
+with the policy `stop` (U25), so that a crash of the test's actor fails that test and nothing restarts
+(§11, the owner, 2026-11-20, comment 7051499099, Q13 (a) of comment 6998786049 at its lean). An error
+that ends the process wherever it happens (U19), `allocation-failed` among them, and on Windows an
 overflow of an actor's stack, at which the build ends the process as the system ends it (U19), ends the
 run inside a test too: its error line stands on standard error, and neither that test's line, nor the
-tests after it, nor the counts are written, and the exit code is 1 *(assumed: reading l, a reading of the
-build said back in comment 6997332522)*. The crash of a test's own actor writes no line on standard
+tests after it, nor the counts are written, and the exit code is 1 (§11, the owner, 2026-11-20, comment
+7051499099: reading l of comment 6997332522, a reading of the build said back there, stands). The crash of a test's own actor writes no line on standard
 error, its words standing under the test's `FAILED` line (Y3), and the crash of an actor the test spawned
 keeps its line (U24). At a test's end every actor it made is dropped at once, parked ones too, as U13
 drops what is queued at a program's end; the numbers of actors (U2) go on counting, each test's own actor
@@ -296,16 +319,16 @@ test "throws again" {
 }
 ```
 
-### Y6 (assumed, §11) `check`
+### Y6 (decided, §11) `check`
 
 `check condition` is a statement that stands in any code, the top-level code, a function, a method, a
-lambda and a test, in every build *(assumed: F8 and F9 of issue 586, comment 6993110710, readings of the
-build said back there)*. Its condition is a `bool`, read as a condition is (C3): a value of another type
+lambda and a test, in every build *(assumed: F8 of issue 586, comment 6993110710, a reading of the build
+said back there)*, `check(x)` among its forms (Y1). Its condition is a `bool`, read as a condition is (C3): a value of another type
 is `type-mismatch` at its line, a nullable one `nullable-unchecked` (N2), and a call with a `void` success
 `syntax` (O10). A `check` narrows nothing: after `check x != null` the variable `x` is still nullable in
 the statements after it, `nullable-unchecked` at a use that needs its value (N2), as Rust's `assert!`
-leaves an `Option` an `Option` *(assumed: Q9 of issue 586, comment 6994632453, built at the lean while it
-waits for the owner)*.
+leaves an `Option` an `Option` (§11, the owner, 2026-11-20, issue 586, comment 7051499099, Q9 (a) of
+comment 6994632453 at its lean).
 
 A false condition crashes the actor that runs it with the run-time error `check-failed`, at the file and
 the line of the `check`. Its text is the condition as the source writes it, each run of spaces, line
@@ -313,9 +336,10 @@ breaks and comments between two of its tokens one space, and for one of the six 
 `<`, `<=`, `>` and `>=`, alone or in parentheses, whose two sides show their values as a hole of an
 interpolation shows them (L6), each side's value after it in parentheses, `names.Count == 2 (3 == 2)`,
 each side evaluated once; a side of a type whose text no `print` shows, a `Text()` without `pub` (A9), a
-raw pointer or a vector among them, leaves the condition its text alone *(assumed: Q1 of issue 586,
-comment 6992687784, built at the default while it waits for the owner, and F1 and F10 of comment
-6993110710, readings of the build said back there)*. At the top level, where the crash ends the process
+raw pointer or a vector among them, leaves the condition its text alone (§11, the owner, 2026-11-20,
+issue 586, comment 7051499099, Q1 of comment 6992687784 at its lean, and F10 of comment 6993110710 as
+comment 6994632453 said it back, which stands) *(assumed: F1 of comment 6993110710, a reading of the build
+said back there)*. At the top level, where the crash ends the process
 (U19), its error line ends with a colon and the text starts on the line after it, before the trace, as a
 thrown value's text does (O6). Under `kurz test` the words of such a crash that the test's own actor
 takes, by a `check` of its own code or of a child that escalates into it (U25), stand under its test's
@@ -347,12 +371,12 @@ Positive(-1)
 
 Case: [tests/check-fails-in-test.kz](../corpus/tests/check-fails-in-test.kz)
 
-### Y7 (assumed, §11) `build`, `run` and `exec` check every test
+### Y7 (decided, §11) `build`, `run` and `exec` check every test
 
 Every command checks every `test "name"` block (Y1), the cluster test of Y8 apart, so that an error in
 one refuses `kurz build`, `kurz run` and `kurz exec` of its program as an error elsewhere does, and none
-of them runs a test *(assumed: Q5 of issue 586, comment 6992687784, built at the default while it waits
-for the owner)*.
+of them runs a test (§11, the owner, 2026-11-20, issue 586, comment 7051499099, Q5 of comment 6992687784
+at its lean).
 
 Case: [tests/test-error-refuses-build.kz](../corpus/tests/test-error-refuses-build.kz)
 ```kurz
@@ -375,29 +399,27 @@ supported` at the line of its `test`, its words and its block read to the block'
 
 No case: the build answers `not supported` to the form, and a case stands on what a build does.
 
-### Y9 (open) `mock X with Y`
+### Y9 (decided, §11) `mock X with Y`
 
-`mock X with Y` is read, two types after `mock` and `with`, and answered `not supported` at its line, its
-types not resolved (§11, assumed there: F20 of issue 586, comment 6993110710).
-`mock` takes a class or an actor type, a `per node` one among them, as `X` and as `Y`, and a function
-takes no swap (§11, assumed there: D9 of comment 6992687784, said back there). What `Y` has to offer
-nobody chose (§14; Q7 of comment 6992687784): (a) each member of `X` that the code the test reaches
-calls, with the same types, checked at each such call, `mock-mismatch` at the `mock` line for a member
-`Y` lacks or types otherwise and `mock-unreached` for a `mock` whose `X` nothing the test runs reaches;
-(b) every `pub` member of `X`, with the same types, checked at the `mock` line; (c) a `Y` that implements
-an interface `X` implements.
+`mock X with Y` accepts a `Y` that has each member of `X` that the code the test reaches calls, with the
+same types, checked at each such call in the build of that test's swaps: a member `Y` lacks or types
+otherwise is the compile error `mock-mismatch` at the `mock` line, naming the call, and a `mock` whose `X`
+nothing the test runs reaches is `mock-unreached` (§11, the owner, 2026-11-20, issue 586, comment
+7051499099, Q7 of comment 6992687784 at its lean). `mock` takes a class or an actor type, a `per node` one
+among them, as `X` and as `Y`, and a function takes no swap (§11, assumed there: D9 of comment 6992687784,
+said back there). The build reads `mock X with Y`, two types after `mock` and `with`, and answers it `not
+supported` at its line, its types not resolved (§11, assumed there: F20 of issue 586, comment 6993110710).
 
-No case: the rule is open, and the build answers `not supported` to the form.
+No case: the build answers `not supported` to the form, and a case stands on what a build does.
 
-### Y10 (open) `advance d`
+### Y10 (decided, §11) `advance d`
 
-`advance d` is read, a duration after `advance`, which is checked as any expression is, and as the bound
-of `within` is (U40), a value of another type than `duration` `type-mismatch` at its line, and the
-statement is answered `not supported` at its line (§11, assumed there: a reading of the build said back
-in comment 6994632453). Where it stands nobody chose (§14; Q8 of issue 586, comment 6992687784): (a)
-among a `test` block's own statements alone, the compile error `advance-outside` elsewhere and the
-run-time error `advance-negative` for a negative duration; (b) in any function the build of `kurz test`
-reaches, refused where a program's own run can reach it; (c) a function of the standard library,
-`Clock.Advance(d)`, that moves nothing outside the build of `kurz test`.
+`advance d` stands among a `test` block's own statements alone, the compile error `advance-outside`
+elsewhere, and a negative duration crashes the test at the statement with the run-time error
+`advance-negative` (§11, the owner, 2026-11-20, issue 586, comment 7051499099, Q8 of comment 6992687784 at
+its lean). The build reads `advance d`, a duration after `advance`, which it checks as any expression is,
+and as the bound of `within` is (U40), a value of another type than `duration` `type-mismatch` at its
+line, and answers the statement `not supported` at its line (§11, the owner, 2026-11-20, comment
+7051499099: the readings of comment 6994632453 stand).
 
-No case: the rule is open, and the build answers `not supported` to the form.
+No case: the build answers `not supported` to the form, and a case stands on what a build does.

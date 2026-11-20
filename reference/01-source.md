@@ -618,7 +618,8 @@ among them, and names everywhere else, a variable named so among them, but for a
 `check` or `advance` at the start of a statement, which is the statement, as every other `const assert(`
 there is, so that a function value so named is not called there and `check x = 1` is a `check` with `= 1`
 after it, `syntax` (Y1; §11, assumed there: D2 of issue 586, comment 6992687784, and F9 of comment
-6993110710, a reading of the build said back there).
+6993110710, a reading of the build said back there, for `advance(d)` and the declaration; for `check(x)` §11,
+the owner, 2026-11-20, comment 7051499099: F9 as comment 6994632453 said it back stands).
 
 Case: [source/core-word-as-name.kz](../corpus/source/core-word-as-name.kz)
 ```kurz
