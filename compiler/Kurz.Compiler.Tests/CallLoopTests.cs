@@ -134,6 +134,64 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     }
 
     [Fact]
+    public void The_text_starts_at_the_method_that_reaches_the_call_in_the_fewest_edges_of_the_first_type_declared()
+    {
+        // U56: `A.Far`, declared first, reaches the call at line 2 through `C.Relay` at line 6, two edges, and `A.Go` reaches it at line
+        // 12, one: the text starts at `A.Go`; and where the call at line 2 is on a loop back to `A` and on one back to `B` of three hops
+        // each, through `D.Y`, the text comes back to `A`, the type declared first
+        const string fewest = """
+            actor B(A Back) {
+                pub int Mid() => Back.Value()
+            }
+
+            actor C(B Keep) {
+                pub int Relay() => Keep.Mid()
+            }
+
+            actor A(B Keep, C Via) {
+                pub int Far() => Via.Relay() + 1
+
+                pub int Go() => Keep.Mid() + 1
+
+                pub int Value() => 1
+            }
+
+            print(1)
+
+            """;
+        var errors = Check(fewest).Diagnostics.Sorted;
+        Assert.Equal([(ErrorIds.CallLoop, 2)], errors.Select(d => (d.Id, d.Line)));
+        Assert.Equal([12, 2], Named(errors[0]));
+        const string two = """
+            actor C(D Next) {
+                pub int X() => Next.Y()
+            }
+
+            actor D(A First, B Second) {
+                pub int Y() => First.Value() + Second.Value()
+            }
+
+            actor A(C Hub) {
+                pub int Go() => Hub.X() + 1
+
+                pub int Value() => 1
+            }
+
+            actor B(C Hub) {
+                pub int Go() => Hub.X() + 2
+
+                pub int Value() => 2
+            }
+
+            print(1)
+
+            """;
+        errors = Check(two).Diagnostics.Sorted;
+        Assert.Equal([(ErrorIds.CallLoop, 2)], errors.Select(d => (d.Id, d.Line)));
+        Assert.Equal([10, 2, 6], Named(errors[0]));
+    }
+
+    [Fact]
     public void A_group_of_types_that_reach_one_another_is_one_error_and_two_groups_are_two()
     {
         // T52: `A.Go` and `B.Go` each wait on `C.X`, which waits on both: the loops back to `A` and back to `B` reach each other's types,
@@ -790,9 +848,9 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     {
         // U57, T49: `B.Keep` sets `peer` from its parameter, which `A.Join` fills with `this` by a call that waits, the field's one write
         // beside its `null`: `B.Read`'s call through it reaches the caller that waits, and the program has no error, read and written
-        // through `this` as well; a second write from a parameter that a top-level call fills with another `A`, or one in a lambda that no
-        // code runs, makes the field none, and the loop of `A.Total` and `B.Read` is one error at line 6; and a field of the primary
-        // constructor, which its `spawn` sets, is none
+        // through `this` as well; a second write from a parameter that a top-level call fills with another `A`, by the field's name or
+        // through `this`, a default that spawns another `A`, or a write in a lambda that no code runs, makes the field none, and the loop
+        // of `A.Total` and `B.Read` is one error at line 6; and a field of the primary constructor, which its `spawn` sets, is none
         const string program = """
             actor A(B Other) {
                 pub void Join() {
@@ -831,6 +889,8 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
         Assert.Empty(Diagnostics(program.Replace("        peer = x\n", "        this.peer = x\n", StringComparison.Ordinal).Replace("p = peer", "p = this.peer", StringComparison.Ordinal)));
         var put = program.Replace("    pub int Read() {", "    pub void Put(A y) {\n        peer = y\n    }\n\n    pub int Read() {", StringComparison.Ordinal);
         Assert.Equal([(ErrorIds.CallLoop, 6)], Diagnostics(put + "b.Put(spawn A(b))\n"));
+        Assert.Equal([(ErrorIds.CallLoop, 6)], Diagnostics(put.Replace("        peer = y\n", "        this.peer = y\n", StringComparison.Ordinal) + "b.Put(spawn A(b))\n"));
+        Assert.Equal([(ErrorIds.CallLoop, 6)], Diagnostics(program.Replace("mut A? peer = null", "mut A? peer = spawn A(spawn B())", StringComparison.Ordinal)));
         var unrun = program.Replace("        peer = x\n", "        peer = x\n        f = () => {\n            peer = x\n        }\n", StringComparison.Ordinal);
         Assert.Equal([(ErrorIds.CallLoop, 6), (ErrorIds.UnusedVariable, 16)], Diagnostics(unrun));
         const string primary = """
@@ -856,9 +916,11 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     {
         // U57, T49: `B.Keep` adds its parameter, which `A.Join` fills with `this`, to `kept`, which starts empty: each item is a callback,
         // and `B.Sum`'s call through the variable of a `for` over the list reaches the caller that waits, and the program has no error,
-        // read through an index, put in by `Insert`, an item assigned or a list literal, and through `this`, as well; an item from another
-        // `A`, one added in a lambda, which captures the parameter, one that `AddRange` puts in, a list literal with another item, and the
-        // list passed as `mut`, make it none, and the loop of `A.Total` and `B.Sum` is one error at line 6, and at line 9 after the function
+        // read through an index, put in by `Insert`, an item assigned or a list literal, after an empty list its constructor made, and
+        // through `this`, as well; an item from another `A`, one added in a lambda, which captures it or a local that holds it, an item
+        // assigned from another `A`, one that `AddRange` puts in, a list literal with another item, a list assigned from a local, a list
+        // passed as `mut`, and an item from another `A` added in an own method that `Keep` calls directly, make it none, and so does a call
+        // through an item read in a lambda: the loop of `A.Total` and `B.Sum` is one error at line 6, and at line 9 after the function
         const string program = """
             actor A(B Other) {
                 pub void Join() {
@@ -901,6 +963,7 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
             (add, "        kept.Insert(0, x)\n"),
             (add, add + "        kept[0] = x\n"),
             (add, "        kept = [x]\n"),
+            (add, "        kept = List<A>()\n" + add),
             (add, "        this.kept.Add(x)\n"),
         })
         {
@@ -911,6 +974,11 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
         {
             program + "b.Keep(spawn A(b))\n",
             program.Replace(add, "        more = () => kept.Add(x)\n        more()\n", StringComparison.Ordinal),
+            program.Replace(add, "        held = x\n        more = () => kept.Add(held)\n        more()\n", StringComparison.Ordinal),
+            program.Replace(add, add + "        kept[0] = spawn A(spawn B())\n", StringComparison.Ordinal),
+            program.Replace(add, "        mut more = List<A>()\n        more.Add(x)\n        kept = more\n", StringComparison.Ordinal),
+            program.Replace("        for k in kept {\n            total = total + k.Load()\n        }\n", "        if kept.Count > 0 {\n            first = () => kept[0].Load()\n            total = first()\n        }\n", StringComparison.Ordinal),
+            program.Replace(add, "        Put(x)\n", StringComparison.Ordinal).Replace("    pub int Sum() {", "    void Put(A y) {\n        kept.Add(y)\n    }\n\n    pub int Sum() {", StringComparison.Ordinal) + "b.Keep(spawn A(b))\n",
             program.Replace(add, "        kept.AddRange([x])\n", StringComparison.Ordinal),
             program.Replace(add, "        kept = [x, spawn A(spawn B())]\n", StringComparison.Ordinal),
         })
