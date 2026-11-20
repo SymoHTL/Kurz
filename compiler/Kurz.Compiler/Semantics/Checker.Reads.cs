@@ -231,6 +231,7 @@ public sealed partial class Checker
         ThrowStatement { Value: { } v } => Muts(v),
         RawBlock r => Muts(r.Body),
         WithinStatement w => Muts(w.Bound).Concat(Muts(w.Body)),
+        AssertionStatement a => Muts(a.Condition),
         _ => [],
     };
 

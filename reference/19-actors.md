@@ -3066,6 +3066,23 @@ print(w.Ping())
 
 Case: [actors/block-escalate.kz](../corpus/actors/block-escalate.kz)
 
+Case: [tests/test-child-escalates.kz](../corpus/tests/test-child-escalates.kz)
+```kurz
+actor Worker {
+    pub void Fail() {
+        throw "down"
+    }
+
+    pub int Get() => 1
+}
+
+test "child escalates" {
+    w = spawn Worker() on crash escalate
+    send w.Fail()
+    print(w.Get())
+}
+```
+
 Case: [actors/per-node-start-throws.kz](../corpus/actors/per-node-start-throws.kz)
 ```kurz
 // `User`'s `Use` waits in `Cache`'s start for `Starts.Take` while `Probe`'s `Ping` answers the top-level code, and `User`, woken by

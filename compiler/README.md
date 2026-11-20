@@ -283,12 +283,23 @@ words (the owner, 2026-10-29, "Keep these words"), the first on Linux and the se
 no child inherits the lock file, they check on Linux alone, reading `/proc`: on Windows nothing
 checks either.
 
+`kurz test [--release] [--lines] [--cpu <name>] <file.kz>` builds the file's tests in place of its
+top-level code, which does not run, and runs them in a place of its own as `kurz run` runs a program,
+with no word for the program: `--` and an argument after the file are the usage's, since a test reads no
+`args` (Y2, F17). It writes `test "name" ... ok` or `test "name" ... FAILED` for each test, in the order of
+the file, after the lines the test printed, the words of a failed test's crash indented under its
+`FAILED` line, and then the counts, `2 tests: 1 passed, 1 failed`, `1 test:` for one (Y3), and ends with
+0 where every test passed and 1 where one failed (Q4). A program the checker accepts with no test gets
+`error: no test in <file>` and a `help:` line naming the form, and the exit code 1 (Y4, Q6).
+`CommandTests` holds each of these.
+
 Any other command line gets the usage on standard error and the exit code 1:
 
     usage: kurz --version [--verbose]
            kurz build [--release] [--lines] [--cpu <name>] <file.kz> [-o <output>]
            kurz run [--release] [--lines] [--cpu <name>] <file.kz> [-- <argument>...]
            kurz exec [--release] [--lines] [--cpu <name>] "<program text>" [-- <argument>...]
+           kurz test [--release] [--lines] [--cpu <name>] <file.kz>
            run and exec pass the words after -- to the program
 
 ### Readings the record leaves open to the command
@@ -590,7 +601,8 @@ out at once, and not after the peer's acknowledgement of the one before.
 the value given, and `LockWake` wakes one thread that sleeps on it, each by the `futex` call through `syscall`
 (S16): the wait by `FUTEX_WAIT_PRIVATE` (128), where Rust's `futex_wait` waits by
 `FUTEX_WAIT_BITSET` with `FUTEX_PRIVATE_FLAG` and a bitset of every bit, and the wake by `FUTEX_WAKE_PRIVATE` (129),
-as Rust's `futex_wake` does (Rust's operations not checked at source); each Linux architecture's file gives the two with the number of
+as Rust's `futex_wake` does (Rust's operations as `library/std/src/sys/sync/futex/unix.rs` of Rust 1.100.0 gives them, read on
+2026-11-19); each Linux architecture's file gives the two with the number of
 `futex` there, 202 on x86-64, and 98 on AArch64, where 202 is `accept`, and the Windows runtime waits by
 `WaitOnAddress` and wakes by `WakeByAddressSingle`, as Rust's futex does there. `std/` gives the room a read makes in a list of bytes before it,
 `BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9), and the
@@ -1037,7 +1049,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   lock; the lock of the table of slots and its lookup with none (`SlotTake`, `SlotFree`, `SlotsUsed`, `Lookup`),
   whose model takes every interleaving of a lookup of each of two actors while a third thread frees the first's
   slot and takes it for the second, but for the life of the table's directory and pages; and the futex's wait and wake
-  (`sys.LockWait`, `sys.LockWake`), of Rust's futex shape (not checked at source). The models' moves are
+  (`sys.LockWait`, `sys.LockWake`), the wake as Rust's `futex_wake` and the wait by `FUTEX_WAIT_PRIVATE`, where
+  Rust's waits by `FUTEX_WAIT_BITSET` (`library/std/src/sys/sync/futex/unix.rs` of Rust 1.100.0, read on 2026-11-19: on
+  Linux `futex_wait` calls `futex` with `libc::FUTEX_WAIT_BITSET | libc::FUTEX_PRIVATE_FLAG` and `!0u32`, "A full bitmask,
+  to make it behave like a regular FUTEX_WAIT", and `futex_wake` with `libc::FUTEX_WAKE | libc::FUTEX_PRIVATE_FLAG` and 1,
+  which is `FUTEX_WAKE_PRIVATE`). The models' moves are
   sequentially consistent, so that no model checks the orders of the atomic operations: they are the ones the
   runtime's source writes, each of which `EmitterTests` holds to one instruction of the IR of that order
   (`An_atomic_member_with_its_order_written_is_one_llvm_instruction_of_that_order_aligned_to_its_word`). These hold only while one thread runs every program (U35), each a reading of the code that no run on
@@ -1112,7 +1128,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `corpus/actors/copy-two-arguments.kz`, `copy-two-at-call.kz`, `copy-weak-across-arguments.kz`,
   `copy-weak-argument.kz` and `copy-weak-at-call.kz` the memo of a call, `copy-left-to-right.kz` the order, `copy-memo-keeps-block.kz` a block the memo
   holds living to the call's last copy and `copy-left-early.kz` a call left before it, whose copies
-  the call had not read yet are let go of (`ActorTests`, by the count of blocks); and
+  the call had not read yet are let go of (`ActorTests`, by the count of blocks, and, issue 569, by the
+  count and by the order of the frees for a construction, a plain call and a function value's call,
+  and by the count alone for a parameter written `move`, whose slot takes its copy); and
   `corpus/actors/copy-derived.kz` an instance of a derived class held as its base. The copy of a map whose
   keys reach a class instance is the copy of its block's bytes, with its source's hash and keys, each key
   and each value copied in its slot, and then each entry placed again under its copied key's hash, by
@@ -1129,7 +1147,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   A `move` before an argument of a call that crosses nothing copies nothing and, of a value whose
   place it empties, changes no count (U12): a variable's value leaves its place, which is stored null, or a string of no block, the count
   it held going to the parameter written `move` the argument fills, which its function owns and lets go of where it
-  leaves; the item of a loop that takes its list leaves its place in the list the same way where the
+  leaves, a lambda's too where the type of the function value called writes `move` there, whose call hands the argument
+  over as a direct call does (issue 587); the item of a loop that takes its list leaves its place in the list the same way where the
   place has an empty value, an address or a string, an item of another type staying there, counted
   once more, and the release of a list of an item type such a loop takes, read from every unit's model before the first
   helper is built, tests each item for null, so that the list lets go of every item it still holds
@@ -1147,7 +1166,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   to the frees on a branch, in a loop that takes its list, after a reassignment and through a
   parameter written `move`; the line `actor-move-fenced` of `ListTests` a branch, a loop that takes
   its list, a variable moved and assigned again in a loop, and a parameter written `move` left by a
-  `return` or moved on.
+  `return` or moved on; and the calls of a function value whose type writes `move` at a parameter, given a new value, a moved
+  variable, a loop's item, an inline `data` value, a copy, the first of two copies and a lambda that moves its parameter on,
+  and left by an argument after the `move`, `ActorTests` by the count of blocks and the line `value-move-fenced` of `ListTests` under the
+  fence (issue 587).
   A call that waits (U4), wherever it stands, passes a reply in its own frame, the
   one-shot slot of section 6, an `int` word, the activation that waits on it and the result, whose
   waiter the runtime's `ReplyWaiter` stores before `Enqueue` queues the message, so that whoever
@@ -1661,7 +1683,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - lambdas (F7) and function values (F11): a function value is the address of its lambda's code and
   of its environment, which holds the values the lambda read when it was made (F15); a lambda that
   reads no variable has none and allocates nothing, and a call of a function value calls its code
-  with its environment (section 4, the owner, 2026-10-25, "Pair + heap env");
+  with its environment (section 4, the owner, 2026-10-25, "Pair + heap env") and takes its arguments as a direct call takes
+  them: an argument of a parameter its type writes `move` is handed over to the lambda, which lets go of it at its end, and
+  every other is borrowed for the call (U12; issue 587);
 - `print`, `eprint`, which writes the same line to standard error (A17), and the text of a value in
   a string's holes (A1, A2, A8, L6), `==` on strings by
   their bytes (T18), and `<`, `<=`, `>` and `>=` on strings by the first byte in which they differ,
@@ -1804,8 +1828,18 @@ the rest. The count
 is lowered where a holder ends: at the end of the block that declared a variable, and at a
 `return`, a `break` or a `continue` for the blocks it leaves; at an assignment over the value; at
 the end of its statement for a value that a call, a `with`, a `match` or an `else` made and that
-nothing keeps; and where a value that holds the list ends. At zero the lists the items hold are let
-go of in turn, and the block goes back to `Free`. A parameter borrows its argument and changes no
+nothing keeps; where a case an argument propagates, or another jump, leaves a construction or a call
+that is no message before its last argument, for each value a slot took from the arguments before
+it, a field of the construction or a parameter written `move`, each copy the call made before it, a
+call's one copy among the values its arguments made, and the callee or the receiver the call made
+before its arguments, the last made first, so that the callee or the receiver goes last, each copy
+after the end of its call's memo, which a jump between a call's first copy and its last ends first,
+as R1 states (assumed: a reading of the build) and as Rust drops
+the operands of an expression that one of its operands leaves (the Rust Reference, "Destructors", read on
+2026-11-18; issue 569), the callee and the receiver being operands of the call as Rust's function operand and
+receiver are (`expr.call.intro` and `expr.method.intro`, read on 2026-11-19); and where a value
+that holds the list ends. At zero the lists the items hold are let
+go of in turn, and the block goes back to `Free`. A parameter not written `move` borrows its argument and changes no
 count: nothing changes the value it borrows while the call runs, since the checker refuses a read of
 what a call takes as `mut` that the expression still holds when the call runs, or when an assignment
 or a `mut` method in an arm's statement inside the expression changes it (M7), and such a read of a
@@ -1814,8 +1848,19 @@ made (the owner, 2026-10-25, "Copied"), and no state
 outside a function holds a list or a string, which R13 refuses, so a callee reaches a list or a
 string its caller lent it through its parameters alone. The name an arm of a `match` binds holds a count of its value, as a
 variable does, so that the arm can change the subject's variable and the name keeps its value (M3).
+The case an arm of a postfix `else` takes, after a call or after a loop over a file's lines (O5, S16), holds the count the result
+gave it, which no place holds: the arm holds it as a variable of its block, a name bound or not, and the arm of `else` the whole
+value, and lets go of it at the block's end and at a `return`, a `break` or a `continue` that leaves the block, unless a `move`
+of the name emptied its place, as Rust drops the variables a `match` arm binds when the arm ends and none a move left
+uninitialized (the Rust Reference, "Destructors", `destructors.scope.bindings.match-arm` and `destructors.intro`, and "Match
+expressions", `expr.match.scrutinee-value`, read on 2026-11-19); a `return` of the name counts it once more for the caller.
+Pinned by `ListTests` under an allocator that counts the blocks and under the fenced one, the arm of a `match` the control, and
+by `FileTests` for the loop's arms.
 Counted are a list, a string, a function value, an instance of a class, a value of a block type, a plain
-`data` value that holds one of them in a field and a union with a case that holds one. A string made while the program runs holds a block
+`data` value that holds one of them in a field and a union with a case that holds one; a plain `data` value lets go of each such
+field where it ends, a union field by the case it holds (`ListTests`, under an allocator that counts the blocks and under the
+fenced one: a plain data case, an instance and a list in a union field, at a variable's end, at its reassignment, in a list's
+item and in the copy a call makes, the same field of a class the control). A string made while the program runs holds a block
 of `std/` in front of its bytes, laid out as the block of a list of bytes: the count of the values that
 hold it, 8 bytes, then the count of its bytes, which `string.FromRaw` writes, and the room
 `string.Allocate` gave, 4 bytes each, so that `s.Bytes` and a string of a list of bytes share the
@@ -2067,6 +2112,32 @@ choice Rust refuses raises `invalid-ordering-at-run-time` at the call's line (`E
 `EmitterTests` pins the instructions and the choice). A view crossing into an actor is
 `not supported`, as a pointer's crossing is (U12).
 
+### The tests and `check`
+
+`check condition` (Y6) is emitted in every build: its condition, and where it is one of the six
+comparisons whose sides show their values, each side once, compared as the comparison compares them; on
+the path of its failure the runtime's `CheckFailed` gets the condition's text, the values after it in
+parentheses, `names.Count == 2 (3 == 2)`, and the file and the line as constants, and crashes the actor
+that runs it, at the top level the end of the process with `error: check-failed at <file>:<n>:` and the
+text on the line after it. That path takes a count of each counted side before it makes the texts, since
+the `Text()` of one side may assign the place the other was read through, a `mut` parameter's, whose read
+takes no count, and lets go of them once the text is joined (`ListTests`, the line `check-operands-fenced`). A `test` block emits nothing in the build of
+`kurz build`, `kurz run` and `kurz exec` (Q5). In the build of `kurz test` the top-level code is the
+table of the tests, each test's function, its name as written and its line, and a call of the runtime's
+`RunTests`, which runs each test in an actor of its own, a child of the top-level code with the policy
+`stop`, by one message with no deadline (D6), and waits for it as the top-level code waits for a call
+(`RootWait`, the loop `Wait` runs). The test passes where the actor answered, and fails where it crashed,
+the words of its crash kept for the line under `FAILED` and no log line written for it (F1, F3), or where
+the wait found nothing left to run, `deadlock at <file>:<the test's line>` (F5). Then every actor the
+test made ends at once, parked ones too (F6): the records of the run queue, each activation's stack back
+in the pool with its open copy sessions ended, the stack a pending block keeps, every heap, the heaps of
+messages, the timers, the pauses and the deadline of the top-level code's `within`, so that no timer and
+no message heap names a heap freed; the numbers of actors go on counting (U2). A socket or a file a
+test's actors hold at that end stays open, as nothing of an actor's end closes one (F22). The test's own
+actor is named `test` (F2), a name no log line shows, since its crash writes none (F3). `ActorTests`
+holds the end of a test's actors and the bound of a test's message, `CommandTests` what the command
+writes, and the corpus's `tests/` cases what a case of `kurz test` shows (E3).
+
 ### What the emitter does not emit
 
 A program that uses one of these gets one `not supported` at the construct's line, in the
@@ -2078,7 +2149,8 @@ command line, the environment or the clock, and a log call, in a build for Windo
 map, a field or a union and a lambda that reads a variable of a vector's type, whose places are not
 aligned to it, and on a 64-bit Arm machine a test of a class under `Arm`, whose intrinsics are not
 built (R18), and an `asm`, whose operands the checker reads for x86-64 alone (R11), where a `naked` function, whose
-operands are `sym` and `const` alone, builds (R12), and a construct of the other chapters the checker does not read. The line
+operands are `sym` and `const` alone, builds (R12), and a construct of the other chapters the
+checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use"); a call on a socket or a file that a
 function of `std/` makes is refused at the line of the program's statement whose call reached that function, which the queue of
@@ -2707,6 +2779,15 @@ that sit under a rule by its id. Every one is pinned by a test.
   closing `"""`, so that the block's text is not read as code, and reads what follows the
   closing quotes on their line as code.
 
+- Y1, Y6, Y9: where `test`, `check`, `mock` and `advance` are words, inside D2's letter (issue 586, comment
+  6992687784). `test cluster` is the cluster test only where a token that can start an expression follows
+  `cluster`, so that `test cluster = 1` declares a variable `cluster` of a type named `test`; `mock` is the
+  statement only where a type, `with` and a type follow it, so that `mock x = 1` declares a variable `x` of
+  a type named `mock`; a `test` block in a class's body is the member parser's `syntax` at its line; and
+  the text of a `check` is its tokens as the source writes them, a `>` of a `>>` that type arguments took
+  apart among them, each run of spaces, line breaks and comments between two tokens one space. Pinned by
+  `ParserTests`.
+
 Six shapes still get two errors, or an uneven one, from the front end, each low: `if x print(1)
 else print(2)` is `braces-required` twice on one line, because the postfix `else` binds to the call
 and takes arms of its own; `if x` with its `{` on the next line, then `else if y` with its own, is
@@ -2999,8 +3080,11 @@ reaches a value of a type parameter, an instance of a class of `std/`, `HttpRequ
 reaches a handle, a hasher, a command or a child process by any path the copy follows, a lambda's capture and
 a field of any class among them, or a value of a type parameter, which the copy of its function for such a type
 argument makes one of them, whose copy would share the sender's block by its count (U12); `copy` at a call that is no message before a value that
-reaches a function value or an interface's value, which no word makes cross (U12); and a log call
-inside an actor (P8). The refusal of
+reaches a function value or an interface's value, which no word makes cross (U12); a log call
+inside an actor (P8); the cluster test of section 13, `test cluster N seed S { ... }`, whose words and
+block the parser passes over (Y8); and `mock X with Y` and `advance d`, whose questions are open (Y9, Y10),
+the duration of an `advance` checked as the bound of `within` is (U40) and its error reported beside the
+line. The refusal of
 the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered
 on 2026-11-14, comment 6880404917); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
@@ -3562,3 +3646,9 @@ round can ask about it by the rule's id.
 - A9 with A7 and A15: a `Text()` without `pub` makes `not-visible` every `print`, interpolation and
   `string.Join` (X6) of the instance, and of a list or a `data` value that holds one, inside the class and
   outside it.
+- Y6: a `check` tells the checker nothing after it, so that after `check x != null` the variable `x`
+  is still nullable (N2), as Rust's `assert!` narrows no type, where C#'s `Debug.Assert` tells its
+  flow analysis the condition held. A comparison shows its sides' values where it stands alone or in
+  parentheses and each side shows its value as a hole of an interpolation does; a test's name is its
+  own by its value, so that `"A"` and `"\u0041"` are one name. Pinned by
+  `CheckerTests`.

@@ -1,0 +1,10 @@
+// expect: error syntax at 5
+// rules: Y1
+
+void Check() {
+    test "inside a function" {
+        print(1)
+    }
+}
+
+Check()

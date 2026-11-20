@@ -198,6 +198,7 @@ public static class ErrorIds
     public const string ReversedRangeAtRunTime = "reversed-range-at-run-time";
     public const string InvalidOrderingAtRunTime = "invalid-ordering-at-run-time";
     public const string StackOverflow = "stack-overflow";
+    public const string CheckFailed = "check-failed";
 }
 
 /// <summary>The ids of the lints, which warn and build the program (H5): no case expects one, and the error table keeps them out.</summary>
