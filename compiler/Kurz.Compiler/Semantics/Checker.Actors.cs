@@ -991,8 +991,8 @@ public sealed partial class Checker
     /// <summary>
     /// U58: <c>vouch</c> stands before a call of an actor's method through a reference that waits (U4), whose edge it takes out of U56's
     /// graph (<see cref="CallLoops"/>); before any other call, a <c>send</c>'s (U6), a function's, a class's method's or an actor's own
-    /// method called inside it (U10), it is <c>syntax</c>, as <c>within</c> on such a call is (U39) (assumed: T50 of #519, comment
-    /// 7007991607); whether the call is one that waits, the <c>syntax</c> reported where it is none.
+    /// method called inside it (U10), it is <c>syntax</c>, as <c>within</c> on such a call is (U39) (the owner, 2026-11-20, #519, comment
+    /// 7051071630, T50 (a)); whether the call is one that waits, the <c>syntax</c> reported where it is none.
     /// </summary>
     private bool Vouched(CallExpression c)
     {

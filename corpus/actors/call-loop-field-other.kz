@@ -1,0 +1,35 @@
+// expect: error call-loop at 9
+// rules: U56, U57
+
+actor A(B Other) {
+    pub void Join() {
+        Other.Keep(this)
+    }
+
+    pub int Total() => Other.Sum() + 1
+
+    pub int Load() => 7
+}
+
+actor B {
+    mut List<A> kept = []
+
+    pub void Keep(A x) {
+        kept.Add(x)
+    }
+
+    pub int Sum() {
+        mut total = 0
+        for k in kept {
+            total = total + k.Load()
+        }
+
+        return total
+    }
+}
+
+b = spawn B()
+a = spawn A(b)
+a.Join()
+b.Keep(spawn A(b))
+print(a.Total())

@@ -20,12 +20,10 @@ actor Boss(Peer P) {
 
         return c.Work(n)
     }
-
-    pub int Seen() => 1
 }
 
 actor Peer {
-    pub int Ask(Boss boss) => boss.Seen()
+    pub int Ask(Boss boss) => boss.Run(1)
 
     pub int Seen() => 2
 }

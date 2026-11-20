@@ -178,8 +178,10 @@ public sealed class ThrowSets
     /// overrides and of the methods that implement it, a data type's method taking the value it is called on first (D16), and any other
     /// edge, a lambda's or a construction's among them, passes none, which reads as no callback. A <c>spawn</c> reaches the
     /// construction of the actor it makes, whose code is that actor's, and the code under <c>escalate</c> is the child's: neither is the
-    /// spawner's. The walk reads each unit once over all the actors, from the roots of the sets and every actor's code, and the reach of
-    /// each unit is its own sites and those of the units it runs, read again as long as one grows.
+    /// spawner's. Each entry holds too the writes of its actor's fields that its code reaches, with the origins each value can have in
+    /// its terms, passed as an argument's are (T49 (c)). The walk reads each unit once over all the actors, from the roots of the sets and
+    /// every actor's code, and the reach of each unit is its own sites and writes and those of the units it runs, read again as long as one
+    /// grows.
     /// </summary>
     public IReadOnlyList<ActorCode> ActorsCode()
     {
@@ -198,21 +200,41 @@ public sealed class ThrowSets
     /// <summary>Every call through an actor's reference and every <c>spawn</c> of every unit the walk read, in the order it read them.</summary>
     public IReadOnlyList<ActorSite> Sites() => order.SelectMany(u => u.Sites).ToList();
 
+    /// <summary>Every write of a field of an actor that a unit the walk read makes, a lambda's that no code runs among them (T49 (c)).</summary>
+    public IReadOnlyList<FieldWrite> Writes() => order.SelectMany(u => u.Writes).ToList();
+
     /// <summary>
-    /// U57: every site that the roots of the sets reach after <see cref="ActorsCode"/>, the top-level code of the program and each of its
-    /// <c>pub</c> functions and of the <c>pub</c> methods of its classes and data types, a method that implements an interface (K7) and a
-    /// data type's method called from outside it (F9) among them, but the methods of its actor types, which run in their actor's
-    /// messages: code that a caller outside the messages of the program's actor types can run.
+    /// U57, T74 (b): every site that code outside the messages of the program's actor types reaches after <see cref="ActorsCode"/>: the
+    /// top-level code, and each root of the sets that no code of an actor reaches, a <c>pub</c> function or a <c>pub</c> method of a class or
+    /// a data type that only a caller outside the program could call, through every function, method and lambda they run; a method of a
+    /// class, an interface or a data type that the actors' code alone calls runs in their messages, as their own methods do.
     /// </summary>
-    public IReadOnlySet<ActorSite> Outside() => Roots().Where(r => r is not FunctionSymbol { Owner.IsActor: true, IsStatic: false })
-        .SelectMany(r => units[r].Reach.Keys).ToHashSet(ReferenceEqualityComparer.Instance as IEqualityComparer<ActorSite>);
+    public IReadOnlySet<ActorSite> Outside()
+    {
+        var inside = new HashSet<object>(new UnitKeys());
+        var pending = new Queue<object>(units.Where(u => u.Key is Root).SelectMany(u => u.Value.Edges).Select(e => e.Unit).Where(k => k is not FunctionSymbol { IsStatic: true }));
+        while (pending.TryDequeue(out var key))
+        {
+            if (inside.Add(key))
+            {
+                foreach (var edge in units[key].Edges.Where(e => e.Runs && !e.Crosses))
+                {
+                    pending.Enqueue(edge.Unit);
+                }
+            }
+        }
+
+        return Roots().Where(r => r is not FunctionSymbol { Owner.IsActor: true, IsStatic: false } && !inside.Contains(r))
+            .SelectMany(r => units[r].Reach.Keys).ToHashSet(ReferenceEqualityComparer.Instance as IEqualityComparer<ActorSite>);
+    }
 
     // an entry of an actor's code: its construction, or a method; a site that stands in another unit names it
     private ActorEntry Entry(Edge edge, bool direct)
     {
         var unit = units[edge.Unit];
         var sites = unit.Reach.Select(p => new ReachedSite(p.Key, ReferenceEquals(owners![p.Key], unit) ? null : owners[p.Key].Name, p.Value[0], p.Value[1..])).ToList();
-        return new ActorEntry(unit.Name, edge.Unit as FunctionSymbol, sites, direct);
+        var writes = unit.Written.Select(p => new ReachedWrite(p.Key, p.Value)).ToList();
+        return new ActorEntry(unit.Name, edge.Unit as FunctionSymbol, sites, writes, direct);
     }
 
     // each unit's reach: its own sites, then those of every unit it runs through an edge that does not cross into another actor's code (U56), each origin of the receiver and
@@ -232,6 +254,11 @@ public sealed class ThrowSets
             {
                 unit.Reach[site] = [[site.Receiver], .. site.Arguments.Select(a => new HashSet<Origin> { a })];
                 owners[site] = unit;
+            }
+
+            foreach (var write in unit.Writes)
+            {
+                unit.Written[write] = [write.Value];
             }
         }
 
@@ -258,13 +285,26 @@ public sealed class ThrowSets
                             }
                         }
                     }
+
+                    foreach (var (write, values) in units[edge.Unit].Written.ToList())
+                    {
+                        if (!unit.Written.TryGetValue(write, out var into))
+                        {
+                            unit.Written[write] = into = [];
+                        }
+
+                        foreach (var value in values.ToList())
+                        {
+                            grew |= into.Add(Passed(edge, value));
+                        }
+                    }
                 }
             }
         }
     }
 
     // U57: an origin of the unit an edge reaches in the terms of the unit it leaves: a parameter takes its argument's, and the actor
-    // itself and anything else stay
+    // itself, a field of it, an item of a field's list and anything else stay
     private static Origin Passed(Edge edge, Origin origin) =>
         origin.Parameter < 0 ? origin
         : edge.Arguments is { } arguments && origin.Parameter < arguments.Count ? arguments[origin.Parameter]
@@ -333,6 +373,12 @@ public sealed class ThrowSets
 
         /// <summary>Each site the unit's code reaches, its own and those of the units it runs, with the origins its receiver, then each of its arguments by the parameter it fills, can have in the unit's terms (U57).</summary>
         public Dictionary<ActorSite, HashSet<Origin>[]> Reach { get; } = new(ReferenceEqualityComparer.Instance);
+
+        /// <summary>The writes of an actor's fields the unit's own code makes (U57, T49 (c)).</summary>
+        public List<FieldWrite> Writes { get; } = [];
+
+        /// <summary>Each write the unit's code reaches, its own and those of the units it runs, with the origins its value can have in the unit's terms (U57, T49 (c)).</summary>
+        public Dictionary<FieldWrite, HashSet<Origin>> Written { get; } = new(ReferenceEqualityComparer.Instance);
 
         public List<Edge> Edges { get; } = [];
 
@@ -579,6 +625,10 @@ public sealed class ThrowSets
                     foreach (var field in c.Class.Fields.Where(f => f.Body is { } body && (c.Class.Declaration.Members ?? []).Any(m => ReferenceEquals(m, body))))
                     {
                         walk.Optional(field.Body!.Value);
+                        if (field.Body.Value is { } value)
+                        {
+                            walk.Default(c.Class, field, value);
+                        }
                     }
 
                     if (c.Class.BaseCall is { } call)
@@ -1012,10 +1062,24 @@ public sealed class ThrowSets
                 case AssignOrDeclare a:
                     Expression(a.Value);
                     Local(a, a.Value);
+                    if (model.IsImplicitField(a, out var self, out var assigned) && assigned is not null && ActorOf(self.Type) is not null)
+                    {
+                        Write(assigned, a.Value); // T49 (c)
+                    }
+
                     break;
                 case Assignment a:
                     Expression(a.Target);
                     Expression(a.Value);
+                    if (a.Target is IndexExpression { Target: var list } && FieldOf(list) is { Type: ListType } held)
+                    {
+                        Record(held, item: true, a.Value); // T49 (c): an item of the list a field holds
+                    }
+                    else
+                    {
+                        Write(FieldOf(a.Target), a.Value); // T49 (c): a field through `this`
+                    }
+
                     break;
                 case ExpressionStatement x:
                     Expression(x.Expression);
@@ -1035,6 +1099,11 @@ public sealed class ThrowSets
                     break;
                 case ForInStatement f:
                     Expression(f.Collection);
+                    if (sets.reach && model.Declares(f))
+                    {
+                        locals[model.DeclarationOf(f)] = ItemOf(OriginOf(f.Collection)); // T49 (c): the variable of a loop over a field's list holds its items
+                    }
+
                     foreach (var body in model.PassesOf(f) ?? new[] { f.Body })
                     {
                         Statement(body); // T33: in a copy, a pass of the body for each field of the type
@@ -1193,6 +1262,10 @@ public sealed class ThrowSets
             foreach (var argument in c.Arguments)
             {
                 Expression(argument.Value);
+                if (sets.reach && argument.Word == ArgumentWord.Mut && FieldOf(argument.Value) is { } field)
+                {
+                    unit.Writes.Add(new FieldWrite(field, false, Origin.Other, argument.Value.Line)); // T49 (c): a field the callee can write
+                }
             }
 
             foreach (var bound in c.Clause())
@@ -1310,8 +1383,17 @@ public sealed class ThrowSets
                     break;
                 case CallKind.ListAdd or CallKind.ListInsert:
                     // M9, X11: `Add` and `Insert` keep the function value they take and run none of it, so a lambda there brings what its
-                    // walk gave it, what it builds and nothing it throws, and a call of the value it became reaches the lambda
+                    // walk gave it, what it builds and nothing it throws, and a call of the value it became reaches the lambda; T49 (c): the
+                    // item they put into the list a field holds, the last argument
+                    if (sets.reach && c.Callee is MemberAccess { Target: var addedTo } && FieldOf(addedTo) is { } added && c.Arguments.Count > 0)
+                    {
+                        Record(added, item: true, c.Arguments[^1].Value);
+                    }
+
                     break;
+                case CallKind.ListAddRange when sets.reach && c.Callee is MemberAccess { Target: var rangedTo } && FieldOf(rangedTo) is { } ranged:
+                    unit.Writes.Add(new FieldWrite(ranged, true, Origin.Other, c.Line)); // T49 (c): the items of another list
+                    goto default;
                 default:
                     // M9, X8: a built-in call that takes a function value calls it, as `Where` calls its test and `SortBy` its key for each
                     // item, but `Add` and `Insert` above, so that a kind no arm names counts what the function throws, too much rather than
@@ -1347,9 +1429,11 @@ public sealed class ThrowSets
         /// <summary>
         /// U57: where a reference comes from: <c>this</c> as a value inside an actor, its own reference (U10), or a local without
         /// <c>mut</c> that holds it, is the actor itself; a parameter of the function, which no <c>mut</c> lets change, is that
-        /// parameter, by its place; anything else, a field, an item, a capture in a lambda, a call's result, is other. In a lambda
-        /// nothing is the actor's, a parameter or a local of the code around it, since its body is a unit read by a walk of its own,
-        /// whose locals hold none of that code's (assumed: T49 of #519, comment 7007991607, and T61 of #519, comment 7009683539).
+        /// parameter, by its place; a field of the actor, read by its name or through <c>this</c>, is that field, and an item of the
+        /// list it holds, read by an index or as the variable of a <c>for</c> over it, an item of it (T49 (c)); anything else, a field of
+        /// a class, a capture in a lambda, a call's result, is other. In a lambda nothing is the actor's, a parameter, a field or a local of the code around it, since its body
+        /// is a unit read by a walk of its own, whose locals hold none of that code's (the owner, 2026-11-20, #519, comment 7051071630:
+        /// T49 (c) and T61 (a)).
         /// </summary>
         private Origin OriginOf(Expression e)
         {
@@ -1362,10 +1446,90 @@ public sealed class ThrowSets
                 case NameExpression n when model.IsVariable(n) && model.VariableOf(n) is { Mut: false } v:
                     var at = parameters?.IndexOf(v) ?? -1;
                     return at >= 0 && !lambda ? new Origin(at) : locals.TryGetValue(v, out var held) ? held : Origin.Other;
+                case NameExpression or MemberAccess when !lambda && FieldOf(e) is { } field:
+                    return Origin.Of(field);
+                case IndexExpression i:
+                    return ItemOf(OriginOf(i.Target));
                 default:
                     return Origin.Other;
             }
         }
+
+        // T49 (c): an item of the list a field of the actor's body holds, other for anything else
+        private static Origin ItemOf(Origin list) => list is { Field.Type: ListType, Item: false } ? Origin.Of(list.Field!, item: true) : Origin.Other;
+
+        // T49 (c): the field of the actor an expression names, by its name inside a method or through `this`, in a lambda too; null for any
+        // other expression, a field of a class among them
+        private FieldSymbol? FieldOf(Expression e)
+        {
+            switch (e)
+            {
+                case ParenthesizedExpression p:
+                    return FieldOf(p.Inner);
+                case NameExpression n when model.IsImplicitField(n, out var self, out var field) && field is not null && ActorOf(self.Type) is not null:
+                    return field;
+                case MemberAccess { Target: ThisExpression t } m when Typed(t) is { } type && ActorOf(type)?.Field(m.Member) is { } field:
+                    return field;
+                default:
+                    return null;
+            }
+        }
+
+        private static ClassSymbol? ActorOf(KurzType type) => type switch
+        {
+            ActorType a => a.Symbol,
+            ClassType { Symbol.IsActor: true } c => c.Symbol,
+            _ => null,
+        };
+
+        /// <summary>
+        /// T49 (c): the default of a field of an actor's body, a write of it in the construction, which reads no <c>this</c> (V10).
+        /// </summary>
+        public void Default(ClassSymbol owner, FieldSymbol field, Expression value)
+        {
+            if (owner.IsActor && field.Body is not null)
+            {
+                Write(field, value);
+            }
+        }
+
+        // T49 (c): a write of a field of the actor with the value: a list literal puts each of its items into the list, an empty list
+        // and `null` hold no reference, and a list of another origin is other; in a lambda every value is other
+        private void Write(FieldSymbol? field, Expression value)
+        {
+            if (!sets.reach || field is null)
+            {
+                return;
+            }
+
+            if (field.Type is ListType)
+            {
+                switch (value)
+                {
+                    case ListLiteral l:
+                        foreach (var item in l.Items)
+                        {
+                            Record(field, item: true, item);
+                        }
+
+                        return;
+                    case CallExpression c when model.HasCall(c) && model.CallOf(c).Kind == CallKind.ListNew && c.Arguments.Count == 0:
+                        return;
+                    default:
+                        unit.Writes.Add(new FieldWrite(field, false, Origin.Other, value.Line));
+                        return;
+                }
+            }
+
+            if (value is not NullLiteral)
+            {
+                Record(field, item: false, value);
+            }
+        }
+
+        // T49 (c): a write of the field or of an item of its list, with where the value comes from; in a lambda, other
+        private void Record(FieldSymbol field, bool item, Expression value) =>
+            unit.Writes.Add(new FieldWrite(field, item, lambda ? Origin.Other : OriginOf(value), value.Line));
 
         // U57: where each argument of the call comes from, by the parameter it fills (D11), other for a parameter it leaves to its default
         private Origin[] Slots(CallExpression c, CallInfo info)
@@ -1483,16 +1647,28 @@ public sealed class ThrowSets
 
 /// <summary>
 /// U57: where the reference a call goes through, or an argument it passes, comes from in the unit of code that holds it: the actor
-/// itself (<see cref="Self"/>), a parameter of the unit's function by its place, or anything else (<see cref="Other"/>).
+/// itself (<see cref="Self"/>), a parameter of the unit's function by its place, a field of the actor or an item of the list
+/// such a field holds (<see cref="Of"/>), or anything else (<see cref="Other"/>).
 /// </summary>
-public readonly record struct Origin(int Parameter)
+public readonly record struct Origin(int Parameter, FieldSymbol? Field = null, bool Item = false)
 {
     /// <summary><c>this</c> as a value inside an actor, its own reference (U10), or a local without <c>mut</c> that holds it.</summary>
     public static readonly Origin Self = new(-1);
 
-    /// <summary>A field, an item of a collection, a capture in a lambda, a call's result, or a local with <c>mut</c>.</summary>
+    /// <summary>A field of a class or a data type, an item of a collection a field of an actor does not hold, a capture in a lambda, a call's result, or a local with <c>mut</c>.</summary>
     public static readonly Origin Other = new(-2);
+
+    /// <summary>A field of the actor (T49 (c)), or with <paramref name="item"/> an item of the list it holds.</summary>
+    public static Origin Of(FieldSymbol field, bool item = false) => new(-3, field, item);
 }
+
+/// <summary>
+/// U57, T49 (c): a write of a field of an actor that the actor's code makes: an assignment of the field, or with
+/// <see cref="Item"/> an item put into the list it holds, by <c>Add</c>, <c>Insert</c>, an assignment of an item or a list literal
+/// assigned to it, and where the value comes from in the unit's terms; a write the loops cannot follow, a field passed to a <c>mut</c>
+/// parameter or <c>AddRange</c> among them, takes <see cref="Origin.Other"/>.
+/// </summary>
+public sealed record FieldWrite(FieldSymbol Field, bool Item, Origin Value, int Line);
 
 /// <summary>What a site of an actor's code is (U56): a call that waits (U4), a <c>send</c> (U6) or a <c>spawn</c> (U2).</summary>
 public enum SiteKind
@@ -1516,11 +1692,15 @@ public sealed record ActorSite(CallExpression Call, ClassSymbol Actor, FunctionS
 /// <summary>A site an entry of an actor's code reaches: <see cref="Through"/> names the unit it stands in where that is not the entry itself, <see cref="Receivers"/> holds the origins its receiver can have in the entry's terms, and <see cref="Arguments"/> those of each of its arguments, by the parameter it fills (U57).</summary>
 public sealed record ReachedSite(ActorSite Site, string? Through, IReadOnlyCollection<Origin> Receivers, IReadOnlyList<IReadOnlyCollection<Origin>> Arguments);
 
+/// <summary>A write of a field an entry reaches, with the origins its value can have in the entry's terms (U57, T49 (c)).</summary>
+public sealed record ReachedWrite(FieldWrite Write, IReadOnlyCollection<Origin> Values);
+
 /// <summary>
 /// An entry of an actor's code (U56): its construction, whose <see cref="Method"/> is null, or a method it declares, with the sites its code
-/// reaches, and whether code of the program calls it directly, as its own actor's code calls its method (U10).
+/// reaches, the writes of its actor's fields it reaches, and whether code of the program calls it directly, as its own actor's code calls
+/// its method (U10).
 /// </summary>
-public sealed record ActorEntry(string Name, FunctionSymbol? Method, IReadOnlyList<ReachedSite> Sites, bool Direct);
+public sealed record ActorEntry(string Name, FunctionSymbol? Method, IReadOnlyList<ReachedSite> Sites, IReadOnlyList<ReachedWrite> Writes, bool Direct);
 
 /// <summary>The code of an actor by its entries (U56).</summary>
 public sealed record ActorCode(ClassSymbol Actor, IReadOnlyList<ActorEntry> Entries);

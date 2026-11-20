@@ -1,4 +1,5 @@
-// expect: error call-loop at 9
+// expect: output
+// | 71
 // rules: U57
 
 interface Checker {

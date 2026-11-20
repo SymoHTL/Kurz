@@ -4790,7 +4790,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // the wait, or before a direct call of the method that assigns it, which the count of such a read holds to its statement's end; a
         // field as an argument before the wait, a `for` over a field whose body waits and a key of `SortBy` that waits, which hold what
         // they read as they hold it across any call; `this` inside the key's lambda is no callback of U57, since a lambda can cross into
-        // another actor's message (U12; assumed: T49 of #519, comment 7007991607, and T61 of #519, comment 7009683539), and `vouch`
+        // another actor's message (U12; the owner, 2026-11-20, #519, comment 7051071630, T49 (c) and T61 (a)), and `vouch`
         // takes `Valid`'s call out of U56's loop, a promise nothing checks (U58)
         const string actorWaits = """
             actor Store(Checker Check) {

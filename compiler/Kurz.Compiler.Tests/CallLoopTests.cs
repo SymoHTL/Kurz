@@ -9,11 +9,11 @@ using Xunit;
 namespace Kurz.Compiler.Tests;
 
 /// <summary>
-/// Layer 2 of section 6's deadlocks (U56 to U59; assumed: T40 to T45 and T48 to T59 of issue 519, comment 7007991607, T60 and T61 of
-/// issue 519, comment 7009683539, and T62 of issue 519, comment 7010568524, built at the lean while it waits for the owner): the line of
-/// each <c>call-loop</c> and how many a program gets, the loop its text names, read by the lines it names, the word <c>vouch</c> as the
-/// parser reads it, the lint <c>vouch-unneeded</c>, and the walk that reads each unit of code once. Every error is pinned by its id and
-/// its line; of a text, only the lines of a loop's hops are read, and for T56 the order of the words <c>send</c> and <c>vouch</c>.
+/// Layer 2 of section 6's deadlocks (U56 to U59; the owner, 2026-11-20, issue 519, comment 7051071630: T40 to T62 and T74): the line of
+/// each <c>call-loop</c> and how many a program gets, the loop its text names, read by the lines it names, the callbacks U57 takes out,
+/// the word <c>vouch</c> as the parser reads it, the lint <c>vouch-unneeded</c>, and the walk that reads each unit of code once. Every
+/// error is pinned by its id and its line; of a text, only the lines of a loop's hops are read, and for T56 the order of the words
+/// <c>send</c> and <c>vouch</c>.
 /// </summary>
 public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -37,9 +37,9 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     [Fact]
     public void A_loop_of_three_types_is_one_error_at_its_call_that_stands_first_in_source_order()
     {
-        // T52: the types are declared in the reverse order of the loop, so that a walk from the first type declared or from the first
-        // call the top-level code makes would start elsewhere; the error stands at line 2, the first call of the group in the file, and
-        // its text goes round the loop from there
+        // T40, T52: `A.Go` waits on `B.Go`, which waits on `C.Go`, which waits on `A.Value`, a path of methods that comes back to `A`;
+        // the types are declared in the reverse order of the loop, so that the call that stands first in the file, at line 2, is its
+        // last hop, and the text goes round the loop from `A`, the type it comes back to
         const string program = """
             actor C {
                 pub int Go(A a) => a.Value() + 3
@@ -48,13 +48,13 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
             }
 
             actor B {
-                pub int Go(C c) => c.Value() + 2
+                pub int Go(C c, A a) => c.Go(a) + 2
 
                 pub int Value() => 2
             }
 
             actor A {
-                pub int Go(B b) => b.Value() + 1
+                pub int Go(B b, C c, A a) => b.Go(c, a) + 1
 
                 pub int Value() => 1
             }
@@ -62,85 +62,67 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
             theA = spawn A()
             theB = spawn B()
             theC = spawn C()
-            print(theA.Go(theB) + theB.Go(theC) + theC.Go(theA))
+            print(theA.Go(theB, theC, theA))
 
             """;
         var errors = Check(program).Diagnostics.Sorted;
         Assert.Equal([(ErrorIds.CallLoop, 2)], errors.Select(d => (d.Id, d.Line)));
-        Assert.Equal([2, 14, 8], Named(errors[0]));
+        Assert.Equal([14, 8, 2], Named(errors[0]));
     }
 
     [Fact]
     public void The_text_names_the_shortest_loop_through_the_first_call()
     {
-        // T52: `A.Go` at line 2 is on a loop of two types, back through `B.Near` (line 12), and on one of four, through `B.Far`, `C.Far`
-        // and `D.Far` (lines 10, 18 and 24), whose first hop out of `B` stands first in source order: the text names the loop of two
+        // T52: after `A.Go`'s call at line 2, `B.Both` comes back to `A` by its own call at line 18, and by a path of three hops through
+        // `C.Far` and `D.Far`, whose call of `A.Value` at line 8 stands first in source order: the text names the loop of two hops
         const string program = """
             actor A {
-                pub int Go(B b) => b.Value() + 1
+                pub int Go(B b, C c, D d, A a) => b.Both(c, d, a) + 1
 
                 pub int Value() => 1
             }
 
-            actor B {
-                pub int Value() => 2
-
-                pub int Far(C c) => c.Value()
-
-                pub int Near(A a) => a.Value()
-            }
-
-            actor C {
-                pub int Value() => 3
-
-                pub int Far(D d) => d.Value()
-            }
-
             actor D {
-                pub int Value() => 4
-
                 pub int Far(A a) => a.Value()
             }
 
+            actor C {
+                pub int Far(D d, A a) => d.Far(a)
+            }
+
+            actor B {
+                pub int Both(C c, D d, A a) {
+                    far = c.Far(d, a)
+                    return far + a.Value()
+                }
+            }
+
             theA = spawn A()
-            theB = spawn B()
-            theC = spawn C()
-            theD = spawn D()
-            print(theA.Go(theB) + theB.Far(theC) + theB.Near(theA) + theC.Far(theD) + theD.Far(theA))
+            print(theA.Go(spawn B(), spawn C(), spawn D(), theA))
 
             """;
         var errors = Check(program).Diagnostics.Sorted;
         Assert.Equal([(ErrorIds.CallLoop, 2)], errors.Select(d => (d.Id, d.Line)));
-        Assert.Equal([2, 12], Named(errors[0]));
+        Assert.Equal([2, 18], Named(errors[0]));
     }
 
     [Fact]
     public void Of_two_loops_of_the_fewest_hops_the_text_names_the_one_the_code_of_each_type_reaches_first()
     {
-        // U56: `B` reaches `C` from its method at line 8 and `D` from its construction at line 12, and each of them waits on `A`: two
-        // loops of three hops through the call at line 2; the walk takes a type's construction before its methods, so that the text
-        // names the loop through `D`, where the order of the lines would name the one through `C`
+        // U56: `A`'s construction, at line 10, and `A.Go`, at line 6, each wait on `B.Mid`, whose call at line 2 comes back to `A`: two
+        // loops of two hops through that call, the first in source order; the walk takes a type's construction before its methods, so
+        // that the text names the loop from the construction, where the order of the lines would name the one from `A.Go`
         const string program = """
-            actor A {
-                pub int Ask(B b) => b.Value()
+            actor B(A Back) {
+                pub int Mid() => Back.Value()
+            }
+
+            actor A(B Keep) {
+                pub int Go() => Keep.Mid() + 1
 
                 pub int Value() => 1
-            }
 
-            actor B(D Keep) {
-                pub int Ask(C c) => c.Get()
-
-                pub int Value() => 2
-
-                int seen = Keep.Get()
-            }
-
-            actor C(A Back) {
-                pub int Get() => Back.Value()
-            }
-
-            actor D(A Back) {
-                pub int Get() => Back.Value()
+                int seen = Keep.Mid()
             }
 
             print(1)
@@ -148,87 +130,71 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
             """;
         var errors = Check(program).Diagnostics.Sorted;
         Assert.Equal([(ErrorIds.CallLoop, 2)], errors.Select(d => (d.Id, d.Line)));
-        Assert.Equal([2, 12, 20], Named(errors[0]));
+        Assert.Equal([10, 2], Named(errors[0]));
     }
 
     [Fact]
     public void A_group_of_types_that_reach_one_another_is_one_error_and_two_groups_are_two()
     {
-        // T52: `A` waits on `B` and on `C`, which both wait on `A`: two loops in one group, one error at line 2; two groups apart, `A`
-        // and `B`, `C` and `D`, are an error each, at the first call of each
+        // T52: `A.Go` and `B.Go` each wait on `C.X`, which waits on both: the loops back to `A` and back to `B` reach each other's types,
+        // one group, one error at line 2; with a method of `C` for each, `C.X` back to `A` and `C.Y` back to `B`, neither loop reaches
+        // the other's type, though both pass through `C`: two groups, an error each, at the first call of each
         const string one = """
             actor A {
-                pub int ToB(B b) => b.Value()
-
-                pub int ToC(C c) => c.Value()
+                pub int Go(C hub, A me, B other) => hub.X(me, other)
 
                 pub int Value() => 1
             }
 
             actor B {
-                pub int ToA(A a) => a.Value()
+                pub int Go(C hub, A other, B me) => hub.X(other, me) + 1
 
                 pub int Value() => 2
             }
 
             actor C {
-                pub int ToA(A a) => a.Value()
-
-                pub int Value() => 3
+                pub int X(A first, B second) => first.Value() + second.Value()
             }
 
-            theA = spawn A()
-            theB = spawn B()
-            theC = spawn C()
-            print(theA.ToB(theB) + theA.ToC(theC) + theB.ToA(theA) + theC.ToA(theA))
+            print(1)
 
             """;
         Assert.Equal([(ErrorIds.CallLoop, 2)], Diagnostics(one));
         const string two = """
             actor A {
-                pub int ToB(B b) => b.Value()
+                pub int Go(C hub, A me) => hub.X(me)
 
                 pub int Value() => 1
             }
 
             actor B {
-                pub int ToA(A a) => a.Value()
+                pub int Go(C hub, B me) => hub.Y(me) + 1
 
                 pub int Value() => 2
             }
 
             actor C {
-                pub int ToD(D d) => d.Value()
+                pub int X(A first) => first.Value()
 
-                pub int Value() => 3
+                pub int Y(B second) => second.Value()
             }
 
-            actor D {
-                pub int ToC(C c) => c.Value()
-
-                pub int Value() => 4
-            }
-
-            theA = spawn A()
-            theB = spawn B()
-            theC = spawn C()
-            theD = spawn D()
-            print(theA.ToB(theB) + theB.ToA(theA) + theC.ToD(theD) + theD.ToC(theC))
+            print(1)
 
             """;
-        Assert.Equal([(ErrorIds.CallLoop, 2), (ErrorIds.CallLoop, 14)], Diagnostics(two));
+        Assert.Equal([(ErrorIds.CallLoop, 2), (ErrorIds.CallLoop, 8)], Diagnostics(two));
     }
 
     [Fact]
     public void A_call_whose_edge_leaves_its_group_is_none_of_the_group_s_calls()
     {
-        // U56: `A` waits on `E` at line 2, a type on no loop, before it waits on `B` at line 4: the error stands at the first call whose
-        // edge stays in the group of `A` and `B`, and names the loop through it
+        // U56: `A` waits on `E` at line 2, a type on no loop, before it waits on `B.ToA` at line 4, which waits on `A`: the error stands
+        // at the first call whose edge stays in the loop's group, and names the loop through it
         const string program = """
             actor A {
                 pub int ToE(E e) => e.Value()
 
-                pub int ToB(B b) => b.Value()
+                pub int ToB(B b, A a) => b.ToA(a)
 
                 pub int Value() => 1
             }
@@ -260,7 +226,7 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
         // as the method it picked; the same calls without their errors close the loop (the controls)
         const string beside = """
             actor Left {
-                pub int Ask(Right other) => other.Value() + 1
+                pub int Ask(Right other, Left back) => other.Ask(back) + 1
 
                 pub int Value() => 1
             }
@@ -349,8 +315,8 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     public void A_method_its_own_actor_calls_directly_reads_its_calls_with_what_its_callers_pass()
     {
         // U57: `B.Peek` is called by no call through a reference, only by `B.Check` directly (U10), which `A.Save` calls with `this`: the
-        // call through `Peek`'s parameter reaches the caller that waits, and the program has no error; a top-level call of `Peek` through
-        // a reference with another `A` makes it an edge, at line 2, the first call of the loop
+        // call through `Peek`'s parameter reaches the caller that waits, and the program has no error; a top-level call of `Check` with
+        // another `A` makes the call in `Peek` an edge of `Check`, and the loop of `A.Save` and `B.Check` is one error, at line 2
         const string program = """
             actor A(B Other) {
                 pub int Save() => Other.Check(this) + 1
@@ -370,7 +336,7 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
 
             """;
         Assert.Empty(Diagnostics(program));
-        Assert.Equal([(ErrorIds.CallLoop, 2)], Diagnostics(program + "print(b.Peek(spawn A(b)))\n"));
+        Assert.Equal([(ErrorIds.CallLoop, 2)], Diagnostics(program + "print(b.Check(spawn A(b)))\n"));
     }
 
     [Fact]
@@ -413,9 +379,9 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     [Fact]
     public void A_reference_a_send_hands_on_is_no_callback()
     {
-        // U57, T60: `Checker.Valid` hands the `Store` it was given on to `Verifier.Verify` by a `send`, which gives no callback (T49), so
-        // that `Verify`'s call of `Load` is an edge, and the loop of three types, through `Valid`'s wait on `Verifier.Count`, is one
-        // error, at line 2; the same call made as one that waits hands the callback on, and the program has no error
+        // U57, T60: `Checker.Valid` hands the `Store` it was given on to `Verifier.Verify` by a `send` and by a call that waits; the
+        // `send` gives no callback (T49), so that `Verify`'s call of `Load` is an edge, and the loop of three types, through the call that
+        // waits, is one error, at line 2; the `send` made a call that waits hands the callback on, and the program has no error
         const string program = """
             actor Store(Checker Check) {
                 pub int Save() => Check.Valid(this) + 1
@@ -426,7 +392,8 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
             actor Checker(Verifier V) {
                 pub int Valid(Store store) {
                     send V.Verify(store)
-                    return V.Count()
+                    V.Verify(store)
+                    return 1
                 }
             }
 
@@ -434,8 +401,6 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
                 pub void Verify(Store store) {
                     print(store.Load())
                 }
-
-                pub int Count() => 3
             }
 
             v = spawn Verifier()
@@ -599,8 +564,10 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     {
         // U57, D16: `A.Save` passes `this` to a function that calls a method through a base class, one through an interface and a data
         // type's method, and each passes it on to `B.Check`: the edge of the picked method's override, of the method that implements
-        // the interface's and of the data method, whose function takes the value first, each reads `this` at the call of `B.Check`; each
-        // of those methods is `pub`, code outside the actors' messages, so that none of these calls is a callback (ThrowSets.Outside)
+        // the interface's and of the data method, whose function takes the value first, each reads `this` at the call of `B.Check`; an
+        // actor's message is the only caller of each of those methods, so that each call hands on a callback and the program has no error
+        // (T74); a top-level call of the function makes code outside the actors' messages reach them (ThrowSets.Outside), and the loop of
+        // `A.Save` and `B.Check` is one error, at the call of `B.Check`
         const string actors = """
 
             actor A(B Other) {
@@ -648,7 +615,8 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
         foreach (var (program, line) in new[] { (overridden, 6), (implemented, 6), (data, 2) })
         {
             Assert.Equal([Origin.Self], FirstArgument(program + actors, "`A.Save`", "Check"));
-            Assert.Equal([(ErrorIds.CallLoop, line)], Diagnostics(program + actors));
+            Assert.Empty(Diagnostics(program + actors));
+            Assert.Equal([(ErrorIds.CallLoop, line)], Diagnostics(program + actors + "theB = spawn B()\nprint(Ask(theB, spawn A(theB)))\n"));
         }
     }
 
@@ -687,21 +655,18 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
         // through two types and for one through one type, each text read by where the two words stand in it and not by its wording
         const string two = """
             actor Left {
-                pub int Ask(Right other) => other.Value() + 1
+                pub int Ask(Right other, Left back) => other.Ask(back) + 1
 
                 pub int Value() => 1
             }
 
             actor Right {
                 pub int Ask(Left other) => other.Value() + 2
-
-                pub int Value() => 2
             }
 
             l = spawn Left()
             r = spawn Right()
-            print(l.Ask(r))
-            print(r.Ask(l))
+            print(l.Ask(r, l))
 
             """;
         const string one = """
@@ -729,9 +694,10 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     [Fact]
     public void The_text_of_a_loop_through_a_spawn_names_the_construction_of_the_spawned_type()
     {
-        // U56: the construction of `Child` runs in `Child` (U3), so that its call at line 8 is `Child`'s hop and the `spawn` at line 4
-        // `Parent`'s: two hops, where a construction read as the spawner's code would make the call at line 8 a hop of `Parent` to
-        // itself too, which stands first, since `Parent` is declared first, and a loop of one hop
+        // U56, T43: the `spawn` at line 4 is an edge of `Parent.Make` into the construction of `Child`, which runs in `Child` (U3) and
+        // waits on `Parent.Count` at line 8: a path that comes back to `Parent`, the error at its call that waits and the text from
+        // `Parent.Make`, two hops, where a construction read as the spawner's code would make the call at line 8 a hop of `Parent` to
+        // itself, a loop of one hop
         const string program = """
             actor Parent {
                 pub int Count() => 3
@@ -752,7 +718,207 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
             """;
         var errors = Check(program).Diagnostics.Sorted;
         Assert.Equal([(ErrorIds.CallLoop, 8)], errors.Select(d => (d.Id, d.Line)));
-        Assert.Equal([8, 4], Named(errors[0]));
+        Assert.Equal([4, 8], Named(errors[0]));
+    }
+
+    [Fact]
+    public void Two_chains_that_cross_through_two_different_methods_are_no_loop_and_a_callee_that_waits_back_on_its_caller_s_type_is_one()
+    {
+        // T40: `Left.Ask` waits on `Right.Value` and `Right.Ask` on `Left.Value`, the crossing of `deadlock.kz`: neither callee's code
+        // waits on a method of its caller's type, no loop, and the program has no error; with `Left.Ask` waiting on `Right.Ask`, whose code
+        // waits on `Left.Value`, the path comes back to `Left`, a loop at line 2
+        const string program = """
+            actor Left {
+                pub int Ask(Right other) => other.Value() + 1
+
+                pub int Value() => 1
+            }
+
+            actor Right {
+                pub int Ask(Left other) => other.Value() + 2
+
+                pub int Value() => 2
+            }
+
+            l = spawn Left()
+            r = spawn Right()
+            print(l.Ask(r))
+            print(r.Ask(l))
+
+            """;
+        Assert.Empty(Diagnostics(program));
+        var back = program.Replace("pub int Ask(Right other) => other.Value() + 1", "pub int Ask(Right other) => other.Ask(spawn Left()) + 1", StringComparison.Ordinal);
+        var errors = Check(back).Diagnostics.Sorted;
+        Assert.Equal([(ErrorIds.CallLoop, 2)], errors.Select(d => (d.Id, d.Line)));
+        Assert.Equal([2, 8], Named(errors[0]));
+    }
+
+    [Fact]
+    public void A_path_that_comes_back_to_a_type_only_by_a_spawn_is_no_loop()
+    {
+        // T40, T43: `A.Go` waits on `B.Make`, which spawns an `A`: the path comes back to the construction of `A`, which waits on nothing,
+        // and a `spawn` is no call that waits on a method of `A`, so that it is no loop; with `B.Make` waiting on the `A` it spawned, the
+        // path comes back to `A.Value`, a loop at line 3
+        const string program = """
+            actor A {
+                pub int Go(B b) {
+                    b.Make()
+                    return 1
+                }
+
+                pub int Value() => 1
+            }
+
+            actor B {
+                mut List<A> made = []
+
+                pub void Make() {
+                    made.Add(spawn A())
+                }
+            }
+
+            print(1)
+
+            """;
+        Assert.Empty(Diagnostics(program));
+        var back = program.Replace("made.Add(spawn A())", "made.Add(spawn A())\n        print(made[0].Value())", StringComparison.Ordinal);
+        Assert.Equal([(ErrorIds.CallLoop, 3)], Diagnostics(back));
+    }
+
+    [Fact]
+    public void A_field_whose_every_write_is_a_callback_is_one_and_any_other_write_makes_it_none()
+    {
+        // U57, T49: `B.Keep` sets `peer` from its parameter, which `A.Join` fills with `this` by a call that waits, the field's one write
+        // beside its `null`: `B.Read`'s call through it reaches the caller that waits, and the program has no error, read and written
+        // through `this` as well; a second write from a parameter that a top-level call fills with another `A`, or one in a lambda that no
+        // code runs, makes the field none, and the loop of `A.Total` and `B.Read` is one error at line 6; and a field of the primary
+        // constructor, which its `spawn` sets, is none
+        const string program = """
+            actor A(B Other) {
+                pub void Join() {
+                    Other.Keep(this)
+                }
+
+                pub int Total() => Other.Read() + 1
+
+                pub int Load() => 7
+            }
+
+            actor B {
+                mut A? peer = null
+
+                pub void Keep(A x) {
+                    peer = x
+                }
+
+                pub int Read() {
+                    p = peer
+                    if p != null {
+                        return p.Load()
+                    }
+
+                    return 0
+                }
+            }
+
+            b = spawn B()
+            a = spawn A(b)
+            a.Join()
+            print(a.Total())
+
+            """;
+        Assert.Empty(Diagnostics(program));
+        Assert.Empty(Diagnostics(program.Replace("        peer = x\n", "        this.peer = x\n", StringComparison.Ordinal).Replace("p = peer", "p = this.peer", StringComparison.Ordinal)));
+        var put = program.Replace("    pub int Read() {", "    pub void Put(A y) {\n        peer = y\n    }\n\n    pub int Read() {", StringComparison.Ordinal);
+        Assert.Equal([(ErrorIds.CallLoop, 6)], Diagnostics(put + "b.Put(spawn A(b))\n"));
+        var unrun = program.Replace("        peer = x\n", "        peer = x\n        f = () => {\n            peer = x\n        }\n", StringComparison.Ordinal);
+        Assert.Equal([(ErrorIds.CallLoop, 6), (ErrorIds.UnusedVariable, 16)], Diagnostics(unrun));
+        const string primary = """
+            actor A {
+                pub int Go(B b) => b.Ask()
+
+                pub int Value() => 1
+            }
+
+            actor B(A Back) {
+                pub int Ask() => Back.Value()
+            }
+
+            a = spawn A()
+            print(a.Go(spawn B(a)))
+
+            """;
+        Assert.Equal([(ErrorIds.CallLoop, 2)], Diagnostics(primary));
+    }
+
+    [Fact]
+    public void A_list_field_whose_every_item_written_is_a_callback_holds_callbacks_read_by_a_for_or_an_index()
+    {
+        // U57, T49: `B.Keep` adds its parameter, which `A.Join` fills with `this`, to `kept`, which starts empty: each item is a callback,
+        // and `B.Sum`'s call through the variable of a `for` over the list reaches the caller that waits, and the program has no error,
+        // read through an index, put in by `Insert`, an item assigned or a list literal, and through `this`, as well; an item from another
+        // `A`, one added in a lambda, which captures the parameter, one that `AddRange` puts in, a list literal with another item, and the
+        // list passed as `mut`, make it none, and the loop of `A.Total` and `B.Sum` is one error at line 6, and at line 9 after the function
+        const string program = """
+            actor A(B Other) {
+                pub void Join() {
+                    Other.Keep(this)
+                }
+
+                pub int Total() => Other.Sum() + 1
+
+                pub int Load() => 7
+            }
+
+            actor B {
+                mut List<A> kept = []
+
+                pub void Keep(A x) {
+                    kept.Add(x)
+                }
+
+                pub int Sum() {
+                    mut total = 0
+                    for k in kept {
+                        total = total + k.Load()
+                    }
+
+                    return total
+                }
+            }
+
+            b = spawn B()
+            a = spawn A(b)
+            a.Join()
+            print(a.Total())
+
+            """;
+        const string add = "        kept.Add(x)\n";
+        Assert.Empty(Diagnostics(program));
+        foreach (var (from, to) in new[]
+        {
+            ("        for k in kept {\n            total = total + k.Load()\n        }\n", "        if kept.Count > 0 {\n            total = kept[0].Load()\n        }\n"),
+            (add, "        kept.Insert(0, x)\n"),
+            (add, add + "        kept[0] = x\n"),
+            (add, "        kept = [x]\n"),
+            (add, "        this.kept.Add(x)\n"),
+        })
+        {
+            Assert.Empty(Diagnostics(program.Replace(from, to, StringComparison.Ordinal)));
+        }
+
+        foreach (var other in new[]
+        {
+            program + "b.Keep(spawn A(b))\n",
+            program.Replace(add, "        more = () => kept.Add(x)\n        more()\n", StringComparison.Ordinal),
+            program.Replace(add, "        kept.AddRange([x])\n", StringComparison.Ordinal),
+            program.Replace(add, "        kept = [x, spawn A(spawn B())]\n", StringComparison.Ordinal),
+        })
+        {
+            Assert.Equal([(ErrorIds.CallLoop, 6)], Diagnostics(other));
+        }
+
+        Assert.Equal([(ErrorIds.CallLoop, 9)], Diagnostics("void Grow(mut List<A> items) {\n}\n\n" + program.Replace(add, add + "        Grow(mut kept)\n", StringComparison.Ordinal)));
     }
 
     [Theory]
@@ -857,26 +1023,23 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     [Fact]
     public void Two_vouches_on_one_loop_keep_each_other_and_a_program_with_a_not_supported_gets_no_warning()
     {
-        // U59: the graph is read with every `vouch` left out, so that each of the two covers the loop of `Left` and `Right`; with one
-        // left out, the other is still needed (the control); and an actor the build does not read, `per node`, takes the warning away
-        // beside its `not supported`, where another error, an `unknown-name` at line 11, leaves it
+        // U59: the graph is read with every `vouch` left out, so that each of the two covers the loop of `Left.Ask`, `Right.Ask` and
+        // `Left.Value`; with one left out, the other is still needed (the control); and an actor the build does not read, `per node`,
+        // takes the warning away beside its `not supported`, where another error, an `unknown-name` at line 11, leaves it
         const string program = """
             actor Left {
-                pub int Ask(Right other) => vouch other.Value() + 1
+                pub int Ask(Right other, Left back) => vouch other.Ask(back) + 1
 
                 pub int Value() => 1
             }
 
             actor Right {
                 pub int Ask(Left other) => vouch other.Value() + 2
-
-                pub int Value() => 2
             }
 
             l = spawn Left()
             r = spawn Right()
-            print(l.Ask(r))
-            print(r.Ask(l))
+            print(l.Ask(r, l))
 
             """;
         Assert.Empty(Diagnostics(program));
@@ -904,15 +1067,16 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     [Fact]
     public void The_walk_reads_each_unit_of_two_thousand_actor_types_once_and_their_loop_is_one_error()
     {
-        // T59: a chain of actor types, each waiting on the one after it and the last on the first, one loop through all of them: each type
-        // adds its root, its construction and its two methods to the units the walk read, once each, and the loop is one error at the
-        // first call; the groups are found without a frame of the process per type
+        // T59: a chain of actor types, the method of each waiting on the same method of the one after it and the last on the first's, one
+        // path of methods that comes back to every type on it: each type adds its root, its construction and its two methods to the units
+        // the walk read, once each, and the loop is one error at the first call; the groups are found without a frame of the process per
+        // type
         static string Chain(int count)
         {
             var text = new StringBuilder();
             for (var i = 0; i < count; i++)
             {
-                text.Append(System.Globalization.CultureInfo.InvariantCulture, $"actor A{i} {{\n    pub int Get(A{(i + 1) % count} n) => n.Value()\n\n    pub int Value() => {i}\n}}\n\n");
+                text.Append(System.Globalization.CultureInfo.InvariantCulture, $"actor A{i}(A{(i + 1) % count} Next) {{\n    pub int Get() => Next.Get() + 1\n\n    pub int Value() => {i}\n}}\n\n");
             }
 
             return text.Append("print(1)\n").ToString();

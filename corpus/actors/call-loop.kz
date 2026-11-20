@@ -2,18 +2,15 @@
 // rules: U56
 
 actor Left {
-    pub int Ask(Right other) => other.Value() + 1
+    pub int Ask(Right other, Left back) => other.Ask(back) + 1
 
     pub int Value() => 1
 }
 
 actor Right {
     pub int Ask(Left other) => other.Value() + 2
-
-    pub int Value() => 2
 }
 
 l = spawn Left()
 r = spawn Right()
-print(l.Ask(r))
-print(r.Ask(l))
+print(l.Ask(r, l))

@@ -1,21 +1,18 @@
 // expect: error call-loop at 4
 // rules: U56
 
-int ValueOf(Right right) => right.Value()
+int AskOf(Right right, Left back) => right.Ask(back)
 
 actor Left {
-    pub int Ask(Right other) => ValueOf(other) + 1
+    pub int Ask(Right other, Left back) => AskOf(other, back) + 1
 
     pub int Value() => 1
 }
 
 actor Right {
     pub int Ask(Left other) => other.Value() + 2
-
-    pub int Value() => 2
 }
 
 l = spawn Left()
 r = spawn Right()
-print(l.Ask(r))
-print(r.Ask(l))
+print(l.Ask(r, l))
