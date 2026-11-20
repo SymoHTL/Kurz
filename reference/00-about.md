@@ -454,6 +454,10 @@ print(Show(1))
 print(Show("ok"))
 print(Show(Point(1, 2)))
 print(Show(Tag()))
+n = 4
+s = "n={n}"
+print(Show(s))
+print(s)
 ```
 
 ### A6 (decided, §8) The text of a map
