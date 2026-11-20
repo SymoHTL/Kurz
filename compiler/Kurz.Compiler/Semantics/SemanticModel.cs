@@ -393,6 +393,13 @@ public sealed record CallInfo(
 /// </summary>
 public sealed record LogSite(int Level, string? Category, IReadOnlyList<string> Fields);
 
+/// <summary>
+/// Y6: a <c>check</c> as the checker read it: the condition's text as the parser kept it (F10), and where the condition, its parentheses
+/// passed over, is one of the six comparisons whose two sides have a text (A4), that comparison with the type of each side, the values its
+/// failure shows; null for any other condition, whose failure shows its text alone.
+/// </summary>
+public sealed record Assertion(string Text, BinaryExpression? Comparison, KurzType? Left, KurzType? Right);
+
 /// <summary>A lambda as the checker read it: its parameters, the variables of the functions around it that it reads (F11, F15) and its type.</summary>
 public sealed record LambdaInfo(IReadOnlyList<VariableSymbol> Parameters, IReadOnlyList<VariableSymbol> Captures, FunctionType Type);
 
@@ -437,6 +444,9 @@ public sealed class SemanticModel
     private readonly Dictionary<ExternFunction, FunctionSymbol> cFunctions = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypeDeclaration, DataSymbol> dataTypes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<TestDeclaration, FunctionSymbol> tests = new(ReferenceEqualityComparer.Instance);
+    private readonly List<TestDeclaration> testOrder = [];
+    private readonly Dictionary<AssertionStatement, Assertion> assertions = new(ReferenceEqualityComparer.Instance);
 
     // K7: a read of a property, `h.Count` or `Count` inside its class, by the call of its method that the read is
     private readonly Dictionary<Expression, CallExpression> propertyReads = new(ReferenceEqualityComparer.Instance);
@@ -762,6 +772,27 @@ public sealed class SemanticModel
     internal void RecordPattern(TypePattern pattern, KurzType type) => patterns[pattern] = type;
 
     internal void RecordFunction(FunctionDeclaration declaration, FunctionSymbol symbol) => functions[declaration] = symbol;
+
+    /// <summary>
+    /// Y1, Y5: the function a test's body is checked as, with no parameter and a <c>void</c> result, its declaration the test's line, a name
+    /// <c>test "name"</c> and the test's block as its body, which no call can name; <see cref="FunctionOf"/> gives it too, by that declaration.
+    /// </summary>
+    public FunctionSymbol TestOf(TestDeclaration test) => tests.TryGetValue(test, out var f) ? f : throw Missing("test", test.Line);
+
+    /// <summary>Y2: the tests of the file the checker read, in the order of the file, the cluster test's (Y8) not among them.</summary>
+    public IReadOnlyList<TestDeclaration> Tests => testOrder;
+
+    internal void RecordTest(TestDeclaration test, FunctionSymbol symbol)
+    {
+        tests[test] = symbol;
+        testOrder.Add(test);
+        functions[symbol.Declaration!] = symbol;
+    }
+
+    /// <summary>Y6: a <c>check</c> the checker read, with its text and the comparison whose two sides its failure shows.</summary>
+    public Assertion AssertionOf(AssertionStatement check) => assertions.TryGetValue(check, out var a) ? a : throw Missing("check", check.Line);
+
+    internal void RecordAssertion(AssertionStatement check, Assertion assertion) => assertions[check] = assertion;
 
     internal void RecordCFunction(ExternFunction declaration, FunctionSymbol symbol) => cFunctions[declaration] = symbol;
 

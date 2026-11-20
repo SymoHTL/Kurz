@@ -1,0 +1,11 @@
+// expect: throws check-failed at 6
+// | ok
+// rules: Y6
+
+void Positive(int n) {
+    check n > 0
+}
+
+Positive(1)
+print("ok")
+Positive(-1)
