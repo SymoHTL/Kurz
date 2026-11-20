@@ -1022,6 +1022,45 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void A_message_to_the_name_of_a_per_node_actor_from_its_own_method_brings_nothing_of_its_start()
+    {
+        // U55, U17 (assumed: T33 of issue 519, comment 6983903100): a method of `Cache` runs in the actor that stands, so that a call or
+        // a `send` through its name there starts none and runs no default; a function's call through the name brings the start's
+        // throw, the control (U52)
+        const string text = """
+            data EStart
+
+            int Started() {
+                throw EStart
+            }
+
+            actor Cache per node {
+                int first = Started()
+
+                pub int Get() => first
+
+                pub void Add() {
+                    print(first)
+                }
+
+                pub int Again() {
+                    send Cache.Add()
+                    return Cache.Get()
+                }
+            }
+
+            pub void Call() {
+                print(Cache.Get())
+            }
+
+            """;
+        var own = Own(text);
+        var cache = own.Checker.Model.ClassOf(own.Tree.Statements.OfType<TypeDeclaration>().Single(t => t.Name == "Cache"));
+        Assert.Equal(["RuntimeError"], Names(own.Sets.RaisedBy(cache.Methods["Again"].Single())));
+        Assert.Equal(["EStart", "RuntimeError"], RaisedIn(own, "Call"));
+    }
+
+    [Fact]
     public void A_text_reads_each_instantiation_of_one_generic_type_it_holds()
     {
         // section 5: `Two` holds a `Box<int>` and a `Box<Quiet>`, and its text reads both, `Quiet`'s Text() through the second

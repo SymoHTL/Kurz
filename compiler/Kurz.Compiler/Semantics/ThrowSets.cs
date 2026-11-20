@@ -583,7 +583,7 @@ public sealed class ThrowSets
             return;
         }
 
-        var walk = new Walk(this, site.Model, site.File, unit);
+        var walk = new Walk(this, site.Model, site.File, unit, f.Owner);
         foreach (var parameter in declaration.Parameters)
         {
             walk.Optional(parameter.Default);
@@ -717,7 +717,8 @@ public sealed class ThrowSets
 
     // ---- the walk of a unit's code ------------------------------------------------------------------------------------------
 
-    private sealed class Walk(ThrowSets sets, SemanticModel model, int file, Unit unit)
+    // `inside`: the type whose method the walk reads, null for any other code (U55)
+    private sealed class Walk(ThrowSets sets, SemanticModel model, int file, Unit unit, ClassSymbol? inside = null)
     {
         // O7: the cases a bare `throw` throws in the arm of `else` being walked, innermost on top
         private readonly Stack<IReadOnlyList<KurzType>> bare = new();
@@ -1116,10 +1117,11 @@ public sealed class ThrowSets
 
                     break;
                 case CallKind.ActorCall or CallKind.ActorSend:
-                    if (info.ByName)
+                    if (info.ByName && !ReferenceEquals(((ActorType)info.Target!).Symbol, inside))
                     {
                         // U52: a message to the name of a `per node` actor starts it where none stands, its constructor run on the caller's
-                        // stack, whose throw is the caller's crash, as at a `spawn`
+                        // stack, whose throw is the caller's crash, as at a `spawn`; a method of that actor runs in it while it stands, so
+                        // that a message to its own name there starts none (U55, U17)
                         unit.Edges.Add(new Edge(new Construction(((ActorType)info.Target!).Symbol), null));
                     }
 

@@ -2244,7 +2244,7 @@ supported` of section 6's supervision: `attempt { ... }` and `retry { ... }`; a 
 throw a type the crossing copy does not copy (U12), a block in a file read without `std/`, and a block
 whose child's `Reason` grows by what the blocks of the program read, read five times, the first and four more; `per` with other
 words than `node`, `per cluster` with a text of its own, since it needs the directory of section 7, and a policy after such a
-name with it (U1, U51); the block `on crash (c) { ... }` after the name of a `per node` actor (U28, U54); the crash paths of the ESP32
+name with it (U1, U51); the block `on crash (c) { ... }` after the name of a `per` actor, `per node` among them (U27, U28); the crash paths of the ESP32
 models, AVR and WebAssembly, for which the build has no target; and, on Windows, an actor's stack
 overflow, which ends the process as the system ends it whatever the policy (U19); a crash at the root, the top-level code, still ends
 the process with its error line, its trace and the exit code 1. A call whose caller crashed runs to its end and its result goes nowhere, which on
@@ -2321,19 +2321,23 @@ checker reads `Cache.M(...)` and `send Cache.M(...)` as a call through a referen
 (`ThrowSets`); `spawn` of it is `type-mismatch`, a parameter of its constructor and its name as a value `syntax`, a field
 named through its name `not-visible` (U8), and a method named through it with no call and its name called as a function,
 `Cache()`, `not supported`. The emitter gets the reference before the call's arguments from a function made once for each
-such type, `actor.per.<n>`, with three globals of its own: its cell, a lock word, the slot and the number of its one actor;
+such type, `actor.per.<n>`, with three globals of its own: its cell, whose three words are a lock word, the slot and the number of its one actor;
 its block of a restart, with no argument kept, a null function for `escalate` and none for `stop`; and its knobs where
 `after` or `max N in` is written, their last word 1 to mark a `per node` type's. The runtime's `PerFind` reads the cell: where
 its number names an actor `Lookup` finds, it gives that actor with no lock taken; else it takes the cell's lock and reads
 again, and where no actor stands there either it gives null with the lock held, and the function makes the actor's heap and
 record as a `spawn` does, its supervisor the code that runs, and `PerStarted` sets the pause of the type's block and the
 count of its knobs' ring back to 0, stores the slot and the number in the cell, the number with release, and lets go of the
-lock. The lock is held around the read, the making of the record and that store alone,
-never around a constructor or a wait, which the one thread of the build never contends (U35). The defaults then run on the
+lock. The lock is held around the read, the making of the heap and the record and that store alone,
+never around a constructor or a wait, which the one thread of the build never contends (U35): the making of the heap
+and the record under it is a reading of the build beyond the words of the default said back in comment 6983903100,
+"around the check and the publication alone". The defaults then run on the
 caller's stack in the actor's heap, the actor BUILDING, so that a message that reaches it meanwhile waits in its inbox, and
 named as the one built (`Building`), so that an actor they spawn is its child (U21), and
 at their end `PerBuilt` makes the root its supervisor and ends its building as `ActorBuilt` does (U53). A throw in the
-defaults is the caller's crash, which ends its child, the actor half built, the calls queued in it raising `actor-gone`,
+defaults is the caller's crash, whose log line names the line of the throw where T29's words name the call's
+(U52; assumed: T37 of issue 519, comment 6991862214, put to the owner), which ends its child, the actor half built, the
+calls queued in it raising `actor-gone`,
 and the message after it finds no actor in the cell and starts a fresh one (U52). The crash of a `per node` actor whose knobs
 carry the mark, past `max N in`, ends it with no `restart-limit` (`Fell`), and `on crash stop` ends it as at a `spawn`,
 the calls queued in it raising `actor-gone` and the message after it starting a fresh one (U54). It ends with the process,

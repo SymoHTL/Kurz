@@ -5058,7 +5058,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // it while it is built, `Counter`'s crash under `stop` ends it, and `Limited`'s second crash passes its limit and ends it; each
         // message after that finds no actor by the cell's slot and number and starts a fresh one, reading nothing of the record its end
         // freed; under the allocator that makes every freed block inaccessible, with the word of the heap of a record its end frees
-        // written 16 before the free (PoisonedEnds)
+        // written 16 before the free (PoisonedEnds); each start's crash names the line of the throw, where T29's words name the
+        // call's (U52; assumed: T37 of issue 519, comment 6991862214, put to the owner)
         const string text = """
             List<string> Words(string s) {
                 words = ["start", s]
