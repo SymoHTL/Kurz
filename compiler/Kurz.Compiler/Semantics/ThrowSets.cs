@@ -1116,6 +1116,13 @@ public sealed class ThrowSets
 
                     break;
                 case CallKind.ActorCall or CallKind.ActorSend:
+                    if (info.ByName)
+                    {
+                        // U52: a message to the name of a `per node` actor starts it where none stands, its constructor run on the caller's
+                        // stack, whose throw is the caller's crash, as at a `spawn`
+                        unit.Edges.Add(new Edge(new Construction(((ActorType)info.Target!).Symbol), null));
+                    }
+
                     break; // U20: the callee's code runs in the callee, whose crash its caller gets as `callee-crashed`
                 case CallKind.ListAdd or CallKind.ListInsert:
                     // M9, X11: `Add` and `Insert` keep the function value they take and run none of it, so a lambda there brings what its

@@ -221,6 +221,17 @@ public sealed class ClassSymbol(string name, TypeDeclaration declaration)
     /// <summary>U1: the class is an actor's body, written <c>actor</c>, whose references are <see cref="ActorType"/> and whose instance is <c>this</c> alone.</summary>
     public bool IsActor => Declaration.Kind == TypeDeclarationKind.Actor;
 
+    /// <summary>
+    /// U51: the actor is declared <c>per node</c>, its one clause <c>per</c> with the word <c>node</c> alone: one of it stands per process,
+    /// addressed by its name in a call or a <c>send</c>, and none is spawned (section 13, "A <c>per cluster</c> or <c>per node</c> actor is
+    /// the singleton").
+    /// </summary>
+    public bool PerNode => DeclaresPerNode(Declaration);
+
+    /// <summary>U51: whether the declaration <paramref name="d"/> is an actor's whose one clause <c>per</c> holds the word <c>node</c> alone (<see cref="PerNode"/>).</summary>
+    public static bool DeclaresPerNode(TypeDeclaration d) => d.Kind == TypeDeclarationKind.Actor && d.Clauses is { } clauses
+        && clauses.Count(c => c.Word == "per") == 1 && clauses.Single(c => c.Word == "per").Words is ["node"];
+
     public List<FieldSymbol> Fields { get; } = [];
 
     public Dictionary<string, List<FunctionSymbol>> Methods { get; } = new(StringComparer.Ordinal);

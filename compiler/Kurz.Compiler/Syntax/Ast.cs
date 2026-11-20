@@ -409,10 +409,11 @@ public enum TypeDeclarationKind
 /// <summary>
 /// A word that starts a clause after an actor's name (section 6): <c>per</c>, <c>yield</c>, <c>inbox</c>, <c>stack</c> or <c>on crash</c>,
 /// with its line. The parser keeps the word and passes over what follows it, which the checker says <c>not supported</c> to, but for
-/// <c>stack</c>, whose <paramref name="Size"/> is the literal of bytes after it (U1), and for an <c>on crash</c>, whose words of a
-/// policy or block, the type's default, <paramref name="Policy"/> holds (U27, U28).
+/// <c>stack</c>, whose <paramref name="Size"/> is the literal of bytes after it (U1), for an <c>on crash</c>, whose words of a
+/// policy or block, the type's default, <paramref name="Policy"/> holds (U27, U28), and for <c>per</c>, whose words before the clause
+/// after it or the body <paramref name="Words"/> holds, <c>node</c> alone for <c>per node</c> (U51).
 /// </summary>
-public sealed record ActorClause(int Line, string Word, UnitLiteral? Size = null, CrashPolicy? Policy = null);
+public sealed record ActorClause(int Line, string Word, UnitLiteral? Size = null, CrashPolicy? Policy = null, IReadOnlyList<string>? Words = null);
 
 /// <summary>A base class or an interface after the colon (K6, K10), with the arguments of the explicit form.</summary>
 public sealed record BaseSpecifier(int Line, TypeSyntax Type, IReadOnlyList<Argument>? Arguments);

@@ -1,0 +1,31 @@
+// expect: output
+// | 2
+// threads: 1
+// rules: U53, U25
+
+// `Worker`'s `Fail` runs before `Counter`'s `Get`, as one thread runs the ready actors first in, first out (U35)
+
+actor Counter per node {
+    mut int count = 0
+
+    pub void Add(int n) {
+        count = count + n
+    }
+
+    pub int Get() => count
+}
+
+actor Worker {
+    pub void Start() {
+        Counter.Add(2)
+    }
+
+    pub void Fail() {
+        throw "worker fails"
+    }
+}
+
+w = spawn Worker() on crash stop
+w.Start()
+send w.Fail()
+print(Counter.Get())

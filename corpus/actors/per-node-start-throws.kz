@@ -1,0 +1,51 @@
+// expect: output
+// | 9
+// | 1
+// | 2
+// threads: 1
+// rules: U52, U25
+
+// `User`'s `Use` waits in `Cache`'s start for `Starts.Take` while `Probe`'s `Ping` answers the top-level code, and `User`, woken by
+// that `Take`, throws before `Starts` takes the top-level code's `Peek`, as one thread runs the ready actors first in, first out (U35)
+
+actor Starts per node {
+    mut int count = 0
+
+    pub int Take() {
+        count = count + 1
+        return count
+    }
+
+    pub int Peek() => count
+}
+
+actor Cache per node {
+    int first = Checked(Starts.Take())
+
+    pub int Get() => first
+}
+
+int Checked(int n) {
+    if n == 1 {
+        throw "first start"
+    }
+
+    return n
+}
+
+actor User {
+    pub void Use() {
+        print(Cache.Get())
+    }
+}
+
+actor Probe {
+    pub int Ping() => 9
+}
+
+u = spawn User() on crash stop
+p = spawn Probe()
+send u.Use()
+print(p.Ping())
+print(Starts.Peek())
+print(Cache.Get())

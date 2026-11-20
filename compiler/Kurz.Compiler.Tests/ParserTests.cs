@@ -1728,12 +1728,14 @@ public sealed class ParserTests
     [Theory]
     [InlineData("actor Counter {\n}", "(actor Counter {})")]
     [InlineData("pub actor Account(int Start) {\n    pub int Get() => Start\n}", "(actor pub Account(int Start) {(function pub int Get() => Start)})")]
-    [InlineData("actor Parser stack 8mb per Id inbox drop {\n}", "(actor Parser [stack 1 (unit 8mb)] [per 1] [inbox 1] {})")]
-    [InlineData("actor Parser per Id stack 1.5kb {\n}", "(actor Parser [per 1] [stack 1 (unit 1.5kb)] {})")]
+    [InlineData("actor Parser stack 8mb per Id inbox drop {\n}", "(actor Parser [stack 1 (unit 8mb)] [per 1 Id] [inbox 1] {})")]
+    [InlineData("actor Parser per Id stack 1.5kb {\n}", "(actor Parser [per 1 Id] [stack 1 (unit 1.5kb)] {})")]
     [InlineData("actor Worker on crash restart {\n}", "(actor Worker [on crash 1 restart] {})")]
     [InlineData("actor Worker on crash stop stack 8mb {\n}", "(actor Worker [on crash 1 stop] [stack 1 (unit 8mb)] {})")]
     [InlineData("actor Worker stack 8mb on crash restart max 3 in 1min after 5ms {\n}", "(actor Worker [stack 1 (unit 8mb)] [on crash 1 restart after (unit 5ms) max (int 3) in (unit 1min)] {})")]
-    [InlineData("actor Worker per Id on crash escalate {\n}", "(actor Worker [per 1] [on crash 1 escalate] {})")]
+    [InlineData("actor Worker per Id on crash escalate {\n}", "(actor Worker [per 1 Id] [on crash 1 escalate] {})")]
+    [InlineData("actor Cache per node on crash stop {\n}", "(actor Cache [per 1 node] [on crash 1 stop] {})")]
+    [InlineData("actor Session per int userId yield checks {\n}", "(actor Session [per 1 int userId] [yield 1] {})")]
     [InlineData("actor Worker on crash (c) {\n    restart\n} {\n    pub int Get() => 1\n}", "(actor Worker [on crash 1 block (lambda (c) {(decide restart)})] {(function pub int Get() => (int 1))})")]
     [InlineData("actor Worker yield checks {\n}", "(actor Worker [yield 1] {})")]
     [InlineData("c = spawn Counter(1)", "(assign-or-declare c (spawn (call Counter (int 1))))")]
@@ -1753,7 +1755,7 @@ public sealed class ParserTests
     {
         // U28: the block of a policy, its one parameter and its body, at `spawn` and after an actor's name, its decisions statements (U29)
         // U1: `actor` before a name declares an actor, the clauses after its name kept by their first word and its line, an `on crash` with
-        // the words of a policy among them (U27); U2: `spawn` before a name, its type arguments where it writes them (U14, T19), makes one and
+        // the words of a policy among them (U27), `per` with its words (U51), `yield`'s passed over; U2: `spawn` before a name, its type arguments where it writes them (U14, T19), makes one and
         // binds as C#'s `new`; U25, U26: the words of a policy after it, the knobs in either order, each value a number literal with its sign,
         // which the checker reads, and an `on crash` block after it kept by its line to the end of the expression; U6: `send` before a call
         Assert.Equal(tree, Tree(program));
