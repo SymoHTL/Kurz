@@ -481,10 +481,17 @@ public sealed class CommandTests : IDisposable
     [InlineData("exec", "--cpu", "native")]
     [InlineData("exec", "--cpu", "native", "--cpu", "native", "print(1)")]
     [InlineData("exec", "print(1)", "--cpu", "native")]
+    [InlineData("test")]
+    [InlineData("test", "a.kz", "--")] // Y2, F17: a test reads no `args`, so `test` takes no word for the program
+    [InlineData("test", "a.kz", "--", "x")]
+    [InlineData("test", "a.kz", "b.kz")]
+    [InlineData("test", "--release", "--release", "a.kz")]
+    [InlineData("test", "a.kz", "--cpu")]
     public void A_command_line_the_command_cannot_read_gets_the_usage_and_exit_1(params string[] arguments) =>
         Assert.Equal(
             (1, "", "usage: kurz --version [--verbose]\n       kurz build [--release] [--lines] [--cpu <name>] <file.kz> [-o <output>]\n"
                 + "       kurz run [--release] [--lines] [--cpu <name>] <file.kz> [-- <argument>...]\n       kurz exec [--release] [--lines] [--cpu <name>] \"<program text>\" [-- <argument>...]\n"
+                + "       kurz test [--release] [--lines] [--cpu <name>] <file.kz>\n"
                 + "       run and exec pass the words after -- to the program\n"),
             Kurz(arguments));
 
@@ -531,6 +538,163 @@ public sealed class CommandTests : IDisposable
         Assert.Equal((0, "-2147483648\n", ""), KurzWithPlaces("exec", "--release", "int Next(int n) => n + 1\nprint(Next(2147483647))"));
         Assert.Equal((0, "", ""), KurzWithPlaces("exec", "")); // an empty text is an empty program, as an empty file is
         NoPlaceLeft(made: true);
+    }
+
+    [Fact]
+    public void Test_writes_a_line_for_each_test_the_words_under_a_failed_one_and_the_counts_and_exits_1_where_one_failed_else_0()
+    {
+        // Y3, Q3, Q4, F1, F21: `ok` or `FAILED` for each test, the words of the failed test's crash indented under its line, the counts,
+        // `1 test:` for one, and the exit code 1 where a test failed, 0 where every test passed
+        var source = Path.Combine(root, "adds.kz");
+        File.WriteAllText(source, "test \"adds\" {\n    check 1 + 1 == 2\n}\n\ntest \"counts\" {\n    names = [\"a\", \"b\", \"c\"]\n    check names.Count == 2\n}\n");
+        Assert.Equal((1, $"test \"adds\" ... ok\ntest \"counts\" ... FAILED\n    check-failed \"names.Count == 2 (3 == 2)\" at {source}:7\n2 tests: 1 passed, 1 failed\n", ""), KurzWithPlaces("test", source));
+        var one = Path.Combine(root, "one.kz");
+        File.WriteAllText(one, "test \"adds\" {\n    check 1 + 1 == 2\n}\n");
+        Assert.Equal((0, "test \"adds\" ... ok\n1 test: 1 passed, 0 failed\n", ""), KurzWithPlaces("test", one));
+        NoPlaceLeft(made: true);
+    }
+
+    [Fact]
+    public void Test_runs_no_top_level_code_and_the_tests_in_the_order_of_the_file()
+    {
+        // Y2, D1: the top-level code does not run, and the tests run in the order the file writes them, not by name
+        var source = Path.Combine(root, "order.kz");
+        File.WriteAllText(source, "print(\"top\")\n\ntest \"b\" {\n    print(\"in b\")\n}\n\nprint(\"middle\")\n\ntest \"a\" {\n    print(\"in a\")\n}\n");
+        Assert.Equal((0, "in b\ntest \"b\" ... ok\nin a\ntest \"a\" ... ok\n2 tests: 2 passed, 0 failed\n", ""), KurzWithPlaces("test", source));
+    }
+
+    [Fact]
+    public void A_test_that_crashes_fails_alone_and_the_run_goes_on_with_the_test_after_it()
+    {
+        // Y5, Q2, F3: the crash of a test's own actor fails that test, its words under its line and no line on standard error, and the
+        // test after it runs
+        var source = Path.Combine(root, "crash.kz");
+        File.WriteAllText(source, "test \"throws\" {\n    throw \"down\"\n}\n\ntest \"passes\" {\n    print(\"ran\")\n}\n");
+        Assert.Equal((1, $"test \"throws\" ... FAILED\n    thrown \"down\" at {source}:2\nran\ntest \"passes\" ... ok\n2 tests: 1 passed, 1 failed\n", ""), KurzWithPlaces("test", source));
+    }
+
+    [Fact]
+    public void A_test_whose_wait_nothing_can_end_fails_with_deadlock_at_its_line_and_the_run_goes_on()
+    {
+        // Y5, Q2, F5: the test waits on its child, whose block of `on crash` runs in the test's actor once the test's message ends; the
+        // runner's wait finds nothing left to run, fails the test at the test's line, since a parked wait keeps no place of its own,
+        // raises nothing, and runs the test after it
+        var source = Path.Combine(root, "deadlock.kz");
+        File.WriteAllText(source, "actor Worker {\n    pub void Fail() {\n        throw \"down\"\n    }\n\n    pub int Get() => 1\n}\n\n"
+            + "test \"waits\" {\n    w = spawn Worker() on crash (c) {\n        restart\n    }\n\n    send w.Fail()\n    print(w.Get())\n}\n\n"
+            + "test \"after\" {\n    print(\"after\")\n}\n");
+        Assert.Equal((1, $"test \"waits\" ... FAILED\n    deadlock at {source}:9\nafter\ntest \"after\" ... ok\n2 tests: 1 passed, 1 failed\n", ""), KurzWithPlaces("test", source));
+    }
+
+    [Fact]
+    public void Test_of_a_program_with_no_test_is_the_commands_own_failure_and_exits_1()
+    {
+        // Y4, Q6: a run that checked nothing does not look like a pass; the program is not built, and no place is made
+        var source = Path.Combine(root, "none.kz");
+        File.WriteAllText(source, "print(1)\n");
+        Assert.Equal((1, "", $"error: no test in {source}\n  help: write a test as `test \"name\" {{ ... }}` at the top level of the file\n"), KurzWithPlaces("test", source));
+        NoPlaceLeft(made: false);
+    }
+
+    [Fact]
+    public void Run_and_exec_of_a_program_with_tests_run_none_of_them()
+    {
+        // Q5, Y7: a test block is checked by every command, and only `kurz test` runs it
+        var source = Path.Combine(root, "both.kz");
+        const string text = "print(\"top\")\n\ntest \"t\" {\n    print(\"in t\")\n}\n";
+        File.WriteAllText(source, text);
+        Assert.Equal((0, "top\n", ""), KurzWithPlaces("run", source));
+        Assert.Equal((0, "top\n", ""), KurzWithPlaces("exec", text));
+    }
+
+    [Fact]
+    public void Test_with_release_builds_the_release_build_whose_integers_wrap()
+    {
+        // section 2, T5: `kurz test` builds the test build unless `--release` says otherwise, as `run` does
+        var source = Path.Combine(root, "wraps.kz");
+        File.WriteAllText(source, "int Bump(int n) => n + 1\n\ntest \"wraps\" {\n    print(Bump(2147483647))\n}\n");
+        Assert.Equal((1, $"test \"wraps\" ... FAILED\n    overflow at {source}:1\n1 test: 0 passed, 1 failed\n", ""), KurzWithPlaces("test", source));
+        Assert.Equal((0, "-2147483648\ntest \"wraps\" ... ok\n1 test: 1 passed, 0 failed\n", ""), KurzWithPlaces("test", "--release", source));
+    }
+
+    [Fact]
+    public void A_failed_check_evaluates_each_side_once_and_shows_the_left_side_first()
+    {
+        // Y6, Q1, F1: `Bump()` prints once, and the failure shows its value before the right side's
+        var source = Path.Combine(root, "once.kz");
+        File.WriteAllText(source, "int Bump() {\n    print(\"bump\")\n    return 2\n}\n\ntest \"bump is one\" {\n    check Bump() == 1\n}\n");
+        Assert.Equal((1, $"bump\ntest \"bump is one\" ... FAILED\n    check-failed \"Bump() == 1 (2 == 1)\" at {source}:7\n1 test: 0 passed, 1 failed\n", ""), KurzWithPlaces("test", source));
+    }
+
+    [Fact]
+    public void Test_takes_lines_as_run_does_so_that_a_release_build_names_the_line_of_a_tests_stack_overflow()
+    {
+        // D4, section 2: `--lines` is taken as `kurz run` takes it; on Linux, where an overflow of an actor's stack is its crash (U19), the
+        // release build names the overflow's line only with the line tables, while on Windows that overflow ends the process
+        var source = Path.Combine(root, "lines.kz");
+        File.WriteAllText(source, "test \"adds\" {\n    check 1 + 1 == 2\n}\n");
+        Assert.Equal((0, "test \"adds\" ... ok\n1 test: 1 passed, 0 failed\n", ""), KurzWithPlaces("test", "--lines", source));
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var deep = Path.Combine(root, "deep.kz");
+        File.WriteAllText(deep, "int Down(int n) {\n    int deeper = Down(n + 1)\n    print(deeper)\n    return deeper\n}\n\ntest \"recurses\" {\n    print(Down(0))\n}\n");
+        Assert.Equal((1, "test \"recurses\" ... FAILED\n    stack-overflow (no line tables: build with --lines)\n1 test: 0 passed, 1 failed\n", ""), KurzWithPlaces("test", "--release", deep));
+        Assert.Equal((1, $"test \"recurses\" ... FAILED\n    stack-overflow at {deep}:2\n1 test: 0 passed, 1 failed\n", ""), KurzWithPlaces("test", "--release", "--lines", deep));
+    }
+
+    [Fact]
+    public void Test_takes_cpu_as_run_does_and_refuses_a_name_clang_does_not_know_as_build_refuses_it()
+    {
+        // D4, section 2, R18: `--cpu` takes the word after it as the CPU's name, as `kurz run` takes it: `native`, which every host's clang
+        // takes, builds the tests, and a name clang does not know is the command's own failure, the words of `kurz build`'s
+        var source = Path.Combine(root, "cpu.kz");
+        File.WriteAllText(source, "test \"adds\" {\n    check 1 + 1 == 2\n}\n");
+        Assert.Equal((0, "test \"adds\" ... ok\n1 test: 1 passed, 0 failed\n", ""), KurzWithPlaces("test", "--cpu", "native", source));
+        var (code, output, error) = Kurz("build", "--cpu", "pentium9", source);
+        Assert.Equal((1, ""), (code, output));
+        Assert.Contains("`pentium9`", error, StringComparison.Ordinal);
+        Assert.Equal((1, "", error), KurzWithPlaces("test", "--cpu", "pentium9", source));
+    }
+
+    [Fact]
+    public void Build_of_a_program_with_tests_writes_an_executable_that_runs_its_top_level_code_and_no_test()
+    {
+        // Q5, Y7: a test block is checked by every command, and only `kurz test` runs it: the executable `kurz build` writes prints the
+        // lines of the top-level code alone
+        var source = Path.Combine(root, "built.kz");
+        File.WriteAllText(source, "print(\"top\")\n\ntest \"t\" {\n    print(\"in t\")\n}\n\nprint(\"after\")\n");
+        var output = Path.Combine(root, OperatingSystem.IsWindows() ? "built.exe" : "built");
+        Assert.Equal((0, "", ""), Kurz("build", source, "-o", output));
+        Assert.Equal((0, "top\nafter\n", ""), Processes.Capture(output, [], null, TimeSpan.FromSeconds(30)));
+    }
+
+    [Fact]
+    public void The_numbers_of_actors_go_on_counting_across_tests()
+    {
+        // F6, U2: the end of a test frees its actors and leaves the count of the actors spawned as it stands, so that the first test's own
+        // actor is #1 and its child #2, and the second test's #3 and #4, which the log line of each child's crash names (U24)
+        var source = Path.Combine(root, "numbers.kz");
+        File.WriteAllText(source, "actor Flaky {\n    pub void Fail() {\n        throw \"flaky\"\n    }\n\n    pub int Ping() => 1\n}\n\n"
+            + "test \"first\" {\n    f = spawn Flaky() on crash restart after 1ms\n    send f.Fail()\n    print(f.Ping())\n}\n\n"
+            + "test \"second\" {\n    f = spawn Flaky() on crash restart after 1ms\n    send f.Fail()\n    print(f.Ping())\n}\n");
+        var (code, output, error) = KurzWithPlaces("test", source);
+        var (crashes, rest) = ActorTests.Logged(error);
+        Assert.Equal((0, "1\ntest \"first\" ... ok\n1\ntest \"second\" ... ok\n2 tests: 2 passed, 0 failed\n", ""), (code, output, rest));
+        Assert.Equal([$"Flaky#2 crashed: thrown \"flaky\" at {source}:3", $"Flaky#4 crashed: thrown \"flaky\" at {source}:3"], crashes);
+    }
+
+    [Fact]
+    public void An_error_that_ends_the_process_in_a_test_ends_the_run_with_its_error_line_no_counts_and_exit_1()
+    {
+        // Y5, U19, O11: `allocation-failed` ends the process wherever it is raised, a test's actor among them, as an abort ends Rust's
+        // harness: the lines of the tests before it stand, and neither that test's line, nor the tests after it, nor the counts are written
+        var source = Path.Combine(root, "ends.kz");
+        File.WriteAllText(source, "test \"before\" {\n    print(\"before\")\n}\n\ntest \"grows past the limit\" {\n    mut s = \"a\"\n    mut i = 0\n    while i < 16 {\n"
+            + "        s = \"{s}{s}\"\n        i = i + 1\n    }\n\n    t = s.Replace(\"a\", s)\n    print(t.Bytes.Count)\n}\n\ntest \"after\" {\n    print(\"after\")\n}\n");
+        Assert.Equal((1, "before\ntest \"before\" ... ok\n", "error: allocation-failed (4294967296 bytes)\n"), KurzWithPlaces("test", source));
     }
 
     [Fact]

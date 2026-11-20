@@ -37,9 +37,9 @@ namespace Kurz.Compiler.Tests;
 /// </summary>
 public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
-    private (int Code, IReadOnlyList<string> Output, string Error) BuildAndRun(string text, CheckedRuntime runtime, string name, bool testBuild = true, string? trace = "0")
+    private (int Code, IReadOnlyList<string> Output, string Error) BuildAndRun(string text, CheckedRuntime runtime, string name, bool testBuild = true, string? trace = "0", bool tests = false)
     {
-        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], runtime, testBuild);
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], runtime, testBuild, tests: tests);
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         return Toolchain.Run(toolchain.Build(compilation.Program, name), trace);
     }
@@ -6018,5 +6018,151 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Parent#1 crashed: thrown \"parent\" at program.kz:19"], crashes);
         Ran((run.Code, run.Output, rest), 1, [], "error: actor-gone at program.kz:30\n");
+    }
+
+    // ---- the tests of `kurz test` (chapter 20, Y5; issue 586) ---------------------------------------------------------------------
+
+    [Fact]
+    public void The_end_of_a_test_ends_every_actor_it_made_with_their_timers_pauses_blocks_and_stacks()
+    {
+        // Y5, F6, Q2: the first test leaves a child paused by its restart, a child whose crash's block waits in the test's actor with the
+        // stack it raised on, a child parked on the paused one with its timer, and a child with a `send` queued; the second meets
+        // `deadlock` while it builds a message in a heap of its own, one of whose arguments waits on a child whose block waits in the
+        // test's actor; the third runs alone, and after each test no timer, no pause, no queued actor and no heap of messages is left,
+        // and every stack is back in the pool, under the allocator that makes every freed block inaccessible
+        var counted = ListTests.Edited([.. ListTests.Fence, ("runtime/common/runtime.kz", "        testWords = null\n        testWordsCount = 0\n        testWordsRoom = 0\n    }\n}\n",
+            "        testWords = null\n        testWordsCount = 0\n        testWordsRoom = 0\n    }\n\n    mut long left = 0\n    mut bool unpaused = false\n    mut bool unqueued = false\n" +
+            "    mut bool unheaped = false\n    mut long stacks = 0\n    raw {\n        mut byte* at = timers\n        while at != null {\n            left = left + 1\n            at = *Ptr<byte*>(at + 32)\n        }\n\n" +
+            "        unpaused = paused == null\n        unqueued = runFirst == null\n        unheaped = messageHeaps == null\n        stacks = pooledCount\n    }\n\n" +
+            "    Print(1, \"timers {left} paused {!unpaused} queued {!unqueued} heaps {!unheaped} pooled {stacks}\", \"\", 0)\n}\n")]);
+        const string text = """
+            actor Printer {
+                pub void Say(string s) {
+                    print(s)
+                }
+            }
+
+            actor Crasher {
+                pub void Fail() {
+                    throw "down"
+                }
+
+                pub int Get() => 1
+            }
+
+            actor Asker {
+                pub void Ask(Crasher c) {
+                    print("asked {c.Get()}")
+                }
+            }
+
+            actor Pinger {
+                pub int Ping() => 7
+            }
+
+            test "leaves actors behind" {
+                c = spawn Crasher() on crash restart after 30s
+                send c.Fail()
+                d = spawn Crasher() on crash (k) {
+                    stop
+                }
+
+                send d.Fail()
+                a = spawn Asker()
+                send a.Ask(c)
+                q = spawn Pinger()
+                print(q.Ping())
+                p = spawn Printer()
+                send p.Say("never")
+                print("first")
+            }
+
+            test "deadlocks while it builds a message" {
+                w = spawn Crasher() on crash (k) {
+                    restart
+                }
+
+                send w.Fail()
+                p = spawn Printer()
+                send p.Say("{w.Get()}")
+            }
+
+            test "starts with none" {
+                print("second")
+            }
+
+            """;
+        var run = BuildAndRun(text, counted, "test-actors-ended", tests: true);
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Crasher#2 crashed: thrown \"down\" at program.kz:9"], crashes); // the test's actor is #1, and the block of `d` never ran
+        Ran((run.Code, run.Output, rest), 1, ["7", "first", "test \"leaves actors behind\" ... ok", "timers 0 paused false queued false heaps false pooled 4",
+            "test \"deadlocks while it builds a message\" ... FAILED", "    deadlock at program.kz:42", "timers 0 paused false queued false heaps false pooled 4", "second",
+            "test \"starts with none\" ... ok", "timers 0 paused false queued false heaps false pooled 4", "3 tests: 2 passed, 1 failed"], "");
+    }
+
+    [Fact]
+    public void A_test_has_no_bound_of_time_while_each_call_it_makes_keeps_its_own()
+    {
+        // D6, Y7: the test's message carries no deadline, so a test that holds its thread past the default bound of a call calls on, the
+        // call with that bound of its own, here 10 ms for the run; a read of the clock is `not supported` in a build for Windows (S11)
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var bounded = ListTests.Edited(("runtime/linux/linux.kz", "pub long DefaultBound() => 5000000000", "pub long DefaultBound() => 10000000"));
+        const string text = """
+            actor Pinger {
+                pub int Ping() => 1
+            }
+
+            void Hold(duration d) {
+                instant start = instant.Now
+                while start.Elapsed < d {
+                }
+            }
+
+            test "outlasts the bound" {
+                p = spawn Pinger()
+                Hold(100ms)
+                print(p.Ping())
+            }
+
+            """;
+        Ran(BuildAndRun(text, bounded, "test-no-bound", tests: true), 0, ["1", "test \"outlasts the bound\" ... ok", "1 test: 1 passed, 0 failed"], "");
+    }
+
+    [Fact]
+    public void The_words_of_a_tests_crash_stand_under_its_line_whatever_the_filter_of_the_log()
+    {
+        // Q3, F1, F3, P4: the crash of a test's own actor writes no log line, and its words stand under its `FAILED` line with the log of
+        // `Kurz.Actor` off too; the other test spawns, so that the program reads `KURZ_LOG` (P5), which it reads on Linux alone
+        const string text = """
+            actor Pinger {
+                pub int Ping() => 1
+            }
+
+            test "spawns" {
+                p = spawn Pinger()
+                print(p.Ping())
+            }
+
+            test "throws" {
+                throw "down"
+            }
+
+            """;
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: true, tests: true);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, "test-words-log-off");
+        string[] lines = ["1", "test \"spawns\" ... ok", "test \"throws\" ... FAILED", "    thrown \"down\" at program.kz:11", "2 tests: 1 passed, 1 failed"];
+        Ran(Toolchain.Run(executable, "0"), 1, lines, "");
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var off = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = "0", ["KURZ_LOG"] = "Kurz.Actor=None" });
+        Assert.Equal((1, string.Join("\n", lines) + "\n", ""), (off.Code, off.Output, off.Error));
     }
 }

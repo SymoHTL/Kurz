@@ -717,6 +717,23 @@ public sealed partial class Emitter
     {
         var left = EmitExpression(b.Left);
         var right = EmitExpression(b.Right);
+        return Compared(b, left, leftType, right, rightType);
+    }
+
+    /// <summary>
+    /// The comparison <paramref name="b"/> of two values its sides gave, each evaluated once, which a <c>check</c> shows on its failure too
+    /// (Y6): a side <c>null</c> tests the other's case, as <see cref="EmitNullTest"/> does, a nullable side is lifted
+    /// (<see cref="LiftedEquality"/>), and two other values compare as their types do.
+    /// </summary>
+    private string Compared(BinaryExpression b, string left, KurzType leftType, string right, KurzType rightType)
+    {
+        if (b.Operator is TokenKind.EqualEqual or TokenKind.NotEqual && (leftType is NullType || rightType is NullType))
+        {
+            var (other, otherType) = leftType is NullType ? (right, rightType) : (left, leftType);
+            var test = otherType is UnionType union ? IsCase(Tag(other, union), union, Types.Null) : "true";
+            return b.Operator == TokenKind.EqualEqual ? test : fn.Value($"xor i1 {test}, true");
+        }
+
         return Types.NonNull(leftType) is not null || Types.NonNull(rightType) is not null
             ? LiftedEquality(b, left, leftType, right, rightType)
             : Compare(b.Operator, left, leftType, right, rightType, b.Line);

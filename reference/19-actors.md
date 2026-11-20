@@ -3018,6 +3018,23 @@ print(w.Ping())
 
 Case: [actors/block-escalate.kz](../corpus/actors/block-escalate.kz)
 
+Case: [tests/test-child-escalates.kz](../corpus/tests/test-child-escalates.kz)
+```kurz
+actor Worker {
+    pub void Fail() {
+        throw "down"
+    }
+
+    pub int Get() => 1
+}
+
+test "child escalates" {
+    w = spawn Worker() on crash escalate
+    send w.Fail()
+    print(w.Get())
+}
+```
+
 ### U26 (decided, §6) The first pause and the limit
 
 After `restart`, `after <duration>` sets the first pause of the growing pause (U23), which doubles
