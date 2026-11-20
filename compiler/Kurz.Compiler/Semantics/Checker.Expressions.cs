@@ -440,6 +440,7 @@ public sealed partial class Checker
         WeakRefType w => HasText(w.Target, seen), // A4 with R3: the text of what its read gives
         PointerType or CFunctionType => true, // its text is not read (HoldsRaw), and decides nothing here
         TypeParameterType p => p.Symbol.LimitUnread || p.Symbol.Limits.Any(face => face.TextMethod is not null) // A10: a limit that declares `string Text()`
+            || p.Symbol.ClassLimit?.TextMethod is not null // A9, A10: a class limit whose chain declares it
             || seen.Any(s => s.TypeParameters.Contains(p.Symbol)), // a parameter of a data type whose fields are read: its argument is judged where the type is used
         _ => false, // a function value
     };
@@ -915,11 +916,8 @@ public sealed partial class Checker
             case UnionType:
                 Report(ErrorIds.TypeMismatch, line, $"{Types.A(type)} is one of its cases only after a `match` (D9)");
                 return Typed.Error;
-            case TypeParameterType { Symbol.LimitUnread: true }:
-                return Typed.Error; // T19: its limit's diagnostic is reported (E1)
-            case TypeParameterType p when p.Symbol.Limits.Any(face => face.Methods.Any(f => f.Name == member)):
-                NotSupported(line, "a method as a value, named without a call (K7, F11)"); // T19: a limit's method, as a class's
-                return Typed.Error;
+            case TypeParameterType p:
+                return MemberOfParameter(p.Symbol, member, line); // T19
             default:
                 break;
         }

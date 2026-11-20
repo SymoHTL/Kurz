@@ -79,7 +79,7 @@ public sealed partial class Checker
         public (int Argument, KurzType Parameter)? Misfit { get; set; }
 
         /// <summary>T19: the first limit that a type argument, inferred or written, does not meet, with the parameter and the argument; null where each meets all.</summary>
-        public (TypeParameterSymbol Parameter, InterfaceSymbol Limit, KurzType Argument)? Unmet { get; set; }
+        public UnmetLimit? Unmet { get; set; }
 
         /// <summary>The name of the data type a construction builds, which an unmet limit's message names where no function stands (T19).</summary>
         public string? Of { get; init; }
@@ -2713,8 +2713,10 @@ public sealed partial class Checker
         if (candidate.Fits)
         {
             // T19: the types inferred or written are checked against the limits after the inference (T27), and a function whose limit
-            // they do not meet does not fit the call (F13) *(assumed: Q10 of issue 605, built at the lean while it waits for the owner)*
-            candidate.Unmet = Unmet(candidate.TypeParameters.Where(candidate.Map.ContainsKey).Select(p => (p, candidate.Map[p])));
+            // they do not meet does not fit the call (F13) (Q10 of issue 605, comment 7051071380); in a copy, a type argument that an
+            // argument read through the copy's type parameter gives is that type parameter, as the function's text writes it (Q22)
+            var written = WrittenArguments(candidate, pres);
+            candidate.Unmet = Unmet(candidate.TypeParameters.Where(candidate.Map.ContainsKey).Select(p => (p, written?.GetValueOrDefault(p) ?? candidate.Map[p])));
         }
     }
 

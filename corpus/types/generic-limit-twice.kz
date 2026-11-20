@@ -5,6 +5,6 @@ interface Shape {
     int Area()
 }
 
-int AreaOf<T: Shape & Shape>(T item) => item.Area()
+int AreaOf<T: Shape + Shape>(T item) => item.Area()
 
 print(1)

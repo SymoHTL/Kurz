@@ -73,7 +73,7 @@ internal static class SyntaxPrinter
     private static string TypeParameter(TypeParameter p) => p switch
     {
         { Constant: { } constant } => $"const {Type(constant)}{p.Name}{(p.Default is null ? "" : " = " + Print(p.Default))}",
-        { Limits.Count: > 0 } => $"{p.Name}: {string.Join(" & ", p.Limits.Select(l => Type(l).TrimEnd()))}",
+        { Limits.Count: > 0 } => $"{p.Name}: {string.Join(" + ", p.Limits.Select(l => Type(l).TrimEnd()))}",
         _ => p.Name,
     };
 

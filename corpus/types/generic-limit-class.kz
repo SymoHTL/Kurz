@@ -1,10 +1,20 @@
-// expect: error syntax at 8
+// expect: output
+// | woof
+// | quiet
+// | woof
 // rules: T19
 
 class Animal {
-    pub string Sound() => "quiet"
+    pub virtual string Sound() => "quiet"
+}
+
+class Dog : Animal {
+    pub override string Sound() => "woof"
 }
 
 string Speak<T: Animal>(T a) => a.Sound()
 
-print(1)
+Animal pet = Dog()
+print(Speak(Dog()))
+print(Speak(Animal()))
+print(Speak(pet))

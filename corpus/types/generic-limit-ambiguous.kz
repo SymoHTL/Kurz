@@ -9,6 +9,6 @@ interface B {
     int M()
 }
 
-int Both<T: A & B>(T x) => x.M()
+int Both<T: A + B>(T x) => x.M()
 
 print(1)

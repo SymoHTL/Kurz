@@ -16,7 +16,7 @@ class Square(int Side) : Shape, Named {
     pub string Name() => "square"
 }
 
-void Show<T: Shape & Named>(T item) {
+void Show<T: Shape + Named>(T item) {
     print(item.Area())
     print(item.Name())
 }

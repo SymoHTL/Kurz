@@ -1439,7 +1439,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_call_through_a_limit_is_direct_in_a_copy_that_binds_a_class_and_through_the_table_in_one_that_binds_the_interface()
     {
-        // T19 *(assumed: Q14 of issue 605)*: in `AreaOf<Square>` the call is `Square`'s `Area`, as a call on a `Square` runs it, with no
+        // T19 (Q14 of issue 605, comment 7051071380): in `AreaOf<Square>` the call is `Square`'s `Area`, as a call on a `Square` runs it, with no
         // table read; in `AreaOf<Shape>` it loads the slot of `Area` from the instance's table for `Shape` (K6)
         var program = Compile(
             "interface Shape {\n    int Area()\n}\n\nclass Square(int Side) : Shape {\n    pub int Area() => Side * Side\n}\n\nint AreaOf<T: Shape>(T item) => item.Area()\n\nShape s = Square(2)\nprint(AreaOf(Square(3)) + AreaOf(s))\n",

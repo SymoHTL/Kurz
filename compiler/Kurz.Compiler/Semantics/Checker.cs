@@ -1462,9 +1462,8 @@ public sealed partial class Checker
                 return Types.Error;
             }
 
-            // T19: the limits at every use that names the type with its arguments, never implied by a signature *(assumed: Q7 of issue
-            // 605, built at the lean while it waits for the owner; Q16 of the product pass on issue 605, comment 7014593721, built at its
-            // default while it waits for the owner)*
+            // T19: the limits at every use that names the type with its arguments, never implied by a signature (Q7 and Q16 of issue
+            // 605, comment 7051071380)
             if (Unmet(data.TypeParameters.Zip(arguments)) is { } unmet)
             {
                 Report(ErrorIds.TypeMismatch, n.Line, UnmetText(unmet, data.Name));
@@ -1647,12 +1646,14 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// T19: the interfaces the limits of a type parameter name, read with the type parameters of its declaration in scope. A limit
-    /// that names a type that is no interface, a class, a data type, an enum, a number type or a type parameter, is <c>syntax</c>, as
-    /// a union or a function type there is in the parser *(assumed: Q5 and Q6 of issue 605, built at the lean while it waits for the
-    /// owner)*, and an interface named twice in one list is <c>syntax</c> *(assumed: Q19 of the product pass on issue 605, comment
-    /// 7014593721, built at its default while it waits for the owner)*; a generic interface as a limit is <c>not supported</c>, which section 14 leaves open (T19). Each limit that is
-    /// not read leaves the parameter with a limit unread, whose members and arguments report nothing more (E1).
+    /// T19: the interfaces and the class the limits of a type parameter name, read with the type parameters of its declaration in scope
+    /// (the owner's answers of 2026-11-20 on issue 605, comment 7051071380). A limit names an interface or a class that can have derived
+    /// classes, which every class but an actor can (K6, U1; Q5); any other type, a data type, an enum, a number type, a type parameter,
+    /// a union and a function type among them, is <c>limit-not-interface</c> (Q6), the union and the function type that the parser reads
+    /// there as a reading of Q6; a limit named twice in one list is <c>syntax</c> (Q19). A second class, and a class after an interface,
+    /// are <c>not supported</c>, as a reading of the build, as a class's second base and its base after an interface are (K6, K7). A
+    /// generic interface as a limit, which Q15 lets stand, is <c>not supported</c>. Each limit that is not read leaves the parameter with
+    /// a limit unread, whose members and arguments report nothing more (E1).
     /// </summary>
     private void ResolveLimits(TypeParameter p, TypeParameterSymbol parameter)
     {
@@ -1660,7 +1661,7 @@ public sealed partial class Checker
         {
             if (limit is NamedType { } n && genericInterfaces.Contains(n.Name))
             {
-                NotSupported(limit.Line, "a generic interface as a limit, which section 14 leaves open (T19)");
+                NotSupported(limit.Line, "a generic interface as a limit (Q15 of issue 605, T19)");
                 parameter.LimitUnread = true;
                 continue;
             }
@@ -1670,18 +1671,39 @@ public sealed partial class Checker
             {
                 parameter.LimitUnread = true; // its diagnostic is reported (E1)
             }
-            else if (type is not InterfaceType face)
+            else if (type is InterfaceType face)
             {
-                Report(ErrorIds.Syntax, limit.Line, "a type parameter's limit names an interface (T19)");
-                parameter.LimitUnread = true;
+                if (parameter.Limits.Contains(face.Symbol))
+                {
+                    Report(ErrorIds.Syntax, limit.Line, $"`{face.Symbol.Name}` is named twice among the limits of `{p.Name}` (T19)");
+                }
+                else
+                {
+                    parameter.Limits.Add(face.Symbol);
+                }
             }
-            else if (parameter.Limits.Contains(face.Symbol))
+            else if (type is ClassType { Symbol: var named })
             {
-                Report(ErrorIds.Syntax, limit.Line, $"`{face.Symbol.Name}` is named twice among the limits of `{p.Name}` (T19)");
+                if (ReferenceEquals(parameter.ClassLimit, named))
+                {
+                    Report(ErrorIds.Syntax, limit.Line, $"`{named.Name}` is named twice among the limits of `{p.Name}` (T19)");
+                }
+                else if (parameter.ClassLimit is not null || parameter.Limits.Count > 0)
+                {
+                    NotSupported(limit.Line, parameter.ClassLimit is not null
+                        ? $"a second class, `{named.Name}`, among the limits of `{p.Name}` (T19)"
+                        : $"the class `{named.Name}` after an interface among the limits of `{p.Name}` (T19)");
+                    parameter.LimitUnread = true;
+                }
+                else
+                {
+                    parameter.ClassLimit = named;
+                }
             }
             else
             {
-                parameter.Limits.Add(face.Symbol);
+                Report(ErrorIds.LimitNotInterface, limit.Line, $"`{type.Text}` is neither an interface nor a class that can have derived classes, which a limit names (T19)");
+                parameter.LimitUnread = true;
             }
         }
     }

@@ -1541,20 +1541,14 @@ public sealed class Parser
             var limits = new List<TypeSyntax>();
             if (Match(TokenKind.Colon))
             {
-                // T19: a limit names an interface, so it is one type by name; a union, a function type or a type in parentheses there
-                // is text no rule gives a meaning (E4), whatever the parentheses; several are joined by `&`, as a union's cases by `|`
+                // T19: several limits are joined by `+` (Q4 of issue 605, comment 7051071380), and `&` there is text no rule gives a
+                // meaning (E4) as any other token; a limit is read as a type, so that one that names no interface and no class, a union
+                // and a function type among them, is the checker's `limit-not-interface` (Q6)
                 do
                 {
-                    var limitToken = Current;
-                    var limit = ParseCoreType();
-                    if (limit is not NamedType)
-                    {
-                        throw new ParseError(limitToken.Line, "a type parameter's limit names an interface (T19)");
-                    }
-
-                    limits.Add(limit);
+                    limits.Add(ParseType());
                 }
-                while (Match(TokenKind.Ampersand));
+                while (Match(TokenKind.Plus));
             }
 
             result.Add(new TypeParameter(name.Line, name.Text, limits));

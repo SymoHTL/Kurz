@@ -1,4 +1,4 @@
-// expect: error syntax at 8
+// expect: error limit-not-interface at 8
 // rules: T19
 
 interface Shape {

@@ -42,15 +42,21 @@ public sealed class VariableSymbol(string name, KurzType type, bool mut, Variabl
     public bool Move { get; init; }
 }
 
-/// <summary>A type parameter (T19), with the interfaces its limits name, which alone give a value of it members.</summary>
+/// <summary>A type parameter (T19), with the interfaces and the class its limits name, which alone give a value of it members.</summary>
 public sealed class TypeParameterSymbol(string name, int line)
 {
     public string Name { get; } = name;
 
     public int Line { get; } = line;
 
-    /// <summary>T19: the interfaces the limits name, <c>T: Shape &amp; Named</c>, in their order; empty for none.</summary>
+    /// <summary>T19: the interfaces the limits name, <c>T: Shape + Named</c>, in their order; empty for none.</summary>
     public List<InterfaceSymbol> Limits { get; } = [];
+
+    /// <summary>T19: the class a limit names, <c>T: Animal</c>, met by the class and every class derived from it (Q5 of issue 605); null for none.</summary>
+    public ClassSymbol? ClassLimit { get; set; }
+
+    /// <summary>T19: a limit is read, an interface or a class.</summary>
+    public bool HasLimits => Limits.Count > 0 || ClassLimit is not null;
 
     /// <summary>
     /// T19, E1: a limit is written that is not read, one reported already (a name of nothing, no interface, a carrier the build

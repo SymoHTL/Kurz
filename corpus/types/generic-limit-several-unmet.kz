@@ -13,6 +13,6 @@ class Square(int Side) : Shape {
     pub int Area() => Side * Side
 }
 
-int AreaOf<T: Shape & Named>(T item) => item.Area()
+int AreaOf<T: Shape + Named>(T item) => item.Area()
 
 print(AreaOf(Square(3)))

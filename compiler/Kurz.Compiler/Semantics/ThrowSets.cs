@@ -1049,6 +1049,11 @@ public sealed class ThrowSets
                         }
 
                         var method = info.Function!;
+                        if (method.Interface is { TextOnly: true } && c.Callee is MemberAccess { Target: var receiver })
+                        {
+                            Text(model.TypeOf(receiver).Type); // T19, A10: a call of the text through a limit of a text alone is the text of the value (Q21)
+                        }
+
                         var targets = sets.Overrides(method).Prepend(method)
                             .Concat(sets.Implementers(method).SelectMany(g => sets.Overrides(g).Prepend(g)))
                             .Distinct();
@@ -1220,6 +1225,9 @@ public sealed class ThrowSets
                         }
                     }
 
+                    break;
+                case TypeParameterType { Symbol.ClassLimit: { } limit }:
+                    Text(new ClassType(limit), seen); // T19, A9: the Text() of the class limit and of every class derived from it (K6)
                     break;
                 case TypeParameterType p when p.Symbol.Limits.Any(face => face.TextMethod is not null):
                     foreach (var face in p.Symbol.Limits.Where(face => face.TextMethod is not null))
