@@ -226,8 +226,8 @@ public sealed partial class Checker
     /// <summary>
     /// T19, T33 with Q8 and Q22 of issue 605 (comment 7051071380): in a copy, the type arguments a call's arguments give its type
     /// parameters from the types the function's text writes for them, where an argument is read through a parameter or a local of the
-    /// copy's type parameter, so that the call meets a limit by that type parameter's own limits, whatever the copy binds; null outside a
-    /// copy and where no argument is read so.
+    /// copy's type parameter, or is an item of one that holds a list, so that the call meets a limit by that type parameter's own limits,
+    /// whatever the copy binds; null outside a copy and where no argument is read so.
     /// </summary>
     private Dictionary<TypeParameterSymbol, KurzType>? WrittenArguments(Candidate candidate, List<Pre> pres)
     {

@@ -1048,6 +1048,7 @@ public sealed class CheckerTests
         Assert.Equal(["5: the field `Legs` of the limit `Animal` of `T`, read through a value of it (T19)"], NotSupported("class Animal(int Legs) {\n    pub string Sound() => \"quiet\"\n}\n\nint Legs<T: Animal>(T a) => a.Legs\n\nprint(1)"));
         Assert.Equal(["5: the property `Count` of the limit `Bag` of `T`, read through a value of it (Q2 of issue 605, T19)"], NotSupported("class Bag {\n    pub int Count => 1\n}\n\nint Size<T: Bag>(T b) => b.Count\n\nprint(1)"));
         Assert.Equal(["5: the `static` member `Create` of the limit `Maker`, reached through `T` (Q2 of issue 605, T19)"], NotSupported("class Maker {\n    pub static int Create() => 1\n}\n\nint Fresh<T: Maker>() => T.Create()\n\nprint(1)"));
+        Assert.Equal(["5: the `static` member `Most` of the limit `Maker`, reached through `T` (Q2 of issue 605, T19)"], NotSupported("class Maker {\n    pub static int Most = 2\n}\n\nint Size<T: Maker>() => T.Most\n\nprint(1)"));
         Assert.Equal(["10: a method as a value, named without a call (K7, F11)"], NotSupported(Animals + "string S<T: Animal>(T a) {\n    f = a.Sound\n    return \"x\"\n}\n\nprint(1)"));
         var twin = "interface Named {\n    string Name()\n}\n\nclass Animal : Named {\n    pub string Name() => \"a\"\n}\n\nstring N<T: Animal + Named>(T a) => a.Name()\n\nprint(1)";
         Assert.Equal([(ErrorIds.AmbiguousCall, 9)], Errors(twin));
@@ -1186,7 +1187,8 @@ public sealed class CheckerTests
     public void A_copy_of_a_function_that_reads_its_type_reaches_the_limits_alone()
     {
         // T19 with T33 (Q13 of issue 605, comment 7051071380): through a parameter of `T`, a local written `T` and a local that takes one
-        // of them, a copy for `Square` reaches `Area` and neither `Perimeter` nor `Side`, at the line of the copy's text
+        // of them, a copy for `Square` reaches `Area` and neither `Perimeter` nor `Side`, at the line of the copy's text; with a class
+        // limit, a copy for `Dog` reaches the methods of `Animal` and not `Bark`, which `Dog` alone declares (Q5)
         var square = "interface Shape {\n    int Area()\n}\n\nclass Square(int Side) : Shape {\n    pub int Area() => Side * Side\n    pub int Perimeter() => 4 * Side\n}\n\nint Measure<T: Shape>(T item) {\n    print(T.Kind)\n";
         Clean(square + "    return item.Area()\n}\n\nprint(Measure(Square(3)))");
         Assert.Equal([(ErrorIds.UnknownName, 12)], Errors(square + "    return item.Perimeter()\n}\n\nprint(Measure(Square(3)))"));
@@ -1194,6 +1196,9 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 13)], Errors(square + "    T x = item\n    return x.Perimeter()\n}\n\nprint(Measure(Square(3)))"));
         Assert.Equal([(ErrorIds.UnknownName, 13)], Errors(square + "    x = item\n    return x.Perimeter()\n}\n\nprint(Measure(Square(3)))"));
         Assert.Equal("`T.Create` names no `static` member of a limit of `T` (V10, T19)", ErrorText(square + "    return T.Create()\n}\n\nprint(Measure(Square(3)))"));
+        var dog = "class Animal {\n    pub virtual string Sound() => \"quiet\"\n}\n\nclass Dog : Animal {\n    pub string Bark() => \"woof\"\n}\n\nstring M<T: Animal>(T a) {\n    print(T.Kind)\n";
+        Clean(dog + "    return a.Sound()\n}\n\nprint(M(Dog()))");
+        Assert.Equal([(ErrorIds.UnknownName, 11)], Errors(dog + "    return a.Bark()\n}\n\nprint(M(Dog()))"));
     }
 
     [Fact]
