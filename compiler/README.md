@@ -1825,7 +1825,8 @@ before its arguments, the last made first, so that the callee or the receiver go
 after the end of its call's memo, which a jump between a call's first copy and its last ends first,
 as R1 states (assumed: a reading of the build) and as Rust drops
 the operands of an expression that one of its operands leaves (the Rust Reference, "Destructors", read on
-2026-11-18; issue 569); and where a value
+2026-11-18; issue 569), the callee and the receiver being operands of the call as Rust's function operand and
+receiver are (`expr.call.intro` and `expr.method.intro`, read on 2026-11-19); and where a value
 that holds the list ends. At zero the lists the items hold are let
 go of in turn, and the block goes back to `Free`. A parameter not written `move` borrows its argument and changes no
 count: nothing changes the value it borrows while the call runs, since the checker refuses a read of
