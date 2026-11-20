@@ -315,7 +315,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// std/ whose allocator counts the blocks it gives and takes back, read by the program through <c>HttpServer.Allocated()</c> and
     /// <c>HttpServer.Live()</c>, a class of std/ the program sees (W1).
     /// </summary>
-    private static readonly Lazy<CheckedRuntime> Blocks = new(() => ListTests.Edited(
+    internal static readonly Lazy<CheckedRuntime> Blocks = new(() => ListTests.Edited(
         ("std/std.kz", "pub byte* Allocate(long size) {\n    mut byte* p = null\n", """
             thread static mut long allocated = 0
             thread static mut long freed = 0
