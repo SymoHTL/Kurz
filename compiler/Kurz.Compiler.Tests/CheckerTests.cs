@@ -7872,6 +7872,19 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_print_of_a_base_without_a_text_is_no_text_where_a_derived_class_declares_one()
+    {
+        // A4, A7: whether a value has a text at a `print` or in an interpolation is decided by its type, so that a value of a base with no
+        // `Text()` is `no-text` there whatever its instance, while a `throw` of it builds and shows the text of the instance's class (O7, the
+        // owner, 2026-11-21, issue 598, comment 7060156252, Q9 of comment 7055578588)
+        const string Animals = "class Animal(string Name)\n\nclass Dog(int Legs) : Animal {\n    pub string Text() => \"dog {Name}\"\n}\n\nAnimal a = Dog(\"rex\", 4)\n";
+        Assert.Equal([(ErrorIds.NoText, 8)], Errors(Animals + "print(a)\n"));
+        Assert.Equal([(ErrorIds.NoText, 8)], Errors(Animals + "print(\"got {a}\")\n"));
+        Assert.Equal([(ErrorIds.NoText, 8)], Errors(Animals + "print([a])\n"));
+        Clean(Animals + "print(Dog(\"tom\", 3))\nthrow a\n");
+    }
+
+    [Fact]
     public void A_move_on_the_right_side_of_and_or_or_may_have_ended_its_variable_after_it()
     {
         // U12, section 6: the right side of `&&` runs where the left is true and of `||` where it is false (N3), so that a `move` there may

@@ -332,9 +332,9 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_thrown_instance_of_a_class_without_a_text_writes_its_class_s_name_below_the_error_line()
     {
         // O7: an instance of a class that neither declares nor inherits a `Text()`, thrown by `throw` or by a bare `throw`, has its class's
-        // name below the error line (the owner, 2026-11-20, issue 598, comment 7051500939): the name of the instance's own class, a derived
-        // one thrown as its base, and that name where the instance stands in a `data` value or a list that is thrown (section 5, assumed: Q2
-        // and Q3 of comment 7055011193, and the reading of a value that holds one)
+        // name below the error line (the owner, 2026-11-20, issue 598, comment 7051500939): the bare name of the instance's own class, a
+        // derived one thrown as its base (2026-11-21, comment 7060156252, Q2 and Q3 of comment 7055011193), and that name where the instance
+        // stands in a `data` value or a list that is thrown (the same answer, Q8 of comment 7055578588)
         const string Note = "data Missing\n\nclass Note(string Body)\n\nint | Note | Missing Find(int id) {\n    if id == 1 {\n        return Note(\"a\")\n    }\n\n    return Missing\n}\n\nv = Find(1) else {\n";
         Ran(BuildAndRun(Note + "    Note n => throw n\n    Missing => 0\n}\nprint(v)\n", "throw-class"), 1, [], "error: thrown at program.kz:14:\nNote\n");
         Ran(BuildAndRun(Note + "    Note => throw\n    Missing => 0\n}\nprint(v)\n", "throw-class-bare"), 1, [], "error: thrown at program.kz:14:\nNote\n");
@@ -343,10 +343,19 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Animals + "Fail(Dog(\"rex\", 4))\n", "throw-class-derived"), 1, [], "error: thrown at program.kz:6:\nDog\n");
         Ran(BuildAndRun(Animals + "Fail(Animal(\"tom\"))\n", "throw-class-base"), 1, [], "error: thrown at program.kz:6:\nAnimal\n");
 
-        // a derived class that declares its own `Text()`, thrown as a base that has none, is named too: the type the value has at the
-        // `throw` decides whether it has a text, as at a `print` (A4, A7; assumed: the build's reading, Q9 of comment 7055578588)
+        // an instance thrown as a base that has no `Text()` shows what the `Text()` of its own class gives, found when the program runs, its
+        // class's own or that of a base between the two, a `virtual` one's override among them, as C#'s virtual `ToString()` (the owner,
+        // 2026-11-21, issue 598, comment 7060156252, Q9 of comment 7055578588); an instance whose class's chain declares none keeps its name,
+        // a sibling class's `Text()` aside; and an instance a thrown `data` value holds as such a base takes the text by the same rule
+        // (section 5, assumed: the build's reading)
         const string Texted = "class Animal(string Name)\n\nclass Dog(int Legs) : Animal {\n    pub string Text() => \"dog {Name}\"\n}\n\nvoid Fail(Animal a) {\n    throw a\n}\n\n";
-        Ran(BuildAndRun(Texted + "print(Dog(\"rex\", 4))\nFail(Dog(\"rex\", 4))\n", "throw-class-derived-text"), 1, ["dog rex"], "error: thrown at program.kz:8:\nDog\n");
+        Ran(BuildAndRun(Texted + "print(Dog(\"rex\", 4))\nFail(Dog(\"rex\", 4))\n", "throw-class-derived-text"), 1, ["dog rex"], "error: thrown at program.kz:8:\ndog rex\n");
+        const string Kinds = Texted + "class Puppy(int Age) : Dog\n\nclass Cat(int Lives) : Animal\n\n";
+        Ran(BuildAndRun(Kinds + "Fail(Puppy(\"pip\", 4, 1))\n", "throw-class-inherited-text"), 1, [], "error: thrown at program.kz:8:\ndog pip\n");
+        Ran(BuildAndRun(Kinds + "Fail(Cat(\"tom\", 9))\n", "throw-class-sibling-text"), 1, [], "error: thrown at program.kz:8:\nCat\n");
+        Ran(BuildAndRun(Kinds + "Fail(Animal(\"any\"))\n", "throw-class-base-of-text"), 1, [], "error: thrown at program.kz:8:\nAnimal\n");
+        Ran(BuildAndRun(Texted.Replace("pub string", "pub virtual string") + "class Puppy(int Age) : Dog {\n    pub override string Text() => \"puppy {Name}\"\n}\n\nFail(Puppy(\"pip\", 4, 1))\n", "throw-class-override-text"), 1, [], "error: thrown at program.kz:8:\npuppy pip\n");
+        Ran(BuildAndRun(Texted + "data Pen(Animal Item)\n\nthrow Pen(Dog(\"rex\", 4))\n", "throw-class-held-text"), 1, [], "error: thrown at program.kz:13:\nPen { Item = dog rex }\n");
         Ran(BuildAndRun("class Counter(mut int Count)\ndata Box(Counter Item)\n\nthrow Box(Counter(1))\n", "throw-class-held"), 1, [], "error: thrown at program.kz:4:\nBox { Item = Counter }\n");
         Ran(BuildAndRun("class Counter(mut int Count)\n\nthrow [Counter(1), Counter(2)]\n", "throw-class-list"), 1, [], "error: thrown at program.kz:3:\n[Counter, Counter]\n");
     }
