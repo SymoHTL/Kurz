@@ -89,13 +89,25 @@ public sealed partial class Emitter
     /// <summary>The result of a call on a file being emitted: its union, the case <c>IoError</c>, the slot that takes the value and the block after it.</summary>
     private sealed record FileOutcome(UnionType Union, DataType Error, string Slot, string Done);
 
-    /// <summary>The IR name of a <c>pub</c> function of the runtime of the target, which only a program's calls on files and sockets call.</summary>
-    private string SysFunction(string name) => Instance(
-        sys.Tree.Statements.OfType<FunctionDeclaration>()
+    /// <summary>
+    /// The IR name of a <c>pub</c> function of the runtime of the target, which a call into the runtime's <c>sys</c> needs: of the
+    /// target's file or of the architecture's, which the folder <c>sys</c> reads beside it (round 20, "Dir per arch"), as the lock word's
+    /// wait and wake by the number of <c>futex</c> on Linux. Where neither file gives it, the error names both files; where more than one
+    /// declaration does, which the runtime's check refuses as <c>redeclared</c> (V9), it names each with its file and line.
+    /// </summary>
+    private string SysFunction(string name)
+    {
+        var found = new[] { sys, arch }.SelectMany(u => u.Tree.Statements.OfType<FunctionDeclaration>()
             .Where(d => d.Name == name && (d.Modifiers & Modifiers.Pub) != 0)
-            .Select(d => sys.Model.FunctionOf(d))
-            .SingleOrDefault() ?? throw new InvalidOperationException($"{sys.File} has no `pub` function `{name}`, which a call on a file or a socket calls"),
-        NoMap);
+            .Select(d => (Unit: u, Declaration: d)))
+            .ToList();
+        return found switch
+        {
+            [var one] => Instance(one.Unit.Model.FunctionOf(one.Declaration), NoMap),
+            [] => throw new InvalidOperationException($"neither {sys.File} nor {arch.File} has a `pub` function `{name}`, which a call into the runtime's `sys` needs"),
+            _ => throw new InvalidOperationException($"`{name}`, which a call into the runtime's `sys` needs, is a `pub` function at {string.Join(" and at ", found.Select(f => $"{f.Unit.File}:{f.Declaration.Line}"))}, which the folder `sys` reads as one"),
+        };
+    }
 
     /// <summary>Whether the data type is <c>IoError</c>, which no file can declare beside the one every file sees (S1, V9).</summary>
     private static bool IsIoError(KurzType type) => type is DataType { Symbol.Name: "IoError" };
@@ -268,7 +280,10 @@ public sealed partial class Emitter
             case CallKind.DirectoryCreate:
                 {
                     var count = fn.Value($"and i64 {fn.Value($"extractvalue %kz.str {path}, 1")}, 9223372036854775807"); // without the mark of a block
-                    var r = SysCall("CreateDirectories", $"ptr {c}, i64 {count}");
+                    // the byte of `st_mode` in the architecture's `struct stat`, which its file gives; emitted for Linux alone, since
+                    // `EmitFileCall`, the one caller of `EmitPathCall`, says `not supported` for every other target first (S11)
+                    var modeAt = SysCall("StatModeAt", "");
+                    var r = SysCall("CreateDirectories", $"ptr {c}, i64 {count}, i64 {modeAt}");
                     FreePath(c, path);
                     FailBelowZero(o, r, path);
                     Succeed(o, null);

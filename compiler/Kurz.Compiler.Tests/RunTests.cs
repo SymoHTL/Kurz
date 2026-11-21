@@ -149,7 +149,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             ? CrashLine().Replace(written, string.Empty) : written;
 
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the cases whose <c>system:</c> line names Linux, the stack overflows', nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls, the reads of standard input and running a program. The number for Linux is the count measured with no margin in an image built locally from <c>ci/Dockerfile</c>, whose clang is the point release of the day it was built and not always the one of the image the gates job pulls by its digest (knowledge/the-gates-job-runs-in-its-image.md), so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156); a green gates job shows only that its own image counts at least this number, and a count in that image is one run of the job on a pushed head with the number at 999. The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 596 : 723;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 627 : 999;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -181,11 +181,14 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         "system/command-env-dir.kz",
     ];
 
-    /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
+    /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11), the cases of the deadlines that hold their thread by the clock among them (U36 to U45).</summary>
     private static readonly string[] ProcessCases =
     [
         "system/arguments.kz", "system/args-parameter.kz", "system/args-in-lambda.kz", "system/args-new-list.kz", "system/clock.kz", "system/environment-missing.kz",
         "system/monotonic-clock.kz", "system/elapsed-order.kz", "functions/top-level-return.kz", "functions/top-level-return-end.kz",
+        "actors/timeout-block.kz", "actors/timeout-callee-crash.kz", "actors/timeout-capped.kz", "actors/timeout-carried.kz", "actors/timeout-crashed.kz",
+        "actors/timeout-crashed-early.kz", "actors/timeout-default.kz", "actors/timeout-send.kz", "actors/within-clauses.kz",
+        "actors/timeout-chain-nested.kz",
     ];
 
     /// <summary>The cases of log calls that expect a run, which a build for Windows says <c>not supported</c> to (S11, P6).</summary>
@@ -240,14 +243,19 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     };
 
     /// <summary>
-    /// U25, U26: the <c>throws</c> cases whose trace is no raise of the top-level code at the error line, each with the line of its first
-    /// frame and the name of its last: a crash escalated to the root, whose trace is the child's stack, from its raise to its message's
-    /// method, and the root's <c>restart-limit</c>, whose trace is the top-level code's where it waits, and not at the line of the
-    /// <c>spawn</c> that its error line names (assumed readings of section 6, "Policy at <c>spawn</c>").
+    /// U25, U26, U29: the <c>throws</c> cases whose trace is no raise of the top-level code at the error line, each with the line of its
+    /// first frame and the name of its last: a crash escalated to the root, by its policy or by its block, whose trace is the child's stack,
+    /// from its raise to its message's method, but a <c>stack-overflow</c> that a block escalates, whose trace is the top-level code's
+    /// (section 6, the owner, 2026-11-17, #570, comment 6961064167, Q4; no case pins that trace's line, where it is taken being Q13 of
+    /// comment 6964678868 on #573),
+    /// and the root's <c>restart-limit</c>, whose trace is the top-level code's where it waits, and
+    /// not at the line of the <c>spawn</c> that its error line names (assumed readings of section 6, "Policy at <c>spawn</c>").
     /// </summary>
     private static readonly Dictionary<string, (int First, string Last)> OwnTraces = new(StringComparer.Ordinal)
     {
         ["actors/crash-escalate-root.kz"] = (7, "Worker.Fail"),
+        ["actors/block-escalate-root.kz"] = (6, "Worker.Fail"),
+        ["actors/per-node-escalate.kz"] = (7, "Cache.Fail"), // U53: a `per node` actor's, whose supervisor is the root
         ["actors/crash-restart-limit.kz"] = (18, "main"),
     };
 
@@ -272,7 +280,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     {
         var bytes = File.ReadAllBytes(Path.Combine(CorpusTests.Root, "corpus", relativePath));
         var source = SourceText.FromBytes(relativePath, bytes, out _)!;
-        var compilation = Builder.Compile(source, header.Grants, runtime ?? toolchain.Runtime, testBuild: header.Build != BuildKind.Release);
+        var compilation = Builder.Compile(source, header.Grants, runtime ?? toolchain.Runtime, testBuild: header.Build != BuildKind.Release, tests: header.Tests);
         Assert.False(compilation.Diagnostics.HasErrors, $"{relativePath}: the compiler refuses a case that expects a run: {string.Join("; ", compilation.Diagnostics.Sorted)}");
         if (compilation.Program is { } program)
         {
@@ -333,10 +341,29 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             return;
         }
 
-        // the trace on, as a program runs where nobody set KURZ_TRACE; the log line of a crash left out in a case of a crash (E3)
+        // the trace on, as a program runs where nobody set KURZ_TRACE; the log line of a crash left out in a case of a crash (E3); a case's
+        // `threads: 1` line (chapter 0) asks for the one thread the build runs every program on, first in, first out (U35), so the run sets
+        // nothing for it
         var (code, output, written) = Toolchain.Run(executable, null);
         var all = LeftOut(written, header.Rules);
         Assert.Equal(header.OutputLines, output);
+        if (header.Tests)
+        {
+            // Y3, E3: what `kurz test` writes is its standard output, which the header's lines hold, and nothing on standard error but the
+            // log lines of crashes it leaves out; a case that throws names the id and the place of the words under the first `FAILED` line
+            Assert.Equal("", all);
+            if (header.Expectation == Expectation.Throws)
+            {
+                var failed = output.ToList().FindIndex(l => l.EndsWith(" ... FAILED", StringComparison.Ordinal));
+                Assert.True(failed >= 0 && failed + 1 < output.Count, $"{relativePath}: no `FAILED` line with its words under it");
+                Assert.StartsWith($"    {header.ErrorId} ", output[failed + 1], StringComparison.Ordinal);
+                Assert.EndsWith($" at {relativePath}:{header.ErrorLine}", output[failed + 1], StringComparison.Ordinal);
+            }
+
+            Assert.Equal(header.Expectation == Expectation.Throws ? 1 : 0, code);
+            return;
+        }
+
         if (header.Expectation == Expectation.Output)
         {
             Assert.Equal((0, ""), (code, all));
@@ -345,7 +372,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
 
         var (error, trace) = TraceTests.Split(all);
         var line = $"error: {header.ErrorId} at {relativePath}:{header.ErrorLine}";
-        if (header.ErrorId == ErrorIds.Thrown)
+        if (header.ErrorId is ErrorIds.Thrown or ErrorIds.CheckFailed)
         {
             Assert.StartsWith(line + ":\n", error, StringComparison.Ordinal);
             Assert.True(Toolchain.Lines(error).Count >= 2, $"{relativePath}: no text below the error line: {error}");

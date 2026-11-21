@@ -94,6 +94,10 @@ def parse_case(text):
         rest = rest[1:]
     if rest and re.fullmatch(r"// build: (?:test|release)", rest[0]):
         rest = rest[1:]
+    if rest and rest[0].startswith("// command:"):  # a case that runs its program's tests under `kurz test` (chapter 0, Y2)
+        if rest[0] != "// command: test":
+            return None, "the `// command:` line is not `// command: test`"
+        rest = rest[1:]
     if rest and rest[0].startswith("// allow:"):  # the grants of a project.kz the file takes (R7)
         if not re.fullmatch(r"// allow: (?:raw(?: native)?|native)", rest[0]):
             return None, "the `// allow:` line is not `// allow: raw`, `// allow: native` or `// allow: raw native`"
@@ -101,6 +105,10 @@ def parse_case(text):
     if rest and rest[0].startswith("// system:"):  # the one system the case runs on (chapter 0)
         if not re.fullmatch(r"// system: (?:linux|windows)", rest[0]):
             return None, "the `// system:` line is not `// system: linux` or `// system: windows`"
+        rest = rest[1:]
+    if rest and rest[0].startswith("// threads:"):  # a case whose output follows one thread's order (chapter 0, U35)
+        if rest[0] != "// threads: 1":
+            return None, "the `// threads:` line is not `// threads: 1`"
         rest = rest[1:]
     if len(rest) != 1 or not re.fullmatch(r"// rules: [A-Z]\d+(?:, [A-Z]\d+)*", rest[0]):
         return None, "the header does not end in one `// rules: A1, B2` line"
@@ -436,6 +444,10 @@ def cases_in(base):
         "a grant line in the order native raw": (tree(edit(declare, "// rules: V1", "// allow: native raw\n// rules: V1")), "the `// allow:` line is not"),
         "a system line the header takes": (tree(edit(declare, "// rules: V1", "// allow: raw\n// system: linux\n// rules: V1")), None),
         "a system line the header does not take": (tree(edit(declare, "// rules: V1", "// system: macos\n// rules: V1")), "the `// system:` line is not"),
+        "a threads line the header takes": (tree(edit(declare, "// rules: V1", "// system: linux\n// threads: 1\n// rules: V1")), None),
+        "a threads line of another count": (tree(edit(declare, "// rules: V1", "// threads: 2\n// rules: V1")), "the `// threads:` line is not"),
+        "a command line the header takes": (tree(edit(declare, "// rules: V1", "// build: test\n// command: test\n// allow: raw\n// rules: V1")), None),
+        "a command line of another word": (tree(edit(declare, "// rules: V1", "// command: run\n// rules: V1")), "the `// command:` line is not"),
         "a case without a body": (tree({declare: "// expect: output\n// rules: V1\n"}), "no body"),
         "a case that names an unknown rule": (tree(edit(declare, "// rules: V1", "// rules: V1, V9")), "does not have"),
         "a case not linked from a rule it names": (tree(edit(declare, "// rules: V1", "// rules: V1, V4")), "has no Case line for it"),

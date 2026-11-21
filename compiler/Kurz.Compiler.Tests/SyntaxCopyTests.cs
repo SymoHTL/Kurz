@@ -16,7 +16,7 @@ public sealed class SyntaxCopyTests
     private const string Program = """
         data Point(int X, int Y)
 
-        int Every<T, const Mode M = Mode.Plain>(T value, mut List<int> xs, int step = 1) {
+        int Every<T, const Mode M = Mode.Plain>(T value, mut List<int> xs, int step = 1) within 2s {
             a = 1
             mut int b = 2
             b = a + -b
@@ -29,6 +29,7 @@ public sealed class SyntaxCopyTests
             n = Point(1, 2)
             m = n with { X = 4 }
             k = n.X
+            q = w.Get(a) within 2s
             lambda = (int x) => x * 2
             other = (int x) => {
                 return x
@@ -36,6 +37,9 @@ public sealed class SyntaxCopyTests
             r = 0..3
             s = 0..<3
             p = (a)
+            check a == (1)
+            advance 1s
+            mock Point with Point
             int? maybe = null
             List<int?> list = [1, null]
             Map<string, int | bool> map = Map<string, int | bool>()

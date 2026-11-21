@@ -21,6 +21,7 @@ internal static class SyntaxPrinter
         Assignment a => $"(assign {Print(a.Target)} {Print(a.Value)})",
         ExpressionStatement e => Print(e.Expression),
         SendStatement s => $"(send {Print(s.Call)})",
+        WithinStatement w => $"(within {Print(w.Bound)} {Print(w.Body)})",
         DecisionStatement d => $"(decide {d.Word})",
         IfStatement i => $"(if {Print(i.Condition)} {Print(i.Then)}{(i.Else is null ? "" : " else " + Print(i.Else))})",
         WhileStatement w => $"(while {Print(w.Condition)} {Print(w.Body)})",
@@ -32,6 +33,10 @@ internal static class SyntaxPrinter
         ThrowStatement t => t.Value is null ? "(throw)" : $"(throw {Print(t.Value)})",
         RawBlock r => $"(raw {Print(r.Body)})",
         ConstAssertStatement c => $"(const-assert {Print(c.Condition)} {Print(c.Text)})",
+        TestDeclaration t => t.Cluster ? $"(test-cluster {Print(t.Body)})" : $"(test {t.Written} {Print(t.Body)})",
+        AssertionStatement a => $"(check {Print(a.Condition)} {Quote(a.Text)})",
+        MockStatement m => $"(mock {Type(m.Target).TrimEnd()} with {Type(m.Replacement).TrimEnd()})",
+        AdvanceStatement a => $"(advance {Print(a.Duration)})",
         UseStatement u => $"(use {u.Target})",
         AsmStatement a => $"(asm {string.Join(" ", a.Templates.Select(x => Quote(x.Text)))}{string.Concat(a.Operands.Select(o => " " + Operand(o)))})",
         ExternBlock e => $"(extern{(e.Library is null ? "" : " in " + Quote(e.Library))} {{{string.Join(" ", e.Functions.Select(CFunction))}}})",
@@ -58,7 +63,8 @@ internal static class SyntaxPrinter
     {
         var typeParameters = TypeParameters(f.TypeParameters);
         var body = f.ExpressionBody is not null ? " => " + Print(f.ExpressionBody) : f.BlockBody is not null ? " " + Print(f.BlockBody) : "";
-        return $"(function {Mods(f.Modifiers)}{Type(f.ReturnType)}{f.Name}{typeParameters}({Parameters(f.Parameters)}){body})";
+        var within = f.Within is null ? "" : $" (within {Print(f.Within)})";
+        return $"(function {Mods(f.Modifiers)}{Type(f.ReturnType)}{f.Name}{typeParameters}({Parameters(f.Parameters)}){within}{body})";
     }
 
     /// <summary>
@@ -102,7 +108,7 @@ internal static class SyntaxPrinter
 
         if (t.Clauses is { Count: > 0 } clauses)
         {
-            sb.Append(' ').Append(string.Join(" ", clauses.Select(c => c.Policy is { } policy ? Policy(policy) : c.Size is { } size ? $"[{c.Word} {c.Line} {Print(size)}]" : $"[{c.Word} {c.Line}]"))); // U1: each clause's word with its line, `stack`'s size, the type's policy (U27)
+            sb.Append(' ').Append(string.Join(" ", clauses.Select(c => c.Policy is { } policy ? Policy(policy) : c.Size is { } size ? $"[{c.Word} {c.Line} {Print(size)}]" : $"[{string.Join(" ", new[] { c.Word, $"{c.Line}" }.Concat(c.Words ?? []))}]"))); // U1: each clause's word with its line, `stack`'s size, the type's policy (U27), the words of `per` (U51)
         }
 
         if (t.Members is not null)
@@ -168,7 +174,7 @@ internal static class SyntaxPrinter
         ThisExpression => "this",
         MemberAccess m => $"({(m.Conditional ? "?." : ".")} {Print(m.Target)} {m.Member})",
         TypeMemberAccess m => $"(. {Type(m.Type).TrimEnd()} {m.Member})",
-        CallExpression c => $"(call {Print(c.Callee)}{(c.TypeArguments.Count == 0 ? "" : "<" + string.Join(", ", c.TypeArguments.Select(t => Type(t).TrimEnd())) + ">")}{(c.Arguments.Count == 0 ? "" : " " + Arguments(c.Arguments))})",
+        CallExpression c => $"(call {Print(c.Callee)}{(c.TypeArguments.Count == 0 ? "" : "<" + string.Join(", ", c.TypeArguments.Select(t => Type(t).TrimEnd())) + ">")}{(c.Arguments.Count == 0 ? "" : " " + Arguments(c.Arguments))}{(c.Within is null ? "" : $" (within {Print(c.Within)})")})",
         IndexExpression i => $"(index {Print(i.Target)} {Print(i.Index)})",
         ListLiteral l => "(list" + string.Concat(l.Items.Select(item => " " + Print(item))) + ")",
         UnaryExpression u => $"({Op(u.Operator)} {Print(u.Operand)})",

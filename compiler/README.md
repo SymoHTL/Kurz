@@ -283,12 +283,23 @@ words (the owner, 2026-10-29, "Keep these words"), the first on Linux and the se
 no child inherits the lock file, they check on Linux alone, reading `/proc`: on Windows nothing
 checks either.
 
+`kurz test [--release] [--lines] [--cpu <name>] <file.kz>` builds the file's tests in place of its
+top-level code, which does not run, and runs them in a place of its own as `kurz run` runs a program,
+with no word for the program: `--` and an argument after the file are the usage's, since a test reads no
+`args` (Y2, F17). It writes `test "name" ... ok` or `test "name" ... FAILED` for each test, in the order of
+the file, after the lines the test printed, the words of a failed test's crash indented under its
+`FAILED` line, and then the counts, `2 tests: 1 passed, 1 failed`, `1 test:` for one (Y3), and ends with
+0 where every test passed and 1 where one failed (Q4). A program the checker accepts with no test gets
+`error: no test in <file>` and a `help:` line naming the form, and the exit code 1 (Y4, Q6).
+`CommandTests` holds each of these.
+
 Any other command line gets the usage on standard error and the exit code 1:
 
     usage: kurz --version [--verbose]
            kurz build [--release] [--lines] [--cpu <name>] <file.kz> [-o <output>]
            kurz run [--release] [--lines] [--cpu <name>] <file.kz> [-- <argument>...]
            kurz exec [--release] [--lines] [--cpu <name>] "<program text>" [-- <argument>...]
+           kurz test [--release] [--lines] [--cpu <name>] <file.kz>
            run and exec pass the words after -- to the program
 
 ### Readings the record leaves open to the command
@@ -545,9 +556,11 @@ below (S1). `OpenFile` opens close-on-exec, a file it
 creates with the permissions 0666 less the `umask` (S2); `OpenFile` and `ReadFile` call again where a
 signal interrupted them; `WriteFile` calls `Write` again with the rest and returns the bytes written
 before a call that took none (S4); `CloseFile` takes an interrupt for no failure; `FileSize` and
-`FileExists` read `stat` into a page each thread maps at its first use, at the offsets of x86-64's
-`struct stat`; `CreateDirectories` creates the directories above that are missing, as Rust's
-`fs::create_dir_all` does, and `ListDirectory` reads the names `readdir` gives at byte 19 of the GNU C
+`FileExists` read `stat` into a page each thread maps at its first use, at the offsets of the
+architecture's `struct stat`, which agree on `st_size` and `st_mtime`; `CreateDirectories` creates the
+directories above that are missing, as Rust's `fs::create_dir_all` does, reading `st_mode` at the byte
+the architecture's file gives, 24 on x86-64 and 16 on AArch64 (`StatModeAt`, whose result the emitted call of
+`Directory.Create` passes to `CreateDirectories`), and `ListDirectory` reads the names `readdir` gives at byte 19 of the GNU C
 library's `struct dirent` (S8). `Listen` and `Connect` take an address as `CPath` copies it, read
 its port after its last `:` and its host by `inet_pton` where it is a literal of IPv4, or of IPv6 inside
 `[` and `]` with a scope id in digits after a `%` and a port without a `+`, as Rust's parse of a socket
@@ -584,9 +597,14 @@ call passes, and one on a stream whose peer reset the connection fails with `ENO
 `SetNoDelay` sets `TCP_NODELAY` (1) at the level `IPPROTO_TCP` (6), the stream's member that only `std/`'s checker
 resolves, for the writer of a streamed response (W11), as Kestrel sets it on every connection: a small write then goes
 out at once, and not after the peer's acknowledgement of the one before.
-`LockWait` puts the thread to sleep on a file's lock word while it holds
-the value given, and `LockWake` wakes one thread that sleeps on it, each by the `futex` call through `syscall`,
-as Rust's `futex_wait` and `futex_wake` do (S16). `std/` gives the room a read makes in a list of bytes before it,
+`LockWait` puts the thread to sleep on a lock word, a file's or one of the runtime's, while it holds
+the value given, and `LockWake` wakes one thread that sleeps on it, each by the `futex` call through `syscall`
+(S16): the wait by `FUTEX_WAIT_PRIVATE` (128), where Rust's `futex_wait` waits by
+`FUTEX_WAIT_BITSET` with `FUTEX_PRIVATE_FLAG` and a bitset of every bit, and the wake by `FUTEX_WAKE_PRIVATE` (129),
+as Rust's `futex_wake` does (Rust's operations as `library/std/src/sys/sync/futex/unix.rs` of Rust 1.100.0 gives them, read on
+2026-11-19); each Linux architecture's file gives the two with the number of
+`futex` there, 202 on x86-64, and 98 on AArch64, where 202 is `accept`, and the Windows runtime waits by
+`WaitOnAddress` and wakes by `WakeByAddressSingle`, as Rust's futex does there. `std/` gives the room a read makes in a list of bytes before it,
 `BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9), and the
 block of a map, its growth and the hash of its keys (M9, below).
 
@@ -978,14 +996,23 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   its tasks ("What the emitter does not emit" names what of section 6 this does not build): `spawn`
   constructs the state as an instance of the actor's body is constructed, both its counts at one (K1,
   K7), in the first block of the actor's own heap, which the runtime's `ActorHeapNew` makes and
-  `ActorNew` fills, the actor's record in the 96 bytes in front of it, the build's own layout, which no rule of the record names, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps
+  `ActorNew` fills, the actor's record in the 144 bytes in front of it, the build's own layout, which no rule of the record names, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps
   the alignment of the allocator's block, as Rust's `ArcInner` pads its counts to what it holds, a
-  `Vector128` field's 16 among it: the name of its type and two words the emitted code holds (U2),
-  whether it runs, waits for its restart, ends after its current message or ended (U19, U22), an `int`,
+  `Vector128` field's 16 among it: the queue of many senders its messages are put on and the queue its
+  blocks are posted on, 24 bytes each, an intrusive queue of many producers and one consumer (not checked at source),
+  which a sender appends to by one atomic swap of its end and a release store of the link and which the
+  thread that holds the actor moves into the inbox and the side list of the activation that waits in the
+  message's chain, the blocks to the front of the inbox, at its take, at `Ready`, at its crash's fall and at its
+  end, and which a child's thread moves on its supervisor, with no hold of it, where the child's crash escalates
+  through the supervisor (`Fall`) or ends it as the crash's taker (`EndActor`), as the list of what holds only
+  while one thread runs every program names that move (U35; the runtime's `Pushed`, `Popped`, `Moved`; section 6), the name of its type and two words the emitted code holds (U2),
+  whether it runs, waits for its restart or ended (U19, U22), an `int`,
   and beside it the actor's state word, an `int` reached only through `AtomicInt` (R19), whose bits say
   whether a thread holds the actor (RUNNING), whether an entry of it stands in the run queue (QUEUED),
-  whether a take found it held and left the entry to its holder (NOTIFIED) and whether its constructor
-  runs (BUILDING), as tokio's task state keeps RUNNING and NOTIFIED bits (not checked at source), the
+  whether a take found it held and left the entry to its holder (NOTIFIED), whether its constructor
+  runs (BUILDING) and whether it ends after its current message, which the end of its supervisor sets by one
+  atomic `or` before it acts on the actor under its hold (ENDING; the runtime's `EndChildren`), as tokio's
+  task state keeps RUNNING and NOTIFIED bits (not checked at source), the
   block of its restart, which its supervisor's heap holds, null where it does not restart (U22), its
   supervisor, null for the top-level code (U13), its heap, the index of its slot in the runtime's
   table of the process (below), the size of the stack its messages run on, 2 MiB or what its
@@ -996,7 +1023,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   state word's BUILDING marks it, so that no message starts before its `spawn` returns, the block of a
   child's crash posted while the constructor waits among them (U17, U28), and the life of the record
   marks it, so that a crash passed up into an actor whose constructor runs at its `spawn` goes on to its spawner (U25, U3). The number
-  counts the actors of every type from 1, in the order `ActorNew` makes them (U2). The reference is
+  counts the actors of every type from 1, in the order `ActorNew` makes them, by one relaxed atomic add (U2). The reference is
   two words, 16 bytes, the index of the actor's slot in the runtime's table of the process and the
   actor's number, which nothing counts (section 6, the owner, 2026-11-16, comment 6919351399, "Erlang:
   id + generation"; the two words assumed there): a slot holds the address of the state and the
@@ -1004,7 +1031,46 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   with it, the next `spawn` takes the slot freed last again, and a call or a `send` through a reference
   whose number its slot no longer holds finds no actor and raises `actor-gone` at its line (the
   runtime's `Lookup`, `ActorHeap` and `Enqueue`; U6, U20); the table's pages double from 64 slots and
-  never move, their directory in the thread's own heap (assumed in section 6). `==` of two references
+  never move (assumed in section 6), their directory made once, by the first take of a slot under the table's
+  lock, in the own heap of that take's thread, the main thread's while one thread runs every program (U35), and
+  never moved, grown or freed while the process runs, so that a lookup with no lock finds it made, since an index
+  it reads was given by a take after the directory was stored (inferred). The table is taken and freed
+  under a lock of its own and looked up with none, by three loads with acquire, the number, the state and the
+  number again, against the stores with release of `SlotTake` and `SlotFree` (section 6). The words the threads
+  share are one block the runtime's `Start` makes, or the first `spawn` where the system refused it there
+  (`Shared`): the locks of the streams of `print` and of the log, of the
+  table of slots, of the queue of the pauses and of the blocks the top-level code's wait runs, each of Rust's
+  futex shape (`library/std/src/sys/sync/mutex/futex.rs`, not checked at source: a compare-exchange from 0 to 1, a spin, a swap of 2
+  and a sleep on the word while it holds 2, a swap of 0 and a wake where it found 2), the count of the actors
+  and the table of every block's message, made there once; a `print` writes its line whole under its stream's
+  lock, and a log line under the lock of standard error. Of the state the threads share, these are read to hold
+  on any number of threads, a reading that no run on more than one thread checks (inferred): the lock word (`Lock`,
+  `LockTried`, `LockSpun`, `Unlock`), whose model in `ModelTests` takes every interleaving of three threads on one
+  lock; the lock of the table of slots and its lookup with none (`SlotTake`, `SlotFree`, `SlotsUsed`, `Lookup`),
+  whose model takes every interleaving of a lookup of each of two actors while a third thread frees the first's
+  slot and takes it for the second, but for the life of the table's directory and pages; and the futex's wait and wake
+  (`sys.LockWait`, `sys.LockWake`), the wake as Rust's `futex_wake` and the wait by `FUTEX_WAIT_PRIVATE`, where
+  Rust's waits by `FUTEX_WAIT_BITSET` (`library/std/src/sys/sync/futex/unix.rs` of Rust 1.100.0, read on 2026-11-19: on
+  Linux `futex_wait` calls `futex` with `libc::FUTEX_WAIT_BITSET | libc::FUTEX_PRIVATE_FLAG` and `!0u32`, "A full bitmask,
+  to make it behave like a regular FUTEX_WAIT", and `futex_wake` with `libc::FUTEX_WAKE | libc::FUTEX_PRIVATE_FLAG` and 1,
+  which is `FUTEX_WAKE_PRIVATE`). The models' moves are
+  sequentially consistent, so that no model checks the orders of the atomic operations: they are the ones the
+  runtime's source writes, each of which `EmitterTests` holds to one instruction of the IR of that order
+  (`An_atomic_member_with_its_order_written_is_one_llvm_instruction_of_that_order_aligned_to_its_word`). These hold only while one thread runs every program (U35), each a reading of the code that no run on
+  more than one thread checks (inferred): the run queue,
+  a plain `static mut` (`Queue`, `RunOne`); the life of the table's directory and pages, each made in the own
+  heap of the thread whose take made it, the main thread's (`SlotTake`, `Lookup`); the life of an actor a sender
+  reads by a plain load after its push
+  (`Enqueue`, `Post`); the queues of a supervisor the thread does not hold, moved where a child's crash
+  escalates through it or ends it (`Moved` in `Fall` and `EndActor`); the reads that find a supervisor's
+  children with no hold, the ENDING bit set before the child's hold, and the siblings of a crashed child held
+  in no one order (`EndChildren`); the gap between a restart's take off the queue of the pauses and its hold
+  (`PauseEnded`, `Restart`); a block for the top-level code posted with no wake, which the main thread finds at
+  its wait's following turn (`Post`); the make of the words the threads share by the first `spawn`, where the
+  system refused them at the start, with no lock (`Shared`); the log line of a block's decision, which reads the child's record, the
+  return of the stack it raised on and the free of the block's message, made before the child's hold
+  (`Decided`); and the plain stores that clear the table's slots at the end of the process (`EndActors`).
+  `==` of two references
   compares their numbers, a reference's hash as a map's key is its number's, `this` as a value inside
   an actor is the reference its record holds (U2, U10), and the runtime's `ActorText` makes the text of
   a reference from its number, the name of the actor's type, `#` and its number, `Counter#1`, all three
@@ -1062,7 +1128,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `corpus/actors/copy-two-arguments.kz`, `copy-two-at-call.kz`, `copy-weak-across-arguments.kz`,
   `copy-weak-argument.kz` and `copy-weak-at-call.kz` the memo of a call, `copy-left-to-right.kz` the order, `copy-memo-keeps-block.kz` a block the memo
   holds living to the call's last copy and `copy-left-early.kz` a call left before it, whose copies
-  the call had not read yet are let go of (`ActorTests`, by the count of blocks); and
+  the call had not read yet are let go of (`ActorTests`, by the count of blocks, and, issue 569, by the
+  count and by the order of the frees for a construction, a plain call and a function value's call,
+  and by the count alone for a parameter written `move`, whose slot takes its copy); and
   `corpus/actors/copy-derived.kz` an instance of a derived class held as its base. The copy of a map whose
   keys reach a class instance is the copy of its block's bytes, with its source's hash and keys, each key
   and each value copied in its slot, and then each entry placed again under its copied key's hash, by
@@ -1079,7 +1147,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   A `move` before an argument of a call that crosses nothing copies nothing and, of a value whose
   place it empties, changes no count (U12): a variable's value leaves its place, which is stored null, or a string of no block, the count
   it held going to the parameter written `move` the argument fills, which its function owns and lets go of where it
-  leaves; the item of a loop that takes its list leaves its place in the list the same way where the
+  leaves, a lambda's too where the type of the function value called writes `move` there, whose call hands the argument
+  over as a direct call does (issue 587); the item of a loop that takes its list leaves its place in the list the same way where the
   place has an empty value, an address or a string, an item of another type staying there, counted
   once more, and the release of a list of an item type such a loop takes, read from every unit's model before the first
   helper is built, tests each item for null, so that the list lets go of every item it still holds
@@ -1097,7 +1166,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   to the frees on a branch, in a loop that takes its list, after a reassignment and through a
   parameter written `move`; the line `actor-move-fenced` of `ListTests` a branch, a loop that takes
   its list, a variable moved and assigned again in a loop, and a parameter written `move` left by a
-  `return` or moved on.
+  `return` or moved on; and the calls of a function value whose type writes `move` at a parameter, given a new value, a moved
+  variable, a loop's item, an inline `data` value, a copy, the first of two copies and a lambda that moves its parameter on,
+  and left by an argument after the `move`, `ActorTests` by the count of blocks and the line `value-move-fenced` of `ListTests` under the
+  fence (issue 587).
   A call that waits (U4), wherever it stands, passes a reply in its own frame, the
   one-shot slot of section 6, an `int` word, the activation that waits on it and the result, whose
   waiter the runtime's `ReplyWaiter` stores before `Enqueue` queues the message, so that whoever
@@ -1105,13 +1177,17 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   in the top-level code it runs the first actor of the run queue ("The runtime"),
   in a loop until the word is set, as tokio's `block_on` runs its queue until its future is ready, so
   that a call behind any count of messages takes the stack of one, and ends the process with
-  `deadlock` at the call's line where the queue is empty and the word is not set (U18); inside a
-  message it parks the activation, switching to the thread's side until the word is set (`ActorTests`).
+  `deadlock` at the call's line where the queue is empty, no restart's pause runs and the word is not set
+  (U18, U42), and with `call-timeout` there once its deadline passes (U36); inside a
+  message it parks the activation, switching to the thread's side until the word is set or a timer of the
+  thread, the timers kept in the order of their deadlines, wakes it at its deadline (U37, U38), and the scheduler drops
+  a message whose deadline passed before it starts it, its reply's word set to 4 (`ActorTests`).
   `ModelTests` explores every interleaving of two and three threads over a transcription of the state
   word's protocol and the reply's into C#, as loom explores a Rust test's (not checked at source), each
   move naming the runtime's function it transcribes, which a test holds to `runtime/common/runtime.kz`,
   and finds no lost wake, no two owners of a reply, no two threads holding one actor and no message
-  while its constructor runs, and each of these in a model broken so; `EmitterTests` holds the orders
+  while its constructor runs, and with the deadlines no lost wake of a drop or of a timer and no reply read or
+  kept among the timers once its frame was gone, and each of these in a model broken so; `EmitterTests` holds the orders
   of the atomic operations in the IR, which one thread does not show;
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
   number among the cases needs (section 5, round 19), a data type's number that of its name, as the IR names it, so
@@ -1322,12 +1398,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   one order in every run of one build (M10), and a block takes its keys with it;
   the Linux runtime's `Random` takes them as Rust's standard library takes the seed of a `HashMap`
   (`library/std/src/sys/pal/unix/rand.rs`, checked at the tag 1.82.0): `getrandom` with
-  `GRND_INSECURE`, `GRND_NONBLOCK` for the rest of the process where the kernel refuses that flag with
-  `EINVAL`, the call made again for the bytes left and where `EINTR` interrupted it, and
+  `GRND_INSECURE`, `GRND_NONBLOCK` where the kernel refuses that flag with `EINVAL`, for the rest of the
+  thread, where Rust's holds for the rest of the process, the call made again for the bytes left and where `EINTR` interrupted it, and
   `/dev/urandom`, opened with `O_CLOEXEC` at its first read and kept open, where the system refuses
-  `getrandom` with `ENOSYS` or `EPERM`, the process keeping to the file from then on, or where the
-  pool is not ready, `EAGAIN`; the two flags and the descriptor are plain `static mut`s where Rust
-  keeps `AtomicBool`s and a `OnceLock`, and the runtime runs one thread.
+  `getrandom` with `ENOSYS` or `EPERM`, the thread keeping to the file from then on, or where the
+  pool is not ready, `EAGAIN`; the two flags and the descriptor are `thread static mut`s where Rust
+  keeps `AtomicBool`s and a `OnceLock`, each thread finding the kernel's answer and opening the file for itself,
+  since an atomic view takes the address of its word (R19) and the runtime's code takes the address of no
+  static (R10, R13) (assumed: each thread's own, as the `rand` crate's `ThreadRng` is one per thread, not
+  checked at source).
   Where Rust panics, with any other error of `getrandom`, an open or a read of the file that fails or
   a file that ends first, `Random` gives false and the first write into the thread's first map ends
   the program with `random-failed` before it takes a block (M9; the owner, 2026-10-30, "End with an
@@ -1604,7 +1683,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - lambdas (F7) and function values (F11): a function value is the address of its lambda's code and
   of its environment, which holds the values the lambda read when it was made (F15); a lambda that
   reads no variable has none and allocates nothing, and a call of a function value calls its code
-  with its environment (section 4, the owner, 2026-10-25, "Pair + heap env");
+  with its environment (section 4, the owner, 2026-10-25, "Pair + heap env") and takes its arguments as a direct call takes
+  them: an argument of a parameter its type writes `move` is handed over to the lambda, which lets go of it at its end, and
+  every other is borrowed for the call (U12; issue 587);
 - `print`, `eprint`, which writes the same line to standard error (A17), and the text of a value in
   a string's holes (A1, A2, A8, L6), `==` on strings by
   their bytes (T18), and `<`, `<=`, `>` and `>=` on strings by the first byte in which they differ,
@@ -1747,8 +1828,18 @@ the rest. The count
 is lowered where a holder ends: at the end of the block that declared a variable, and at a
 `return`, a `break` or a `continue` for the blocks it leaves; at an assignment over the value; at
 the end of its statement for a value that a call, a `with`, a `match` or an `else` made and that
-nothing keeps; and where a value that holds the list ends. At zero the lists the items hold are let
-go of in turn, and the block goes back to `Free`. A parameter borrows its argument and changes no
+nothing keeps; where a case an argument propagates, or another jump, leaves a construction or a call
+that is no message before its last argument, for each value a slot took from the arguments before
+it, a field of the construction or a parameter written `move`, each copy the call made before it, a
+call's one copy among the values its arguments made, and the callee or the receiver the call made
+before its arguments, the last made first, so that the callee or the receiver goes last, each copy
+after the end of its call's memo, which a jump between a call's first copy and its last ends first,
+as R1 states (assumed: a reading of the build) and as Rust drops
+the operands of an expression that one of its operands leaves (the Rust Reference, "Destructors", read on
+2026-11-18; issue 569), the callee and the receiver being operands of the call as Rust's function operand and
+receiver are (`expr.call.intro` and `expr.method.intro`, read on 2026-11-19); and where a value
+that holds the list ends. At zero the lists the items hold are let
+go of in turn, and the block goes back to `Free`. A parameter not written `move` borrows its argument and changes no
 count: nothing changes the value it borrows while the call runs, since the checker refuses a read of
 what a call takes as `mut` that the expression still holds when the call runs, or when an assignment
 or a `mut` method in an arm's statement inside the expression changes it (M7), and such a read of a
@@ -1757,8 +1848,19 @@ made (the owner, 2026-10-25, "Copied"), and no state
 outside a function holds a list or a string, which R13 refuses, so a callee reaches a list or a
 string its caller lent it through its parameters alone. The name an arm of a `match` binds holds a count of its value, as a
 variable does, so that the arm can change the subject's variable and the name keeps its value (M3).
+The case an arm of a postfix `else` takes, after a call or after a loop over a file's lines (O5, S16), holds the count the result
+gave it, which no place holds: the arm holds it as a variable of its block, a name bound or not, and the arm of `else` the whole
+value, and lets go of it at the block's end and at a `return`, a `break` or a `continue` that leaves the block, unless a `move`
+of the name emptied its place, as Rust drops the variables a `match` arm binds when the arm ends and none a move left
+uninitialized (the Rust Reference, "Destructors", `destructors.scope.bindings.match-arm` and `destructors.intro`, and "Match
+expressions", `expr.match.scrutinee-value`, read on 2026-11-19); a `return` of the name counts it once more for the caller.
+Pinned by `ListTests` under an allocator that counts the blocks and under the fenced one, the arm of a `match` the control, and
+by `FileTests` for the loop's arms.
 Counted are a list, a string, a function value, an instance of a class, a value of a block type, a plain
-`data` value that holds one of them in a field and a union with a case that holds one. A string made while the program runs holds a block
+`data` value that holds one of them in a field and a union with a case that holds one; a plain `data` value lets go of each such
+field where it ends, a union field by the case it holds (`ListTests`, under an allocator that counts the blocks and under the
+fenced one: a plain data case, an instance and a list in a union field, at a variable's end, at its reassignment, in a list's
+item and in the copy a call makes, the same field of a class the control). A string made while the program runs holds a block
 of `std/` in front of its bytes, laid out as the block of a list of bytes: the count of the values that
 hold it, 8 bytes, then the count of its bytes, which `string.FromRaw` writes, and the room
 `string.Allocate` gave, 4 bytes each, so that `s.Bytes` and a string of a list of bytes share the
@@ -2011,6 +2113,32 @@ choice Rust refuses raises `invalid-ordering-at-run-time` at the call's line (`E
 `EmitterTests` pins the instructions and the choice). A view crossing into an actor, or out of one as
 a waiting call's result, is the checker's `pointer-crosses`, as a pointer's crossing is (U12, R19).
 
+### The tests and `check`
+
+`check condition` (Y6) is emitted in every build: its condition, and where it is one of the six
+comparisons whose sides show their values, each side once, compared as the comparison compares them; on
+the path of its failure the runtime's `CheckFailed` gets the condition's text, the values after it in
+parentheses, `names.Count == 2 (3 == 2)`, and the file and the line as constants, and crashes the actor
+that runs it, at the top level the end of the process with `error: check-failed at <file>:<n>:` and the
+text on the line after it. That path takes a count of each counted side before it makes the texts, since
+the `Text()` of one side may assign the place the other was read through, a `mut` parameter's, whose read
+takes no count, and lets go of them once the text is joined (`ListTests`, the line `check-operands-fenced`). A `test` block emits nothing in the build of
+`kurz build`, `kurz run` and `kurz exec` (Q5). In the build of `kurz test` the top-level code is the
+table of the tests, each test's function, its name as written and its line, and a call of the runtime's
+`RunTests`, which runs each test in an actor of its own, a child of the top-level code with the policy
+`stop`, by one message with no deadline (D6), and waits for it as the top-level code waits for a call
+(`RootWait`, the loop `Wait` runs). The test passes where the actor answered, and fails where it crashed,
+the words of its crash kept for the line under `FAILED` and no log line written for it (F1, F3), or where
+the wait found nothing left to run, `deadlock at <file>:<the test's line>` (F5). Then every actor the
+test made ends at once, parked ones too (F6): the records of the run queue, each activation's stack back
+in the pool with its open copy sessions ended, the stack a pending block keeps, every heap, the heaps of
+messages, the timers, the pauses and the deadline of the top-level code's `within`, so that no timer and
+no message heap names a heap freed; the numbers of actors go on counting (U2). A socket or a file a
+test's actors hold at that end stays open, as nothing of an actor's end closes one (F22). The test's own
+actor is named `test` (F2), a name no log line shows, since its crash writes none (F3). `ActorTests`
+holds the end of a test's actors and the bound of a test's message, `CommandTests` what the command
+writes, and the corpus's `tests/` cases what a case of `kurz test` shows (E3).
+
 ### What the emitter does not emit
 
 A program that uses one of these gets one `not supported` at the construct's line, in the
@@ -2022,7 +2150,8 @@ command line, the environment or the clock, and a log call, in a build for Windo
 map, a field or a union and a lambda that reads a variable of a vector's type, whose places are not
 aligned to it, and on a 64-bit Arm machine a test of a class under `Arm`, whose intrinsics are not
 built (R18), and an `asm`, whose operands the checker reads for x86-64 alone (R11), where a `naked` function, whose
-operands are `sym` and `const` alone, builds (R12), and a construct of the other chapters the checker does not read. The line
+operands are `sym` and `const` alone, builds (R12), and a construct of the other chapters the
+checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use"); a call on a socket or a file that a
 function of `std/` makes is refused at the line of the program's statement whose call reached that function, which the queue of
@@ -2072,9 +2201,11 @@ each waiting caller `callee-crashed` (U20), ends the actor's children after thei
 to 30 s, run by the top-level code's wait, which sleeps while only a pause is left (U22, U23); the
 emitted `spawn` keeps a copy of the constructor's arguments in the spawner's heap and makes the
 function that constructs the state again from them, and each call site of a message gets a table
-of the function that runs it and the one that copies it into a new heap. No case carries chapter 0's
-line `// threads: 1`, which the corpus runner does not read and `tools/lint_reference.py` refuses as a
-header line it does not know (chapter 0). A message any of whose
+of the function that runs it and the one that copies it into a new heap. Chapter 0's line
+`// threads: 1`, on a case whose output follows one thread's order, is read by `tools/lint_reference.py` and by the
+corpus runner's reading of a header (`CaseHeader`), each refusing another count, and the runner does nothing more for
+it: the build runs every actor on its one thread, the ready actors first in, first out, the top-level code's wait
+running them, which is U35's order for such a case. A message any of whose
 arguments can wait, one that runs a call anywhere in it, is built in a
 heap of its own (`MessageHeapNew`) and at its queueing copied by that copy into the heap its actor has
 then, its own heap freed, as Erlang builds a message in the sender's heap and copies it into the
@@ -2114,8 +2245,9 @@ an overflow escalated to the top level writes the trace of the top-level code wh
 the stack the child overflowed on, whose state the signal's stack held, is not kept. What stays `not
 supported` of section 6's supervision: `attempt { ... }` and `retry { ... }`; a block whose child can
 throw a type the crossing copy does not copy (U12), a block in a file read without `std/`, and a block
-whose child's `Reason` grows by what the blocks of the program read, read five times, the first and four more; a policy after
-the name of a `per` actor with `per` itself (U1), a block there among it; the crash paths of the ESP32
+whose child's `Reason` grows by what the blocks of the program read, read five times, the first and four more; `per` with other
+words than `node`, `per cluster` with a text of its own, since it needs the directory of section 7, and a policy after such a
+name with it (U1, U51); the block `on crash (c) { ... }` after the name of a `per node` actor (U28, U54); the crash paths of the ESP32
 models, AVR and WebAssembly, for which the build has no target; and, on Windows, an actor's stack
 overflow, which ends the process as the system ends it whatever the policy (U19); a crash at the root, the top-level code, still ends
 the process with its error line, its trace and the exit code 1. A call whose caller crashed runs to its end and its result goes nowhere, which on
@@ -2148,7 +2280,9 @@ switch, `naked` on Arm and the stacks build, and no run of this repository's gat
 job `compiler-arm`, which is not required and runs on Linux, as `compiler-windows` runs on x86-64, so
 that the switch of Windows on Arm is assembled
 (`EmitterTests.The_switch_of_every_target_and_architecture_is_assembled_by_clang_for_its_machine`)
-and runs nowhere; a call waits with no bound, where section 6 bounds it by 5 seconds (`call-timeout`);
+and runs nowhere; a call waits 5 seconds, or the time its chain has left where that ends first, where no `within` block, clause
+on the call or clause on the method's declaration names another bound (U36 to U45), on the system's clock, with no virtual time
+of section 11, while a socket's wait keeps its own bound of section 12, which no `within` bounds;
 and an inbox grows with no bound, where section 13 spills it at 64 MB, until the allocator ends the
 process with `allocation-failed`. An actor's record and the place of its state live to the end of the
 process, the state built again at each restart (U22), which is
@@ -2180,7 +2314,36 @@ the turns, the end and the inbox's growth, each heap giving back every block of 
 and moves, 10,000 idle actors within 512 bytes each, on Linux alone, which reads the resident memory,
 a buffer of the runtime made inside an actor outliving it, and a block of more than 262144 bytes of an
 actor joining the kept blocks at the end; the line `actor-heaps-fenced` of `ListTests` the heaps of
-actors freed whole and every result of their messages read after it, from the caller's heap; no test pins the wait with no bound, which would not end.
+actors freed whole and every result of their messages read after it, from the caller's heap; and `ActorTests` the deadlines, the bound of every target, the timers kept in the order of their
+deadlines, the inbox's drop of a message past its deadline, a `within` put back at every way out of it, and a wait that its
+deadline ends while a restart's pause runs.
+
+Of section 13 the build makes the actor declared `per node`, one in the process, addressed by its name (U51 to U55). The
+checker reads `Cache.M(...)` and `send Cache.M(...)` as a call through a reference (U4, U6), inside the actor as outside it
+(U55), and marks the call (`CallInfo.ByName`), so that the throws of the defaults of the actor's fields count among the call's
+(`ThrowSets`); `spawn` of it is `type-mismatch`, a parameter of its constructor and its name as a value `syntax`, a field
+named through its name `not-visible` (U8), and a method named through it with no call and its name called as a function,
+`Cache()`, `not supported`. The emitter gets the reference before the call's arguments from a function made once for each
+such type, `actor.per.<n>`, with three globals of its own: its cell, a lock word, the slot and the number of its one actor;
+its block of a restart, with no argument kept, a null function for `escalate` and none for `stop`; and its knobs where
+`after` or `max N in` is written, their last word 1 to mark a `per node` type's. The runtime's `PerFind` reads the cell: where
+its number names an actor `Lookup` finds, it gives that actor with no lock taken; else it takes the cell's lock and reads
+again, and where no actor stands there either it gives null with the lock held, and the function makes the actor's heap and
+record as a `spawn` does, its supervisor the code that runs, and `PerStarted` sets the pause of the type's block and the
+count of its knobs' ring back to 0, stores the slot and the number in the cell, the number with release, and lets go of the
+lock. The lock is held around the read, the making of the record and that store alone,
+never around a constructor or a wait, which the one thread of the build never contends (U35). The defaults then run on the
+caller's stack in the actor's heap, the actor BUILDING, so that a message that reaches it meanwhile waits in its inbox, and
+named as the one built (`Building`), so that an actor they spawn is its child (U21), and
+at their end `PerBuilt` makes the root its supervisor and ends its building as `ActorBuilt` does (U53). A throw in the
+defaults is the caller's crash, which ends its child, the actor half built, the calls queued in it raising `actor-gone`,
+and the message after it finds no actor in the cell and starts a fresh one (U52). The crash of a `per node` actor whose knobs
+carry the mark, past `max N in`, ends it with no `restart-limit` (`Fell`), and `on crash stop` ends it as at a `spawn`,
+the calls queued in it raising `actor-gone` and the message after it starting a fresh one (U54). It ends with the process,
+freed by the end's walk over the table as every actor is (U13). `ActorTests` pins the memory of each way a `per node` actor
+is freed, a restart in place, a stop, its limit and a start that throws, flat over 10,000 rounds, the first pause and the
+window of a fresh start, its defaults' heap after a wait, its heap freed at the end, and, under the fence with the heap word
+of a freed record written 16 before its free, that nothing reads an ended one.
 
 On Linux an exception that ends the process writes the trace of the calls below its error line
 (section 6), but `allocation-failed` and `random-failed`, which write no place and no trace (O11, M9): the runtime's `Trace` (`runtime/linux/linux.kz`) walks the stack it raised on with
@@ -2580,7 +2743,8 @@ that sit under a rule by its id. Every one is pinned by a test.
   before what can begin one, which is `syntax` there, as a statement form's word is. After an
   actor's name and its primary constructor the parser keeps each clause's first word, `per`, `yield`,
   `inbox`, `stack` or `on crash`, with its line, passes over the words that follow it up to the body,
-  but for `stack`'s literal and the words of a policy, and reads any other word there as `syntax`.
+  but for `stack`'s literal, the words of a policy and the words after `per`, which it keeps (U51), and
+  reads any other word there as `syntax`.
   The words of a policy after `on crash`, there and after the arguments of a `spawn`, which they end,
   are `restart`, `stop` or `escalate`, and after `restart` the knobs `after <duration>` and
   `max N in <duration>`, each once, in either order, each value a number literal with its sign where it
@@ -2617,6 +2781,15 @@ that sit under a rule by its id. Every one is pinned by a test.
   that no `"""` on the same line closes, the lexer passes over the rest of the block, up to the
   closing `"""`, so that the block's text is not read as code, and reads what follows the
   closing quotes on their line as code.
+
+- Y1, Y6, Y9: where `test`, `check`, `mock` and `advance` are words, inside D2's letter (issue 586, comment
+  6992687784). `test cluster` is the cluster test only where a token that can start an expression follows
+  `cluster`, so that `test cluster = 1` declares a variable `cluster` of a type named `test`; `mock` is the
+  statement only where a type, `with` and a type follow it, so that `mock x = 1` declares a variable `x` of
+  a type named `mock`; a `test` block in a class's body is the member parser's `syntax` at its line; and
+  the text of a `check` is its tokens as the source writes them, a `>` of a `>>` that type arguments took
+  apart among them, each run of spaces, line breaks and comments between two tokens one space. Pinned by
+  `ParserTests`.
 
 Six shapes still get two errors, or an uneven one, from the front end, each low: `if x print(1)
 else print(2)` is `braces-required` twice on one line, because the postfix `else` binds to the call
@@ -2913,8 +3086,11 @@ U12), an argument written `move` only where it
 reaches a handle, a hasher, a command or a child process by any path the copy follows, a lambda's capture and
 a field of any class among them, or a value of a type parameter, which the copy of its function for such a type
 argument makes one of them, whose copy would share the sender's block by its count (U12); `copy` at a call that is no message before a value that
-reaches a function value or an interface's value, which no word makes cross (U12); and a log call
-inside an actor (P8). The refusal of
+reaches a function value or an interface's value, which no word makes cross (U12); a log call
+inside an actor (P8); the cluster test of section 13, `test cluster N seed S { ... }`, whose words and
+block the parser passes over (Y8); and `mock X with Y` and `advance d`, whose questions are open (Y9, Y10),
+the duration of an `advance` checked as the bound of `within` is (U40) and its error reported beside the
+line. The refusal of
 the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered
 on 2026-11-14, comment 6880404917); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
@@ -3476,3 +3652,9 @@ round can ask about it by the rule's id.
 - A9 with A7 and A15: a `Text()` without `pub` makes `not-visible` every `print`, interpolation and
   `string.Join` (X6) of the instance, and of a list or a `data` value that holds one, inside the class and
   outside it.
+- Y6: a `check` tells the checker nothing after it, so that after `check x != null` the variable `x`
+  is still nullable (N2), as Rust's `assert!` narrows no type, where C#'s `Debug.Assert` tells its
+  flow analysis the condition held. A comparison shows its sides' values where it stands alone or in
+  parentheses and each side shows its value as a hole of an interpolation does; a test's name is its
+  own by its value, so that `"A"` and `"\u0041"` are one name. Pinned by
+  `CheckerTests`.

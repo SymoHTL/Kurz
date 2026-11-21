@@ -1,0 +1,24 @@
+// expect: throws call-timeout at 24
+// | slow done
+// threads: 1
+// rules: U36
+
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Worker {
+    pub void Slow() {
+        Hold(5200ms)
+        print("slow done")
+    }
+
+    pub int Get() => 1
+}
+
+w = spawn Worker()
+send w.Slow()
+print(w.Get())

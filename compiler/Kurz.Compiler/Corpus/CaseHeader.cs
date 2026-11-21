@@ -25,10 +25,12 @@ public enum BuildKind
 /// <c>// expect: output</c>, <c>// expect: error &lt;id&gt; at &lt;line&gt;</c> or
 /// <c>// expect: throws &lt;id&gt; at &lt;line&gt;</c>; then <c>// | </c> lines with what the program
 /// prints (not for an error); then an optional <c>// build: test</c> or <c>// build: release</c>;
+/// then an optional <c>// command: test</c>, a case that runs its program's tests under <c>kurz test</c> (Y2) in place of the program;
 /// then an optional <c>// allow: raw</c>, <c>// allow: native</c> or <c>// allow: raw native</c>, the
 /// grants of a <c>project.kz</c> that the case's file takes; then an optional <c>// system: linux</c> or
-/// <c>// system: windows</c>, the one system the case runs on; then exactly one <c>// rules: A1, B2</c>
-/// line; then an empty line; then the program. A line of a diagnostic counts from the first line of
+/// <c>// system: windows</c>, the one system the case runs on; then an optional <c>// threads: 1</c>, a case whose output follows one
+/// thread's order (U35), which the build gives every program, since it runs every actor on its one thread (compiler/README.md); then
+/// exactly one <c>// rules: A1, B2</c> line; then an empty line; then the program. A line of a diagnostic counts from the first line of
 /// the file, the header included.
 /// </summary>
 public sealed partial record CaseHeader(
@@ -43,6 +45,12 @@ public sealed partial record CaseHeader(
     string Body,
     int BodyLine)
 {
+    /// <summary>
+    /// Y2: the case runs its program's tests, as <c>kurz test</c> does, in place of the program, by the header line <c>// command: test</c>
+    /// (assumed: a reading of the build, said back in issue 586, comment 6993110710).
+    /// </summary>
+    public bool Tests { get; init; }
+
     [GeneratedRegex(@"^// expect: (?:(output)|(throws) ([a-z][a-z-]*) at (\d+)|error ([a-z][a-z-]*) at (\d+))$")]
     private static partial Regex ExpectLine();
 
@@ -104,6 +112,19 @@ public sealed partial record CaseHeader(
             i++;
         }
 
+        var tests = false;
+        if (i < lines.Length && lines[i].StartsWith("// command:", StringComparison.Ordinal))
+        {
+            if (lines[i] != "// command: test")
+            {
+                problem = "the `// command:` line is not `// command: test`";
+                return null;
+            }
+
+            tests = true;
+            i++;
+        }
+
         IReadOnlyList<string> grants = [];
         if (i < lines.Length && lines[i].StartsWith("// allow:", StringComparison.Ordinal))
         {
@@ -132,6 +153,17 @@ public sealed partial record CaseHeader(
             i++;
         }
 
+        if (i < lines.Length && lines[i].StartsWith("// threads:", StringComparison.Ordinal))
+        {
+            if (lines[i] != "// threads: 1")
+            {
+                problem = "the `// threads:` line is not `// threads: 1`";
+                return null;
+            }
+
+            i++;
+        }
+
         if (i >= lines.Length || !RulesLine().IsMatch(lines[i]))
         {
             problem = "the header does not end in one `// rules: A1, B2` line";
@@ -155,6 +187,6 @@ public sealed partial record CaseHeader(
         }
 
         problem = null;
-        return new CaseHeader(expectation, id, errorLine, output, build, grants, system, rules, body, i + 1);
+        return new CaseHeader(expectation, id, errorLine, output, build, grants, system, rules, body, i + 1) { Tests = tests };
     }
 }

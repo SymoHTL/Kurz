@@ -15,8 +15,8 @@ namespace Kurz.Compiler.Semantics;
 /// <c>string.Join</c> call on the types they make text of, and for a generic <c>data</c> type derived from such a type the text of each
 /// instantiation of it that the program builds (section 5, the owner, 2026-11-16); the construction of an actor it spawns, whose throw is
 /// its crash (U3); and the code of an actor it spawns under <c>escalate</c>, whose crash passes up whole (U25). The instantiations a
-/// program builds are found as Rust's monomorphization finds its instances: from the roots, the top-level code and every <c>pub</c>
-/// function, a generic one and each actor's <c>pub</c> methods among them, through the type arguments each call gives, with the fixed
+/// program builds are found as Rust's monomorphization finds its instances: from the roots, the top-level code, every <c>pub</c>
+/// function, a generic one and each actor's <c>pub</c> methods among them, and every test (Y5), through the type arguments each call gives, with the fixed
 /// point's edges, a lambda's in the unit that makes it, and each with no type parameter left, read again with the text of each
 /// instantiation found until they grow no more. A call through an actor's
 /// reference reaches none of the callee's code, whose crash its caller gets as <c>callee-crashed</c> (U20). The text of a thrown value
@@ -73,7 +73,7 @@ public sealed class ThrowSets
         [typeof(ThisExpression)] = "no code",
         [typeof(MemberAccess)] = "its target, and a property's read",
         [typeof(TypeMemberAccess)] = "a property's read",
-        [typeof(CallExpression)] = "its callee, its arguments and what it calls",
+        [typeof(CallExpression)] = "its callee, its arguments, the bound of its clause and what it calls",
         [typeof(ListLiteral)] = "its items",
         [typeof(IndexExpression)] = "its target and its index",
         [typeof(UnaryExpression)] = "its operand",
@@ -102,9 +102,14 @@ public sealed class ThrowSets
         [typeof(RawBlock)] = "its body",
         [typeof(UseStatement)] = "no code",
         [typeof(SendStatement)] = "its call's arguments",
+        [typeof(WithinStatement)] = "its bound and its body",
         [typeof(DecisionStatement)] = "no code: the runtime acts on the decision",
         [typeof(AsmStatement)] = "its operands, and the function a sym operand names",
         [typeof(ConstAssertStatement)] = "no code: the compiler reads it",
+        [typeof(TestDeclaration)] = "no code where it stands: its body is the code of the test's own actor under kurz test",
+        [typeof(AssertionStatement)] = "its condition, and the Text() of each side of the comparison its failure shows",
+        [typeof(MockStatement)] = "no code: the checker refuses it",
+        [typeof(AdvanceStatement)] = "no code: the checker refuses it",
         [typeof(ExternBlock)] = "no code",
         [typeof(FunctionDeclaration)] = "no code where it stands: its body where it is called",
         [typeof(FieldDeclaration)] = "no code where it stands: its value where its type is made",
@@ -399,8 +404,11 @@ public sealed class ThrowSets
     // list holds, a generic one among them, whose instantiations with every type argument named are built whatever type argument a
     // call gives it (section 5, the owner, 2026-11-17, #560, comment 6952257456, "(b) As built (Recommended)"); the list holds each
     // actor's `pub` methods, which alone take messages (U9), so that what an actor builds is built: its other methods run from its own
-    // code alone, and its construction from a `spawn` that a root reaches
-    private IEnumerable<object> Roots() => Pub().Prepend<object>(new TopLevel(program.Model));
+    // code alone, and its construction from a `spawn` that a root reaches; and each test of the file, which the build of `kurz test`
+    // runs as a function of its own (Y5), as Rust's `cargo test` builds each `#[test]` function as a root of its harness, in every
+    // reading, since the checker reads every test whatever command the build is for (Y7), so that a `Reason` is one set under every
+    // command
+    private IEnumerable<object> Roots() => Pub().Concat(program.Model.Tests.Select(program.Model.TestOf)).Prepend<object>(new TopLevel(program.Model));
 
     // a type once, at the earliest place that throws it
     private static bool Add(List<Thrown> set, Thrown thrown)
@@ -870,6 +878,17 @@ public sealed class ThrowSets
                     break;
                 case BreakStatement or ContinueStatement or UseStatement or ConstAssertStatement or ExternBlock or FunctionDeclaration or FieldDeclaration or ConstructorDeclaration or TypeDeclaration or DecisionStatement:
                     break;
+                case TestDeclaration or MockStatement or AdvanceStatement:
+                    break;
+                case AssertionStatement a:
+                    Expression(a.Condition);
+                    if (model.AssertionOf(a) is { Left: { } left, Right: { } right })
+                    {
+                        Text(left); // Y6: the text of each side its failure shows, made by the actor that runs it
+                        Text(right);
+                    }
+
+                    break;
                 case ReturnStatement r:
                     Optional(r.Value);
                     break;
@@ -881,6 +900,10 @@ public sealed class ThrowSets
                     break;
                 case SendStatement send:
                     Call(send.Call);
+                    break;
+                case WithinStatement w:
+                    Expression(w.Bound);
+                    Statement(w.Body);
                     break;
                 case AsmStatement a:
                     foreach (var operand in a.Operands)
@@ -1008,6 +1031,11 @@ public sealed class ThrowSets
                 Expression(argument.Value);
             }
 
+            foreach (var bound in c.Clause())
+            {
+                Expression(bound); // U39: the clause's bound, after the arguments
+            }
+
             Calls(c);
         }
 
@@ -1088,6 +1116,13 @@ public sealed class ThrowSets
 
                     break;
                 case CallKind.ActorCall or CallKind.ActorSend:
+                    if (info.ByName)
+                    {
+                        // U52: a message to the name of a `per node` actor starts it where none stands, its constructor run on the caller's
+                        // stack, whose throw is the caller's crash, as at a `spawn`
+                        unit.Edges.Add(new Edge(new Construction(((ActorType)info.Target!).Symbol), null));
+                    }
+
                     break; // U20: the callee's code runs in the callee, whose crash its caller gets as `callee-crashed`
                 case CallKind.ListAdd or CallKind.ListInsert:
                     // M9, X11: `Add` and `Insert` keep the function value they take and run none of it, so a lambda there brings what its

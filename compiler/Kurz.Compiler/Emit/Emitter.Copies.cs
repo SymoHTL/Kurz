@@ -69,7 +69,8 @@ public sealed partial class Emitter
     /// value into the slot <paramref name="into"/>, in the call's session <paramref name="session"/>, else in a session of its own
     /// (<see cref="CopyRun"/>), whose copies go into the heap <paramref name="heap"/> of a crossing, every counted block among them, or,
     /// for null, after <c>copy</c> at a call that is no crossing, into the heap the allocation entry serves, every block on a path to a
-    /// class instance among them (Q5). A function value crosses by <paramref name="copyInto"/>, the copy of the environment of its lambda
+    /// class instance that passes through no function value and no actor's reference among them (Q5). A function value crosses by
+    /// <paramref name="copyInto"/>, the copy of the environment of its lambda
     /// (<see cref="CopyEnvironmentInto"/>). A session of more than one copy points the <c>weak</c> references of its copies at its last
     /// copy, the ones the slot holds itself among them, a <c>weak T?</c> and a plain <c>data</c> value or a union that holds one, so that
     /// the slot is read after the call's last copy (<see cref="Late"/>), or is the place the callee reads.
@@ -93,7 +94,8 @@ public sealed partial class Emitter
     /// U12: the copy of a value in the session <paramref name="session"/> of a call of more than one copy, made where it is evaluated, into
     /// a slot of its own that the call reads after its last copy, which ends the session and points the <c>weak</c> references the slot
     /// holds itself (<see cref="CrossInto"/>); the slot is listed for the session, so that an exit before that read lets go of it where
-    /// <paramref name="held"/>, as of a temporary of the region (<see cref="EndSessions"/>).
+    /// <paramref name="held"/>, a copy of a message that its callee borrows, as of a temporary of the region (<see cref="EndSessions"/>),
+    /// and a copy at a call that is no message is a temporary of the region itself (<see cref="CopiedLate"/>).
     /// </summary>
     private string Late(string value, KurzType type, string session, string? heap, bool held, string? copyInto = null)
     {
@@ -122,13 +124,21 @@ public sealed partial class Emitter
 
     /// <summary>
     /// U12: the argument <paramref name="e"/> after <c>copy</c> in a call of more than one copy, evaluated where it is written and copied
-    /// there in the call's session (<see cref="Late"/>): the slot of its copy, which the call reads after its last copy.
+    /// there in the call's session (<see cref="Late"/>): the slot of its copy, which the call reads after its last copy. The slot is a
+    /// temporary of the region from its copy to that read (<see cref="ReadLate"/>), whether the slot of the call takes the copy or the
+    /// callee borrows it, so that a jump out of the call before the read lets go of the copy with the region's other temporaries, the
+    /// last made first (R1), as Rust drops the operands it had evaluated (<see cref="Taken"/>; issue 569), after the session's end has pointed
+    /// the <c>weak</c> references the slot holds itself (<see cref="EndSessions"/>).
     /// </summary>
-    private string CopiedLate(Expression e, bool held)
+    private string CopiedLate(Expression e)
     {
         var value = EmitUncopied(e);
         copySessions.Remove(e, out var session);
-        return Late(value, Sub(Model.TypeOf(e).Type), session!, null, held);
+        var type = Sub(Model.TypeOf(e).Type);
+        var slot = Late(value, type, session!, null, held: false);
+        standIns[(fn, slot)] = () => fn.Value($"load {Ir(type)}, ptr {slot}");
+        regions[^1].Add((slot, type));
+        return slot;
     }
 
     /// <summary>
@@ -188,10 +198,12 @@ public sealed partial class Emitter
     /// U12: at a region's end, or a jump out of it, the sessions begun in it ended where their calls' code did not reach their last
     /// copy, a case propagated out of a later argument among them, before the region lets go of the copies, so that their <c>weak</c>
     /// references are pointed as a whole call's are and the memo's counts let go of (the runtime's <c>CopyAbort</c>); then the copies
-    /// the call had not read yet and held (<see cref="Late"/>) let go of, as the temporaries of the region they would have been. A copy
-    /// whose slot takes it, a field of a construction, is not held and stays where it was made: no code lets go of it at such an exit,
-    /// as of no value such a slot took from an argument before the one that left, so a construction left so keeps one block for each
-    /// such slot, a copy, a count of a shared block and a new value alike (issue 569).
+    /// of a message that its callee borrows and had not read yet (<see cref="Late"/>) let go of, as the temporaries of the region they
+    /// would have been. The copies of a call that is no message are temporaries of the region from their copy to their read
+    /// (<see cref="CopiedLate"/>), which the region lets go of after this, with its other temporaries, the last made first, a copy a
+    /// slot takes among them, as every value a slot took from an argument before the one that left (<see cref="Taken"/>; issue 569).
+    /// A copy a slot of a message takes is not held here: what becomes of it at such an exit is section 6's reading, put to the owner
+    /// as T24 (issue 519, comment 6981296432).
     /// </summary>
     private void EndSessions(List<(string Value, KurzType Type)> temporaries)
     {
@@ -218,6 +230,11 @@ public sealed partial class Emitter
         {
             for (var i = 0; i < listed.Count; i++)
             {
+                if (standIns.Remove((fn, listed[i].Slot)))
+                {
+                    Take(listed[i].Slot); // the copy is read, and the call holds it
+                }
+
                 read(i, fn.Value($"load {Ir(listed[i].Type)}, ptr {listed[i].Slot}"));
             }
         }
@@ -654,7 +671,8 @@ public sealed partial class Emitter
     /// 2026-11-16, #519, comment 6923513534, "Rehash each key (Recommended)"). The maps are placed before the session's last copy points
     /// the <c>weak</c> references of its copies (the runtime's <c>CopyLeft</c>), and no key the checker admits hashes a <c>weak</c> slot:
     /// a <c>weak T?</c> as a map's key or value is <c>not supported</c> (the checker's <c>WeakUnread</c>), a key type that reaches one
-    /// through a field, an item or a case is no key the checker reads (its <c>KeyOf</c>), a class with a <c>weak</c> field compares, and
+    /// through what <c>==</c> compares by content, a <c>data</c> value's field, an item or a case, is no key the checker reads (its
+    /// <c>KeyOf</c>), and a class with a <c>weak</c> field compares, and
     /// hashes, by identity (K4, <c>ComparesByIdentity</c>), by its copy's address, which the pointing does not change, and an
     /// <c>equal by</c> that names such a field is <c>not supported</c> (K8). No two keys are compared: two keys of the source are two of
     /// the copy, since a copy gives each block of its source one copy (Q2), and a key the checker admits reaches no <c>weak</c> reference

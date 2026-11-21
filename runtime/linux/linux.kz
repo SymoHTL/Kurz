@@ -182,15 +182,19 @@ pub void Release(byte* p, long bytes) {
     }
 }
 
-// What `Random` keeps for the process, as Rust's standard library keeps it in two `static` `AtomicBool`s
-// read and written with `Relaxed` order and a `OnceLock<File>`: whether `getrandom` takes the flag
-// `GRND_INSECURE`, whether the system refused `getrandom` itself, and the descriptor of `/dev/urandom`,
-// -1 where it is not open. They are plain `static mut`s: the runtime starts
-// no thread, and two threads a program starts through C (R16) that ask for random bytes at once, each
-// thread's first map among them, race on them, where Rust's atomics and `OnceLock` do not.
-static mut bool insecureTaken = true
-static mut bool getrandomRefused = false
-static mut int urandom = -1
+// What `Random` keeps for each thread, where Rust's standard library keeps it for the process in two `static`
+// `AtomicBool`s read and written with `Relaxed` order and a `OnceLock<File>`: whether `getrandom` takes the flag
+// `GRND_INSECURE`, whether the system refused `getrandom` itself, and the descriptor of `/dev/urandom`, -1 where
+// it is not open. An atomic view takes the address of its word (R19), and the runtime's code takes the address
+// of no `static` (R10, R13), so each thread keeps its own, which no other thread reads: each thread learns the
+// system's answer at its own first call, and opens its own descriptor where the system refuses `getrandom`
+// (assumed: each thread's own, as the `rand` crate's `ThreadRng` is one per thread, not checked at source). Nothing
+// closes a thread's descriptor when the thread ends, so that each thread a program starts through C (R16) that
+// opened one leaves it open to the end of the process, where Rust keeps one descriptor for the process, opened
+// once (its `OnceLock`, not checked at source).
+thread static mut bool insecureTaken = true
+thread static mut bool getrandomRefused = false
+thread static mut int urandom = -1
 
 // `count` bytes of the system's randomness at `bytes`, taken as Rust's standard library takes the keys of
 // a map's hash on Linux (`library/std/src/sys/pal/unix/rand.rs`, checked at the tag 1.82.0): true where
@@ -2123,32 +2127,6 @@ pub long Seek(int fd, long offset) {
     return result
 }
 
-// The thread put to sleep while the lock word of a file at `word` holds `expected`, by `futex` (202,
-// its number on x86-64, the one target of this runtime) with `FUTEX_WAIT_PRIVATE` (128) and no time
-// limit, where Rust's `futex_wait` always uses `FUTEX_WAIT_BITSET_PRIVATE` with a full mask, which
-// with no time limit waits as `FUTEX_WAIT_PRIVATE` does: 0, or the failure, which the caller does not read, since it tries the lock
-// again after every wake (S16).
-pub long LockWait(int* word, int expected) {
-    mut long result = 0
-    raw {
-        result = syscall(202, word, long(128), long(expected), long(0))
-    }
-
-    return result
-}
-
-// One thread that sleeps on the lock word of a file at `word` woken, by `futex` (202 on x86-64) with
-// `FUTEX_WAKE_PRIVATE` (129), as Rust's `futex_wake` wakes one: the count woken, or the failure, which
-// the caller does not read (S16).
-pub long LockWake(int* word) {
-    mut long result = 0
-    raw {
-        result = syscall(202, word, long(129), long(1))
-    }
-
-    return result
-}
-
 // The `count` bytes at `bytes` written to the file `fd`, `write` called again with the rest where it
 // took a part, as `print` writes and Rust's `write_all` does: `count`, or the bytes written before a
 // call that took none, which is `WriteZero` to the caller, or the failure of the call that failed.
@@ -2233,8 +2211,9 @@ pub long DeleteDirectory(byte* path) {
 
 // The status of what has the path, by `stat`, which follows a link, as Rust's `fs::metadata` does,
 // into the thread's page: 0, or the failure, `ENOMEM` (12) where the page cannot be mapped. The page
-// holds x86-64's `struct stat` (the trace above reads x86-64's forms of a call): `st_mode` at its
-// byte 24 and `st_size` at its byte 48.
+// holds the `struct stat` of the architecture, x86-64's or AArch64's, the kernel's generic one, which
+// agree on `st_size` at byte 48 and `st_mtime` at byte 88 and differ in `st_mode`: at byte 24 on x86-64
+// and at byte 16 on AArch64, where 24 is `st_uid`, which each architecture's file gives (`StatModeAt`).
 long Status(byte* path) {
     mut long result = -12
     raw {
@@ -2328,15 +2307,16 @@ pub long FileModified(byte* path, mut long nanoseconds) {
     return 0
 }
 
-// Whether a directory has the path: its type in `st_mode` (`S_IFMT`, 0o170000) is `S_IFDIR` (0o40000).
-bool IsDirectory(byte* path) {
+// Whether a directory has the path: its type in `st_mode` (`S_IFMT`, 0o170000), at the byte `modeAt` of
+// the page (`Status`), is `S_IFDIR` (0o40000).
+bool IsDirectory(byte* path, long modeAt) {
     if Status(path) < 0 {
         return false
     }
 
     mut bool directory = false
     raw {
-        directory = (*Ptr<int>(status + 24) & 61440) == 16384
+        directory = (*Ptr<int>(status + modeAt) & 61440) == 16384
     }
 
     return directory
@@ -2344,14 +2324,15 @@ bool IsDirectory(byte* path) {
 
 // `mkdir` of the path with the permissions 0777 (511) less the `umask`: 0 where it made the directory,
 // or where a directory has the path and the failure is not `ENOENT` (2), as Rust's `create_dir_all`
-// takes a directory that is there; else the failure.
-long MakeDirectory(byte* path) {
+// takes a directory that is there, which `st_mode` at the byte `modeAt` of the status says (`IsDirectory`);
+// else the failure.
+long MakeDirectory(byte* path, long modeAt) {
     mut long result = 0
     raw {
         result = Checked(long(mkdir(path, 511)))
     }
 
-    if result < 0 && result != -2 && IsDirectory(path) {
+    if result < 0 && result != -2 && IsDirectory(path, modeAt) {
         return 0
     }
 
@@ -2362,8 +2343,10 @@ long MakeDirectory(byte* path) {
 // missing, as Rust's `fs::create_dir_all` creates them: where `mkdir` finds no directory above, the
 // one above is created first and `mkdir` made again. An empty path is created already. The byte after
 // the `count` is written NUL while the call runs and given back after it, so that a path ends where the
-// directory above ends: at its last `/` with bytes in front of it, without the `/`s at its end.
-pub long CreateDirectories(byte* path, long count) {
+// directory above ends: at its last `/` with bytes in front of it, without the `/`s at its end. `modeAt`
+// is the byte of `st_mode` in the architecture's `struct stat`, which the emitted call reads from the
+// architecture's file (`StatModeAt`), since this file calls none of that file's functions.
+pub long CreateDirectories(byte* path, long count, long modeAt) {
     if count == 0 {
         return 0
     }
@@ -2372,7 +2355,7 @@ pub long CreateDirectories(byte* path, long count) {
     raw {
         byte kept = path[count]
         path[count] = 0
-        result = MakeDirectory(path)
+        result = MakeDirectory(path, modeAt)
         if result == -2 {
             mut long end = count
             while end > 1 && path[end - 1] == 47 {
@@ -2387,9 +2370,9 @@ pub long CreateDirectories(byte* path, long count) {
                 end = end - 1
             }
 
-            result = CreateDirectories(path, end)
+            result = CreateDirectories(path, end, modeAt)
             if result == 0 {
-                result = MakeDirectory(path)
+                result = MakeDirectory(path, modeAt)
             }
         }
 
@@ -2628,8 +2611,10 @@ byte* Endpoints() {
 }
 
 // The bound of a read, a write and `Connect` on a socket where the program sets none, 5 seconds in
-// nanoseconds (S9).
-long DefaultBound() => 5000000000
+// nanoseconds (S9, section 12), and of a call that waits where no `within` names another, the 5 seconds of
+// section 6 (U36): one constant for both is the build's reading, which the design record does not state;
+// Windows's runtime holds the same value, which a test holds equal.
+pub long DefaultBound() => 5000000000
 
 // The monotonic clock in nanoseconds, read by `clock_gettime` with `CLOCK_MONOTONIC` (1) into the page at
 // `held`, as Rust's `Instant::now` reads it; it fails only for a clock the kernel lacks, which Linux for

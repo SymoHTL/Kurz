@@ -4,9 +4,11 @@
 // | first's block
 // | second's block
 // | 2
-// rules: U34
+// threads: 1
+// rules: U28, U34, U35
 
-// `first`'s `Fail` runs before `second`'s, in the order the build's run queue holds them, which no rule of chapter 19 fixes
+// `first`'s `Fail` runs before `second`'s, and both before `Other` answers `Go`'s call, so that both blocks stand in `Boss`'s
+// inbox ahead of the top-level code's `Ping`, as one thread runs the ready actors first in, first out (U35)
 
 actor Other {
     pub int Ping() => 1

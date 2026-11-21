@@ -1,0 +1,23 @@
+// expect: output
+// | started
+// | argument
+// | 3
+// rules: U51
+
+actor Cache per node {
+    int first = Started()
+
+    pub int Get(int n) => first + n
+}
+
+int Started() {
+    print("started")
+    return 1
+}
+
+int Argument() {
+    print("argument")
+    return 2
+}
+
+print(Cache.Get(Argument()))

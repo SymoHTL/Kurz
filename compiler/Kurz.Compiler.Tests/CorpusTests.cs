@@ -310,6 +310,55 @@ public sealed class CorpusTests
     }
 
     [Theory]
+    [InlineData("// expect: output\n// | 1\n// threads: 1\n// rules: U34\n\nx\n", "U34", 6)]
+    [InlineData("// expect: throws actor-gone at 7\n// | 0\n// system: linux\n// threads: 1\n// rules: U32\n\nx\n", "U32", 7)]
+    public void A_threads_line_of_one_thread_stands_before_the_rules_line(string text, string rules, int bodyLine)
+    {
+        // chapter 0: a case whose output follows one thread's order carries `// threads: 1` (U35; section 6, comment 6946657505, Q5), after
+        // its `system:` line where it has one; the build runs every actor on its one thread, so the runner does nothing more for it
+        var header = CaseHeader.Parse(text, out var problem);
+        Assert.Null(problem);
+        Assert.Equal((rules, bodyLine), (string.Join(", ", header!.Rules), header.BodyLine));
+    }
+
+    [Theory]
+    [InlineData("// expect: output\n// threads: 2\n// rules: U34\n\nx\n")]
+    [InlineData("// expect: output\n// threads: 0\n// rules: U34\n\nx\n")]
+    [InlineData("// expect: output\n// threads:\n// rules: U34\n\nx\n")]
+    [InlineData("// expect: output\n// threads: 1 2\n// rules: U34\n\nx\n")]
+    public void A_threads_line_of_another_count_is_refused_as_such(string text)
+    {
+        // chapter 0: the line is `// threads: 1` (section 6, comment 6946657505, Q5); another count is refused (assumed: chapter 0, the
+        // answer naming no other count), named as the threads line it is, not as a missing rules line
+        Assert.Null(CaseHeader.Parse(text, out var problem));
+        Assert.Equal("the `// threads:` line is not `// threads: 1`", problem);
+    }
+
+    [Theory]
+    [InlineData("// expect: output\n// | test \"a\" ... ok\n// command: test\n// rules: Y2\n\nx\n", true, 6)]
+    [InlineData("// expect: throws check-failed at 7\n// build: release\n// command: test\n// allow: raw\n// rules: Y6\n\nx\n", true, 7)]
+    [InlineData("// expect: output\n// | 1\n// build: test\n// rules: V1\n\nx\n", false, 6)]
+    public void A_command_line_makes_a_case_one_of_its_program_s_tests(string text, bool tests, int bodyLine)
+    {
+        // chapter 0: a case that runs its program's tests under `kurz test` carries `// command: test`, after its `build:` line where it
+        // has one and before its `allow:` line (assumed: a reading of the build, said back in issue 586, comment 6993110710)
+        var header = CaseHeader.Parse(text, out var problem);
+        Assert.Null(problem);
+        Assert.Equal((tests, bodyLine), (header!.Tests, header.BodyLine));
+    }
+
+    [Theory]
+    [InlineData("// expect: output\n// command: run\n// rules: Y2\n\nx\n")]
+    [InlineData("// expect: output\n// command:\n// rules: Y2\n\nx\n")]
+    [InlineData("// expect: output\n// command: test test\n// rules: Y2\n\nx\n")]
+    public void A_command_line_of_another_command_is_refused_as_such(string text)
+    {
+        // chapter 0: the line is `// command: test`; another is named as the command line it is, not as a missing rules line
+        Assert.Null(CaseHeader.Parse(text, out var problem));
+        Assert.Equal("the `// command:` line is not `// command: test`", problem);
+    }
+
+    [Theory]
     [InlineData("// expects output\n// rules: V1\n\nx = 4\n")]
     [InlineData("// expect: output\n\nx = 4\n")]
     [InlineData("// expect: output\n// rules: v1\n\nx = 4\n")]
@@ -318,6 +367,8 @@ public sealed class CorpusTests
     [InlineData("// expect: error unused-variable at 5\n// | a\n// rules: V1\n\nx\n")]
     [InlineData("// expect: throws overflow at 5\n// build: debug\n// rules: V1\n\nx\n")]
     [InlineData("// expect: output\n// allow: raw\n// build: test\n// rules: R7\n\nx\n")]
+    [InlineData("// expect: output\n// allow: raw\n// command: test\n// rules: Y2\n\nx\n")]
+    [InlineData("// expect: output\n// command: test\n// build: test\n// rules: Y2\n\nx\n")]
     public void A_header_out_of_its_shape_is_refused(string text)
     {
         Assert.Null(CaseHeader.Parse(text, out var problem));
