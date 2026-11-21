@@ -99,13 +99,14 @@ public sealed class CheckerTests
     [Theory]
     [InlineData("print(s.Get() within Swap(mut s))", "changed-while-held")]
     [InlineData("mut t = spawn Store()\nprint(s.Get() within Swap(mut t))\nprint(t.Get())", null)]
+    [InlineData("mut ss = [s]\nprint(ss[0].Get() within Clear(mut ss))", "changed-while-held")]
     public void The_bound_of_a_calls_clause_changes_nothing_its_callee_was_read_from(string tail, string? id)
     {
         // U39, M7: the callee's reference is read before the arguments and the bound, so a bound that changes the variable it was read
-        // from is `changed-while-held` at its line, as an argument that does is; `Swap`'s parameter is named apart from `s`, so that
-        // the row has that one error (F16)
+        // from, or the list it was read from as an item, is `changed-while-held` at its line, as an argument that does is; `Swap`'s and
+        // `Clear`'s parameters are named apart from the program's variables, so that the row has that one error (F16)
         var program = "actor Store {\n    pub int Get() => 1\n}\n\nduration Swap(mut Store other) {\n    other = spawn Store()\n    return 1s\n}\n\n" +
-            "mut s = spawn Store()\n" + tail;
+            "duration Clear(mut List<Store> held) {\n    held.Clear()\n    return 1s\n}\n\nmut s = spawn Store()\n" + tail;
         Assert.Equal(id is null ? [] : [(id, program.Split('\n').Length)], Errors(program));
     }
 

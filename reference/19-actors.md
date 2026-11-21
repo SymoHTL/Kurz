@@ -2537,9 +2537,9 @@ print(c.Done())
 
 Case: [actors/timeout-chain-nested.kz](../corpus/actors/timeout-chain-nested.kz)
 ```kurz
-// `Ask` holds the thread past the 100 ms of the chain's root, so its call `S.Get()`, which takes the time its chain has left,
-// raises `call-timeout` in `Front`, its crash, and the top-level code's call, whose callee crashed once its deadline had
-// passed, raises `call-timeout` too
+// `Ask` holds the thread past the 100 ms of the chain's root before it calls `S.Get()`: the top-level code's call raises
+// `call-timeout`, its callee's crash set once its deadline had passed (U43), where a crash set before it is `callee-crashed`
+// (U20); the time the nested call takes from its chain is shown by `timeout-chain-left.kz` (U37)
 
 // the thread held for `d`, with no call and no wait
 void Hold(duration d) {
@@ -3135,6 +3135,38 @@ send gone.Fail()
 print(o.Ping())
 within 0s {
     print(gone.Get())
+}
+```
+
+Case: [actors/timeout-chain-left.kz](../corpus/actors/timeout-chain-left.kz)
+```kurz
+// `Ask` holds the thread past the 100 ms of the chain's root, the top-level code's call, so that its call `S.Get()`, which
+// takes the time its chain has left, raises `call-timeout` at its line, the crash of `Front`, whose policy passes the crash up
+// to the root, which ends the process with that line (U25); a call that took its own 5 seconds would wait, and the top-level
+// code's call raise `call-timeout` at its own line
+
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Store {
+    pub int Get() => 1
+}
+
+actor Front(Store S) {
+    pub int Ask() {
+        Hold(150ms)
+        return S.Get()
+    }
+}
+
+s = spawn Store()
+f = spawn Front(s) on crash escalate
+within 100ms {
+    print(f.Ask())
 }
 ```
 
@@ -4058,7 +4090,7 @@ Case: [actors/timeout-capped.kz](../corpus/actors/timeout-capped.kz)
 
 Case: [actors/timeout-send.kz](../corpus/actors/timeout-send.kz)
 
-Case: [actors/timeout-chain-nested.kz](../corpus/actors/timeout-chain-nested.kz)
+Case: [actors/timeout-chain-left.kz](../corpus/actors/timeout-chain-left.kz)
 
 ### U38 (decided, §6) The block `within`
 
@@ -4069,7 +4101,7 @@ owner, 2026-11-13, #519, comment 6850539879, "One deadline for the block (Recomm
 deadline binds the calls that wait, and their waits, made by the code the block runs, in the functions it calls too, as Tokio's
 `timeout` cancels its future with every wait in it (checked in §6 on 2026-11-13, at Tokio 1.54.1) *(assumed in §6)*. The
 message of such a call carries the call's own deadline (U44), which caps the calls its callee makes, each taking its own bound
-(U36, U39) *(assumed: T8 of comment 6967625156)*. A `send` in the block carries the chain's own deadline (U37), and a message of
+(U36, U39) *(assumed in §6: T8 of comment 6967625156)*. A `send` in the block carries the chain's own deadline (U37), and a message of
 another chain or a policy's block that runs in the top-level code's wait is not bound by it (U44, U45). The waits it binds are
 those of calls on actors: a socket's wait keeps its own bound of §12 (S9), which no `within` bounds *(assumed in §6: whether a
 block bounds a socket's wait stands open in §14, T5 of comment 6967147952)*. The deadline
@@ -4188,12 +4220,13 @@ otherwise it is a name, so that `within(3)` is a call, `within + 1` a sum and
 `type-mismatch`, a `duration?` is `nullable-unchecked` (N2), and a call with a `void` success is `syntax` (O10); and a `{`
 of the block on a line after the bound's is `braces-required` at the line where the bound ends, as C1 has it of an `if`
 *(assumed in §6: proposed there and not put to the owner)*. A bound of zero or less sets a deadline that has passed, so
-that each call it bounds raises `call-timeout` at once, but a call to an actor that ended, which raises `actor-gone` first (U43)
-*(assumed: T14 of comment 6972461413)*, and no id of its own is added, as Tokio's
+that each call it bounds raises `call-timeout` at once, but a call to an actor that had ended before the call was queued, which
+raises `actor-gone` first (U43) *(assumed in §6: T14 of comment 6972461413)*, and no id of its own is added, as Tokio's
 `timeout(Duration::ZERO, f)` elapses at its first wait (not checked at source) *(assumed: T4 of comment 6967147952)*. A
-bound whose deadline would pass the largest time the clock holds sets no deadline, which the calls it bounds take over the 5
-seconds of U36, each waiting with no bound but the time its chain has left (U37), as Tokio's `timeout` falls back on a far
-future where its sum overflows (not checked at source) *(assumed in §6)*.
+bound whose deadline would pass the largest time the clock holds sets no deadline of its own: the calls it bounds wait with no
+bound of their own in place of U36's 5 seconds, each capped by the time its chain has left (U37) and by the deadline of a block
+it stands in (U38), as Tokio's `timeout` falls back on a far future where its sum overflows (not checked at source)
+*(assumed in §6)*.
 
 Case: [actors/timeout-zero.kz](../corpus/actors/timeout-zero.kz)
 ```kurz
@@ -4245,7 +4278,9 @@ bound standing in parentheses, and the clause stands before a postfix `else` (O5
 *(assumed: T12 of comment 6967625156)*. An `else` after a call inside the operand is that call's, as a unary expression takes its
 own postfix forms (T35) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. A call takes one
 clause, a second `within` after its clause being `syntax`, and outside brackets the clause stands on the line where the call
-ends: a line break ends the call first, so that a `within` at the start of the next line begins a statement, U40's; inside a
+ends: a line break ends the call first, so that a `within` at the start of the next line begins a statement, read as U40 reads
+one, the word where a `{` follows its expression and a name otherwise, so that `within 2s` there with no block after it is
+`syntax` at its line, `within` being a name there; inside a
 `(` or a `[`, where a line break ends no statement (L4), it may stand on a line after the call's *(assumed: a
 reading of the build, proposed with this record and not put to the owner)*. The operand of a declaration's clause is a number
 literal alone, its sign included, any other operand being `syntax`, its type read as U40 reads a bound. That the operand is a
@@ -4318,6 +4353,8 @@ actor Store {
 s = spawn Store()
 print(s.Get())
 ```
+
+Case: [actors/within-clauses.kz](../corpus/actors/within-clauses.kz)
 
 ### U42 (assumed, §6) A wait of the top-level code with no message to run while a deadline stands
 

@@ -149,7 +149,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             ? CrashLine().Replace(written, string.Empty) : written;
 
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the cases whose <c>system:</c> line names Linux, the stack overflows', nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls, the reads of standard input and running a program. The number for Linux is the count measured in the gates image, with no margin, so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156). The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 625 : 762;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 625 : 763;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -181,14 +181,14 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         "system/command-env-dir.kz",
     ];
 
-    /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11), the cases of the deadlines that hold their thread by the clock among them (U36 to U45).</summary>
+    /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11), the cases of the deadlines that hold their thread by the clock among them (U36 to U45); a case of a deadline that reads no clock, a <c>within</c> that bounds a call with no such hold, is none of them, and a build for Windows runs it.</summary>
     private static readonly string[] ProcessCases =
     [
         "system/arguments.kz", "system/args-parameter.kz", "system/args-in-lambda.kz", "system/args-new-list.kz", "system/clock.kz", "system/environment-missing.kz",
         "system/monotonic-clock.kz", "system/elapsed-order.kz", "functions/top-level-return.kz", "functions/top-level-return-end.kz",
         "actors/timeout-block.kz", "actors/timeout-callee-crash.kz", "actors/timeout-capped.kz", "actors/timeout-carried.kz", "actors/timeout-crashed.kz",
         "actors/timeout-crashed-early.kz", "actors/timeout-default.kz", "actors/timeout-send.kz", "actors/within-clauses.kz",
-        "actors/timeout-chain-nested.kz",
+        "actors/timeout-chain-nested.kz", "actors/timeout-chain-left.kz",
     ];
 
     /// <summary>The cases of log calls that expect a run, which a build for Windows says <c>not supported</c> to (S11, P6).</summary>
@@ -257,6 +257,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         ["actors/block-escalate-root.kz"] = (6, "Worker.Fail"),
         ["actors/per-node-escalate.kz"] = (7, "Cache.Fail"), // U53: a `per node` actor's, whose supervisor is the root
         ["actors/crash-restart-limit.kz"] = (18, "main"),
+        ["actors/timeout-chain-left.kz"] = (24, "Front.Ask"),
     };
 
     public static TheoryData<string> RunnableCases()
@@ -422,12 +423,19 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             Assert.True(program is null && notSupported == construct, $"{relativePath}: listed as `{construct}`, and the emitter {(program is null ? notSupported is null ? "is never asked: the checker does not read the case" : $"says `{notSupported}`" : "lays it out")}");
         }
 
-        // a case listed with a trace of its own is a `throws` case the run runs
+        // a case listed with a trace of its own is a `throws` case the run runs, but on a system whose build says
+        // `not supported` to it, as the list of cases not emitted holds it (the loop of that list checks the refusal)
         Assert.NotEmpty(OwnTraces);
         foreach (var (relativePath, _) in OwnTraces)
         {
             var header = Header(relativePath);
-            Assert.True(header.Expectation == Expectation.Throws && !NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with a trace of its own, and the run does not run it as a `throws` case");
+            Assert.True(header.Expectation == Expectation.Throws, $"{relativePath}: listed with a trace of its own, and it is no `throws` case");
+            if (NotEmitted.ContainsKey(relativePath))
+            {
+                continue;
+            }
+
+            Assert.True(!NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with a trace of its own, and the run does not run it as a `throws` case");
         }
 
         // a case listed as run under the plain allocator alone is one the plain run runs
