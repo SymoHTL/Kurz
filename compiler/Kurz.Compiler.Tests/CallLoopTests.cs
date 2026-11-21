@@ -28,6 +28,18 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     private static List<(string Id, int Line)> Diagnostics(string program) =>
         Check(program).Diagnostics.Sorted.Select(d => (d.Id, d.Line)).ToList();
 
+    // a program read with `std/`, which declares `Crashed`, the case of an `attempt` (U46)
+    private static (DiagnosticBag Diagnostics, Checker Checker) CheckWithStd(string program)
+    {
+        var diagnostics = new DiagnosticBag();
+        var tree = Parser.Parse(SourceText.FromString("test.kz", program), diagnostics);
+        Assert.Empty(diagnostics.Items);
+        return (diagnostics, Checker.Check(tree, diagnostics, [], CorpusTests.StdChecker.Value));
+    }
+
+    private static List<(string Id, int Line)> DiagnosticsWithStd(string program) =>
+        CheckWithStd(program).Diagnostics.Sorted.Select(d => (d.Id, d.Line)).ToList();
+
     // the lines a `call-loop`'s text names, one for each hop of its loop, in the order of the loop
     private static List<int> Named(Diagnostic error) => HopLine().Matches(error.Message).Select(m => int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture)).ToList();
 
@@ -682,31 +694,191 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     }
 
     [Fact]
-    public void The_walk_of_the_sets_refuses_a_node_it_does_not_read_and_the_walk_of_the_loops_passes_an_attempt()
+    public void A_call_that_waits_in_the_block_of_an_attempt_is_an_edge_of_the_method_that_runs_it()
     {
-        // U56: the block `attempt`, which the checker says `not supported` to (section 6, U28), runs no code; the walk of the loops,
-        // which reads a program beside its errors, passes it, and the walk of the sets, which reads a program with none, refuses it as
-        // a node it has no case for
+        // U49, U56: `Left.Ask` waits on its `attempt` as on a call, so that the call of `Right.Ask` in the block, at line 3, is an edge of
+        // `Left.Ask`, which comes back to `Left` at line 14; with no call back from `Right` it closes no loop; a `vouch` in the block
+        // is read as anywhere, covering the loop and a warning where none stands (the owner, 2026-11-21, #519, comment 7068198309,
+        // attempt 1)
         const string program = """
-            pub int Go() {
-                x = attempt {
-                    y = 1
+            actor Left {
+                pub int Ask(Right other, Left back) {
+                    v = attempt { other.Ask(back) } else {
+                        Crashed c => -1
+                    }
+
+                    return v + 1
                 }
 
-                return 1
+                pub int Value() => 1
             }
 
-            actor A {
-                pub int Get() => Go()
+            actor Right {
+                pub int Ask(Left other) => other.Value() + 2
             }
 
-            print(1)
+            l = spawn Left()
+            r = spawn Right()
+            print(l.Ask(r, l))
 
             """;
-        var (_, checker) = Check(program);
-        Assert.NotEmpty(new ThrowSets(checker, CorpusTests.StdChecker.Value, reach: true).ActorsCode());
-        var refused = Assert.Throws<InvalidOperationException>(() => new ThrowSets(checker, CorpusTests.StdChecker.Value).PubFunctions());
-        Assert.Contains(nameof(AttemptExpression), refused.Message, StringComparison.Ordinal);
+        var errors = CheckWithStd(program).Diagnostics.Sorted;
+        Assert.Equal([(ErrorIds.CallLoop, 3)], errors.Select(d => (d.Id, d.Line)));
+        Assert.Equal([3, 14], Named(errors[0]));
+        Assert.Empty(DiagnosticsWithStd(program.Replace("=> other.Value() + 2", "=> 2", StringComparison.Ordinal)));
+        Assert.Empty(DiagnosticsWithStd(program.Replace("attempt { other.Ask(back) }", "attempt { vouch other.Ask(back) }", StringComparison.Ordinal)));
+        Assert.Equal([(LintIds.VouchUnneeded, 3)], DiagnosticsWithStd(program
+            .Replace("attempt { other.Ask(back) }", "attempt { vouch other.Ask(back) }", StringComparison.Ordinal)
+            .Replace("=> other.Value() + 2", "=> 2", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void A_call_back_into_the_method_that_runs_an_attempt_through_a_local_that_holds_this_is_no_edge()
+    {
+        // U49, U57: the block runs a call of the chain of `Run`, so that its call back into `Store` through `me`, a local of `Run`
+        // without `mut` that holds `this`, is a call back to the caller, as in `Run` itself; through a reference `Run` is passed it is
+        // an edge, a loop of one type at line 6 (the owner, 2026-11-21, #519, comment 7068198309, attempt 1)
+        const string program = """
+            actor Store {
+                pub int Add() => 1
+
+                pub int Run(Store other) {
+                    me = this
+                    v = attempt { me.Add() * 10 } else {
+                        Crashed c => -1
+                    }
+
+                    return v
+                }
+            }
+
+            s = spawn Store()
+            print(s.Run(s))
+
+            """;
+        Assert.Empty(DiagnosticsWithStd(program));
+        Assert.Equal([(ErrorIds.CallLoop, 6)], DiagnosticsWithStd(program.Replace("attempt { me.Add() * 10 }", "attempt { me.Add() * other.Add() }", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void A_call_through_the_name_of_a_per_node_actor_is_an_edge_and_one_through_its_own_name_inside_its_method_is_none()
+    {
+        // T47 (a), U51: `Left.Ask` waits on `Right.Ask`, which waits on `Left.Value` through the name of the `per node` actor, a loop
+        // at line 2; U55, U57: inside its own method a call through its name is a call through `this`, no edge (the owner,
+        // 2026-11-21, #519, comment 7068198309, per node 1)
+        const string program = """
+            actor Left per node {
+                pub int Ask(Right other) => other.Ask() + 1
+
+                pub int Value() => 1
+            }
+
+            actor Right {
+                pub int Ask() => Left.Value() + 2
+            }
+
+            r = spawn Right()
+            print(Left.Ask(r))
+
+            """;
+        var errors = Check(program).Diagnostics.Sorted;
+        Assert.Equal([(ErrorIds.CallLoop, 2)], errors.Select(d => (d.Id, d.Line)));
+        Assert.Equal([2, 8], Named(errors[0]));
+        const string own = """
+            actor Counter per node {
+                mut int count = 0
+
+                pub int Bump() {
+                    count = Counter.Get() + 1
+                    return Counter.Get()
+                }
+
+                pub int Get() => count
+            }
+
+            print(Counter.Bump())
+
+            """;
+        Assert.Empty(Diagnostics(own));
+    }
+
+    [Fact]
+    public void A_loop_of_a_per_node_actor_through_itself_names_its_one_actor_and_no_vouch()
+    {
+        // U52, U56: the start of `Cache` runs `Measured`, which waits on `Cache.Size` through its name, outside the actor's method: a
+        // loop through one type, whose text names the one actor and no `vouch`, which is `syntax` before such a call (the owner,
+        // 2026-11-21, #519, comment 7068198309, per node 1)
+        const string program = """
+            actor Cache per node {
+                int size = Measured()
+
+                pub int Size() => size
+            }
+
+            int Measured() {
+                return Cache.Size() + 1
+            }
+
+            print(Cache.Size())
+
+            """;
+        var error = Assert.Single(Check(program).Diagnostics.Sorted);
+        Assert.Equal((ErrorIds.CallLoop, 8), (error.Id, error.Line));
+        Assert.Contains("a call of the one `Cache`, which waits on itself", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("`vouch`", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_vouch_before_a_call_through_the_name_of_a_per_node_actor_is_syntax_at_the_word()
+    {
+        // U58, U51: the name always reaches the one actor, so that no other is vouched for: `syntax` at the word, the call's one
+        // diagnostic, no `vouch-unneeded` beside it; before a call through a reference to an actor that is no `per node` the word stands
+        // (the owner, 2026-11-21, #519, comment 7068198309, per node 1)
+        const string program = """
+            actor Cache per node {
+                pub int Get() => 1
+            }
+
+            actor Box {
+                pub int Get() => 2
+            }
+
+            b = spawn Box()
+            print(vouch Cache.Get())
+            print(b.Get())
+
+            """;
+        Assert.Equal([(ErrorIds.Syntax, 10)], Diagnostics(program));
+        Assert.Equal([(LintIds.VouchUnneeded, 11)], Diagnostics(program.Replace("print(vouch Cache.Get())", "print(Cache.Get())", StringComparison.Ordinal)
+            .Replace("print(b.Get())", "print(vouch b.Get())", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void A_message_to_the_name_of_a_per_node_actor_is_an_edge_into_its_construction_as_a_spawn_is()
+    {
+        // U52, U56: `A.M` can start `P`, whose construction, `P`'s code and not `A.M`'s, waits on `A.V` at line 8: a loop of two hops
+        // through the start at line 2, as a `spawn`'s, where a construction read as the caller's code would make the call at line 8 a
+        // hop of `A` to itself (the owner, 2026-11-21, #519, comment 7068198309, per node 1)
+        const string program = """
+            actor A per node {
+                pub int M() => P.X() + 1
+
+                pub int V() => 1
+            }
+
+            actor P per node {
+                int v = A.V()
+
+                pub int X() => v
+            }
+
+            print(A.M())
+
+            """;
+        var errors = Check(program).Diagnostics.Sorted;
+        Assert.Equal([(ErrorIds.CallLoop, 8)], errors.Select(d => (d.Id, d.Line)));
+        Assert.Equal([2, 8], Named(errors[0]));
+        Assert.Contains("starts `P` by a message to its name (line 2)", errors[0].Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1181,7 +1353,7 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     public void Two_vouches_on_one_loop_keep_each_other_and_a_program_with_a_not_supported_gets_no_warning()
     {
         // U59: the graph is read with every `vouch` left out, so that each of the two covers the loop of `Left.Ask`, `Right.Ask` and
-        // `Left.Value`; with one left out, the other is still needed (the control); and an actor the build does not read, `per node`,
+        // `Left.Value`; with one left out, the other is still needed (the control); and an actor the build does not read, a generic one,
         // takes the warning away beside its `not supported`, where another error, an `unknown-name` at line 11, leaves it
         const string program = """
             actor Left {
@@ -1206,7 +1378,7 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
                 pub int Get() => 3
             }
 
-            actor Keyed per node {
+            actor Keyed<T> {
                 pub int Get() => 4
             }
 
@@ -1216,7 +1388,7 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
             """;
         var diagnostics = Check(unread).Diagnostics.Sorted;
         Assert.Equal([(DiagnosticKind.NotSupported, 5)], diagnostics.Select(d => (d.Kind, d.Line)));
-        var read = unread.Replace("actor Keyed per node {", "actor Keyed {", StringComparison.Ordinal);
+        var read = unread.Replace("actor Keyed<T> {", "actor Keyed {", StringComparison.Ordinal);
         Assert.Equal([(LintIds.VouchUnneeded, 10)], Diagnostics(read));
         Assert.Equal([(LintIds.VouchUnneeded, 10), (ErrorIds.UnknownName, 11)], Diagnostics(read + "print(nope)\n"));
     }

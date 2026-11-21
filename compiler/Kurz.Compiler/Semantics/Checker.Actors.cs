@@ -1088,19 +1088,24 @@ public sealed partial class Checker
     /// U58: <c>vouch</c> stands before a call of an actor's method through a reference that waits (U4), whose edge it takes out of U56's
     /// graph (<see cref="CallLoops"/>); before any other call, a <c>send</c>'s (U6), a function's, a class's method's or an actor's own
     /// method called inside it (U10), it is <c>syntax</c>, as <c>within</c> on such a call is (U39) (the owner, 2026-11-20, #519, comment
-    /// 7051071630, T50 (a)); whether the call is one that waits, the <c>syntax</c> reported where it is none.
+    /// 7051071630, T50 (a)); before a call through the name of a <c>per node</c> actor, which reaches its one actor, always the same instance,
+    /// it is <c>syntax</c> too (U51; the owner, 2026-11-21, #519, comment 7068198309, per node 1); whether the call is one that waits, the
+    /// <c>syntax</c> reported where it is none.
     /// </summary>
     private bool Vouched(CallExpression c)
     {
-        var kind = model.TryCallOf(c)?.Kind;
-        if (kind == CallKind.ActorCall)
+        var info = model.TryCallOf(c);
+        if (info is { Kind: CallKind.ActorCall, ByName: false })
         {
             return true;
         }
 
-        Report(ErrorIds.Syntax, c.Vouch, kind == CallKind.ActorSend
-            ? "`vouch` stands before a call that waits, and a `send` waits for nothing (U58, U6)"
-            : "`vouch` stands before a call of an actor's method through a reference, which waits, and this call is none (U58, U4)");
+        Report(ErrorIds.Syntax, c.Vouch, info?.Kind switch
+        {
+            CallKind.ActorSend => "`vouch` stands before a call that waits, and a `send` waits for nothing (U58, U6)",
+            CallKind.ActorCall => "`vouch` stands before a call through the name of a `per node` actor, which reaches its one actor, always the same instance, and no other to vouch for (U58, U51)",
+            _ => "`vouch` stands before a call of an actor's method through a reference, which waits, and this call is none (U58, U4)",
+        });
         return false;
     }
 

@@ -5,8 +5,12 @@ namespace Kurz.Compiler.Semantics;
 /// <summary>
 /// Section 6, "Deadlocks", layer 2: the compile error <c>call-loop</c> for loops of calls that wait between actor types (U56), with the
 /// call back to the caller that makes no edge (U57), the word <c>vouch</c> that takes its call's edge out (U58) and the lint
-/// <c>vouch-unneeded</c> (U59) (the owner, 2026-11-20, #519, comment 7051071630: T40 to T62 and T74, T45 and T47 naming constructs the
-/// build does not read, an actor behind an interface, a generic one and a <c>per</c> one staying <c>not supported</c>). The graph's points
+/// <c>vouch-unneeded</c> (U59) (the owner, 2026-11-20, #519, comment 7051071630: T40 to T62 and T74, T45 naming constructs the build
+/// does not read, an actor behind an interface and a generic one staying <c>not supported</c>, and T47 (a) built for the actor declared
+/// <c>per node</c>, as the owner answered on 2026-11-21, #519, comment 7068198309, per node 1: a call through its name an edge, its start
+/// one into its construction as a <c>spawn</c>'s, a call through its own name inside its method one through <c>this</c> (U55) and
+/// <c>vouch</c> before a call through its name <c>syntax</c>; and attempt 1 of that comment: the block of an <c>attempt</c> is code of
+/// the method that runs it, which waits on it as on a call (U49)). The graph's points
 /// are the entries of the actor types, the construction and every method each declares; an edge goes from an entry to a method of an actor
 /// for each call that waits on it that the entry's code reaches, with what it runs, as the walk of the throw sets reads it
 /// (<see cref="ThrowSets.ActorsCode"/>, the one definition of what code reaches), and from an entry to the construction of an actor for each
@@ -557,6 +561,13 @@ public sealed class CallLoops
         if (loop is [var only] && points[only.From].Type == points[only.To].Type)
         {
             var one = points[only.To].Actor.Name;
+            if (points[only.To].Actor.PerNode)
+            {
+                // U51, U58: a `per node` actor is one in the process, so the call reaches the one that waits, and no `vouch` stands before
+                // it (the owner, 2026-11-21, #519, comment 7068198309, per node 1)
+                return $"{said}, a call of the one `{one}`, which waits on itself; make the call a `send` where no result is needed, or change the code so that its calls do not come back (U56, U51)";
+            }
+
             return $"{said}, a call of another `{one}`: two chains that enter two `{one}`s at once wait on each other; make the call a `send` where no result is needed, or change the code so that its calls do not come back, and put `vouch` before it only where it reaches another `{one}` than the one that waits (U56, U58)";
         }
 
@@ -566,12 +577,17 @@ public sealed class CallLoops
     /// <summary>A point of the graph: an entry of an actor's code, with its actor and the actor's place among the types.</summary>
     private sealed record Point(ClassSymbol Actor, int Type, ActorEntry Entry);
 
-    /// <summary>An edge of the graph: from the entry whose code reaches the site, to the method the site calls or the construction it spawns.</summary>
+    /// <summary>An edge of the graph: from the entry whose code reaches the site, to the method the site calls or the construction it spawns or starts.</summary>
     private sealed record Hop(int From, int To, ActorEntry Entry, ReachedSite Reached)
     {
         public bool Wait => Reached.Site.Kind == SiteKind.Wait;
 
-        public string Said(ClassSymbol to) => (Wait ? $"{Entry.Name} waits on `{to.Name}.{Reached.Site.Method!.Name}`" : $"{Entry.Name} spawns `{to.Name}`")
+        public string Said(ClassSymbol to) => Reached.Site.Kind switch
+        {
+            SiteKind.Wait => $"{Entry.Name} waits on `{to.Name}.{Reached.Site.Method!.Name}`",
+            SiteKind.Start => $"{Entry.Name} starts `{to.Name}` by a message to its name",
+            _ => $"{Entry.Name} spawns `{to.Name}`",
+        }
             + $" (line {Reached.Site.Line}{(Reached.Through is { } through ? $", in {through}" : "")})";
     }
 }

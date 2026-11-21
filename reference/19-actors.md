@@ -4753,7 +4753,8 @@ passed at its queueing, or before the child takes it, is dropped (U37), and the 
 line in the parent, as a call does, the crash of the parent ending the child (U13) *(assumed: T25 of comment
 6982985447, built at the default while it waits for the owner)*. An `attempt` of the top-level code outside a `within`
 roots a chain with no deadline, each call of its block bounded on its own (U36) *(assumed: T26 of comment 6982985447,
-built at the default while it waits for the owner)*.
+built at the default while it waits for the owner)*. For layer 2 the block is code of the method that runs the `attempt`, so
+that its calls that wait are edges of that method (U56) (the owner, 2026-11-21, #519, comment 7068198309, attempt 1).
 
 Case: [actors/attempt-callback.kz](../corpus/actors/attempt-callback.kz)
 ```kurz
@@ -5076,9 +5077,10 @@ caller's own policy: the half-built actor ends, the calls of other actors queued
 leaves its cell empty after a panic in its function (checked 2026-11-18: its documentation, "the cell remains uninitialized") *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. An actor its defaults spawn is its child, which a
 crash of it ends, as at a `spawn` (U3, U21) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. The crash names the line of the throw, as a
 throw in a constructor at `spawn` does *(assumed: a reading of the build, proposed with this record and not put to the owner)*. Messages that reach it while it is built wait in its
-inbox for its start, and a message to it from the code its own start runs, a default that calls a
-function that calls `Cache.Get()`, waits for a start that waits for it, which the top-level code's
-wait on one thread reads as `deadlock` at that message's line (U18) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*.
+inbox for its start, and a call that waits on it from the code its own start runs, a default that calls a
+function that calls `Cache.Get()`, waits for a start that waits for it: a loop of calls that wait through its type, which
+layer 2 refuses at compile time as `call-loop` at that call's line (U56), where U18's `deadlock` at run time read it before
+(the owner, 2026-11-21, #519, comment 7068198309, per node 1).
 
 Case: [actors/per-node-first-message.kz](../corpus/actors/per-node-first-message.kz)
 ```kurz
@@ -5223,7 +5225,8 @@ Case: [actors/per-node-limit.kz](../corpus/actors/per-node-limit.kz)
 ### U55 (assumed, §13) Its name inside it
 
 Inside a `per node` actor, a call through its name, `Cache.Get(1)`, is a message, as a call through
-`this` is: a call that waits is a call of its own chain, which layer 1 runs (U17), and
+`this` is: a call that waits is a call of its own chain, which layer 1 runs (U17), and no edge of layer 2's graph, as a
+call through `this` is none (U57) (the owner, 2026-11-21, #519, comment 7068198309, per node 1), and
 `send Cache.Add(1)` runs after the current message (U11), against a direct call, as `Get(1)` is (U10)
 *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. `this` inside it gives a reference to the running instance, which ends with it, while its name
 reaches the fresh one that a stop or the limit starts (U54) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*.
@@ -5281,11 +5284,18 @@ before `vouch` (U58). A call back to the caller is no edge (U57), and neither is
 read on every program that declares an actor, after every body and beside the other errors, a call that reported its own
 error making no edge, the walk reading each unit of code once, and a loop with a call in the program's own files is refused
 whether any code calls into it or not, as `reference-cycle` is (R2) (the owner, 2026-11-20, #519, comment 7051071630, T52 (a), T53 (b), T54 (a), T55 (a),
-T56 (a), T59 (a)). An actor with a part the build does not read, an interface after its name, a type parameter or `per`, is
-`not supported` (U1), and the build does not read its code, so that it is no point of the graph: neither a call its code
-makes nor a call through a reference to it is an edge *(assumed: a reading of the build, proposed with this record and not
-put to the owner)*: T46 (a) of comment 7051071630, an edge to every implementer, and T47 (a), an edge and `syntax` at
-a `vouch` before a `per` actor's call, are not built, since each of those constructs is `not supported` on `main`. No parallel form (§6, "Parallel work") is
+T56 (a), T59 (a)). An actor with a part the build does not read, an interface after its name, a type parameter or `per`
+with other words than `node`, is `not supported` (U1), and the build does not read its code, so that it is no point of the
+graph: neither a call its code makes nor a call through a reference to it is an edge *(assumed: a reading of the build,
+proposed with this record and not put to the owner)*: T46 (a) of comment 7051071630, an edge to every implementer, is not
+built, since that construct is `not supported` on `main`. T47 (a) is built for the actor declared `per node` (U51): its
+methods and its construction are points of the graph, a call through its name is an edge, and `vouch` before it is `syntax`,
+since it always reaches its one actor (U58), a call through its own name inside its method is a call through `this`, which
+makes no edge (U55, U57), and a message to its name, which can start it (U52), is an edge into its construction, whose code
+is that actor's, as a `spawn`'s is, so that a loop through its start comes back by a call that waits in its construction
+(the owner, 2026-11-21, #519, comment 7068198309, per node 1). The block of an `attempt` is code of the method that runs it, which waits on it as on a call
+(U49), so that a call that waits in the block is an edge of that method, a call back to it through a local that holds
+`this` none (U57), and `vouch` there is read as anywhere (U58) (the owner, 2026-11-21, #519, comment 7068198309, attempt 1). No parallel form (§6, "Parallel work") is
 built, so that the graph reads none, and the body of one, where one exists, is code of its caller's method, as Q9 of issue
 525, comment 6850177383, reads it for layer 2 *(assumed: a reading of the build, proposed with this record and not put to
 the owner)*.
@@ -5614,6 +5624,8 @@ c = spawn Counter(2)
 print(c.Start())
 ```
 
+Case: [actors/per-node-reentrant.kz](../corpus/actors/per-node-reentrant.kz)
+
 ### U57 (decided, §6) A call back to the caller that waits
 
 A call through a reference that can only be the actor whose message makes it is no edge of U56's graph: `this` as a value
@@ -5631,7 +5643,9 @@ on through a chain of calls that wait is one (T60 (b)), and only a parameter tha
 passing through itself is one, so that a cycle of parameters that no `this` fills is none, and so is a cycle that a `this`
 enters, a recursion through two actor types that hands the reference back and forth among them (the owner, 2026-11-20, #519, comment 7051071630, T62 (a)). Such a call reaches the caller that waits, which takes it as a call of its chain (U17), as layer 1 runs `A.Load`
 inside `A.Save` (§6, "Deadlocks", layer 2, "Exempt without override: a callback through a reference the caller passed in
-that same call").
+that same call"). So is a call through the name of a `per node` actor inside its own method, which U55 reads as a call
+through `this`, and a call in the block of an `attempt` through a local of the method that runs it that holds `this`, a call
+back into the actor that waits on the block (U49) (the owner, 2026-11-21, #519, comment 7068198309, per node 1, attempt 1).
 
 A field set from a parameter that is a callback is one, and so is a list of them (the owner, 2026-11-20, #519, comment 7051071630, T49 (c)); a field
 outlives the message that set it, so that another message's call through it can reach an actor the caller's chain does not
@@ -5913,7 +5927,9 @@ It binds to the call after it, so that `n + vouch c.Size()` adds the call's resu
 `vouch c.Child().Size()` takes the call of `Size` out and leaves `c.Child()` a call as any other *(assumed: a reading of the
 build, proposed with this record and not put to the owner)*. Before anything else, a function's call, a class's method, a
 direct call of the actor's own method (U10), `vouch this.Size()` among them, since a call through `this` is one (U10), a
-`spawn` (U2), what is no call, or inside a `send` (U14), it is `syntax` (E4), as `within` on such a call is (U41); a call
+`spawn` (U2), what is no call, or inside a `send` (U14), it is `syntax` (E4), as `within` on such a call is (U41), and so it is
+before a call through the name of a `per node` actor, `vouch Cache.Get()`, which always reaches its one actor (U51)
+(the owner, 2026-11-21, #519, comment 7068198309, per node 1); a call
 through a local that holds `this` is a call through a reference, which U57 takes out, so that `vouch` before it is U59's
 warning *(assumed: a reading of the build, proposed with this record and not put to the owner)*. `vouch` is a word only
 where it stands, before a name, `this` or `spawn` on its line (§6, the owner, 2026-11-13, #519, comment 6847932993, Q10), so

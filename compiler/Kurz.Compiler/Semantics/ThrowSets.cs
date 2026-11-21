@@ -110,7 +110,7 @@ public sealed class ThrowSets
         [typeof(ElseExpression)] = "its call and its arms",
         [typeof(ParenthesizedExpression)] = "its inner expression",
         [typeof(SpawnExpression)] = "the actor's construction, its code under escalate or a block, and the block's body; for the loops the spawn it is, the construction being the spawned actor's code (U56)",
-        [typeof(AttemptExpression)] = "nothing where it runs but what its block builds, whose throws its child's crash holds; `retry`: no code, the checker refuses it",
+        [typeof(AttemptExpression)] = "nothing where it runs but what its block builds, whose throws its child's crash holds; for the loops its block, as the code that runs it (U49, U56); `retry`: no code, the checker refuses it",
         [typeof(Block)] = "its statements",
         [typeof(VariableDeclaration)] = "its value",
         [typeof(AssignOrDeclare)] = "its value",
@@ -195,7 +195,9 @@ public sealed class ThrowSets
     /// overrides and of the methods that implement it, a data type's method taking the value it is called on first (D16), and any other
     /// edge, a lambda's or a construction's among them, passes none, which reads as no callback. A <c>spawn</c> reaches the
     /// construction of the actor it makes, whose code is that actor's, and the code under <c>escalate</c> is the child's: neither is the
-    /// spawner's. Each entry holds too the writes of its actor's fields that its code reaches, with the origins each value can have in
+    /// spawner's; a message to the name of a <c>per node</c> actor reaches its construction as a <c>spawn</c> does (U52), but through its own
+    /// name inside its method, which reads as through <c>this</c> (U55), and the block of an <c>attempt</c> is the code of the code that runs
+    /// it, which waits on it as on a call (U49) (the owner, 2026-11-21, #519, comment 7068198309, per node 1 and attempt 1). Each entry holds too the writes of its actor's fields that its code reaches, with the origins each value can have in
     /// its terms, passed as an argument's are (T49 (c)). The walk reads each unit once over all the actors, from the roots of the sets and
     /// every actor's code, and the reach of each unit is its own sites and writes and those of the units it runs, read again as long as one
     /// grows.
@@ -798,7 +800,8 @@ public sealed class ThrowSets
 
         // U57: the parameters the arguments of a call of the function fill, each by its place, where the checker read it
         var parameters = declaration.Parameters.Select(p => site.Model.Declares(p) ? site.Model.DeclarationOf(p) : null).ToList();
-        var walk = new Walk(this, site.Model, site.File, unit, parameters);
+        // U55: a method of an actor, whose code a call through the actor's own name reaches as through `this`
+        var walk = new Walk(this, site.Model, site.File, unit, parameters, own: f.Owner is { IsActor: true } actor && !f.IsStatic ? actor : null);
         foreach (var parameter in declaration.Parameters)
         {
             walk.Optional(parameter.Default);
@@ -951,7 +954,7 @@ public sealed class ThrowSets
     /// unit, and <paramref name="lambda"/> holds for a lambda's body, whose <c>this</c> and parameters are no origin the loops follow
     /// (U57).
     /// </summary>
-    private sealed class Walk(ThrowSets sets, SemanticModel model, int file, Unit unit, List<VariableSymbol?>? parameters = null, bool lambda = false)
+    private sealed class Walk(ThrowSets sets, SemanticModel model, int file, Unit unit, List<VariableSymbol?>? parameters = null, bool lambda = false, ClassSymbol? own = null)
     {
         // O7: the cases a bare `throw` throws in the arm of `else` being walked, innermost on top
         private readonly Stack<IReadOnlyList<KurzType>> bare = new();
@@ -1058,8 +1061,20 @@ public sealed class ThrowSets
                 case ParenthesizedExpression p:
                     Expression(p.Inner);
                     break;
-                case AttemptExpression when sets.reach:
-                    break; // U56: the block the checker said `not supported` to (section 6, U28), which runs no code a program builds
+                case AttemptExpression a when sets.reach:
+                    // U49, U56: the block's code, its calls that wait among it, is the code of the unit that runs the `attempt`, which waits on
+                    // its child as on a call (the owner, 2026-11-21, #519, comment 7068198309, attempt 1)
+                    if (model.HasAttempt(a))
+                    {
+                        var block = model.AttemptOf(a).Lambda;
+                        Optional(block.ExpressionBody);
+                        if (block.BlockBody is { } body)
+                        {
+                            Statement(body);
+                        }
+                    }
+
+                    break;
                 case AttemptExpression a:
                     if (model.HasAttempt(a))
                     {
@@ -1438,17 +1453,31 @@ public sealed class ThrowSets
 
                     break;
                 case CallKind.ActorCall or CallKind.ActorSend:
+                    var target = ((ActorType)info.Target!).Symbol;
+                    var self = info.ByName && !lambda && ReferenceEquals(target, own); // U55: its own name inside its method, read as `this`
                     if (info.ByName)
                     {
                         // U52: a message to the name of a `per node` actor starts it where none stands, its constructor run on the caller's
-                        // stack, whose throw is the caller's crash, as at a `spawn`
-                        unit.Edges.Add(new Edge(new Construction(((ActorType)info.Target!).Symbol), null));
+                        // stack, whose throw is the caller's crash, as at a `spawn`; for the loops the construction is the started actor's code,
+                        // which no loop of the caller holds, and the start an edge into it, as a `spawn`'s, but through the actor's own name
+                        // inside its method, read as through `this` (U56, U55; the owner, 2026-11-21, #519, comment 7068198309, per node 1)
+                        unit.Edges.Add(new Edge(new Construction(target), null, Crosses: true));
+                        if (sets.reach && c.Vouch > 0)
+                        {
+                            break; // U58: `vouch` before it is `syntax`, the call's own error, which makes no edge
+                        }
+
+                        if (!self)
+                        {
+                            unit.Sites.Add(new ActorSite(c, target, null, SiteKind.Start, Origin.Other, [], file, c.Line));
+                        }
                     }
 
                     // U20: the callee's code runs in the callee, whose crash its caller gets as `callee-crashed`; U56: the call's edge, with where
-                    // its receiver comes from, the actor's own for a `send` of its own method (U11), and each argument by its parameter
-                    unit.Sites.Add(new ActorSite(c, ((ActorType)info.Target!).Symbol, info.Function, info.Kind == CallKind.ActorCall ? SiteKind.Wait : SiteKind.Send,
-                        c.Callee is MemberAccess m ? OriginOf(m.Target) : Origin.Self, Slots(c, info), file, c.Line));
+                    // its receiver comes from, the actor's own for a `send` of its own method (U11) and for a call through its own name inside
+                    // its method (U55), and each argument by its parameter
+                    unit.Sites.Add(new ActorSite(c, target, info.Function, info.Kind == CallKind.ActorCall ? SiteKind.Wait : SiteKind.Send,
+                        self ? Origin.Self : info.ByName ? Origin.Other : c.Callee is MemberAccess m ? OriginOf(m.Target) : Origin.Self, Slots(c, info), file, c.Line));
                     break;
                 case CallKind.ListAdd or CallKind.ListInsert:
                     // M9, X11: `Add` and `Insert` keep the function value they take and run none of it, so a lambda there brings what its
@@ -1740,17 +1769,21 @@ public readonly record struct Origin(int Parameter, FieldSymbol? Field = null, b
 /// </summary>
 public sealed record FieldWrite(FieldSymbol Field, bool Item, Origin Value, int Line);
 
-/// <summary>What a site of an actor's code is (U56): a call that waits (U4), a <c>send</c> (U6) or a <c>spawn</c> (U2).</summary>
+/// <summary>
+/// What a site of an actor's code is (U56): a call that waits (U4), a <c>send</c> (U6), a <c>spawn</c> (U2) or the start of a
+/// <c>per node</c> actor that a message to its name can make (U52), an edge into its construction as a <c>spawn</c>'s is.
+/// </summary>
 public enum SiteKind
 {
     Wait,
     Send,
     Spawn,
+    Start,
 }
 
 /// <summary>
 /// A call through an actor's reference, or a <c>spawn</c>, as the walk met it in a unit of code (U56): the call, the actor it reaches or
-/// makes, the method it calls (null for a <c>spawn</c>), where its receiver and each of its arguments, by the parameter it fills, of the
+/// makes, the method it calls (null for a <c>spawn</c> and a start), where its receiver and each of its arguments, by the parameter it fills, of the
 /// primary constructor for a <c>spawn</c> (T75 1), come from in that unit (U57), the file it stands in, 0 for the program's and 1 for
 /// <c>std/</c>, and its line.
 /// </summary>
