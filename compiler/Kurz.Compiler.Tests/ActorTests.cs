@@ -6278,10 +6278,14 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_clauses_bound_runs_after_the_arguments_and_a_declarations_literal_bounds_each_call()
     {
         // U39, F12: the bound of a call's clause runs after the call's arguments, as it is written after them, and the literal of a
-        // declaration's clause bounds every call of the method that names none, which answers within it
+        // declaration's clause bounds every call of the method that names none: `Add`'s answers within its 2 seconds, and `Late`'s, whose
+        // literal of 0 s is a deadline that has passed at each call (U41; assumed: a reading of the build), raises `call-timeout` at its
+        // line, which only that literal bounds
         const string text = """
             actor Store {
                 pub int Add(int x) within 2s => x + 1
+
+                pub int Late() within 0s => 0
             }
 
             int Note(string text, int x) {
@@ -6297,9 +6301,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             s = spawn Store()
             print(s.Add(Note("argument", 1)) within Bound("bound"))
             print(s.Add(2))
+            print(s.Late())
 
             """;
-        Ran(BuildAndRun(text, toolchain.Runtime, "actor-clause-order"), 0, ["argument", "bound", "2", "3"], "");
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-clause-order"), 1, ["argument", "bound", "2", "3"], "error: call-timeout at program.kz:20\n");
     }
 
     [Fact]
@@ -6350,6 +6355,75 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Parent#1 crashed: thrown \"parent\" at program.kz:19"], crashes);
         Ran((run.Code, run.Output, rest), 1, [], "error: actor-gone at program.kz:30\n");
+    }
+
+    /// <summary>
+    /// The count of the blocks of more than 262144 bytes of the heap the allocation entry serves, an actor's own inside its message, each
+    /// on its heap's list of such blocks (<c>Enlist</c> in <c>std/std.kz</c>), read as <c>HttpServer.Big()</c>.
+    /// </summary>
+    private static (string Path, string Old, string New)[] BigBlocks =>
+    [
+        ("std/std.kz", "pub class HttpServer {\n", """
+            pub class HttpServer {
+                pub static long Big() {
+                    mut long n = 0
+                    byte* heap = HeapCurrent()
+                    raw {
+                        mut byte* at = *Ptr<byte*>(heap + 24)
+                        while at != null {
+                            n = n + 1
+                            at = *Ptr<byte*>(at + 8)
+                        }
+                    }
+
+                    return n
+                }
+
+            """),
+    ];
+
+    [Fact]
+    public void A_message_whose_clauses_bound_crashes_its_builder_leaves_no_block_in_its_callees_heap()
+    {
+        // U39, U12, U19: the bound `ds[i]` runs after the message and the copy of its list were built, and its `index-out-of-range` crashes
+        // `Front`, the actor whose code builds them, before their queueing; the message is built in a heap of its own, which that crash
+        // frees, so that `Store`'s heap holds no more blocks than it held before, where a message built in `Store`'s heap would leave the
+        // list's copy there, unqueued; `Held` is the control that the count sees that copy in `Store`'s heap while its message runs; under
+        // the allocator that makes every freed block inaccessible
+        const string text = """
+            actor Store {
+                pub long Held(List<int> xs) => HttpServer.Big()
+
+                pub long Big() => HttpServer.Big()
+            }
+
+            actor Front {
+                pub void Ask(Store s, List<duration> ds, int i, long start) {
+                    mut xs = List<int>()
+                    for n in 0..<40000 {
+                        xs.Add(n)
+                    }
+
+                    held = s.Held(xs) within ds[i]
+                    print(held - start)
+                }
+
+                pub int Ping() => 2
+            }
+
+            store = spawn Store()
+            f = spawn Front()
+            before = store.Big()
+            send f.Ask(store, [1s], 0, before)
+            send f.Ask(store, [1s], 1, before)
+            print(f.Ping())
+            print(store.Big() - before)
+
+            """;
+        var run = BuildAndRun(text, ListTests.Edited([.. ListTests.Fence, .. BigBlocks]), "actor-clause-bound-crashes");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Front#2 crashed: index-out-of-range at program.kz:14"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["1", "2", "0"], "");
     }
 
     // ---- the tests of `kurz test` (chapter 20, Y5; issue 586) ---------------------------------------------------------------------
