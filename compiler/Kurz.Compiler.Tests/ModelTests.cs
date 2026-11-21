@@ -1280,7 +1280,7 @@ public sealed class ModelTests
     [InlineData(Break.WakeBeforeLink, "a queue of many senders and its holder", "a lost message")]
     [InlineData(Break.StubPushedNotRead, "a queue of many senders and its holder", "a lost message")]
     [InlineData(Break.UnlockWakesNothing, "three threads on one lock", "a lost wake")]
-    [InlineData(Break.WaitsOnOne, "three threads on one lock", "a lost wake")]
+    [InlineData(Break.WaitsOnOne, "three threads on one lock", "a cycle of moves")]
     [InlineData(Break.LookupReadsOnce, "a lookup while its slot is freed and taken again", "not its actor's")]
     [InlineData(Break.LinkBeforeNumber, "a lookup while its slot is freed and taken again", "not its actor's")]
     [InlineData(Break.RunIgnoresEnding, "the end of a supervisor while its child waits in a message", "did not end")]
