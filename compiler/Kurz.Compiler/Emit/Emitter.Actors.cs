@@ -569,6 +569,22 @@ public sealed partial class Emitter
     }
 
     /// <summary>
+    /// U39, U19: whether the bound of a call's clause can raise with no call in it, an index out of range or an operator's
+    /// <c>overflow</c> or <c>divide-by-zero</c> (chapter 12), which crashes the actor whose code runs it: anything but a duration's literal,
+    /// a number with its unit (L14), its sign included, or a read of a name, either in brackets, a bound of another type being
+    /// <c>type-mismatch</c> (U39, U40); a bound that runs a call, a name that runs a property's among them, can wait
+    /// (<see cref="SemanticModel.CanWait"/>).
+    /// </summary>
+    private static bool Raises(Expression bound) => bound switch
+    {
+        ParenthesizedExpression p => Raises(p.Inner),
+        UnitLiteral => false,
+        UnaryExpression { Operand: UnitLiteral } => false,
+        NameExpression => false,
+        _ => true,
+    };
+
+    /// <summary>
     /// U4, U6, U11: a call of an actor's method as a message: the actor's reference, read first, or, inside it, made from <c>this</c>
     /// (U11), or the one actor of a <c>per node</c> type found or started by its name (<see cref="PerStart"/>; U52), then the arguments, each a copy of its own in the actor's heap where it holds a block (U12,
     /// <see cref="Crossed"/>; comment 6902210646, Q5), stored into a block of that heap that the message's function frees once it ran; the block goes to the end of the actor's inbox (U5, U15), or of its side list, where it is a
@@ -587,7 +603,10 @@ public sealed partial class Emitter
     /// that the arguments and the message would go into (U21), or end (U13): the message is then built in a heap of its own, made for it (the runtime's
     /// <c>MessageHeapNew</c>), and at its queueing copied into the heap the actor has then by the function of its call site that copies it
     /// after a crash, its own heap then freed, as Erlang builds a message in the sender's heap and copies it into the receiver's at its
-    /// send. Where no argument can wait, the message is built in the actor's heap, and nothing runs between the read of that heap and the
+    /// send. So is a message whose clause's bound can raise with no call in it (<see cref="Raises"/>), which runs after the message is
+    /// built: its raise crashes the actor whose code builds the message before its queueing, and that crash frees the heap of its own with
+    /// the message and the copies of its arguments (the runtime's <c>Fall</c>), which the actor's heap would keep unqueued to the actor's
+    /// end. Where no argument can wait, the message is built in the actor's heap, and nothing runs between the read of that heap and the
     /// queueing that could end the actor. Where the actor ended, the message is built or copied in the heap the caller allocates in (the
     /// runtime's <c>ActorHeap</c>), and its queueing raises <c>actor-gone</c> at the call's line, a <c>send</c>'s too (the runtime's
     /// <c>Enqueue</c>; U6, U20; section 6, the owner, 2026-11-16, #519, comments 6919351399 and 6923513534).
@@ -603,7 +622,7 @@ public sealed partial class Emitter
             NameExpression n => Reference(This(n, n.Line)),
             _ => throw new InvalidOperationException($"a message through `{c.Callee.GetType().Name}` at line {c.Line}"),
         };
-        var own = c.Arguments.Select(a => a.Value).Concat(c.Clause()).Any(Model.CanWait) ? fn.Value($"call ptr {RuntimeFunction("MessageHeapNew")}()") : null;
+        var own = c.Arguments.Select(a => a.Value).Concat(c.Clause()).Any(Model.CanWait) || c.Clause().Any(Raises) ? fn.Value($"call ptr {RuntimeFunction("MessageHeapNew")}()") : null;
         var left = own is null ? null : HeapBegun(own, "MessageHeapFree");
         var heap = own ?? fn.Value($"call ptr {RuntimeFunction("ActorHeap")}({ReferenceWords(actor)})");
         var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => Default(f.Declaration!.Parameters[j].Default, owners[f]), cConvention: false, owned: true, into: heap);
@@ -641,8 +660,11 @@ public sealed partial class Emitter
             return "void";
         }
 
-        // U39: the call's bound, that of its clause, run after the arguments, else the literal of the method's declaration, the call's
-        // clause winning over the declaration's, which the runtime's `Enqueue` takes where no `within` block runs (assumed in section 6)
+        // U39: the call's bound, that of its clause, run after the arguments, at every call it stands on, under a `within` block whose
+        // deadline wins over it too (assumed: a reading of the build), else the literal of the method's declaration, the call's clause
+        // winning over the declaration's, which the runtime's `Enqueue` takes where no `within` block runs (assumed in section 6); the
+        // callee's reference and its heap, read before the arguments, stay the callee's while the bound runs, since a bound that
+        // changes the variable the callee was read from, `s.Get() within Swap(mut s)`, is `changed-while-held` (M7), as an argument is
         var bound = c.Within is { } clause ? EmitExpression(clause) : f.Declaration!.Within is { } declared ? EmitExpression(declared) : null;
         var result = f.ReturnType;
         var reply = fn.Alloca(Reply(result), "reply");
@@ -663,11 +685,14 @@ public sealed partial class Emitter
     /// <summary>
     /// U4, U6: the function of the messages of the method <paramref name="f"/>, which the runtime calls with the actor's state and the
     /// message, made at its first use and named outside the program's functions, so that a trace leaves its frame out as it leaves the
-    /// runtime's: the method called on the state with the arguments the message holds, which it lets go of after the call; where the
+    /// runtime's: the method called on the state with the arguments the message holds, which it lets go of after the call, before it
+    /// takes the reply, so that a crash in that release is answered <c>callee crashed</c> as a crash in the method is (U20); where the
     /// message has a reply, which it takes off the message by the runtime's atomic swap, <c>ReplyTaken</c>, after the method returned, the
     /// result moved beside it, a copy of its own in the caller's heap where it holds a block, the method's let go
-    /// of (U12; comment 6902210646, Q5), and the runtime's <c>Replied</c>, which sets its word and wakes the activation that
-    /// waits on it, as tokio's <c>oneshot::Sender::send</c> stores the value and then wakes the receiver; then the message's block freed.
+    /// of once the reply is set (U12; comment 6902210646, Q5), and the runtime's <c>Replied</c>, which sets its word and wakes the activation that
+    /// waits on it, as tokio's <c>oneshot::Sender::send</c> stores the value and then wakes the receiver, so that between the swap and
+    /// <c>Replied</c> stands only the copy, whose fault ends the process (O11), and no code whose fault is the actor's crash; then the
+    /// message's block freed.
     /// A call whose caller crashed while it ran has no reply any more, the runtime having taken it by the same swap at the crash, and its
     /// result is let go of (U20).
     /// </summary>
@@ -676,6 +701,14 @@ public sealed partial class Emitter
         var message = MessageType(f);
         var arguments = f.Parameters.Select((p, i) => (p.Type, Value: fn.Value($"load {Ir(p.Type)}, ptr {MessageField(message, "%a1", MessageArguments + i)}"))).ToList();
         var result = CallOn(f, "%a0", new ClassType(f.Owner!), arguments.Select(a => $"{Ir(a.Type)} {a.Value}"));
+
+        // U20: the arguments let go of before the reply is taken, so that a crash in their release, an overflow of the actor's stack
+        // among it, finds the reply still on the message and answers it `callee crashed`
+        foreach (var (type, value) in arguments.Where((a, i) => Counted(a.Type) && !f.Parameters[i].Move)) // U12: the method owns a parameter written `move`
+        {
+            Release(value, type);
+        }
+
         var reply = fn.Value($"call ptr {RuntimeFunction("ReplyTaken")}(ptr %a1)"); // the swap that makes this function its one owner
         if (!Types.IsVoid(f.ReturnType))
         {
@@ -692,6 +725,7 @@ public sealed partial class Emitter
 
             fn.Branch(joined);
             fn.Block(answered);
+            var answer = result;
             if (Counted(f.ReturnType))
             {
                 // U12: a result that holds a block crosses back into the caller's heap as a copy of its own, and the method's lets go;
@@ -699,21 +733,19 @@ public sealed partial class Emitter
                 // function type among them, is `send-needs-word` at the call, and a `send` of a method with a result is `send-result`
                 // (U6; `Checker.Actors.cs`, the stage of the result)
                 var heap = fn.Value($"load ptr, ptr {fn.Value($"getelementptr {Reply(f.ReturnType)}, ptr {reply}, i32 0, i32 {Number(ReplyHeap)}")}");
-                var crossed = Crossed(result, f.ReturnType, heap); // in a session of its own, not the call's
-                Release(result, f.ReturnType);
-                result = crossed;
+                answer = Crossed(result, f.ReturnType, heap); // in a session of its own, not the call's, whose fault ends the process (O11)
             }
 
             // a method with a result takes no `send` (U6, U7)
-            fn.Emit($"store {Ir(f.ReturnType)} {result}, ptr {fn.Value($"getelementptr {Reply(f.ReturnType)}, ptr {reply}, i32 0, i32 {Number(ReplyHeap + 1)}")}");
+            fn.Emit($"store {Ir(f.ReturnType)} {answer}, ptr {fn.Value($"getelementptr {Reply(f.ReturnType)}, ptr {reply}, i32 0, i32 {Number(ReplyHeap + 1)}")}");
             fn.Emit($"call void {RuntimeFunction("Replied")}(ptr {reply})");
+            if (Counted(f.ReturnType))
+            {
+                Release(result, f.ReturnType); // the method's, let go of once the reply is set, so that nothing between the swap and `Replied` can crash the actor
+            }
+
             fn.Branch(joined);
             fn.Block(joined);
-        }
-
-        foreach (var (type, value) in arguments.Where((a, i) => Counted(a.Type) && !f.Parameters[i].Move)) // U12: the method owns a parameter written `move`
-        {
-            Release(value, type);
         }
 
         if (Types.IsVoid(f.ReturnType))

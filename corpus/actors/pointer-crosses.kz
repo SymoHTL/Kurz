@@ -1,0 +1,14 @@
+// expect: error pointer-crosses at 14
+// allow: raw
+// rules: U12
+
+actor Keeper {
+    pub void Keep(long* p) {
+        print(1)
+    }
+}
+
+mut long word = 5
+k = spawn Keeper()
+// a pointer crosses into no actor, with a word or with none (U12)
+k.Keep(&word)

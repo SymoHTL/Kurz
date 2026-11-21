@@ -186,6 +186,7 @@ public static class ErrorIds
     public const string UsedAfterMove = "used-after-move";
     public const string MoveReachable = "move-reachable";
     public const string MoveAtCall = "move-at-call";
+    public const string PointerCrosses = "pointer-crosses";
 
     /// <summary>L1 names this id in its rule and keeps it out of the table, which lists the ids cases expect: no corpus file can be a file that is not UTF-8.</summary>
     public const string InvalidSource = "invalid-source";

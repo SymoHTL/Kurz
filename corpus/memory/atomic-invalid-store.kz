@@ -1,0 +1,10 @@
+// expect: error invalid-ordering at 9
+// allow: raw
+// rules: R19
+
+mut long word = 5
+counter = AtomicLong.FromPtr(&word)
+raw {
+    counter.Store(6, MemoryOrder.Release)
+    counter.Store(7, MemoryOrder.Acquire)
+}

@@ -1106,7 +1106,7 @@ with its fields, the captured variables and the statics form one region outside 
 is read as a function whose variables are its own, since F16 keeps them from the top-level
 functions, so that they are no statics, and `move` before a value that names no place,
 `f(move Cart(1))`, stands where the word fits the parameter (§6, comment 6897778812, Q3; comment 6657251688, Q3), and ends nothing, the call taking the value it made *(assumed, §6: the
-readings of the top-level code and of a value with no place, which no answer named)*. A call merges the regions of all its arguments not written `copy` or `move`, written `mut` or not,
+top-level code read as a function, and a `move` that ends nothing, which no answer named)*. A call merges the regions of all its arguments not written `copy` or `move`, written `mut` or not,
 and its result's, as SE-0414 does, since `F(a, b)` can store `b` in a `mut` field of `a`, and an argument that crosses
 with no word merges nothing (§6, 2026-11-15, Q2) *(assumed, §6: the point of comment 6897444564 that the answers left standing,
 and for an argument written `copy` or `move`, whose copy is new and whose `move` ends its region at the call, the checker's
@@ -1175,6 +1175,20 @@ tells from a copy, and lets go of the original, which frees what was copied, and
 copy (U22) *(assumed, §6: on comment 6902210646, Q5, "Copy all, share big unbuilt", the answer given
 after comment 6895076937, which gave the moved count to "the message's or the parameter's" place and
 which Q5 narrows to a parameter)*.
+
+A pointer (R10) and a view of an atomic type (R19) cross into no actor: each is the compile error
+`pointer-crosses`, as Rust refuses a raw pointer, `*mut T` being no `Send` (§6, the owner,
+2026-11-17, #572, comment 6961064484, Q1, "Refuse with an id (Recommended)"), so that a program that
+shares a word between actors passes its address as a `long` and makes the view again on the other
+side, in a `raw` block (§6, the cost of that answer). The error stands at its argument, with `copy`,
+with `move` or with no word, as no clone or move of a `*mut T` makes it `Send`, and so it does for a
+value that reaches one, a collection, a `data` value or a class instance among them, as rustc reads
+`Send` through a struct's fields, and for a lambda the sending function shows that captures one; a
+message's result that reaches one is that error at the line of the call, as rustc asks `Send` of a
+task's output; and of a message's or a constructor's arguments the first that does not cross is
+reported, `pointer-crosses` standing in the stage of `send-needs-word` (U16), and before it in an
+argument that reaches both a pointer and a mutable class instance, since no word makes it cross
+*(assumed in §6: the id, the words, what a value reaches, the result and the stage)*.
 
 Case: [actors/relay.kz](../corpus/actors/relay.kz)
 
@@ -1309,6 +1323,20 @@ actor Shop {
 s = spawn Shop()
 c = s.Open()
 print(c.Items)
+```
+
+Case: [actors/pointer-crosses.kz](../corpus/actors/pointer-crosses.kz)
+```kurz
+actor Keeper {
+    pub void Keep(long* p) {
+        print(1)
+    }
+}
+
+mut long word = 5
+k = spawn Keeper()
+// a pointer crosses into no actor, with a word or with none (U12)
+k.Keep(&word)
 ```
 
 Case: [actors/copy-mutable.kz](../corpus/actors/copy-mutable.kz)
@@ -2179,9 +2207,11 @@ comment 6891937666, item 4, option (a), "Rust: by argument order", which named `
 `mut-in-message`); on one argument the checker reads `used-after-move` first, then `move-at-call`,
 then `move-reachable`, the call having the one error *(assumed, §6: the checker's reading, which no
 answer named)*. `mut-in-message` stands at the
-first argument the call writes that fills a `mut` parameter, and on one argument `mut-in-message` and an error of `move` never meet,
-an argument written with `move` that fills a `mut` parameter being `mut-at-call` (M7), its own error
-*(assumed: as §6 marks it)*. An argument's own error
+first argument the call writes that fills a `mut` parameter, and on one argument `mut-in-message` and `move-at-call` or
+`move-reachable` never meet, an argument written with `move` that fills a `mut` parameter being `mut-at-call` (M7), its own error
+*(assumed: as §6 marks it)*, while an argument written `mut` whose variable a `move` ended before it, which fills a `mut`
+parameter and reads that variable, has both `used-after-move` and `mut-in-message` at its line, in that order *(assumed, §6:
+the checker's reading, which no answer named)*. An argument's own error
 stands alone before U14's `cannot-infer` of `spawn`'s type arguments, which is said only where every
 argument reads clean (§6, the owner, 2026-11-15, issue 519, comment 6892275110, item 1, option (a),
 "Argument's error only"), one with no error of its own and no `send-needs-word`, so that
@@ -2314,10 +2344,11 @@ print(b.Get(2))
 The top-level code's call that waits sleeps on the main thread until its reply is set, while the
 worker threads run the actors' messages, each on a stack of its own (U1, U17, U35), as tokio's
 `block_on` waits on the thread that calls it beside its runtime's workers (§6, the owner,
-2026-11-17, #519, comment 6946657505, Q3, "tokio block_on (Recommended)"). A wait of it that finds nothing
-left to run, on any thread *(assumed in §6)*, ends the process with
+2026-11-17, #519, comment 6946657505, Q3, "tokio block_on (Recommended)"). A wait of it that finds no
+actor left to run on any thread, no timer pending and nothing registered with the poller *(assumed in
+§6)*, ends the process with
 `error: deadlock at <file>:<n>`, the line of that call, and the exit code 1, so that two actors that
-call each other from different chains and wait for each other, on one thread, do not hang silently
+call each other from different chains and wait for each other do not hang silently
 (§6, "Deadlocks"; the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level
 wait"). A call that waits in a function the top-level code called is the top-level code's, at its
 own line. A deadline of a call that waits in a message is nothing left to run (U42) *(assumed: T6 of comment 6967625156)*. A loop of actors the top-level code never waits on stays until the end of the program,
@@ -2533,6 +2564,52 @@ c = spawn Caller(f) on crash (e) {
 }
 send c.Go()
 print(c.Done())
+```
+
+Case: [actors/timeout-chain-nested.kz](../corpus/actors/timeout-chain-nested.kz)
+```kurz
+// `Ask` holds the thread past the 100 ms of the chain's root, so its call `S.Get()`, which takes the time its chain has left,
+// raises `call-timeout` in `Front`, its crash, and the top-level code's call, whose callee crashed once its deadline had
+// passed, raises `call-timeout` too
+
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Store {
+    pub int Get() => 1
+}
+
+actor Front(Store S) {
+    pub int Ask() {
+        Hold(150ms)
+        return S.Get()
+    }
+}
+
+s = spawn Store()
+f = spawn Front(s)
+within 100ms {
+    print(f.Ask())
+}
+```
+
+Case: [actors/timeout-crashed-before.kz](../corpus/actors/timeout-crashed-before.kz)
+```kurz
+// `Failing` crashes before the deadline of the call: `callee-crashed`, not `call-timeout`
+actor Failing {
+    pub int Fail() {
+        throw "early"
+    }
+}
+
+f = spawn Failing()
+within 1s {
+    print(f.Fail())
+}
 ```
 
 Case: [actors/timeout-carried.kz](../corpus/actors/timeout-carried.kz)
@@ -3065,6 +3142,32 @@ print(w.Ping())
 ```
 
 Case: [actors/block-escalate.kz](../corpus/actors/block-escalate.kz)
+
+Case: [actors/timeout-gone-queued.kz](../corpus/actors/timeout-gone-queued.kz)
+```kurz
+// `Store` crashed and its policy stopped it in the wait of `o.Ping()`, before the call of `Get` is queued past its deadline:
+// the actor is looked up before the deadline is compared
+
+actor Store {
+    pub void Fail() {
+        throw "gone"
+    }
+
+    pub int Get() => 1
+}
+
+actor Other {
+    pub int Ping() => 2
+}
+
+gone = spawn Store() on crash stop
+o = spawn Other()
+send gone.Fail()
+print(o.Ping())
+within 0s {
+    print(gone.Get())
+}
+```
 
 Case: [tests/test-child-escalates.kz](../corpus/tests/test-child-escalates.kz)
 ```kurz
@@ -3752,6 +3855,32 @@ Case: [actors/block-type.kz](../corpus/actors/block-type.kz)
 
 Case: [actors/timeout-crashed-early.kz](../corpus/actors/timeout-crashed-early.kz)
 
+Case: [actors/block-reason-atomic-order.kz](../corpus/actors/block-reason-atomic-order.kz)
+```kurz
+actor Reader {
+    pub void Show(MemoryOrder order) {
+        mut long word = 5
+        cell = AtomicLong.FromPtr(&word)
+        raw {
+            print(cell.Load(order))
+        }
+    }
+
+    pub int Half(int n) => n / 2
+}
+
+r = spawn Reader() on crash (c) {
+    match c.Reason {
+        RuntimeError e => print("{e.Kind} at {c.Place.Line}")
+    }
+
+    restart
+}
+send r.Show(MemoryOrder.Release)
+send r.Show(MemoryOrder.Acquire)
+print(r.Half(4))
+```
+
 ### U31 (assumed, §6) What the block reads
 
 A block at a `spawn` in an actor's code reads and assigns the fields of that actor, the supervisor,
@@ -3859,7 +3988,21 @@ a container's CPU quota counted, where neither the line `threads = 4` of a `depl
 "Both" and "threads = N line (Recommended)"), the line standing in a `deploy` block *(assumed in
 §6)*. A value of the line that is not a whole number above 0 is the compile error `threads-line`,
 and one of `KURZ_THREADS` ends the start with an error line and the id `threads-variable` *(assumed
-in §6: both ids, and the end of the start)*. The main thread runs the top-level code alone, and
+in §6: both ids, and the end of the start)*. A whole number is written in digits alone and is no
+greater than 2147483647, the greatest `int`, so that an empty `KURZ_THREADS` is a bad value, as tokio
+reads `TOKIO_WORKER_THREADS` as a whole number and refuses an empty one; a container's CPU quota counts
+its whole cores, rounded down and at least 1, as Rust's `available_parallelism` counts it; and a bad
+`KURZ_THREADS` ends the process before its first statement with the line `error: threads-variable
+(<the value>)` on standard error and the exit code 1, as a bad `KURZ_LOG` ends it with `log-filter`
+(P5) *(assumed in §6)*. A worker thread that the system refuses at its start ends the program with an
+error line and an id of its own and the exit code 1, as tokio's `Builder::build` returns an
+`io::Error` (§6, the owner, 2026-11-17, #572, comment 6961064484, Q2, "Error line + exit 1
+(Recommended)"), so that a program on a machine at its thread limit does not start, where it could
+have run on fewer (§6, the cost of that answer). The id is `thread-refused`, its start is the moment
+the scheduler starts its worker threads, at the program's first `spawn` or first form that splits its
+work, the threads that did start ending with the process, and its line is `error: thread-refused
+(<the count of worker threads asked>)` on standard error, with no place and no trace *(assumed in
+§6)*. The main thread runs the top-level code alone, and
 sleeps while it waits (U18; §6, Q3), except in a case marked `// threads: 1`, where its wait runs the ready actors and
 no worker thread runs (§6, the owner, 2026-11-17, #570, comment 6961064167, Q1). A message parked in a wait goes on on the thread that parked it,
 and an actor between messages moves to any thread (§6, the owner, 2026-11-17, #519, comment
@@ -3871,8 +4014,11 @@ actors that are ready first in, first out, the top-level code's wait running the
 2026-11-17, #570, comment 6961064167, Q1, "FIFO, as the build (Recommended)").
 
 No case: for the count of the threads, since a case is a single file with no `project.kz` (chapter 0) and
-gives its program no environment, as `log-filter`'s place in chapter 12 says, and the thread that runs a
-message shows in no output; the order of one thread has the cases below.
+gives its program no environment, as `log-filter`'s place in chapter 12 says, and cannot make its system
+refuse a worker thread, as `thread-refused`'s place there says, the thread that runs a message shows in no
+output, and the two outcomes a program can see, a message that runs on another thread when the top-level
+code ends and the moment a running supervisor acts on a crash, depend on the timing between threads, which
+a case's output cannot fix; the order of one thread has the cases below.
 
 Case: [actors/block-escalate.kz](../corpus/actors/block-escalate.kz)
 
@@ -3975,16 +4121,18 @@ from (U17) (§6, the owner, 2026-11-14, #519, comment 6880404917, Q13). A messag
 goes on, nothing interrupting it: its first call or wait past the deadline
 raises `call-timeout` in it, the crash of its actor, which its supervisor handles (U22) *(assumed: T1 of comment 6967147952)*,
 and a message that makes neither runs to its end, its result the call's where it was set before the caller reads its deadline
-(U36), and going nowhere where the caller already raised `call-timeout`, as the call of a caller that crashed runs (§6, the
-owner, 2026-10-30, "Run it, drop the reply"). The inbox drops a message with no line *(assumed: T3 of comment 6967147952)*: a
-`send` has no caller that waits, and the caller of a call raises `call-timeout` (U36). The deadline a call's own message carries
-is U44's, and the deadline of a chain that no call starts is U45's.
+(U36, assumed in §6), and going nowhere where the caller already raised `call-timeout`, as the call of a caller that crashed runs
+(§6, the owner, 2026-10-30, "Run it, drop the reply"). The inbox drops a message with no line *(assumed: T3 of comment
+6967147952)*: a `send` has no caller that waits, and the caller of a call raises `call-timeout` (U36). The deadline a call's own
+message carries is U44's, and the deadline of a chain that no call starts is U45's.
 
 Case: [actors/timeout-callee-crash.kz](../corpus/actors/timeout-callee-crash.kz)
 
 Case: [actors/timeout-capped.kz](../corpus/actors/timeout-capped.kz)
 
 Case: [actors/timeout-send.kz](../corpus/actors/timeout-send.kz)
+
+Case: [actors/timeout-chain-nested.kz](../corpus/actors/timeout-chain-nested.kz)
 
 ### U38 (decided, §6) The block `within`
 
@@ -3993,12 +4141,12 @@ smaller of that deadline and the time its chain has left, so that ten calls in a
 `withTimeout` (not checked at source) and a C# `CancellationTokenSource(TimeSpan)` passed down bind a group of calls (§6, the
 owner, 2026-11-13, #519, comment 6850539879, "One deadline for the block (Recommended)", against `d` for each call). The
 deadline binds the calls that wait, and their waits, made by the code the block runs, in the functions it calls too, as Tokio's
-`timeout` cancels its future with every wait in it (checked in §6 on 2026-11-13, at Tokio 1.54.1); the message of such a call
-carries the call's own deadline (U44), which caps the calls its callee makes, each taking its own bound, 5 seconds where no
-`within` of the callee names another (U36), so that under a block longer than 5 seconds a callee's call waits 5 seconds at
-most. A `send` in the block carries the chain's own deadline (U37), and a message of another chain or a policy's block that
-runs in the top-level code's wait is not bound by it (U44, U45). The waits it binds are those of calls on actors: a socket's
-wait keeps its own bound of §12 (S9), which no `within` bounds, while T5 of comment 6967147952 waits on the owner. The deadline
+`timeout` cancels its future with every wait in it (checked in §6 on 2026-11-13, at Tokio 1.54.1) *(assumed in §6)*. The
+message of such a call carries the call's own deadline (U44), which caps the calls its callee makes, each taking its own bound
+(U36, U39) *(assumed: T8 of comment 6967625156)*. A `send` in the block carries the chain's own deadline (U37), and a message of
+another chain or a policy's block that runs in the top-level code's wait is not bound by it (U44, U45). The waits it binds are
+those of calls on actors: a socket's wait keeps its own bound of §12 (S9), which no `within` bounds *(assumed in §6: whether a
+block bounds a socket's wait stands open in §14, T5 of comment 6967147952)*. The deadline
 is set at the block's entry and put back at every way out of the block *(assumed in §6, 2026-11-13)*. A block inside another takes
 the smaller of its own deadline and the enclosing block's, as Tokio's outer `timeout` still ends a future that holds an inner one
 (not checked at source) *(assumed in §6)*.
@@ -4037,8 +4185,11 @@ gRPC service's default (§6, the owner, 2026-11-13, #519, comment 6847932993, Q1
 3"). Where more than one form names a bound for one call, the block's bound wins over the call's clause and the call's clause
 over the declaration's, and every bound stays capped by the time the chain has left (U37) *(assumed in §6: the reading of the
 answer's words, said back on 2026-11-13)*. The bound of a call's clause runs after the call's arguments, in the order written at
-the call, as F12 evaluates the arguments *(assumed in §6: proposed with this record and not put to the owner)*, and the bound of
-either clause is read as U40 reads a block's. Where a clause may stand, and what its operand may be, are U41's.
+the call, as F12 evaluates the arguments *(assumed in §6: proposed with this record and not put to the owner)*, and it runs at
+every call it stands on, under a `within` block whose deadline wins over it too *(assumed: a reading of the build, proposed with
+this record and not put to the owner)*. The bound of either clause is read as U40 reads a block's, so that a call's bound of
+another type, `s.Get() within 2`, is `type-mismatch` *(assumed in §6: U40's reading, the three forms there writing a duration and
+naming no other type)*. Where a clause may stand, and what its operand may be, are U41's.
 
 Case: [actors/within-clauses.kz](../corpus/actors/within-clauses.kz)
 ```kurz
@@ -4070,20 +4221,49 @@ send s.Busy()
 print(s.Get())
 ```
 
+Case: [actors/within-clause-under-block.kz](../corpus/actors/within-clause-under-block.kz)
+```kurz
+// the bound of a call's clause runs at the call, under a `within` block whose deadline wins over it too
+duration Bound() {
+    print("bound")
+    return 50ms
+}
+
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+within 1s {
+    print(s.Get() within Bound())
+}
+```
+
+Case: [actors/within-clause-not-duration.kz](../corpus/actors/within-clause-not-duration.kz)
+```kurz
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+print(s.Get() within 2)
+```
+
 ### U40 (assumed, §6) The word `within` and the bound's value
 
 `within` is a word only where it stands, as `on crash`, `attempt` and `vouch` are, so that a variable may be named `within`
 (§6, the owner, 2026-11-13, #519, comment 6847932993, Q10, "Any order + contextual (Recommended)") *(assumed in §6: `within`
 among those words)*. At the start of a statement `within` is the word where an expression, read as a condition is, follows it
 and a `{` follows that expression, on the line where the expression ends or, with nothing but line breaks between, on a following
-line, the latter `braces-required`; otherwise it is a name, so that `within(3)` is a call, `within + 1` a sum and
+line, the latter `braces-required`, a comment after the bound, a line of a comment and an empty line counting as line breaks;
+otherwise it is a name, so that `within(3)` is a call, `within + 1` a sum and
 `within = 3` an assignment *(assumed in §6: the build's reading, proposed there and not put to the owner)*. The bound is a
 `duration`, read as a condition is (C3): a value of another type there is
 `type-mismatch`, a `duration?` is `nullable-unchecked` (N2), and a call with a `void` success is `syntax` (O10); and a `{`
 of the block on a line after the bound's is `braces-required` at the line where the bound ends, as C1 has it of an `if`
 *(assumed in §6: proposed there and not put to the owner)*. A bound of zero or less sets a deadline that has passed, so
-that each call it bounds raises `call-timeout` at once, but a call to an actor that ended, which raises `actor-gone` first (U43),
-and no id of its own is added, as Tokio's
+that each call it bounds raises `call-timeout` at once, but a call to an actor that ended, which raises `actor-gone` first (U43)
+*(assumed: T14 of comment 6972461413)*, and no id of its own is added, as Tokio's
 `timeout(Duration::ZERO, f)` elapses at its first wait (not checked at source) *(assumed: T4 of comment 6967147952)*. A
 bound whose deadline would pass the largest time the clock holds sets no deadline, which the calls it bounds take over the 5
 seconds of U36, each waiting with no bound but the time its chain has left (U37), as Tokio's `timeout` falls back on a far
@@ -4128,16 +4308,27 @@ waits for nothing (U6), on a call of a function, of a class's method or of an ac
 (U14) and as `tokio::spawn` and Elixir's `cast` take no timeout (not checked at source); and a declaration's clause stands on a
 message, a `pub` method
 of an actor (U9), alone, on the declaration of a function, of a class's, a data type's or an interface's method, or of an actor's
-method without `pub` being `syntax` *(assumed: T11 of comment 6967625156)*. The operand of a call's clause is a unary expression,
+method without `pub` being `syntax` *(assumed: T11 of comment 6967625156)*. An actor with a part the checker refuses or does not
+read, a constructor in its body (U2) or a `static` method (U1), has that one diagnostic, and the clauses of its declarations add
+none (E1); and the bound of a clause that is `syntax` where it stands, and that of a call that reported its own error, is read with
+no diagnostic of its own, a variable it reads counting as read, so that `send s.Run() within 2` has its `syntax` alone and
+`s.Missing() within 2` its `unknown-name` alone (E1) *(assumed: a reading of the build, proposed with this record and not put to
+the owner)*. The operand of a call's clause is a unary expression,
 as a constant type parameter's default is read (T35), so that `a.F() within d * 2` reads as `(a.F() within d) * 2`, a computed
 bound standing in parentheses, and the clause stands before a postfix `else` (O5); Rust has no such form (not checked at source)
 *(assumed: T12 of comment 6967625156)*. An `else` after a call inside the operand is that call's, as a unary expression takes its
-own postfix forms (T35) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. The operand of a
-declaration's clause is a duration literal alone, any other operand being `syntax`, as a knob of a policy is read (U26) *(assumed:
-T13 of comment 6967625156)*. The literal takes its sign where it has one, as a knob of a policy takes one (U26), and is read as
-U40 reads a bound, so that a number literal of another type, `within 2`, is `type-mismatch`, as a knob's is (U26), and not
-`syntax`, and one of zero or less a deadline that has passed at each call, where a knob refuses a value of 0 or less (U26)
-*(assumed: a reading of the build, proposed with this record and not put to the owner)*.
+own postfix forms (T35) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. A call takes one
+clause, a second `within` after its clause being `syntax`, and outside brackets the clause stands on the line where the call
+ends: a line break ends the call first, so that a `within` at the start of the next line begins a statement, U40's; inside a
+`(` or a `[`, where a line break ends no statement (L4), it may stand on a line after the call's *(assumed: a
+reading of the build, proposed with this record and not put to the owner)*. The operand of a declaration's clause is a number
+literal alone, its sign included, any other operand being `syntax`, its type read as U40 reads a bound. That the operand is a
+literal alone, any other operand `syntax`, as a knob of a policy is read (U26), is T13's *(assumed: T13 of comment 6967625156,
+whose option names a duration literal)*; that the literal is a number literal of any type, its sign included, as a knob of a
+policy takes one (U26), and is read as U40 reads a bound, so that a number literal of another type, `within 2`, is
+`type-mismatch`, as a knob's is (U26), and not `syntax`, and one of zero or less a deadline that has passed at each call, where a
+knob refuses a value of 0 or less (U26), is the build's *(assumed: a reading of the build, proposed with this record and not put
+to the owner)*.
 
 Case: [actors/within-clause-send.kz](../corpus/actors/within-clause-send.kz)
 ```kurz
@@ -4192,6 +4383,16 @@ s = spawn Store()
 print(s.Get())
 ```
 
+Case: [actors/within-declaration-not-duration.kz](../corpus/actors/within-declaration-not-duration.kz)
+```kurz
+actor Store {
+    pub int Get() within 2 => 1
+}
+
+s = spawn Store()
+print(s.Get())
+```
+
 ### U42 (assumed, §6) A wait of the top-level code with no message to run while a deadline stands
 
 A deadline of a call that waits in a message is nothing left to run (U18): a wait of the top-level code that finds no message to
@@ -4208,27 +4409,33 @@ Case: [actors/deadlock.kz](../corpus/actors/deadlock.kz)
 ### U43 (assumed, §6) A caller whose callee crashed or ended once the caller's deadline had passed
 
 A call that waits gets `callee-crashed` where its callee crashed (U20) and `actor-gone` where it ended; where the crash or the
-end was set once the caller's own deadline had passed, it raises `call-timeout`, its own deadline, the time the crash or the end
-was set held to the deadline and not the time the caller reads it, as a gRPC client of Rust (tonic) reports its own deadline
-(not checked at source), so that a chain of three calls whose third passed the deadline of the top-level code's call ends at the
-top-level code as `call-timeout` *(assumed: as §6 names `call-timeout` "a call past its bound or its chain's deadline", T7 of
-comment 6967625156, "the earlier of the two")*, against `callee-crashed` or `actor-gone` as U20 reads, the timeout standing in
-the log line of the actor that raised it (U24). A deadline set by a `within` inside a message ends that message's actor with
-`call-timeout` and its caller with `callee-crashed` where that caller's own deadline had not passed when the crash was set (U20,
-U44). A result set before the caller reads its deadline is the call's result (U36), and a crash or an end set before the
-deadline is `callee-crashed` or `actor-gone` though the caller reads it after. A call queued past its deadline to an actor that
-ended raises `actor-gone`, its actor looked up before its deadline is compared, so that `within 0s { gone.Get() }` is
-`actor-gone`, as Tokio's `Timeout::poll` polls its future before its timer (not checked at source) *(assumed: T14 of comment
-6972461413)*, against `call-timeout` first, as a gRPC client fails a call whose deadline passed before it starts (not checked at
-source).
+end was set while the call waits, once the caller's own deadline had passed, it raises `call-timeout`, its own deadline, the
+time the crash or the end was set held to the deadline and not the time the caller reads it, as a gRPC client of Rust (tonic)
+reports its own deadline (not checked at source), so that a chain of three calls whose third passed the deadline of the top-level
+code's call ends at the top-level code as `call-timeout` *(assumed: as §6 names `call-timeout` "a call past its bound or its
+chain's deadline", T7 of comment 6967625156, "the earlier of the two")*, against `callee-crashed` or `actor-gone` as U20 reads,
+the timeout standing in the log line of the actor that raised it (U24). A deadline set by a `within` inside a message ends that
+message's actor with `call-timeout` and its caller with `callee-crashed` where that caller's own deadline had not passed when the
+crash was set (U20, U44). A result set before the caller reads its deadline is the call's result (U36), and a crash or an end set
+before the deadline is `callee-crashed` or `actor-gone` though the caller reads it after. A call queued past its deadline to an
+actor that had ended before the call was queued raises `actor-gone`, its actor looked up before its deadline is compared, so that
+`within 0s { gone.Get() }` is `actor-gone`, as Tokio's `Timeout::poll` polls its future before its timer (not checked at source)
+*(assumed: T14 of comment 6972461413)*, against `call-timeout` first, as a gRPC client fails a call whose deadline passed before
+it starts (not checked at source).
 
 Case: [actors/timeout-crashed.kz](../corpus/actors/timeout-crashed.kz)
 
 Case: [actors/timeout-crashed-early.kz](../corpus/actors/timeout-crashed-early.kz)
 
+Case: [actors/timeout-crashed-before.kz](../corpus/actors/timeout-crashed-before.kz)
+
+Case: [actors/timeout-chain-nested.kz](../corpus/actors/timeout-chain-nested.kz)
+
+Case: [actors/timeout-gone-queued.kz](../corpus/actors/timeout-gone-queued.kz)
+
 ### U44 (assumed, §6) The deadline a call's message carries
 
-A call's message carries the call's own deadline, the smaller of its bound (U36, U38) and the time its chain has left (U37), and
+A call's message carries the call's own deadline, the smaller of its bound (U36, U38, U39) and the time its chain has left (U37), and
 the callee's calls and its inbox read it, as a gRPC client of Rust (tonic) sends its call's timeout (not checked at source), so
 that a short bound on one call ends the callee's calls past it, with the callee's crash (U37) *(assumed: as §6 has a block's
 deadline bind every wait made while the block runs, T8 of comment 6967625156)*, against the deadline of the chain's root, the
@@ -4353,7 +4560,10 @@ for a deep copy, or `move`, else the compile error `capture-needs-word`, at the 
 is `capture-assign`, as in any lambda (F11); and a field of the actor whose code runs the `attempt` that the block names
 is taken by value at the block's start, as a variable is, so that an assignment of it is `capture-assign` too. What it
 takes is taken by value at its start, as a lambda takes it (F15), and copied into the child's heap as a message's
-arguments are (U12) *(assumed: T19 of comment 6980152255, built at the default while it waits for the owner)*. A field of
+arguments are (U12) *(assumed: T19 of comment 6980152255, built at the default while it waits for the owner)*. A pointer (R10)
+or a view of an atomic type (R19) that the block takes, or a value that reaches one, is the compile error `pointer-crosses`
+at its first read in the block, and so is a value of the block that reaches one, at the `attempt`, as for a message's
+argument and result (U12; §6, the owner, 2026-11-21, #582, comment 7062996932, Q25 1). A field of
 an instance of a class that is no actor, whose method runs the `attempt`, is taken so too *(assumed: a reading of the
 build, proposed with this record and not put to the owner)*.
 
@@ -4413,6 +4623,23 @@ actor Counter {
 
 k = spawn Counter()
 print(k.Peek())
+```
+
+Case: [actors/attempt-pointer-crosses.kz](../corpus/actors/attempt-pointer-crosses.kz)
+```kurz
+int Look(long* q) => 1
+
+// the block takes the value of `word`, and the pointer `ptr` is the error, as at a message (U12)
+mut long word = 5
+ptr = &word
+n = attempt { word > 1 } else {
+    Crashed c => false
+}
+m = attempt { Look(ptr) } else {
+    Crashed c => 0
+}
+print(n)
+print(m)
 ```
 
 ### U48 (assumed, §6) `return` in an `attempt`

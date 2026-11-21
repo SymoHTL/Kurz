@@ -1101,6 +1101,27 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.DoesNotMatch(@"(%[\w.]+) = extractvalue %kz\.actor %[\w.]+, 0(, !dbg ![0-9]+)?\r?\n\s+store i64 \1, ptr %v\.key\.", compiled.Ir);
     }
 
+    [Theory]
+    [InlineData("d", 0)]
+    [InlineData("2s", 0)]
+    [InlineData("-2s", 0)]
+    [InlineData("(d)", 0)]
+    [InlineData("ds[0]", 1)]
+    [InlineData("(ds[0])", 1)]
+    public void A_message_whose_clauses_bound_can_raise_with_no_call_in_it_is_built_in_a_heap_of_its_own(string bound, int heaps)
+    {
+        // U39, U12: the bound of a call's clause runs after the message is built, so a bound that can raise with no call in it, an index,
+        // builds the message in a heap of its own (the runtime's `MessageHeapNew`), which the crash of its builder frees (ActorTests,
+        // `A_message_whose_clauses_bound_crashes_its_builder_leaves_no_block_in_its_callees_heap`); a duration's literal, its sign
+        // included, and a read of a name, either in brackets, raise nothing, and the message is built in the callee's heap; the IR is
+        // read, since a call whose bound raises nothing answers alike from either heap
+        var compilation = Compile("actor Store {\n    pub int Get(List<int> xs) => xs[0]\n}\n\ns = spawn Store()\nds = [1s]\nd = 1s\nitems = [1]\n"
+            + $"print([d, ds[0]].Count)\nprint(s.Get(items) within {bound})\n", Builder.CheckRuntime(Builder.HostTarget!.Value));
+        var program = compilation.Program;
+        Assert.True(program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        Assert.Equal(heaps, Regex.Count(program.Ir, @"call ptr @""[^""]+\.MessageHeapNew\.[0-9]+[^""]*""\(\)"));
+    }
+
     [Fact]
     public void Remove_finds_the_slot_of_its_key_once_and_takes_the_slot_of_a_copy_at_its_offset()
     {
@@ -1543,8 +1564,8 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void An_atomic_order_held_in_a_value_is_chosen_when_the_call_runs_and_one_rust_refuses_raises_at_the_call()
     {
-        // R19: a `switch` over the five values of `MemoryOrder`, each to the instruction of its order, as Rust's `match` on the order;
-        // `Release` and `AcqRel`, which a load does not take, raise `invalid-ordering-at-run-time` at the call's line
+        // R19: a `switch` over the five values of `MemoryOrder`, as Rust's `match` on the order: each order a load takes goes to its
+        // instruction, and `Release` and `AcqRel`, which a load does not take, raise `invalid-ordering-at-run-time` at the call's line
         const string text = "long Read(AtomicLong a, MemoryOrder order) {\n    mut long v = 0\n    raw {\n        v = a.Load(order)\n    }\n\n    return v\n}\n\n"
             + "mut long w = 70001\nview = AtomicLong.FromPtr(&w)\nprint(Read(view, MemoryOrder.Relaxed))\nprint(Read(view, MemoryOrder.Acquire))\nprint(Read(view, MemoryOrder.SeqCst))\nprint(Read(view, MemoryOrder.AcqRel))\n";
         var program = Emit(text, "raw");
@@ -1563,10 +1584,12 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // U12, U17, R19: the call stores its reply's waiter (`ReplyWaiter`) before `Enqueue` queues its message; the message's function
         // takes the reply off the message after the method returned by one swap (`ReplyTaken`), as the crash's unhook does, so that one
         // of them owns it, as tokio's `oneshot` decides by one word (not checked at source); the owner reads the waiter, then stores the
-        // reply's word with release, then wakes (`Replied`, `Signal`), the waiter loads it with acquire
-        // (`ReplyState`); a wake sets QUEUED by one `or` (`Wake`), a take, a hold's end and a constructor's end change the state word by
-        // one compare-exchange (`Exchanged`); the orders are Rust's for each, which a thread of their own needs and one thread does not
-        // show
+        // reply's word with release, then wakes (`Replied`, `Signal`), the waiter loads it with acquire (`ReplyState`), which the
+        // waits, the readiness, the take and the crash call (`Wait`, its loop in the top-level code in `RootWait`, its loop in an activation and its
+        // kind, `Ready`, `RunOne`, `Fall`), as the crash and the end take a reply by the swap (`Fall`, `EndActor`); a wake sets QUEUED by
+        // one `or` (`Wake`), a take, a hold's end, a constructor's end and a restart's hold change the state word by one compare-exchange
+        // (`Exchanged`) after a load with acquire, the restart's hold loading it with acquire again while a take holds the actor
+        // (`HeldAlone`); the orders are Rust's for each, which a thread of their own needs and one thread does not show
         const string text = "actor Counter {\n    mut long count = 0\n\n    pub void Add(long n) {\n        count = count + n\n    }\n\n    pub long Get() => count\n}\n\n"
             + "c = spawn Counter()\nsend c.Add(2)\nprint(c.Get())\n";
         var program = Emit(text);
@@ -1601,10 +1624,19 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         InOrder(Runtime("Signal"), @"store ptr %t\d+, ptr %v\.waiter\.\d+", @"store atomic i32 %t\d+, ptr %t\d+ release, align 4", @"call void @""rt\.common\.Wake\.\d+""");
         InOrder(Runtime("Wake"), @"atomicrmw or ptr %t\d+, i32 2 acq_rel, align 4", @"call void @""rt\.common\.Queue\.\d+""");
         InOrder(Runtime("Exchanged"), @"cmpxchg ptr %t\d+, i32 %t\d+, i32 %t\d+ acq_rel acquire, align 4");
-        foreach (var name in new[] { "Claimed", "LetGo", "ActorBuilt" })
+        foreach (var name in new[] { "Claimed", "LetGo", "ActorBuilt", "HeldAlone" })
         {
             InOrder(Runtime(name), @"load atomic i32, ptr %t\d+ acquire, align 4", @"call i32 @""rt\.common\.Exchanged\.\d+""");
         }
+
+        InOrder(Runtime("HeldAlone"), @"call i32 @""rt\.common\.Exchanged\.\d+""", @"load atomic i32, ptr %t\d+ acquire, align 4");
+        const string state = @"call i32 @""rt\.common\.ReplyState\.\d+""", taken = @"call ptr @""rt\.common\.ReplyTaken\.\d+""";
+        InOrder(Runtime("Wait"), state, state);
+        InOrder(Runtime("RootWait"), state);
+        InOrder(Runtime("Ready"), state);
+        InOrder(Runtime("RunOne"), state);
+        InOrder(Runtime("Fall"), state, taken, state, taken);
+        InOrder(Runtime("EndActor"), taken);
 
         Ran(Toolchain.Run(toolchain.Build(program, "reply-orders")), 0, ["2"], string.Empty);
     }
