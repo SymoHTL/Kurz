@@ -55,8 +55,11 @@ three bytes) inlined into `std.UnicodeCase`, where a byte loop stood, and the he
   first run alone, is read from that run. Two copies of `main` differed by 0.7% and 0.5% at the median row; the
   largest change one layout made in both runs the same way was 1.8% at the median, over 2% on 49 of the 102 rows and
   up to 33.5% (`parse-ulong`). The moves within 64 bytes made most of it: over 5% on 48 of 303 pairs of a row and a
-  layout, against 6 of 303 for whole functions moved by 64 to 4096 bytes. Which spread is the noise of "no row
-  slower beyond noise" is the owner's choice (question S3 of that comment).
+  layout, against 6 of 303 for whole functions moved by 64 to 4096 bytes. The noise of "no row slower beyond noise"
+  is the larger of the band of two copies and the row's own layout band, the largest change any of the six layouts
+  makes to the row, both measured in the same run as the change (the owner, 2026-11-20, issue 157, comment
+  7051500158, S3, option 1, against the band of two copies alone and against a fixed share with a repeat, at the
+  cost of the six layouts timed in every sweep and a slowdown within a row's layout band unseen on that row).
 
 ## What to do
 
