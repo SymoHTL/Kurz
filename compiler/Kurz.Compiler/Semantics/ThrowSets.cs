@@ -30,6 +30,7 @@ public sealed class ThrowSets
     private readonly Checker? std;
     private readonly bool blocks;
     private readonly IReadOnlySet<CrashPolicy>? skipped;
+    private readonly IReadOnlySet<AttemptExpression>? skippedArms;
     private readonly Dictionary<object, Unit> units = new(new UnitKeys());
     private readonly List<Unit> order = [];
     private readonly KurzType runtimeError;
@@ -42,15 +43,17 @@ public sealed class ThrowSets
     /// The sets of the code of <paramref name="program"/>, which sees the types of <paramref name="std"/> (W1); null where the program is
     /// <c>std/</c> itself. Where <paramref name="blocks"/> does not hold, the bodies of the blocks of <c>on crash</c> are left out, as at the
     /// checker's first reading of such a program, which reads them with no <c>Reason</c> found yet (U30), and so are those of the blocks
-    /// <paramref name="skipped"/> names, which reported errors at a reading whose <c>Reason</c>s may not have settled.
+    /// <paramref name="skipped"/> names, which reported errors at a reading whose <c>Reason</c>s may not have settled; so are the arms of
+    /// the <c>else</c> of every <c>attempt</c> there, and of those <paramref name="skippedArms"/> names, for the same reasons (U46).
     /// </summary>
-    public ThrowSets(Checker program, Checker? std, bool blocks = true, IReadOnlySet<CrashPolicy>? skipped = null)
+    public ThrowSets(Checker program, Checker? std, bool blocks = true, IReadOnlySet<CrashPolicy>? skipped = null, IReadOnlySet<AttemptExpression>? skippedArms = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         this.program = program;
         this.std = std;
         this.blocks = blocks;
         this.skipped = skipped;
+        this.skippedArms = skippedArms;
         var error = (std ?? program).Model.DataTypes.FirstOrDefault(d => d.Name == "RuntimeError")
             ?? throw new InvalidOperationException("std/ declares no `RuntimeError`, the runtime's error type of section 5");
         runtimeError = new DataType(error, []);
@@ -85,7 +88,7 @@ public sealed class ThrowSets
         [typeof(ElseExpression)] = "its call and its arms",
         [typeof(ParenthesizedExpression)] = "its inner expression",
         [typeof(SpawnExpression)] = "the actor's construction, its code under escalate or a block, and the block's body",
-        [typeof(AttemptExpression)] = "no code: the checker refuses it",
+        [typeof(AttemptExpression)] = "nothing where it runs but what its block builds, whose throws its child's crash holds; `retry`: no code, the checker refuses it",
         [typeof(Block)] = "its statements",
         [typeof(VariableDeclaration)] = "its value",
         [typeof(AssignOrDeclare)] = "its value",
@@ -128,6 +131,16 @@ public sealed class ThrowSets
     {
         ArgumentNullException.ThrowIfNull(actor);
         return actor.IsActor ? Solved(new Root(actor)) : throw new ArgumentException($"`{actor.Name}` is no actor", nameof(actor));
+    }
+
+    /// <summary>
+    /// U46: the <c>Reason</c> of the <c>Crashed</c> of an <c>attempt</c> of the program's file: every type the code of its block can throw,
+    /// with what that code reaches, then the runtime's error type.
+    /// </summary>
+    public IReadOnlyList<KurzType> ReasonOf(AttemptExpression attempt)
+    {
+        ArgumentNullException.ThrowIfNull(attempt);
+        return program.Model.HasAttempt(attempt) ? Solved(attempt) : throw new ArgumentException($"no `attempt` the checker read stands at line {attempt.Line}", nameof(attempt));
     }
 
     /// <summary>What a call of the function can raise (section 5): every type its code can throw, then the runtime's error type.</summary>
@@ -213,14 +226,14 @@ public sealed class ThrowSets
         public List<DataType> Built { get; } = [];
     }
 
-    /// <summary>The keys of the units: a lambda by its node, never by its text, and every other key by its own equality.</summary>
+    /// <summary>The keys of the units: a lambda and an <c>attempt</c> by its node, never by its text, and every other key by its own equality.</summary>
     private sealed class UnitKeys : IEqualityComparer<object>
     {
         public new bool Equals(object? x, object? y) =>
-            x is LambdaExpression || y is LambdaExpression ? ReferenceEquals(x, y) : object.Equals(x, y);
+            x is LambdaExpression or AttemptExpression || y is LambdaExpression or AttemptExpression ? ReferenceEquals(x, y) : object.Equals(x, y);
 
         public int GetHashCode(object obj) =>
-            obj is LambdaExpression ? System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj) : obj.GetHashCode();
+            obj is LambdaExpression or AttemptExpression ? System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj) : obj.GetHashCode();
     }
 
     private Unit Discover(object key)
@@ -525,6 +538,20 @@ public sealed class ThrowSets
                     break;
                 }
 
+            case AttemptExpression a:
+                {
+                    // U46: the block's code, which its child runs; an `attempt` stands in the program's file alone, `std/` holding none
+                    var block = program.Model.AttemptOf(a).Lambda;
+                    var walk = new Walk(this, program.Model, 0, unit);
+                    walk.Optional(block.ExpressionBody);
+                    if (block.BlockBody is { } body)
+                    {
+                        walk.Statement(body);
+                    }
+
+                    break;
+                }
+
             case Valued v:
                 unit.Edges.AddRange(Lambdas().Where(x => Fits(x.Type, v.Type)).Select(x => new Edge(x.Lambda, null)));
                 break;
@@ -803,12 +830,27 @@ public sealed class ThrowSets
                     }
 
                     break;
+                case ElseExpression el when (el.Call is ParenthesizedExpression p ? p.Inner : el.Call) is AttemptExpression a:
+                    Expression(a);
+                    if (sets.blocks && sets.skippedArms?.Contains(a) != true && model.HasAttempt(a))
+                    {
+                        Arms(el.Arms, model.AttemptOf(a).Type); // U46: the arms are the code of the actor that waits, at a reading whose `Reason`s may settle
+                    }
+
+                    break;
                 case ElseExpression el:
                     Expression(el.Call);
                     Arms(el.Arms, Result(el.Call));
                     break;
                 case ParenthesizedExpression p:
                     Expression(p.Inner);
+                    break;
+                case AttemptExpression a:
+                    if (model.HasAttempt(a))
+                    {
+                        unit.Edges.Add(new Edge(a, null, Runs: false)); // U46: what its block builds, and nothing it throws, which `Crashed` holds
+                    }
+
                     break;
                 case SpawnExpression s:
                     Call(s.Call);

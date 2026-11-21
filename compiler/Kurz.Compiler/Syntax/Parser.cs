@@ -1644,14 +1644,16 @@ public sealed class Parser
         Expression? within = null;
         if (Current is { Kind: TokenKind.Name, Text: "within" })
         {
-            // U39: the declaration clause `pub T M(...) within d` bounds every call of the method; its operand is a duration literal
-            // alone, as a knob of a policy takes one (U26), and anything else there is `syntax` (assumed: T13 of comment 6967625156);
-            // whether the declaration is one a clause applies to is the checker's (T11)
+            // U39, U41: the declaration clause `pub T M(...) within d` bounds every call of the method (U39); its operand is a number
+            // literal alone, its sign included, as a knob of a policy takes one (U26), anything else there being `syntax` (U41;
+            // assumed: T13 of comment 6967625156, the literal alone), its type read as U40 reads a bound by the checker (U41; assumed:
+            // a reading of the build, any number literal and its sign); whether the declaration is one a clause applies to is the
+            // checker's (U41; T11)
             Advance();
-            within = PolicyValue("a duration literal after `within`, `within 2s` (U39)");
+            within = PolicyValue("a number literal after `within`, `within 2s` (U41)");
             if (!At(TokenKind.Arrow) && !At(TokenKind.LeftBrace) && !EndsStatement())
             {
-                throw Fail("the body after the duration literal of `within`, which stands alone (U39)");
+                throw Fail("the body after the number literal of `within`, which stands alone (U41)");
             }
         }
 
@@ -2608,17 +2610,18 @@ public sealed class Parser
 
             if (Current is { Kind: TokenKind.Name, Text: "within" } && expression is CallExpression { Within: null } bounded)
             {
-                // U39: the call clause `x.M() within d` bounds the one call; its operand is a unary expression, as T35's constant
-                // operand is, and the clause stands before a postfix `else` (assumed: T12 of comment 6967625156); whether the call is
-                // one a clause applies to is the checker's (T11)
+                // U39, U41: the call clause `x.M() within d` bounds the one call (U39); its operand is a unary expression, as T35's
+                // constant operand is, and the clause stands before a postfix `else` (U41; assumed: T12 of comment 6967625156); a call
+                // takes one clause, the token right after the call, so that outside brackets it stands on the line where the call
+                // ends (U41; assumed: a reading of the build); whether the call is one a clause applies to is the checker's (U41; T11)
                 Advance();
                 expression = bounded with { Within = ParseUnary() };
                 continue;
             }
 
-            if (AtKeyword("else") && expression is CallExpression)
+            if (AtKeyword("else") && expression is CallExpression or AttemptExpression)
             {
-                var elseKeyword = Advance(); // O5: `call else { Case => ... }` handles the listed cases at the call, so only a call takes the postfix `else`
+                var elseKeyword = Advance(); // O5: `call else { Case => ... }` handles the listed cases at the call, so only a call takes the postfix `else`, and an `attempt`, whose value is a union as a call's (U46)
                 expression = new ElseExpression(elseKeyword.Line, expression, ParseArms(elseKeyword.Line, "`else`"));
                 continue;
             }
@@ -2731,7 +2734,8 @@ public sealed class Parser
 
                 if (token.Text is "attempt" or "retry" && At(TokenKind.LeftBrace) && headers == 0)
                 {
-                    // section 6: `attempt { ... }` and `retry { ... }`, its block, which the checker says `not supported` to; the words stay
+                    // section 6: `attempt { ... }` and `retry { ... }`, its block, which the checker reads (U46) and says `not supported` to
+                    // after `retry`; the words stay
                     // names elsewhere, and before the block of an `if`, a `while`, a `for` or a `match` outside brackets and braces, so that a
                     // variable of either name stands in a condition (U28; assumed: section 6, comment 6847932993, Q10, as Rust reads a struct
                     // literal in a condition)

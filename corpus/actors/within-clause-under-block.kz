@@ -1,0 +1,19 @@
+// expect: output
+// | bound
+// | 1
+// rules: U39
+
+// the bound of a call's clause runs at the call, under a `within` block whose deadline wins over it too
+duration Bound() {
+    print("bound")
+    return 50ms
+}
+
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+within 1s {
+    print(s.Get() within Bound())
+}
