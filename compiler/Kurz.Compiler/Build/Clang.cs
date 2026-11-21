@@ -186,7 +186,9 @@ public sealed partial class Clang
     /// 2026-11-20 (issue 157, comment 7051500158, S2), an exception to "no row slower beyond noise" as the alignment of functions is,
     /// taken against leaving the loops to LLVM. The Cyrillic rows of <c>ToLower</c> and <c>ToUpper</c>, whose walk's head stood at 48
     /// mod 64, ran 16.1% faster, and 42 of the 102 rows of that issue's sweep ran slower beyond the band of two copies of a build, by
-    /// up to 12.2% (<c>sort-unstable-string</c>), in a larger binary. A test build keeps LLVM's alignment of both.
+    /// up to 12.2% (<c>sort-unstable-string</c>), in a larger binary. Measured with the build of the option, it alone keeps five
+    /// rows slower beyond the noise of S3 in two runs of that sweep and adds 10.3% to 13.6% to the text of each of its programs.
+    /// A test build keeps LLVM's alignment of both.
     /// </summary>
     internal List<string> Arguments(string irPath, string outputPath, IReadOnlyList<string> libraries, bool release, bool lines, string? cpuFlag = null)
     {

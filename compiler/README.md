@@ -713,7 +713,8 @@ aligns one at 16 on x86-64 and leaves it unaligned on 64-bit Arm (the owner, 202
 comment 7051500158, S2, against leaving the loops to LLVM, an exception to "no row slower beyond noise"
 as the alignment of functions is: the Cyrillic rows of `ToLower` and `ToUpper` ran 16.1% faster, and 42
 of the 102 rows of that issue's sweep slower beyond the band of two copies of a build, by up to 12.2%, in
-a larger binary; pinned by
+a larger binary; measured with the build of the option, five rows slower beyond the noise of S3 in two
+runs and 10.3% to 13.6% more text in each program of that sweep; pinned by
 `ClangTests.A_release_build_aligns_every_loop_at_64_bytes_and_a_test_build_leaves_llvms_alignment`), and links with the C
 library as the platform links it, on Linux its math library `libm` with it, as Rust's standard
 library links it through its `libc` crate (checked 2026-10-29: the `libc` crate's `src/unix/mod.rs`,
