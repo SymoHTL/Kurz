@@ -1691,25 +1691,25 @@ public sealed class Parser
                 var constant = ParseCoreType();
                 var named = ExpectName("a type parameter");
                 var value = Match(TokenKind.Assign) ? ParseUnary() : null;
-                result.Add(new TypeParameter(line, named.Text, null, constant, value));
+                result.Add(new TypeParameter(line, named.Text, [], constant, value));
                 continue;
             }
 
             var name = ExpectName("a type parameter");
-            TypeSyntax? limit = null;
+            var limits = new List<TypeSyntax>();
             if (Match(TokenKind.Colon))
             {
-                // T19: a limit names an interface, so it is one type by name; a union, a function type or a type in parentheses there
-                // is text no rule gives a meaning (E4), whatever the parentheses
-                var limitToken = Current;
-                limit = ParseCoreType();
-                if (limit is not NamedType)
+                // T19: several limits are joined by `+` (Q4 of issue 605, comment 7051071380), and `&` there is text no rule gives a
+                // meaning (E4) as any other token; a limit is read as a type, so that one that names no interface and no class, a union
+                // and a function type among them, is the checker's `limit-not-interface` (Q6)
+                do
                 {
-                    throw new ParseError(limitToken.Line, "a type parameter's limit names an interface (T19)");
+                    limits.Add(ParseType());
                 }
+                while (Match(TokenKind.Plus));
             }
 
-            result.Add(new TypeParameter(name.Line, name.Text, limit));
+            result.Add(new TypeParameter(name.Line, name.Text, limits));
         }
         while (Match(TokenKind.Comma));
         suppressNewlines--;

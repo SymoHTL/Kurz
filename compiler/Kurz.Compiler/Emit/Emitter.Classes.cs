@@ -614,6 +614,21 @@ public sealed partial class Emitter
     private string EmitMethodCall(CallExpression c, CallInfo info)
     {
         var f = info.Function!;
+        if (f.Interface is { TextOnly: true } && c.Callee is MemberAccess { Target: var texted })
+        {
+            // T19 with A10: the method of a limit that a type meets by its text alone is, in each copy, the text of the type the copy
+            // binds, as `print` makes it (Q21 of issue 605, comment 7051071380); a call's result is its own count, so a string, which is
+            // its own text, is counted once more
+            var type = TypeOf(texted);
+            var text = TextOf(EmitExpression(texted), type, c.Line);
+            if (!MakesText(type) && type is PrimitiveType { Kind: Primitive.String })
+            {
+                Retain(text, type);
+            }
+
+            return text;
+        }
+
         if (c.Callee is MemberAccess { Target: var target } && TypeOf(target) is InterfaceType face)
         {
             // the receiver is borrowed past the arguments, as a class's is below: one read from a field holds a count of its own to the end
@@ -639,6 +654,14 @@ public sealed partial class Emitter
             NameExpression n => (This(n, n.Line), ClassOfThis(n, n.Line)),
             _ => throw new InvalidOperationException($"a method called through `{c.Callee.GetType().Name}` at line {c.Line}"),
         };
+        if (f.Interface is not null || !ReferenceEquals(f.Owner, receiverType.Symbol))
+        {
+            // T19: a call through a limit, in a copy that binds a class: the class's method, as a call on the class's value runs it,
+            // directly or through the class's own table (K7); of a class limit, the method of the class the copy binds that overrides
+            // the limit's, which is the limit's where none does (Q5, Q14 of issue 605)
+            f = Implementing(receiverType.Symbol, f);
+        }
+
         var arguments = Arguments(
             c,
             info,

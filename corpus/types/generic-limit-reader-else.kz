@@ -1,0 +1,30 @@
+// expect: error type-mismatch at 25
+// rules: T19
+
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+data Missing(int Code)
+
+T | Missing First<T>(List<T> items) {
+    if items.Count == 0 {
+        return Missing(1)
+    }
+    return items[0]
+}
+
+int Measure<T>(List<T> items, T other) {
+    print(T.Kind)
+    return AreaOf(First(items) else {
+        Missing e => other
+    })
+}
+
+print(Measure([Square(3)], Square(2)))

@@ -144,6 +144,7 @@ public static class ErrorIds
     public const string CaptureAssign = "capture-assign";
     public const string ReversedRange = "reversed-range";
     public const string AmbiguousCall = "ambiguous-call";
+    public const string LimitNotInterface = "limit-not-interface";
     public const string CannotInfer = "cannot-infer";
     public const string EqualByUnknown = "equal-by-unknown";
     public const string EqualsMethod = "equals-method";
