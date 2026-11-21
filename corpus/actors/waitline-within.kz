@@ -1,0 +1,37 @@
+// expect: output
+// | Deadlock
+// | left got 2
+// | 1
+// threads: 1
+// rules: U28, U61
+
+// `Right`'s call that closes the loop has a bound of 2 s and still gets `deadlock` at once, not `call-timeout` at its bound (U61)
+
+actor Left {
+    pub void Ask(Right other) {
+        print("left got {other.Value()}")
+    }
+
+    pub int Value() => 1
+}
+
+actor Right {
+    pub void Ask(Left other) {
+        n = other.Value() within 2s
+        print("right got {n}")
+    }
+
+    pub int Value() => 2
+}
+
+l = spawn Left()
+r = spawn Right() on crash (c) {
+    match c.Reason {
+        RuntimeError e => print(e.Kind)
+    }
+
+    restart
+}
+send l.Ask(r)
+send r.Ask(l)
+print(l.Value())

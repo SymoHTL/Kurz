@@ -1,0 +1,30 @@
+// expect: throws deadlock at 20
+// threads: 1
+// rules: U25, U62, U63, U65
+
+// `vouch` takes `Left`'s call of `Value` out of U56's loop, `Left.Ask` waiting on `Right.Value`, whose code waits on `Left`, a
+// promise that does not hold here: `Right`'s `Ask` waits on `Left`, whose `Ask` waits on `Right`, `Right`'s wait closes the
+// loop and gets `deadlock`, and the line of `Left`'s wait in its text is the line where the word stands (U65, U63); `Right`'s
+// policy escalates it to the top-level code (U25)
+
+actor Left {
+    pub void Ask(Right other) {
+        print("left got {vouch other.Value()}")
+    }
+
+    pub int Value() => 1
+}
+
+actor Right(Left Peer) {
+    pub void Ask() {
+        print("right got {Peer.Value()}")
+    }
+
+    pub int Value() => Peer.Value() + 1
+}
+
+l = spawn Left()
+r = spawn Right(l) on crash escalate
+send l.Ask(r)
+send r.Ask()
+print(l.Value())

@@ -1,0 +1,78 @@
+// expect: output
+// | Deadlock
+// | C#3 waits at actors/waitline-text.kz:57 on A#1
+// | A#1 waits at actors/waitline-text.kz:41 on B#2
+// | B#2 waits at actors/waitline-text.kz:49 on C#3
+// | b got 3
+// | a got 2
+// | 1
+// threads: 1
+// rules: U28, U35, U63
+
+// three chains, each actor busy in one and waiting on another: `C`'s wait closes the loop, and the block of its policy prints
+// the text of its `deadlock`, one line for each wait of the loop, from the wait that raised (U63); each line's chain ID, 32
+// lowercase hexadecimal digits that differ on every run, is checked and left out, the raiser's being the chain of the crash
+
+// the lines of `detail`, each without the chain ID that ends it, or what of them does not hold
+string Waits(string detail, string chain) {
+    id = Regex.New(r" in chain [0-9a-f]{32}$")
+    lines = detail.Split("\n")
+    if !lines[0].EndsWith(" in chain {chain}") {
+        return "the first line's chain is not the crash's"
+    }
+
+    mut string text = ""
+    mut string gap = ""
+    for line in lines {
+        if !id.IsMatch(line) {
+            return "no chain ID: {line}"
+        }
+
+        bare = id.Replace(line, "")
+        text = "{text}{gap}{bare}"
+        gap = "\n"
+    }
+
+    return text
+}
+
+actor A {
+    pub void Ask(B other) {
+        print("a got {other.Value()}")
+    }
+
+    pub int Value() => 1
+}
+
+actor B {
+    pub void Ask(C other) {
+        print("b got {other.Value()}")
+    }
+
+    pub int Value() => 2
+}
+
+actor C {
+    pub void Ask(A other) {
+        print("c got {other.Value()}")
+    }
+
+    pub int Value() => 3
+}
+
+a = spawn A()
+b = spawn B()
+c = spawn C() on crash (x) {
+    match x.Reason {
+        RuntimeError e => {
+            print(e.Kind)
+            print(Waits(e.Detail, x.Chain))
+        }
+    }
+
+    restart
+}
+send a.Ask(b)
+send b.Ask(c)
+send c.Ask(a)
+print(a.Value())

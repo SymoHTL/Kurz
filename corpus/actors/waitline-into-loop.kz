@@ -1,0 +1,49 @@
+// expect: throws deadlock at 48
+// | asks at 7
+// threads: 1
+// rules: U18, U34, U61, U64
+
+// `Worker`'s crash closes a loop of `Boss` and `Worker` that no wait closes (U64); `Asker`'s call of `Ping`, made after it,
+// leads into that loop, which `Asker` is not in, so its wait parks and raises nothing (U61), and the top-level code's wait on
+// `Ask` finds nothing left to run (U18)
+
+actor Clock {
+    pub int Now() => 7
+}
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Get() => 5
+}
+
+actor Boss {
+    pub void Go() {
+        w = spawn Worker() on crash (x) {
+            print("decided")
+            restart
+        }
+
+        send w.Fail()
+        print("got {w.Get()}")
+    }
+
+    pub int Ping() => 1
+}
+
+actor Asker(Clock C) {
+    pub void Ask(Boss boss) {
+        t = C.Now()
+        print("asks at {t}")
+        print("pinged {boss.Ping()}")
+    }
+}
+
+b = spawn Boss()
+c = spawn Clock()
+k = spawn Asker(c)
+send b.Go()
+k.Ask(b)
+print("after")
