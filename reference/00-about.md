@@ -223,7 +223,9 @@ shortest digits that read back as the same number: `0.5`, and `0.300000000000000
 
 A class instance is the exception. It has a text only when its class declares one (A5). Printing
 an instance of a class that declares none, or putting one into an interpolated string (L6), is
-the compile error `no-text`. An instance can reach itself through a `weak` reference, so a
+the compile error `no-text`. A throw is the one place where such an instance has a text, its
+class's name on the error line of `thrown` (O7; §5, the owner, 2026-11-20, issue 598, comment
+7051500939). An instance can reach itself through a `weak` reference, so a
 derived text would need a rule for where to stop. The case shows one line for each sentence of
 the first paragraph: a list, an `enum` value, a `data` value without fields, null and two
 `double`s; the texts of A3 and of the class cases have cases of their own.
@@ -275,6 +277,41 @@ class Counter(mut int Count)
 
 c = Counter(0)
 print(c)
+```
+
+Case: [outcomes/throw-instance-without-text.kz](../corpus/outcomes/throw-instance-without-text.kz)
+```kurz
+data Missing
+
+class Note(string Body, List<int> Marks)
+
+int | Note | Missing Find(int id) {
+    if id == 1 {
+        return Note("note {id}", [id, id])
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Rethrown(int id) {
+    v = Find(id) else {
+        Note n => {
+            print("seen {n.Body}")
+            throw n
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3))
+print(Rethrown(2))
+print(Rethrown(1))
 ```
 
 A value of a union (D9) shows the text of the value of its case: an `int | string` that holds 5
@@ -443,7 +480,11 @@ A3 and A4 make the text of a `data` value and of a list out of the texts of what
 an instance of a class a text only when its class declares one (A5). A list whose items are
 instances of a class that declares none has no text either, and neither has a `data` value with
 such a field: printing one, or putting it into an interpolated string (L6), is the compile error
-`no-text`, as for the instance itself. The type of what is held is known where it is printed.
+`no-text`, as for the instance itself. The type of what is held is known where it is printed. A throw
+is the one place where such a value has a text: a thrown `data` value or list that holds such an
+instance has the text A3 and A4 derive from what it holds, the instance's part of it being its
+class's name (O7) *(assumed, §5: the build's reading of the owner's answer of 2026-11-20, issue 598,
+comment 7051500939, which named the thrown instance)*.
 
 Case: [classes/print-list-without-text.kz](../corpus/classes/print-list-without-text.kz)
 ```kurz

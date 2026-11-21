@@ -1177,6 +1177,213 @@ the order of the union's cases (U30) *(assumed: as §5 marks it)*. The bare `thr
 raised (E3): it throws the case value that reached the arm, and nothing is raised a second time,
 because nothing catches.
 
+A bare `throw` is a use of the arm's name, the case it throws being that name's value: after a `move`
+that may have ended the name on a path that reaches the `throw`, it is `used-after-move` at the
+`throw`, naming the line of the `move`, as U12 has it for every use and as rustc refuses a use of a
+value after its move (E0382) (§5, the owner, 2026-11-20, issue 596, comment 7051500690). It holds for
+every type of the name, on every path on which the name may have moved, with U12's message, and an
+arm's name is declared without `mut` (V7), so that no assignment makes it live again *(assumed, §5:
+the readings of the product pass on issue 596, comment 7055001448)*. A thrown instance of a class
+that neither declares nor inherits a `Text()` (A9) is allowed, and the error line of `thrown` prints
+its class's name where a thrown value's text stands (chapter 12), for a `throw` of the instance and
+for a bare `throw` of such a case alike (§5, the owner, 2026-11-20, issue 598, comment 7051500939).
+The name is the bare name of the instance's own class, a derived instance thrown as its base giving
+its own, and a `print` of a `Reason` whose union holds such a class stays `no-text`, as A7 has it
+*(assumed, §5: Q2 and Q3 of comment 7055011193, at their defaults)*. A thrown value that holds such an
+instance, a `data` value or a list, has the text A3 and A4 derive from what it holds, the instance's
+part of it being its class's name, and the name stands where the type the thrown value has at the
+`throw` has no `Text()`, a derived class that declares its own among them *(assumed, §5: the build's
+reading, which the answer did not give)*.
+
+Case: [outcomes/else-throw-after-move.kz](../corpus/outcomes/else-throw-after-move.kz)
+```kurz
+data Missing
+
+int | List<int> | Missing Plain(int id) {
+    if id == 1 {
+        return [id, 7, 9]
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Use(move List<int> l) => l.Count
+
+int Rethrown(int id) {
+    v = Plain(id) else {
+        List<int> n => {
+            c = Use(move n)
+            print("used {c}")
+            throw
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3))
+print(Rethrown(1))
+```
+
+Case: [outcomes/else-throw-after-move-other-path.kz](../corpus/outcomes/else-throw-after-move-other-path.kz)
+```kurz
+data Missing
+
+int | List<int> | Missing Plain(int id) {
+    if id == 1 {
+        return [id, 7, 9]
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Use(move List<int> l) => l.Count
+
+int Rethrown(int id, bool give) {
+    v = Plain(id) else {
+        List<int> n => {
+            if give {
+                return Use(move n)
+            } else {
+                throw
+            }
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3, true))
+print(Rethrown(1, true))
+print(Rethrown(1, false))
+```
+
+Case: [outcomes/else-throw-after-read.kz](../corpus/outcomes/else-throw-after-read.kz)
+```kurz
+data Missing
+
+int | List<int> | Missing Plain(int id) {
+    if id == 1 {
+        return [id, 7, 9]
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Rethrown(int id) {
+    v = Plain(id) else {
+        List<int> n => {
+            print("seen {n.Count}")
+            throw
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3))
+print(Rethrown(1))
+```
+
+Case: [outcomes/throw-instance-without-text.kz](../corpus/outcomes/throw-instance-without-text.kz)
+```kurz
+data Missing
+
+class Note(string Body, List<int> Marks)
+
+int | Note | Missing Find(int id) {
+    if id == 1 {
+        return Note("note {id}", [id, id])
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Rethrown(int id) {
+    v = Find(id) else {
+        Note n => {
+            print("seen {n.Body}")
+            throw n
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3))
+print(Rethrown(2))
+print(Rethrown(1))
+```
+
+Case: [outcomes/else-throw-instance-without-text.kz](../corpus/outcomes/else-throw-instance-without-text.kz)
+```kurz
+data Missing
+
+class Note(string Body, List<int> Marks)
+
+int | Note | Missing Find(int id) {
+    if id == 1 {
+        return Note("note {id}", [id, id])
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Rethrown(int id) {
+    v = Find(id) else {
+        Note n => {
+            print("seen {n.Body}")
+            throw
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3))
+print(Rethrown(2))
+print(Rethrown(1))
+```
+
+Case: [outcomes/throw-derived-instance-without-text.kz](../corpus/outcomes/throw-derived-instance-without-text.kz)
+```kurz
+class Animal(string Name)
+
+class Dog(int Legs) : Animal
+
+void Fail(Animal a) {
+    throw a
+}
+
+print("before")
+Fail(Dog("rex", 4))
+```
+
 Case: [outcomes/bare-throw.kz](../corpus/outcomes/bare-throw.kz)
 ```kurz
 void Fail() {
