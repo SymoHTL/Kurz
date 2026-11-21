@@ -188,7 +188,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         "system/monotonic-clock.kz", "system/elapsed-order.kz", "functions/top-level-return.kz", "functions/top-level-return-end.kz",
         "actors/timeout-block.kz", "actors/timeout-callee-crash.kz", "actors/timeout-capped.kz", "actors/timeout-carried.kz", "actors/timeout-crashed.kz",
         "actors/timeout-crashed-early.kz", "actors/timeout-default.kz", "actors/timeout-send.kz", "actors/within-clauses.kz",
-        "actors/timeout-chain-nested.kz", "actors/timeout-chain-left.kz",
+        "actors/timeout-chain-nested.kz", "actors/timeout-chain-left.kz", "actors/timeout-gone-queued.kz",
     ];
 
     /// <summary>The cases of log calls that expect a run, which a build for Windows says <c>not supported</c> to (S11, P6).</summary>
@@ -382,6 +382,11 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         {
             // the error lines alone: the trace was split off above and is held below
             Assert.Matches($"^{Regex.Escape(line)}:\nbyte [0-9]+ is inside a code point\n$", error);
+        }
+        else if (header.ErrorId == ErrorIds.InvalidInput)
+        {
+            // U40, U41: the bound of zero or less on the line below, written as a duration's text is (assumed: T78 of comment 7055305138)
+            Assert.Matches($"^{Regex.Escape(line)}:\nthe bound of `within` is -?[0-9a-z]+; a bound is positive\n$", error);
         }
         else
         {
