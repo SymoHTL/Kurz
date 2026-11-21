@@ -411,6 +411,11 @@ public sealed partial class Checker
     /// </summary>
     private Typed CheckElse(ElseExpression e, bool isStatement, KurzType? expected)
     {
+        if (Unwrap(e.Call) is AttemptExpression attempt)
+        {
+            return CheckAttemptElse(e, attempt, isStatement, expected);
+        }
+
         if (e.Call is not CallExpression call)
         {
             // O5 gives the postfix `else` to a call, and the parser reads it after a call only, so that after anything else it is the parser's
@@ -444,13 +449,52 @@ public sealed partial class Checker
     }
 
     /// <summary>
+    /// U46, O5: <c>attempt { ... } else { Crashed c =&gt; ... }</c>, the arms over the cases of the <c>attempt</c>'s whole value beside its
+    /// block's value, as after a call (assumed: T18 of comment 6980152255), in which <c>Crashed</c> written with no type arguments names the
+    /// <c>Crashed</c> case, as the record's sample of section 6 writes it (assumed: a reading of the build, proposed with this record and not
+    /// put to the owner). The arms are the code of the function around the <c>attempt</c>, whose <c>Reason</c> the reading before found
+    /// (<see cref="AttemptResult"/>): what they report is dropped at the first reading, and at each reading after it an error among it stands
+    /// with the errors of the blocks of <c>on crash</c>, as theirs (<see cref="CheckCrashBlock"/>).
+    /// </summary>
+    private Typed CheckAttemptElse(ElseExpression e, AttemptExpression attempt, bool isStatement, KurzType? expected)
+    {
+        var result = AttemptResult(attempt, expected);
+        RecordThrough(e.Call, result); // the whole value: the arms take its cases after the success (O5)
+        if (result.IsError)
+        {
+            CheckArmsLoosely(e.Arms, afterAttempt: true);
+            return Typed.Error;
+        }
+
+        var union = (UnionType)result.Type;
+        var success = union.Cases[0];
+        Push();
+        CheckElseArms(e.Arms, success, union.Cases.Skip(1).ToList(), e.Line, e.Line, "an `attempt` (U46, O5)", "the `attempt` can give beside its block's value (U46, O5)", e.Call, (DataType)union.Cases[^1]);
+        var popped = Pop(commit: reasons is not null && !quietBlocks);
+        if (reasons is not null && !quietBlocks && popped.Any(d => d.IsError))
+        {
+            blockErrors.UnionWith(popped.Where(d => d.IsError));
+            erringAttempts.Add(attempt);
+        }
+
+        if (!isStatement && Types.IsVoid(success))
+        {
+            Report(ErrorIds.Syntax, e.Line, "an `attempt` whose block gives no value, used as a value (U46, O10)");
+            return Typed.Error;
+        }
+
+        return new Typed(success);
+    }
+
+    /// <summary>
     /// O5: the arms of an <c>else</c> over the cases of <paramref name="rest"/>, beside the success, of a call or of a loop's collection
     /// (S16); a case no arm handles leaves the function at <paramref name="line"/> (O2, O3, O9). An <c>else</c> with no arms where there
     /// is no case, after what <paramref name="after"/> names, is <c>unreachable-arm</c> at <paramref name="elseLine"/>, as an
     /// <c>else =&gt;</c> arm there is (section 5, the owner, 2026-11-02). An arm of a type that is none of the cases is
-    /// <c>type-mismatch</c>, "is no case" followed by <paramref name="wrong"/>, which names the call (O5) or the loop (S16).
+    /// <c>type-mismatch</c>, "is no case" followed by <paramref name="wrong"/>, which names the call (O5) or the loop (S16). After an
+    /// <c>attempt</c>, an arm's <c>Crashed</c> with no type arguments names its case <paramref name="crashed"/> (U46).
     /// </summary>
-    private void CheckElseArms(IReadOnlyList<MatchArm> arms, KurzType success, List<KurzType> rest, int line, int elseLine, string after, string wrong, Expression? subject = null)
+    private void CheckElseArms(IReadOnlyList<MatchArm> arms, KurzType success, List<KurzType> rest, int line, int elseLine, string after, string wrong, Expression? subject = null, DataType? crashed = null)
     {
         if (arms.Count == 0 && rest.Count == 0)
         {
@@ -483,7 +527,7 @@ public sealed partial class Checker
                     break;
                 case TypePattern tp:
                     {
-                        var type = Resolve(tp.Type);
+                        var type = crashed is not null && tp.Type is NamedType { Name: "Crashed", TypeArguments.Count: 0 } ? crashed : Resolve(tp.Type);
                         model.RecordPattern(tp, type);
                         if (Types.IsError(type))
                         {
@@ -554,8 +598,8 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>The arms of an <c>else</c> after a call that did not type: what does not depend on the call's cases is still checked, with the success unknown (E1).</summary>
-    private void CheckArmsLoosely(IReadOnlyList<MatchArm> arms)
+    /// <summary>The arms of an <c>else</c> after a call that did not type: what does not depend on the call's cases is still checked, with the success unknown (E1); after an <c>attempt</c>, <paramref name="afterAttempt"/>, an arm's <c>Crashed</c> with no type arguments names the case unknown too (U46).</summary>
+    private void CheckArmsLoosely(IReadOnlyList<MatchArm> arms, bool afterAttempt = false)
     {
         foreach (var arm in arms)
         {
@@ -564,7 +608,7 @@ public sealed partial class Checker
             {
                 case TypePattern tp:
                     {
-                        var type = Resolve(tp.Type);
+                        var type = afterAttempt && tp.Type is NamedType { Name: "Crashed", TypeArguments.Count: 0 } ? Types.Error : Resolve(tp.Type);
                         if (tp.Binding is not null)
                         {
                             DeclareChecked(tp.Binding, type, false, VariableKind.Binding, arm.Line, tp);

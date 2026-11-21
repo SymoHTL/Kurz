@@ -2610,9 +2610,9 @@ public sealed class Parser
                 continue;
             }
 
-            if (AtKeyword("else") && expression is CallExpression)
+            if (AtKeyword("else") && expression is CallExpression or AttemptExpression)
             {
-                var elseKeyword = Advance(); // O5: `call else { Case => ... }` handles the listed cases at the call, so only a call takes the postfix `else`
+                var elseKeyword = Advance(); // O5: `call else { Case => ... }` handles the listed cases at the call, so only a call takes the postfix `else`, and an `attempt`, whose value is a union as a call's (U46)
                 expression = new ElseExpression(elseKeyword.Line, expression, ParseArms(elseKeyword.Line, "`else`"));
                 continue;
             }
@@ -2725,7 +2725,8 @@ public sealed class Parser
 
                 if (token.Text is "attempt" or "retry" && At(TokenKind.LeftBrace) && headers == 0)
                 {
-                    // section 6: `attempt { ... }` and `retry { ... }`, its block, which the checker says `not supported` to; the words stay
+                    // section 6: `attempt { ... }` and `retry { ... }`, its block, which the checker reads (U46) and says `not supported` to
+                    // after `retry`; the words stay
                     // names elsewhere, and before the block of an `if`, a `while`, a `for` or a `match` outside brackets and braces, so that a
                     // variable of either name stands in a condition (U28; assumed: section 6, comment 6847932993, Q10, as Rust reads a struct
                     // literal in a condition)
