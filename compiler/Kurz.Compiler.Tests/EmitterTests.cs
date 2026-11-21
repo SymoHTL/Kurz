@@ -1585,7 +1585,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // takes the reply off the message after the method returned by one swap (`ReplyTaken`), as the crash's unhook does, so that one
         // of them owns it, as tokio's `oneshot` decides by one word (not checked at source); the owner reads the waiter, then stores the
         // reply's word with release, then wakes (`Replied`, `Signal`), the waiter loads it with acquire (`ReplyState`), which the
-        // waits, the readiness, the take and the crash call (`Wait`, its loop in the top-level code in `RootWait`, its loop in an activation and its
+        // waits, the readiness, the take and the crash call (`Answer`, its loop in the top-level code in `RootWait`, its loop in an activation and its
         // kind, `Ready`, `RunOne`, `Fall`), as the crash and the end take a reply by the swap (`Fall`, `EndActor`); a wake sets QUEUED by
         // one `or` (`Wake`), a take, a hold's end, a constructor's end and a restart's hold change the state word by one compare-exchange
         // (`Exchanged`) after a load with acquire, the restart's hold loading it with acquire again while a take holds the actor
@@ -1631,7 +1631,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         InOrder(Runtime("HeldAlone"), @"call i32 @""rt\.common\.Exchanged\.\d+""", @"load atomic i32, ptr %t\d+ acquire, align 4");
         const string state = @"call i32 @""rt\.common\.ReplyState\.\d+""", taken = @"call ptr @""rt\.common\.ReplyTaken\.\d+""";
-        InOrder(Runtime("Wait"), state, state);
+        InOrder(Runtime("Answer"), state, state);
         InOrder(Runtime("RootWait"), state);
         InOrder(Runtime("Ready"), state);
         InOrder(Runtime("RunOne"), state);
