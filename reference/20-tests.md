@@ -225,7 +225,7 @@ its own; the run goes on with the test after it (§11, the owner, 2026-11-20, is
 7051499099, Q2 of comment 6992687784 at its lean) *(assumed: F5 of comment 6993110710, a reading of the
 build said back there, for the line `deadlock` names)*. A test's code runs as its actor's, its calls of
 one chain (U17), and the runner's wait meets `deadlock` where the test's actor waits on a message only it
-can run, a block of its child's policy among them, as `tests/test-deadlock.kz` shows. The runner is the
+can run, a block of its child's policy among them, as `tests/test-deadlock.kz` shows. *(assumed: a reading of U17 and U18, proposed with the reading of comment 6998754650 and not put to the owner)* The runner is the
 root actor, which runs the tests in place of the program's statements, and each test's actor is its child
 with the policy `stop` (U25), so that a crash of the test's actor fails that test and nothing restarts
 (§11, the owner, 2026-11-20, comment 7051499099, Q13 (a) of comment 6998786049 at its lean). An error that
