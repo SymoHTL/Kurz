@@ -3272,8 +3272,8 @@ Case: [actors/block-escalate.kz](../corpus/actors/block-escalate.kz)
 
 Case: [actors/waitline-stop.kz](../corpus/actors/waitline-stop.kz)
 ```kurz
-// `Right` gets `deadlock` and its policy stops it: `Left`'s call queued in its inbox raises `actor-gone`, and `Left` restarts
-// and answers the top-level code's call (U62, U25)
+// `Right` gets `deadlock` and its policy stops it: `Left`'s call queued in its inbox raises `actor-gone`, which `Left`'s block
+// reads, and `Left` restarts and answers the top-level code's call (U62, U25, U28)
 
 actor Left {
     pub void Ask(Right other) {
@@ -3291,7 +3291,13 @@ actor Right {
     pub int Value() => 2
 }
 
-l = spawn Left()
+l = spawn Left() on crash (c) {
+    match c.Reason {
+        RuntimeError e => print(e.Kind)
+    }
+
+    restart
+}
 r = spawn Right() on crash stop
 send l.Ask(r)
 send r.Ask(l)
@@ -3779,6 +3785,8 @@ send l.Ask(r)
 send r.Ask(l)
 print(l.Value())
 ```
+
+Case: [actors/waitline-stop.kz](../corpus/actors/waitline-stop.kz)
 
 ### U29 (decided, §6) The decisions
 
