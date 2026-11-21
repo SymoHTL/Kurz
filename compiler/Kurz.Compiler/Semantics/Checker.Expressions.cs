@@ -122,8 +122,7 @@ public sealed partial class Checker
             case SpawnExpression s:
                 return CheckSpawn(s); // U2
             case AttemptExpression a:
-                NotSupported(a.Line, $"`{a.Word} {{ ... }}`, the block that keeps a crash to a piece of code (section 6, U28)");
-                return Typed.Error;
+                return CheckAttempt(a, expected, keepCases); // U46
             default:
                 throw new InvalidOperationException(expression.GetType().Name);
         }
@@ -544,6 +543,13 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (classes.TryGetValue(n.Name, out var perNode) && perNode.PerNode)
+        {
+            // U51, T31 and T32 of comment 6983903100 (assumed): the name of a `per node` actor stands before a call or a `send` alone
+            Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is declared `per node`, and its name stands before a call of its method, `{n.Name}.M(...)`, and no value stands here: inside it, `this` is its reference (U51, U10; E4)");
+            return Typed.Error;
+        }
+
         if (classes.ContainsKey(n.Name))
         {
             Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a class, and no value stands here: an instance is made by `{n.Name}(...)` (K1; E4)");
@@ -693,7 +699,9 @@ public sealed partial class Checker
 
             if (classes.TryGetValue(n.Name, out var classSymbol) && ImplicitField(n.Name) is null)
             {
-                return ClassStaticMember(classSymbol, m); // K7, K18, K19
+                return classSymbol.PerNode
+                    ? ActorMember(new ActorType(classSymbol), m.Member, m.Line) // U51: a member of a `per node` actor's name, as of its reference (U8)
+                    : ClassStaticMember(classSymbol, m); // K7, K18, K19
             }
 
             if (interfaces.ContainsKey(n.Name) && ImplicitField(n.Name) is null)

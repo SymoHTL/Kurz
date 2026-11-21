@@ -133,11 +133,11 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// Whether the expression runs a call as it runs: a call, a <c>spawn</c>, a property's read, a <c>match</c> with a statement in an arm,
-    /// or a part that does (U17, M7).
+    /// Whether the expression runs a call as it runs: a call, a <c>spawn</c>, an <c>attempt</c>, which waits for its child as a call waits
+    /// (U49), a property's read, a <c>match</c> with a statement in an arm, or a part that does (U17, M7).
     /// </summary>
     private bool Calls(Expression e) =>
-        e is CallExpression or SpawnExpression
+        e is CallExpression or SpawnExpression or AttemptExpression
         || model.PropertyCallOf(e) is not null
         || (e is MatchExpression m && m.Arms.Any(a => a.Body is Block))
         || Parts(e).Any(Calls);
@@ -231,6 +231,7 @@ public sealed partial class Checker
         ThrowStatement { Value: { } v } => Muts(v),
         RawBlock r => Muts(r.Body),
         WithinStatement w => Muts(w.Bound).Concat(Muts(w.Body)),
+        AssertionStatement a => Muts(a.Condition),
         _ => [],
     };
 

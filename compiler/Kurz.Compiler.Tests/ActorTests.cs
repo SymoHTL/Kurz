@@ -37,9 +37,9 @@ namespace Kurz.Compiler.Tests;
 /// </summary>
 public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
-    private (int Code, IReadOnlyList<string> Output, string Error) BuildAndRun(string text, CheckedRuntime runtime, string name, bool testBuild = true, string? trace = "0")
+    private (int Code, IReadOnlyList<string> Output, string Error) BuildAndRun(string text, CheckedRuntime runtime, string name, bool testBuild = true, string? trace = "0", bool tests = false)
     {
-        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], runtime, testBuild);
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], runtime, testBuild, tests: tests);
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         return Toolchain.Run(toolchain.Build(compilation.Program, name), trace);
     }
@@ -315,7 +315,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// std/ whose allocator counts the blocks it gives and takes back, read by the program through <c>HttpServer.Allocated()</c> and
     /// <c>HttpServer.Live()</c>, a class of std/ the program sees (W1).
     /// </summary>
-    private static readonly Lazy<CheckedRuntime> Blocks = new(() => ListTests.Edited(
+    internal static readonly Lazy<CheckedRuntime> Blocks = new(() => ListTests.Edited(
         ("std/std.kz", "pub byte* Allocate(long size) {\n    mut byte* p = null\n", """
             thread static mut long allocated = 0
             thread static mut long freed = 0
@@ -900,10 +900,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // the operands of an expression that one of its operands leaves (the Rust Reference, "Destructors", drop scopes, operands;
         // issue 569): the instance of the larger class, made second, is freed before the smaller one, made first, a copy where the
         // call makes two, and no other block is freed while the program records but the tables of the session of those two copies,
-        // which its end frees first (`CopyAbort`), before the instance made after the first copy, larger than the instances of `Small`
-        // (24 bytes) and of `Large` (32); a call's one copy is let go of among the values its arguments made, the last made first, so
-        // that the copy, made second, goes before the instance made first, and the instance, made second, before the copy made first,
-        // after the tables of the copy's own session, which its copy ends (R1)
+        // which its end frees first (`CopyAbort`), before the instance made after the first copy, the tables larger than the instances
+        // of `Small` (24 bytes) and of `Large` (32); a call's one copy is let go of among the values its arguments made, the last made
+        // first, so that the copy, made second, goes before the instance made first, and the instance, made second, before the copy
+        // made first, after the tables of the copy's own session, which ends when the copy is made (R1)
         const string program = """
             data Missing
 
@@ -3197,6 +3197,16 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran((ended.Code, ended.Output, endedRest), 0, ["tick 2 1", "5", "2 2"], "");
     }
 
+    /// <summary>
+    /// The runtime under the allocator that makes every freed block inaccessible, whose <c>EndActor</c> writes 16 into the word of the heap
+    /// of a record it frees, before the free, since the pages of a freed heap stay mapped in the allocator's pool, which the fence does not
+    /// reach, so that a read of a freed record's heap ends the run.
+    /// </summary>
+    private static CheckedRuntime PoisonedEnds => ListTests.Edited([.. ListTests.Fence, ("runtime/common/runtime.kz", "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            std.HeapFree(state - 192)\n",
+            "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 192)\n"),
+            ("runtime/common/runtime.kz", "    } else if ended && (seen & 2) == 0 {\n        raw {\n            std.HeapFree(state - 192)\n",
+            "    } else if ended && (seen & 2) == 0 {\n        raw {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 192)\n")]);
+
     [Fact]
     public void A_child_whose_supervisor_ended_while_it_waited_takes_its_own_crash_and_writes_its_log_line()
     {
@@ -3204,8 +3214,9 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // in `Work` for `S.Get()`, so that `Child` ends after its current message with no supervisor (the runtime's `EndChildren`, section 6,
         // assumed there); its crash after the wait is taken by its own end, and its log line written, reading nothing of the freed
         // supervisor; under the allocator that makes every freed block inaccessible, and with the word of the heap of a record its end
-        // frees at once written 16 before the free, since the pages of a freed heap stay mapped in the allocator's pool, which the fence
-        // does not reach, so that a read of the freed supervisor's heap ends the run
+        // frees at once, or the end of its hold frees where a thread held it (section 6, assumed there), written 16 before the free, since
+        // the pages of a freed heap stay mapped in the allocator's pool, which the fence does not reach, so that a read of the freed
+        // supervisor's heap ends the run
         const string text = """
             actor Slow {
                 pub int Get() => 7
@@ -3250,11 +3261,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(s.Get())
 
             """;
-        var poisoned = ListTests.Edited([.. ListTests.Fence, ("runtime/common/runtime.kz", "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            std.HeapFree(state - 192)\n",
-            "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 192)\n"),
-            ("runtime/common/runtime.kz", "    } else if ended && (seen & 2) == 0 {\n        raw {\n            std.HeapFree(state - 192)\n",
-            "    } else if ended && (seen & 2) == 0 {\n        raw {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 192)\n")]);
-        var run = BuildAndRun(text, poisoned, "actor-orphan-crash");
+        var run = BuildAndRun(text, PoisonedEnds, "actor-orphan-crash");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Parent#3 crashed: thrown \"parent\" at program.kz:26", "Child#4 crashed: thrown \"child 7\" at program.kz:12"], crashes);
         Ran((run.Code, run.Output, rest), 0, ["0", "7"], "");
@@ -3587,10 +3594,11 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_spawn_makes_the_block_of_its_knobs_only_where_it_writes_after_or_max()
     {
-        // U26: the first pause, the limit's count and window, the ring of the crash times and the place of the `spawn` stand in a block of
-        // their own in the supervisor's heap, made where `after` or `max N in` is written, so that the block of a restart that writes
-        // neither grows by one word alone and an idle actor stays within its 512 bytes (section 13)
-        const string knobs = "{ i64, i64, i64, ptr, i64, i64, i64, %kz.str, i64 }";
+        // U26: the first pause, the limit's count and window, the ring of the crash times, the place of the `spawn` and the word that
+        // marks a `per node` type's block (U54) stand in a block of their own in the supervisor's heap, made where `after` or `max N in`
+        // is written, so that the block of a restart that writes neither grows by one word alone and an idle actor stays within its 512
+        // bytes (section 13)
+        const string knobs = "{ i64, i64, i64, ptr, i64, i64, i64, %kz.str, i64, i64 }";
         string Ir(string spawn)
         {
             var compilation = Builder.Compile(SourceText.FromString("program.kz", $"actor A {{\n    pub int Get() => 1\n}}\n\na = {spawn}\nprint(a.Get())\n"), [], toolchain.Runtime, true);
@@ -4553,6 +4561,120 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_building_actor_woken_and_then_ended_by_its_spawners_crash_frees_its_heap_when_the_scheduler_takes_it_off()
+    {
+        // U13, U17, section 6 (comment 6919351399): `Boss`'s constructor, which runs in `Spawner`'s message, spawns `Worker`, whose crash
+        // posts its block to `Boss` and so puts an entry of `Boss` in the run queue while its constructor waits; `Esc`'s crash escalates to
+        // `Spawner`, whose fall ends `Boss` with that entry still queued and BUILDING still in its state word, since its constructor never
+        // ends; the scheduler's take of that entry then finds the actor ended and frees its first page, as it frees one that no constructor
+        // holds, so that the heaps drop by one, `Spawner`'s, as they do where `Boss` was never woken; under the allocator that makes every
+        // freed block inaccessible
+        const string worker = """
+            actor Worker {
+                pub void Fail() {
+                    throw "fails"
+                }
+            }
+
+            Worker Started() {
+                w = spawn Worker() on crash (c) {
+                    print("block")
+                    stop
+                }
+
+                send w.Fail()
+                return w
+            }
+
+
+            """;
+        const string text = """
+            actor Esc {
+                pub void Boom() {
+                    throw "boom"
+                }
+            }
+
+            actor Other {
+                pub int Ping() => 1
+            }
+
+            int Armed(Esc e) {
+                send e.Boom()
+                return 0
+            }
+
+            actor Boss(Other O, Esc E) {
+            WOKEN    int armed = Armed(E)
+                int first = O.Ping()
+
+                pub int Sum() => armed + first
+            }
+
+            actor Spawner(Other O) {
+                mut Boss? boss = null
+
+                pub void Make() {
+                    e = spawn Esc() on crash escalate
+                    boss = spawn Boss(O, e)
+                }
+            }
+
+            o = spawn Other()
+            t = spawn Other()
+            s = spawn Spawner(o) on crash stop
+            before = HttpServer.Heaps()
+            send s.Make()
+            print(t.Ping())
+            print(t.Ping())
+            print(t.Ping())
+            print(before - HttpServer.Heaps())
+
+            """;
+        var woken = BuildAndRun(worker + text.Replace("WOKEN", "    Worker w = Started()\n"), ListTests.Edited([.. ListTests.Fence, .. HeapCount]), "actor-building-ended");
+        var never = BuildAndRun(worker + text.Replace("WOKEN", "    Worker? w = null\n"), ListTests.Edited([.. ListTests.Fence, .. HeapCount]), "actor-building-ended-control");
+        var (crashes, rest) = Logged(woken.Error);
+        Assert.Equal(["Spawner#3 crashed: thrown \"boom\" at program.kz:19"], crashes);
+        Assert.Equal(crashes, Logged(never.Error).Crashes);
+        Ran((woken.Code, woken.Output, rest), 0, ["1", "1", "1", "1"], "");
+        Ran((never.Code, never.Output, Logged(never.Error).Others), 0, ["1", "1", "1", "1"], "");
+    }
+
+    [Fact]
+    public void A_crash_in_the_release_of_a_messages_arguments_answers_the_waiting_call_callee_crashed()
+    {
+        // U12, U19, U20: the message's function lets go of the method's arguments before it takes the reply off the message by its swap,
+        // so that a crash in that release is the callee's crash before it answered, which takes the reply and answers the waiting call
+        // `callee-crashed` at its line, for a method with no result as for one with a result; here the release of a value of 200 nested
+        // data types, each beside a string, whose emitted helpers take each level by value, about 320 KB of frames, overflows the 64 KiB
+        // stack of `Sink`, and fits its default 2 MiB; a release after the swap left the waiting call of the method with no result
+        // unanswered, the top-level code's wait ending in `deadlock`; under the allocator that makes every freed block inaccessible
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // an actor's overflow on Windows ends the process as the system ends it (compiler/README.md)
+        }
+
+        var types = "data D0(string S)\n" + string.Concat(Enumerable.Range(1, 200).Select(k => $"data D{k}(D{k - 1} A, string B)\n"))
+            + "\nD200 Make(int seed) {\n    D0 v0 = D0(\"x{seed}\")\n"
+            + string.Concat(Enumerable.Range(1, 200).Select(k => $"    D{k} v{k} = D{k}(v{k - 1}, \"y{{seed}}\")\n")) + "    return v200\n}\n\n";
+        const string none = "    pub void Take(D200 d) {\n        n = n + 1\n    }\n";
+        const string some = "    pub int Take(D200 d) {\n        n = n + 1\n        return n\n    }\n";
+        string Program(string clause, string take, string call) => types + $"actor Sink{clause} {{\n    mut int n = 0\n\n{take}\n    pub int Get() => n\n}}\n\n"
+            + $"s = spawn Sink()\nvalue = Make(7)\nprint(\"before\")\n{call}\nprint(\"answered\")\nprint(s.Get())\n";
+
+        Ran(BuildAndRun(Program(string.Empty, none, "s.Take(value)"), ListTests.Fenced, "actor-release-fits"), 0, ["before", "answered", "1"], "");
+        foreach (var (take, call, name) in new[] { (none, "s.Take(value)", "actor-release-crash"), (some, "print(s.Take(value))", "actor-release-crash-result") })
+        {
+            var text = Program(" stack 64kb", take, call);
+            var run = BuildAndRun(text, ListTests.Fenced, name, trace: null);
+            var (crashes, rest) = Logged(run.Error);
+            Assert.True(crashes is [var crash] && crash.StartsWith("Sink#1 crashed: stack-overflow", StringComparison.Ordinal), string.Join("; ", crashes) + rest);
+            Assert.Equal((1, "before"), (run.Code, string.Join(", ", run.Output)));
+            Assert.StartsWith($"error: callee-crashed at program.kz:{text[..text.IndexOf("s.Take(value)", StringComparison.Ordinal)].Count(c => c == '\n') + 1}\n", rest, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void A_throw_in_the_block_crashes_the_supervisor_and_the_child_stays_stopped()
     {
         // U32: the block's throw is `Boss`'s crash, after the child's log line as for a `stop` (S10 of comment 6907441402); the crash ends
@@ -4805,6 +4927,331 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         // the bound is read against a reading: `Resident` gives -1 where it reads none, which a growth of 0 would hide
         Assert.True(long.Parse(run.Output[2], System.Globalization.CultureInfo.InvariantCulture) > 0, $"the resident memory before the run read {run.Output[2]}");
+    }
+
+    /// <summary>
+    /// The function a program of a test of the memory of `per node` actors reads its resident memory with, in KiB, -1 where it reads
+    /// none, and its probe, an actor whose answer runs after every message queued before it on the one thread (U35).
+    /// </summary>
+    private const string PerNodeMemory = """
+        long | IoError Resident() {
+            bytes = File.ReadAll("/proc/self/status")
+            text = string.FromUtf8(bytes) else {
+                InvalidUtf8 => ""
+            }
+
+            for line in text.Split('\n') {
+                if line.StartsWith("VmRSS:") {
+                    return long.Parse(line.Replace("VmRSS:", "").Replace("kB", "").Trim()) else {
+                        ParseError => -1
+                    }
+                }
+            }
+
+            return -1
+        }
+
+        actor Probe {
+            pub int Ping() => 0
+        }
+
+        p = spawn Probe()
+
+        """;
+
+    /// <summary>
+    /// The program of a test of the memory of `per node` actors: <paramref name="actors"/>, then <paramref name="round"/> run 1,000 times to
+    /// warm the pools and 10,000 times between two readings of the resident memory, with <c>i</c> its count, adding to <c>total</c>; it
+    /// prints the total, then the two readings.
+    /// </summary>
+    private static string PerNodeRounds(string actors, string round) => actors + PerNodeMemory + $$"""
+        mut total = 0
+        for i in 0..<1000 {
+        {{round}}
+        }
+
+        before = Resident() else {
+            IoError e => -1
+        }
+
+        for i in 0..<10000 {
+        {{round}}
+        }
+
+        after = Resident() else {
+            IoError e => -1
+        }
+
+        print(total)
+        print(before)
+        print(after)
+
+        """;
+
+    [Theory]
+    [InlineData("restart", "", "    send Flaky.Fail(\"r {i}\")\n    total = total + Flaky.Ping() + p.Ping()", 1)]
+    [InlineData("stop", " on crash stop", "    total = total + Flaky.Ping()\n    send Flaky.Fail(\"s {i}\")\n    total = total + p.Ping()", 1)]
+    [InlineData("limit", " on crash restart max 1 in 1min", "    send Flaky.Fail(\"a {i}\")\n    total = total + Flaky.Ping()\n    send Flaky.Fail(\"b {i}\")\n    total = total + p.Ping()", 2)]
+    public void Memory_stays_flat_over_ten_thousand_crashes_of_a_per_node_actor(string name, string policy, string round, int crashes)
+    {
+        // U54 (assumed: T30 of issue 519, comment 6983903100): a restart in place frees the crashed instance's heap whole (U21), and a
+        // crash under `stop` or past `max N in` ends the actor and frees its heap, its record and its slot, so that the message after it
+        // starts a fresh one in a heap of its own; 10,000 rounds after 1,000 that warm the pools grow the resident memory by less than
+        // 256 KiB, a tenth of what a page of 256 bytes kept per round would add; the pauses stood in for, and `Probe`'s answer runs after
+        // the crash that ends the actor, on the one thread (U35)
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // no `/proc/self/status` reads the resident memory on Windows
+        }
+
+        var actors = $$"""
+            actor Flaky per node{{policy}} {
+                mut List<string> seen = []
+
+                pub void Fail(string s) {
+                    seen.Add(s)
+                    throw "flaky fails at {s}"
+                }
+
+                pub int Ping() => seen.Count + 1
+            }
+
+
+            """;
+        var run = BuildAndRun(PerNodeRounds(actors, round), StoodIn(print: false), $"actor-per-memory-{name}");
+        Assert.Equal((0, 11000 * crashes), (run.Code, Logged(run.Error).Crashes.Count));
+        Assert.Equal("11000", run.Output[0]);
+        var grown = Grown(run.Output[1], run.Output[2]);
+        Assert.True(grown < 256, $"10,000 rounds of a `per node` actor under {name} grow the resident memory by {grown} KiB");
+    }
+
+    [Fact]
+    public void Memory_stays_flat_over_ten_thousand_starts_of_a_per_node_actor_that_throw()
+    {
+        // U52 (assumed: T29 of issue 519, comment 6983903100): the defaults of `Cache` throw on `User`'s stack, which is `User`'s crash,
+        // and its stop ends `Cache`, its child while it is built, freeing the heap its defaults allocated in, its record and its slot, so
+        // that 10,000 such starts after 1,000 that warm the pools grow the resident memory by less than 256 KiB
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // no `/proc/self/status` reads the resident memory on Windows
+        }
+
+        const string actors = """
+            List<string> Words(string s) {
+                words = ["start", s]
+                throw "start fails at {words[1]}"
+            }
+
+            actor Cache per node {
+                List<string> words = Words("cache")
+
+                pub int Get() => words.Count
+            }
+
+            actor User {
+                pub void Use() {
+                    print(Cache.Get())
+                }
+            }
+
+
+            """;
+        var run = BuildAndRun(PerNodeRounds(actors, "    u = spawn User() on crash stop\n    send u.Use()\n    total = total + p.Ping() + 1"), StoodIn(print: false), "actor-per-memory-start");
+        Assert.Equal((0, 11000), (run.Code, Logged(run.Error).Crashes.Count));
+        Assert.Equal("11000", run.Output[0]);
+        var grown = Grown(run.Output[1], run.Output[2]);
+        Assert.True(grown < 256, $"10,000 starts of a `per node` actor that throw grow the resident memory by {grown} KiB");
+    }
+
+    [Fact]
+    public void A_fresh_per_node_actor_past_its_limit_pauses_first_and_counts_its_window_from_its_start()
+    {
+        // U54 (assumed: a reading of the build, proposed with this record and not put to the owner): the second crash of each round
+        // passes `max 1 in 1min` and ends `Flaky`, and the fresh one the round after starts takes its first crash with a first pause, 100 ms
+        // within 20% either way, and restarts in place, the crash of the actor before it no longer in its window, where the pause the
+        // ended actor left would double and its count would end the fresh one at its first crash; read through the clock of the pauses,
+        // which this runtime stands in for
+        const string text = """
+            actor Flaky per node on crash restart max 1 in 1min {
+                pub void Fail() {
+                    throw "flaky"
+                }
+
+                pub int Ping() => 1
+            }
+
+            actor Probe {
+                pub int Ping() => 9
+            }
+
+            p = spawn Probe()
+            for i in 0..<3 {
+                send Flaky.Fail()
+                print(Flaky.Ping())
+                send Flaky.Fail()
+                print(p.Ping())
+            }
+
+            """;
+        var run = BuildAndRun(text, StoodIn(print: true), "actor-per-fresh-pause");
+        Assert.Equal((0, 6), (run.Code, Logged(run.Error).Crashes.Count));
+        Assert.Equal(9, run.Output.Count);
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.Equal(("1", "9"), (run.Output[(3 * i) + 1], run.Output[(3 * i) + 2]));
+            var slept = long.Parse(run.Output[3 * i]["pause ".Length..], System.Globalization.CultureInfo.InvariantCulture);
+            Assert.True(slept >= 80 && slept <= 120, $"round {i}: a pause of {slept} ms where 100 ms within 20% was expected");
+        }
+    }
+
+    [Fact]
+    public void A_per_node_actors_defaults_allocate_in_its_heap_after_a_wait_inside_a_message()
+    {
+        // section 3, U52 (assumed: T29 of issue 519, comment 6983903100): the defaults of a `per node` actor run on its first caller's
+        // stack in its own heap, as a `spawn`'s run (U3); a default whose call waits, inside `Owner`'s message, parks that message, and the
+        // runtime's `Wait` serves the heap of the actor being built again, so that the string the default makes after the call is a block of
+        // that heap, as it is for `Top`, which the top-level code starts
+        const string program = """
+            actor Sizes per node {
+                pub int Size() => 3
+            }
+
+            actor Top per node {
+                string name = "top {Sizes.Size()}"
+
+                pub string Name() => name
+
+                pub long Live() => HttpServer.HeapLive()
+            }
+
+            actor Pool per node {
+                string name = "pool {Sizes.Size()}"
+
+                pub string Name() => name
+
+                pub long Live() => HttpServer.HeapLive()
+            }
+
+            actor Owner {
+                pub long Started() => Pool.Live()
+            }
+
+            print(Top.Live())
+            print(spawn Owner().Started())
+
+            """;
+        Ran(BuildAndRun(program, HeapBlocks.Value, "actor-per-wait-heap"), 0, ["2", "2"], "");
+    }
+
+    [Fact]
+    public void Every_per_node_actors_heap_is_freed_whole_at_the_end_of_the_program()
+    {
+        // U53 (assumed: said back with T27 to T33 of issue 519, comment 6983903100): a `per node` actor ends with the process, its heap
+        // freed with every actor's (U13; ListTests.EndingActors, the runtime's `EndActors`), the one `stop` would end among them
+        const string program = """
+            actor Counter per node {
+                pub int Get() => 1
+            }
+
+            actor Stopping per node on crash stop {
+                pub int Get() => 2
+            }
+
+            print(Counter.Get() + Stopping.Get())
+            before = HttpServer.Heaps()
+            eprint("end actors")
+            print(before - HttpServer.Heaps())
+
+            """;
+        Ran(BuildAndRun(program, ListTests.Edited([.. HeapCount, ListTests.EndingActors]), "actor-per-heaps-ended"), 0, ["3", "2"], "");
+    }
+
+    [Fact]
+    public void A_per_node_actor_ended_by_a_start_that_threw_a_stop_or_its_limit_is_read_no_more_and_a_fresh_one_starts()
+    {
+        // U52, U54 (assumed: T29 and T30 of issue 519, comment 6983903100): `Failing`'s defaults throw on `User`'s stack, whose stop ends
+        // it while it is built, `Counter`'s crash under `stop` ends it, and `Limited`'s second crash passes its limit and ends it; each
+        // message after that finds no actor by the cell's slot and number and starts a fresh one, reading nothing of the record its end
+        // freed; under the allocator that makes every freed block inaccessible, with the word of the heap of a record its end frees
+        // written 16 before the free (PoisonedEnds)
+        const string text = """
+            List<string> Words(string s) {
+                words = ["start", s]
+                throw "start fails at {words[1]}"
+            }
+
+            actor Failing per node {
+                List<string> words = Words("failing")
+
+                pub int Get() => words.Count
+            }
+
+            actor Counter per node on crash stop {
+                mut List<string> seen = []
+
+                pub void Add(string s) {
+                    seen.Add(s)
+                }
+
+                pub void Fail() {
+                    throw "counter fails at {seen.Count}"
+                }
+
+                pub int Get() => seen.Count
+            }
+
+            actor Limited per node on crash restart max 1 in 1min {
+                mut List<string> seen = []
+
+                pub void Add(string s) {
+                    seen.Add(s)
+                }
+
+                pub void Fail() {
+                    throw "limited fails at {seen.Count}"
+                }
+
+                pub int Get() => seen.Count
+            }
+
+            actor User {
+                pub void Use() {
+                    print(Failing.Get())
+                }
+            }
+
+            actor Probe {
+                pub int Ping() => 9
+            }
+
+            p = spawn Probe()
+            print(Counter.Get())
+            send Counter.Fail()
+            print(p.Ping())
+            send Counter.Add("b")
+            print(Counter.Get())
+            send Limited.Add("a")
+            send Limited.Fail()
+            print(Limited.Get())
+            send Limited.Fail()
+            print(p.Ping())
+            print(Limited.Get())
+            for i in 0..<2 {
+                u = spawn User() on crash stop
+                send u.Use()
+                print(p.Ping())
+            }
+
+            """;
+        var run = BuildAndRun(text, PoisonedEnds, "actor-per-ends-poisoned");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal([
+            "Counter#2 crashed: thrown \"counter fails at 0\" at program.kz:20",
+            "Limited#4 crashed: thrown \"limited fails at 1\" at program.kz:34",
+            "Limited#4 crashed: thrown \"limited fails at 0\" at program.kz:34",
+            "User#6 crashed: thrown \"start fails at failing\" at program.kz:3",
+            "User#8 crashed: thrown \"start fails at failing\" at program.kz:3"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["0", "9", "1", "0", "9", "0", "9", "9"], "");
     }
 
     [Fact]
@@ -5946,10 +6393,14 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_clauses_bound_runs_after_the_arguments_and_a_declarations_literal_bounds_each_call()
     {
         // U39, F12: the bound of a call's clause runs after the call's arguments, as it is written after them, and the literal of a
-        // declaration's clause bounds every call of the method that names none, which answers within it
+        // declaration's clause bounds every call of the method that names none: `Add`'s answers within its 2 seconds, and `Late`'s, whose
+        // literal of 0 s is a deadline that has passed at each call (U41; assumed: a reading of the build), raises `call-timeout` at its
+        // line, which only that literal bounds
         const string text = """
             actor Store {
                 pub int Add(int x) within 2s => x + 1
+
+                pub int Late() within 0s => 0
             }
 
             int Note(string text, int x) {
@@ -5965,9 +6416,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             s = spawn Store()
             print(s.Add(Note("argument", 1)) within Bound("bound"))
             print(s.Add(2))
+            print(s.Late())
 
             """;
-        Ran(BuildAndRun(text, toolchain.Runtime, "actor-clause-order"), 0, ["argument", "bound", "2", "3"], "");
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-clause-order"), 1, ["argument", "bound", "2", "3"], "error: call-timeout at program.kz:20\n");
     }
 
     [Fact]
@@ -6018,5 +6470,432 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Parent#1 crashed: thrown \"parent\" at program.kz:19"], crashes);
         Ran((run.Code, run.Output, rest), 1, [], "error: actor-gone at program.kz:30\n");
+    }
+
+    /// <summary>
+    /// The count of the blocks of more than 262144 bytes of the heap the allocation entry serves, an actor's own inside its message, each
+    /// on its heap's list of such blocks (<c>Enlist</c> in <c>std/std.kz</c>), read as <c>HttpServer.Big()</c>.
+    /// </summary>
+    private static (string Path, string Old, string New)[] BigBlocks =>
+    [
+        ("std/std.kz", "pub class HttpServer {\n", """
+            pub class HttpServer {
+                pub static long Big() {
+                    mut long n = 0
+                    byte* heap = HeapCurrent()
+                    raw {
+                        mut byte* at = *Ptr<byte*>(heap + 24)
+                        while at != null {
+                            n = n + 1
+                            at = *Ptr<byte*>(at + 8)
+                        }
+                    }
+
+                    return n
+                }
+
+            """),
+    ];
+
+    [Fact]
+    public void A_message_whose_clauses_bound_crashes_its_builder_leaves_no_block_in_its_callees_heap()
+    {
+        // U39, U12, U19: the bound `ds[i]` runs after the message and the copy of its list were built, and its `index-out-of-range` crashes
+        // `Front`, the actor whose code builds them, before their queueing; the message is built in a heap of its own, which that crash
+        // frees, so that `Store`'s heap holds no more blocks than it held before, where a message built in `Store`'s heap would leave the
+        // list's copy there, unqueued; `Held` is the control that the count sees that copy in `Store`'s heap while its message runs; under
+        // the allocator that makes every freed block inaccessible
+        const string text = """
+            actor Store {
+                pub long Held(List<int> xs) => HttpServer.Big()
+
+                pub long Big() => HttpServer.Big()
+            }
+
+            actor Front {
+                pub void Ask(Store s, List<duration> ds, int i, long start) {
+                    mut xs = List<int>()
+                    for n in 0..<40000 {
+                        xs.Add(n)
+                    }
+
+                    held = s.Held(xs) within ds[i]
+                    print(held - start)
+                }
+
+                pub int Ping() => 2
+            }
+
+            store = spawn Store()
+            f = spawn Front()
+            before = store.Big()
+            send f.Ask(store, [1s], 0, before)
+            send f.Ask(store, [1s], 1, before)
+            print(f.Ping())
+            print(store.Big() - before)
+
+            """;
+        var run = BuildAndRun(text, ListTests.Edited([.. ListTests.Fence, .. BigBlocks]), "actor-clause-bound-crashes");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Front#2 crashed: index-out-of-range at program.kz:14"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["1", "2", "0"], "");
+    }
+
+    // ---- the block `attempt { ... }` (U46 to U50; assumed: T18 to T23 of #519, comment 6980152255) --------------------------------
+
+    /// <summary>
+    /// A round of <c>attempt</c>s by <c>i</c>: a <c>Note</c> thrown where <c>i % 3</c> is 0, the runtime's <c>index-out-of-range</c> where it
+    /// is 2, else a string built from a copy of the instance <c>kept</c> the block takes; each <c>Crashed</c> read into a string by its
+    /// <c>Reason</c>; and <c>Resident</c>, the resident memory in KiB.
+    /// </summary>
+    private const string AttemptRounds = """
+        class Note(mut string Why, List<int> Codes) {
+            pub string Text() => Why
+        }
+
+        int Use(Note n) => n.Codes.Count
+
+        string Read(Note | RuntimeError r) {
+            match r {
+                Note n => return "{n.Why} {n.Codes}"
+                RuntimeError e => return "{e.Kind}"
+            }
+        }
+
+        string Round(Note kept, int i) {
+            v = attempt {
+                if i % 3 == 0 {
+                    throw Note("lost {i}", [i, 2])
+                }
+
+                xs = [1]
+                return "{Use(copy kept)} {xs[i % 3 - 1]}"
+            } else {
+                Crashed c => Read(c.Reason)
+            }
+
+            return v
+        }
+
+        long | IoError Resident() {
+            bytes = File.ReadAll("/proc/self/status")
+            text = string.FromUtf8(bytes) else {
+                InvalidUtf8 => ""
+            }
+
+            for line in text.Split('\n') {
+                if line.StartsWith("VmRSS:") {
+                    return long.Parse(line.Replace("VmRSS:", "").Replace("kB", "").Trim()) else {
+                        ParseError => -1
+                    }
+                }
+            }
+
+            return -1
+        }
+
+        held = Note("kept", [1, 2, 3])
+
+        """;
+
+    [Fact]
+    public void An_attempts_child_heap_is_freed_at_its_end_and_at_its_crash()
+    {
+        // U50 (assumed: the small defaults of comment 6980152255): the child of each `attempt` has a heap of its own, freed whole where its
+        // block gives its value, where it throws and where the runtime's error ends it, so that the thread holds as many heaps after three
+        // `attempt`s as before them
+        const string program = AttemptRounds + """
+            before = HttpServer.Heaps()
+            print(Round(held, 1))
+            print(Round(held, 0))
+            print(Round(held, 2))
+            print(HttpServer.Heaps() - before)
+
+            """;
+        var run = BuildAndRun(program, ListTests.Edited(HeapCount), "actor-attempt-heaps");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(2, crashes.Count);
+        Ran((run.Code, run.Output, rest), 0, ["3 1", "lost 0 [0, 2]", "IndexOutOfRange", "0"], "");
+    }
+
+    [Fact]
+    public void Memory_stays_flat_over_ten_thousand_attempts()
+    {
+        // U47, U50: each child's heap and stack, the copy of what its block takes, each crash's message, its thrown copy and its `Crashed`,
+        // and the value that crosses back are let go of, so that 10,000 `attempt`s after 1,000 that warm the pools, two thirds of them
+        // crashes, grow the resident memory by less than 256 KiB
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // no `/proc/self/status` reads the resident memory on Windows
+        }
+
+        const string program = AttemptRounds + """
+            mut total = 0
+            for i in 0..<1000 {
+                total = total + Round(held, i).Bytes.Count
+            }
+
+            before = Resident() else {
+                IoError e => -1
+            }
+
+            for i in 0..<10000 {
+                total = total + Round(held, i).Bytes.Count
+            }
+
+            after = Resident() else {
+                IoError e => -1
+            }
+
+            print(total > 0)
+            print(after - before)
+            print(before)
+
+            """;
+        var run = BuildAndRun(program, toolchain.Runtime, "actor-attempt-memory");
+        Assert.Equal((0, 334 + 333 + 3334 + 3333), (run.Code, Logged(run.Error).Crashes.Count));
+        Assert.Equal("true", run.Output[0]);
+        var grown = long.Parse(run.Output[1], System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(grown < 256, $"10,000 attempts grow the resident memory by {grown} KiB");
+
+        // the bound is read against a reading: `Resident` gives -1 where it reads none, which a growth of 0 would hide
+        Assert.True(long.Parse(run.Output[2], System.Globalization.CultureInfo.InvariantCulture) > 0, $"the resident memory before the run read {run.Output[2]}");
+    }
+
+    [Fact]
+    public void What_crosses_into_and_out_of_the_child_of_an_attempt_is_a_copy_in_the_heap_it_reaches()
+    {
+        // U47 with U12 (assumed: T19 of comment 6980152255): the block's copy of a mutable instance, its list among it, in the child's heap;
+        // the block's value, a list of strings, copied into the heap of the code that waits; and the thrown instance moved there before the
+        // child's heap is freed (U50, the small defaults of that comment), each read after that free, under the allocator that makes every
+        // freed block inaccessible; the crash writes its one log line, named `attempt` (U50; assumed: T23 of that comment)
+        const string text = """
+            class Note(mut string Why, List<int> Codes) {
+                pub string Text() => Why
+            }
+
+            List<string> Words(Note n) => [n.Why, "{n.Codes}"]
+
+            List<string> Fail(int n) {
+                if n > 0 {
+                    throw Note("lost", [n, 4])
+                }
+
+                return []
+            }
+
+            List<string> Read(Note | RuntimeError r) {
+                match r {
+                    Note n => return Words(n)
+                    RuntimeError e => return [e.Detail]
+                }
+            }
+
+            kept = Note("kept", [1, 2])
+            xs = attempt { Words(copy kept) } else {
+                Crashed c => ["crashed"]
+            }
+
+            print(xs)
+            ys = attempt { Fail(3) } else {
+                Crashed c => Read(c.Reason)
+            }
+
+            print(ys)
+            print(kept.Why)
+
+            """;
+        var run = BuildAndRun(text, ListTests.Fenced, "actor-attempt-copies");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["attempt#2 crashed: thrown \"lost\" at program.kz:9"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["[kept, [1, 2]]", "[lost, [3, 4]]", "kept"], "");
+    }
+
+    [Fact]
+    public void An_attempt_of_the_top_level_code_outside_a_within_block_has_no_deadline()
+    {
+        // U49 (assumed: T26 of comment 6982985447): the block's message roots a chain with no deadline, so that a call of the block made past
+        // the default bound of a call, 5 seconds (U36), is bounded on its own and runs
+        if (OperatingSystem.IsWindows())
+        {
+            return; // a build for Windows says `not supported` to the reads of the clock (S11)
+        }
+
+        const string text = """
+            // the thread held for `d`, with no call and no wait
+            void Hold(duration d) {
+                instant start = instant.Now
+                while start.Elapsed < d {
+                }
+            }
+
+            actor Store {
+                pub int Get() => 1
+            }
+
+            s = spawn Store()
+            v = attempt {
+                Hold(5200ms)
+                return s.Get()
+            } else {
+                Crashed c => {
+                    print(c.Reason.Kind)
+                    -1
+                }
+            }
+
+            print(v)
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-attempt-unbounded");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Empty(crashes);
+        Ran((run.Code, run.Output, rest), 0, ["1"], "");
+    }
+
+    // ---- the tests of `kurz test` (chapter 20, Y5; issue 586) ---------------------------------------------------------------------
+
+    [Fact]
+    public void The_end_of_a_test_ends_every_actor_it_made_with_their_timers_pauses_blocks_and_stacks()
+    {
+        // Y5, F6, Q2: the first test leaves a child paused by its restart, a child whose crash's block waits in the test's actor with the
+        // stack it raised on, a child parked on the paused one with its timer, and a child with a `send` queued; the second meets
+        // `deadlock` while it builds a message in a heap of its own, one of whose arguments waits on a child whose block waits in the
+        // test's actor; the third runs alone, and after each test no timer, no pause, no queued actor and no heap of messages is left,
+        // and every stack is back in the pool, under the allocator that makes every freed block inaccessible
+        var counted = ListTests.Edited([.. ListTests.Fence, ("runtime/common/runtime.kz", "        testWords = null\n        testWordsCount = 0\n        testWordsRoom = 0\n    }\n}\n",
+            "        testWords = null\n        testWordsCount = 0\n        testWordsRoom = 0\n    }\n\n    mut long left = 0\n    mut bool unpaused = false\n    mut bool unqueued = false\n" +
+            "    mut bool unheaped = false\n    mut long stacks = 0\n    raw {\n        mut byte* at = timers\n        while at != null {\n            left = left + 1\n            at = *Ptr<byte*>(at + 32)\n        }\n\n" +
+            "        unpaused = paused == null\n        unqueued = runFirst == null\n        unheaped = messageHeaps == null\n        stacks = pooledCount\n    }\n\n" +
+            "    Print(1, \"timers {left} paused {!unpaused} queued {!unqueued} heaps {!unheaped} pooled {stacks}\", \"\", 0)\n}\n")]);
+        const string text = """
+            actor Printer {
+                pub void Say(string s) {
+                    print(s)
+                }
+            }
+
+            actor Crasher {
+                pub void Fail() {
+                    throw "down"
+                }
+
+                pub int Get() => 1
+            }
+
+            actor Asker {
+                pub void Ask(Crasher c) {
+                    print("asked {c.Get()}")
+                }
+            }
+
+            actor Pinger {
+                pub int Ping() => 7
+            }
+
+            test "leaves actors behind" {
+                c = spawn Crasher() on crash restart after 30s
+                send c.Fail()
+                d = spawn Crasher() on crash (k) {
+                    stop
+                }
+
+                send d.Fail()
+                a = spawn Asker()
+                send a.Ask(c)
+                q = spawn Pinger()
+                print(q.Ping())
+                p = spawn Printer()
+                send p.Say("never")
+                print("first")
+            }
+
+            test "deadlocks while it builds a message" {
+                w = spawn Crasher() on crash (k) {
+                    restart
+                }
+
+                send w.Fail()
+                p = spawn Printer()
+                send p.Say("{w.Get()}")
+            }
+
+            test "starts with none" {
+                print("second")
+            }
+
+            """;
+        var run = BuildAndRun(text, counted, "test-actors-ended", tests: true);
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Crasher#2 crashed: thrown \"down\" at program.kz:9"], crashes); // the test's actor is #1, and the block of `d` never ran
+        Ran((run.Code, run.Output, rest), 1, ["7", "first", "test \"leaves actors behind\" ... ok", "timers 0 paused false queued false heaps false pooled 4",
+            "test \"deadlocks while it builds a message\" ... FAILED", "    deadlock at program.kz:42", "timers 0 paused false queued false heaps false pooled 4", "second",
+            "test \"starts with none\" ... ok", "timers 0 paused false queued false heaps false pooled 4", "3 tests: 2 passed, 1 failed"], "");
+    }
+
+    [Fact]
+    public void A_test_has_no_bound_of_time_while_each_call_it_makes_keeps_its_own()
+    {
+        // D6, Y7: the test's message carries no deadline, so a test that holds its thread past the default bound of a call calls on, the
+        // call with that bound of its own, here 10 ms for the run; a read of the clock is `not supported` in a build for Windows (S11)
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var bounded = ListTests.Edited(("runtime/linux/linux.kz", "pub long DefaultBound() => 5000000000", "pub long DefaultBound() => 10000000"));
+        const string text = """
+            actor Pinger {
+                pub int Ping() => 1
+            }
+
+            void Hold(duration d) {
+                instant start = instant.Now
+                while start.Elapsed < d {
+                }
+            }
+
+            test "outlasts the bound" {
+                p = spawn Pinger()
+                Hold(100ms)
+                print(p.Ping())
+            }
+
+            """;
+        Ran(BuildAndRun(text, bounded, "test-no-bound", tests: true), 0, ["1", "test \"outlasts the bound\" ... ok", "1 test: 1 passed, 0 failed"], "");
+    }
+
+    [Fact]
+    public void The_words_of_a_tests_crash_stand_under_its_line_whatever_the_filter_of_the_log()
+    {
+        // Q3, F1, F3, P4: the crash of a test's own actor writes no log line, and its words stand under its `FAILED` line with the log of
+        // `Kurz.Actor` off too; the other test spawns, so that the program reads `KURZ_LOG` (P5), which it reads on Linux alone
+        const string text = """
+            actor Pinger {
+                pub int Ping() => 1
+            }
+
+            test "spawns" {
+                p = spawn Pinger()
+                print(p.Ping())
+            }
+
+            test "throws" {
+                throw "down"
+            }
+
+            """;
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: true, tests: true);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, "test-words-log-off");
+        string[] lines = ["1", "test \"spawns\" ... ok", "test \"throws\" ... FAILED", "    thrown \"down\" at program.kz:11", "2 tests: 1 passed, 1 failed"];
+        Ran(Toolchain.Run(executable, "0"), 1, lines, "");
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var off = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = "0", ["KURZ_LOG"] = "Kurz.Actor=None" });
+        Assert.Equal((1, string.Join("\n", lines) + "\n", ""), (off.Code, off.Output, off.Error));
     }
 }

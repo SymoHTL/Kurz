@@ -55,6 +55,7 @@ public sealed partial class Emitter
     private static readonly IReadOnlyDictionary<TypeParameterSymbol, KurzType> NoMap = new Dictionary<TypeParameterSymbol, KurzType>();
 
     private readonly bool test;
+    private readonly bool runsTests;
     private readonly bool lines;
     private readonly IrModule module;
     private readonly Unit program;
@@ -99,8 +100,9 @@ public sealed partial class Emitter
     /// </summary>
     private sealed record Unit(string Prefix, string File, ProgramSyntax Tree, SemanticModel Model, bool Runtime);
 
-    private Emitter(Unit program, Unit common, Unit sys, Unit arch, Unit std, bool test, bool lines, Target target, Cpu cpu)
+    private Emitter(Unit program, Unit common, Unit sys, Unit arch, Unit std, bool test, bool lines, Target target, Cpu cpu, bool runsTests)
     {
+        this.runsTests = runsTests;
         this.cpu = cpu;
         this.program = program;
         this.common = common;
@@ -128,9 +130,10 @@ public sealed partial class Emitter
     /// with no error and no <c>not supported</c> among its diagnostics; <paramref name="file"/> is the name of the program's
     /// file as a compile error names it (design record, section 2), which the error line of an exception names (section 6);
     /// <paramref name="lines"/> keeps the line tables in a release build (<c>--lines</c>), which a test build carries in any case;
-    /// <paramref name="cpu"/> is the CPU the build names (section 2), the target's baseline where it names none.
+    /// <paramref name="cpu"/> is the CPU the build names (section 2), the target's baseline where it names none; <paramref name="tests"/>
+    /// builds the program's tests in place of its top-level code, the build of <c>kurz test</c> (Y2).
     /// </summary>
-    public static EmittedProgram? Emit(ProgramSyntax tree, Checker checker, CheckedRuntime runtime, string file, bool testBuild, DiagnosticBag diagnostics, bool lines = false, Cpu? cpu = null)
+    public static EmittedProgram? Emit(ProgramSyntax tree, Checker checker, CheckedRuntime runtime, string file, bool testBuild, DiagnosticBag diagnostics, bool lines = false, Cpu? cpu = null, bool tests = false)
     {
         ArgumentNullException.ThrowIfNull(tree);
         ArgumentNullException.ThrowIfNull(checker);
@@ -155,7 +158,8 @@ public sealed partial class Emitter
             testBuild,
             lines,
             runtime.Target,
-            cpu ?? Cpu.Baseline);
+            cpu ?? Cpu.Baseline,
+            tests);
         try
         {
             return emitter.Run();
@@ -199,6 +203,13 @@ public sealed partial class Emitter
         Trace("main", "kz.main", 1);
         InScope(() =>
         {
+            if (runsTests)
+            {
+                EmitLogStart();
+                EmitTestRun();
+                return;
+            }
+
             if (Model.Arguments is { Read: true } arguments)
             {
                 // S13: `args`, made before the first statement, its refusal with no place (the owner, 2026-10-30, "Refused, as Rust")
@@ -351,6 +362,11 @@ public sealed partial class Emitter
         foreach (var copy in u.Model.Copies)
         {
             owners[copy] = u; // T33: a copy of a generic function that reads its type belongs to the function's file
+        }
+
+        foreach (var t in u.Model.Tests)
+        {
+            owners[u.Model.TestOf(t)] = u; // Y5: a test is a function of its file, which the build of `kurz test` emits
         }
     }
 
@@ -804,6 +820,11 @@ public sealed partial class Emitter
                 break; // declared at the top level and emitted when called, a data type laid out where a value of it is made; a `use` brings in a folder for the checker alone
             case ConstAssertStatement:
                 break; // T37: checked while the program compiles, and nothing of it runs
+            case TestDeclaration:
+                break; // Y2, Y7: a test is no code of the top-level code, and only the build of `kurz test` emits it (`EmitTestRun`)
+            case AssertionStatement a:
+                EmitAssertion(a);
+                break;
             case AsmStatement asm:
                 EmitAsm(asm);
                 break;
@@ -828,6 +849,13 @@ public sealed partial class Emitter
                 break;
             case ElseExpression el:
                 EmitElse(el, asValue: false);
+                break;
+            case AttemptExpression a:
+                if (EmitAttempt(a) is { } held)
+                {
+                    Temp(held, TypeOf(a)); // U46: a value nothing holds, as a call's
+                }
+
                 break;
             case MatchExpression m:
                 EmitMatch(m.Subject, m.Arms, null);

@@ -1,0 +1,25 @@
+// expect: output
+// | before
+// | started
+// | 1
+// rules: U52
+
+actor Clock per node {
+    int ticks = Started()
+
+    pub int Get() => ticks
+}
+
+actor Unused per node {
+    int never = Started()
+
+    pub int Get() => never
+}
+
+int Started() {
+    print("started")
+    return 1
+}
+
+print("before")
+print(Clock.Get())

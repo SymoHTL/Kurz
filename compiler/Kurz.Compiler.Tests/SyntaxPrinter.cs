@@ -33,6 +33,10 @@ internal static class SyntaxPrinter
         ThrowStatement t => t.Value is null ? "(throw)" : $"(throw {Print(t.Value)})",
         RawBlock r => $"(raw {Print(r.Body)})",
         ConstAssertStatement c => $"(const-assert {Print(c.Condition)} {Print(c.Text)})",
+        TestDeclaration t => t.Cluster ? $"(test-cluster {Print(t.Body)})" : $"(test {t.Written} {Print(t.Body)})",
+        AssertionStatement a => $"(check {Print(a.Condition)} {Quote(a.Text)})",
+        MockStatement m => $"(mock {Type(m.Target).TrimEnd()} with {Type(m.Replacement).TrimEnd()})",
+        AdvanceStatement a => $"(advance {Print(a.Duration)})",
         UseStatement u => $"(use {u.Target})",
         AsmStatement a => $"(asm {string.Join(" ", a.Templates.Select(x => Quote(x.Text)))}{string.Concat(a.Operands.Select(o => " " + Operand(o)))})",
         ExternBlock e => $"(extern{(e.Library is null ? "" : " in " + Quote(e.Library))} {{{string.Join(" ", e.Functions.Select(CFunction))}}})",
@@ -104,7 +108,7 @@ internal static class SyntaxPrinter
 
         if (t.Clauses is { Count: > 0 } clauses)
         {
-            sb.Append(' ').Append(string.Join(" ", clauses.Select(c => c.Policy is { } policy ? Policy(policy) : c.Size is { } size ? $"[{c.Word} {c.Line} {Print(size)}]" : $"[{c.Word} {c.Line}]"))); // U1: each clause's word with its line, `stack`'s size, the type's policy (U27)
+            sb.Append(' ').Append(string.Join(" ", clauses.Select(c => c.Policy is { } policy ? Policy(policy) : c.Size is { } size ? $"[{c.Word} {c.Line} {Print(size)}]" : $"[{string.Join(" ", new[] { c.Word, $"{c.Line}" }.Concat(c.Words ?? []))}]"))); // U1: each clause's word with its line, `stack`'s size, the type's policy (U27), the words of `per` (U51)
         }
 
         if (t.Members is not null)

@@ -1,0 +1,26 @@
+// expect: throws actor-gone at 25
+// | 2
+// rules: U43, U25
+
+// `Store` crashed and its policy stopped it in the wait of `o.Ping()`, before the call of `Get` is queued past its deadline:
+// the actor is looked up before the deadline is compared
+
+actor Store {
+    pub void Fail() {
+        throw "gone"
+    }
+
+    pub int Get() => 1
+}
+
+actor Other {
+    pub int Ping() => 2
+}
+
+gone = spawn Store() on crash stop
+o = spawn Other()
+send gone.Fail()
+print(o.Ping())
+within 0s {
+    print(gone.Get())
+}

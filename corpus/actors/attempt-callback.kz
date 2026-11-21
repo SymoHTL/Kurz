@@ -1,0 +1,27 @@
+// expect: output
+// | 11
+// | 2
+// rules: U49
+
+// the block runs a call of the chain of `Run`, so that its call back into `Store` runs while `Run` waits
+actor Store {
+    mut int count = 0
+
+    pub int Add() {
+        count = count + 1
+        return count
+    }
+
+    pub int Run() {
+        me = this
+        v = attempt { me.Add() * 10 } else {
+            Crashed c => -1
+        }
+
+        return v + count
+    }
+}
+
+s = spawn Store()
+print(s.Run())
+print(s.Add())

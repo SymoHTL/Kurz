@@ -1,0 +1,20 @@
+// expect: throws thrown at 10
+// | test "child escalates" ... FAILED
+// |     thrown "down" at tests/test-child-escalates.kz:10
+// | 1 test: 0 passed, 1 failed
+// command: test
+// rules: Y5, U25
+
+actor Worker {
+    pub void Fail() {
+        throw "down"
+    }
+
+    pub int Get() => 1
+}
+
+test "child escalates" {
+    w = spawn Worker() on crash escalate
+    send w.Fail()
+    print(w.Get())
+}

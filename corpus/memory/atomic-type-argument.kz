@@ -1,0 +1,8 @@
+// expect: error syntax at 4
+// rules: R19
+
+void Take(AtomicLong<int> cell) {
+    print(1)
+}
+
+print(2)

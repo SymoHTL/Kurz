@@ -1,0 +1,12 @@
+// expect: output
+// | 7
+// allow: raw
+// rules: R19
+
+// `&slot`, a `long**`, gives the `T` of `AtomicPtr<T>.FromPtr`, which the call does not write, its `long` (T27)
+mut long cell = 7
+mut long* slot = &cell
+head = AtomicPtr.FromPtr(&slot)
+raw {
+    print(*head.Load(MemoryOrder.SeqCst))
+}

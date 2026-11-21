@@ -140,16 +140,17 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
 
     /// <summary>
     /// E3: what a case wrote on standard error, <paramref name="written"/>, with the log line of each crash left out where its <c>rules:</c>
-    /// line, <paramref name="rules"/>, names a rule of a crash, U19 to U34, and whole in every other case, where such a line is a crash the
-    /// case does not show (E3, assumed there: the fix of T3 of the reading of issue 39, comment 6926929175, which named U19 to U24, the
-    /// rules of a crash at that head, the policy and its block, U25 to U34, having come since).
+    /// line, <paramref name="rules"/>, names a rule of a crash, U19 to U34 or the rules of <c>attempt</c>, U46 to U50, and whole in every
+    /// other case, where such a line is a crash the case does not show (E3, assumed there: the fix of T3 of the reading of issue 39, comment
+    /// 6926929175, which named U19 to U24, the rules of a crash at that head, the policy and its block, U25 to U34, and <c>attempt</c>, U46
+    /// to U50, having come since).
     /// </summary>
     internal static string LeftOut(string written, IReadOnlyList<string> rules) =>
-        rules.Any(r => r[0] == 'U' && int.Parse(r[1..], System.Globalization.CultureInfo.InvariantCulture) is >= 19 and <= 34)
+        rules.Any(r => r[0] == 'U' && int.Parse(r[1..], System.Globalization.CultureInfo.InvariantCulture) is (>= 19 and <= 34) or (>= 46 and <= 50))
             ? CrashLine().Replace(written, string.Empty) : written;
 
-    /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the cases whose <c>system:</c> line names Linux, the stack overflows', nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls, the reads of standard input and running a program. The number for Linux is the count measured in the gates image, with no margin, so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156). The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 610 : 746;
+    /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the cases whose <c>system:</c> line names Linux, the stack overflows', nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls, the reads of standard input and running a program. The number for Linux is the count measured with no margin in an image built locally from <c>ci/Dockerfile</c>, whose clang is the point release of the day it was built and not always the one of the image the gates job pulls by its digest (knowledge/the-gates-job-runs-in-its-image.md), so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156); a green gates job shows only that its own image counts at least this number, and a count in that image is one run of the job on a pushed head with the number at 999. The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 648 : 999;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -181,13 +182,15 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         "system/command-env-dir.kz",
     ];
 
-    /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11), the cases of the deadlines that hold their thread by the clock among them (U36 to U45).</summary>
+    /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11), the cases of the deadlines that hold their thread by the clock among them (U36 to U45, U49).</summary>
     private static readonly string[] ProcessCases =
     [
         "system/arguments.kz", "system/args-parameter.kz", "system/args-in-lambda.kz", "system/args-new-list.kz", "system/clock.kz", "system/environment-missing.kz",
         "system/monotonic-clock.kz", "system/elapsed-order.kz", "functions/top-level-return.kz", "functions/top-level-return-end.kz",
         "actors/timeout-block.kz", "actors/timeout-callee-crash.kz", "actors/timeout-capped.kz", "actors/timeout-carried.kz", "actors/timeout-crashed.kz",
         "actors/timeout-crashed-early.kz", "actors/timeout-default.kz", "actors/timeout-send.kz", "actors/within-clauses.kz",
+        "actors/attempt-deadline.kz", "actors/attempt-dropped.kz", "actors/attempt-dropped-queued.kz",
+        "actors/timeout-chain-nested.kz",
     ];
 
     /// <summary>The cases of log calls that expect a run, which a build for Windows says <c>not supported</c> to (S11, P6).</summary>
@@ -254,6 +257,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     {
         ["actors/crash-escalate-root.kz"] = (7, "Worker.Fail"),
         ["actors/block-escalate-root.kz"] = (6, "Worker.Fail"),
+        ["actors/per-node-escalate.kz"] = (7, "Cache.Fail"), // U53: a `per node` actor's, whose supervisor is the root
         ["actors/crash-restart-limit.kz"] = (18, "main"),
     };
 
@@ -278,7 +282,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     {
         var bytes = File.ReadAllBytes(Path.Combine(CorpusTests.Root, "corpus", relativePath));
         var source = SourceText.FromBytes(relativePath, bytes, out _)!;
-        var compilation = Builder.Compile(source, header.Grants, runtime ?? toolchain.Runtime, testBuild: header.Build != BuildKind.Release);
+        var compilation = Builder.Compile(source, header.Grants, runtime ?? toolchain.Runtime, testBuild: header.Build != BuildKind.Release, tests: header.Tests);
         Assert.False(compilation.Diagnostics.HasErrors, $"{relativePath}: the compiler refuses a case that expects a run: {string.Join("; ", compilation.Diagnostics.Sorted)}");
         if (compilation.Program is { } program)
         {
@@ -345,6 +349,23 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         var (code, output, written) = Toolchain.Run(executable, null);
         var all = LeftOut(written, header.Rules);
         Assert.Equal(header.OutputLines, output);
+        if (header.Tests)
+        {
+            // Y3, E3: what `kurz test` writes is its standard output, which the header's lines hold, and nothing on standard error but the
+            // log lines of crashes it leaves out; a case that throws names the id and the place of the words under the first `FAILED` line
+            Assert.Equal("", all);
+            if (header.Expectation == Expectation.Throws)
+            {
+                var failed = output.ToList().FindIndex(l => l.EndsWith(" ... FAILED", StringComparison.Ordinal));
+                Assert.True(failed >= 0 && failed + 1 < output.Count, $"{relativePath}: no `FAILED` line with its words under it");
+                Assert.StartsWith($"    {header.ErrorId} ", output[failed + 1], StringComparison.Ordinal);
+                Assert.EndsWith($" at {relativePath}:{header.ErrorLine}", output[failed + 1], StringComparison.Ordinal);
+            }
+
+            Assert.Equal(header.Expectation == Expectation.Throws ? 1 : 0, code);
+            return;
+        }
+
         if (header.Expectation == Expectation.Output)
         {
             Assert.Equal((0, ""), (code, all));
@@ -353,7 +374,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
 
         var (error, trace) = TraceTests.Split(all);
         var line = $"error: {header.ErrorId} at {relativePath}:{header.ErrorLine}";
-        if (header.ErrorId == ErrorIds.Thrown)
+        if (header.ErrorId is ErrorIds.Thrown or ErrorIds.CheckFailed)
         {
             Assert.StartsWith(line + ":\n", error, StringComparison.Ordinal);
             Assert.True(Toolchain.Lines(error).Count >= 2, $"{relativePath}: no text below the error line: {error}");
@@ -437,7 +458,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     [Fact]
     public void The_runner_leaves_out_the_log_line_of_a_crash_alone_and_in_a_case_of_a_crash_alone()
     {
-        // E3: a case that names a rule of a crash, U19 to U34, shows its output without the line of each crash; a line of another category
+        // E3: a case that names a rule of a crash, U19 to U34 or U46 to U50, shows its output without the line of each crash; a line of another category
         // or level stays, and so does the line of a crash in a case that names none of those rules, so that each turns its case red
         const string crash = "2026-11-16T10:00:00.000Z Error Kurz.Actor: Shop#1 crashed: thrown \"no stock\" at shop.kz:3\n";
         const string other = "2026-11-16T10:00:00.000Z Error shop: paid order.Id=17\n";
@@ -447,6 +468,10 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         Assert.Equal(string.Empty, LeftOut(crash, ["U34"]));
         Assert.Equal(crash, LeftOut(crash, ["U18"]));
         Assert.Equal(crash, LeftOut(crash, ["U35"]));
+        Assert.Equal(string.Empty, LeftOut(crash, ["U46"]));
+        Assert.Equal(string.Empty, LeftOut(crash, ["U50"]));
+        Assert.Equal(crash, LeftOut(crash, ["U45"]));
+        Assert.Equal(crash, LeftOut(crash, ["U51"]));
         Assert.Equal(crash, LeftOut(crash, ["P3"]));
     }
 

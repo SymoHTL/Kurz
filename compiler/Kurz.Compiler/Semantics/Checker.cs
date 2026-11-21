@@ -70,7 +70,7 @@ public sealed partial class Checker
     private readonly HashSet<UseStatement> uses = new(ReferenceEqualityComparer.Instance); // F10: those `use` lines
     private readonly List<FunctionSymbol> folderCalls = []; // design record, section 2: the functions of another folder the file's qualified calls picked
     private readonly Checker? std; // W1: the standard library's checker, whose types of the prelude every file sees
-    private readonly IReadOnlyDictionary<TypeDeclaration, IReadOnlyList<KurzType>>? reasons; // U30: the `Reason` of each block's child the reading before found, null at the first reading
+    private readonly IReadOnlyDictionary<object, IReadOnlyList<KurzType>>? reasons; // U30, U46: the `Reason` of each block's child, by its declaration, and of each `attempt`'s `Crashed`, by its node, the reading before found, null at the first reading
     private readonly bool quietBlocks; // U30: a reading that drops what the blocks of `on crash` report, read for the sets of one whose errors stand in blocks alone
     private readonly HashSet<string> preludeSeen = new(StringComparer.Ordinal); // W1: the names of those types this file sees
 
@@ -81,7 +81,7 @@ public sealed partial class Checker
     /// </summary>
     internal Checker? Beside { get; set; }
 
-    private Checker(DiagnosticBag diagnostics, IReadOnlyCollection<string> grants, IReadOnlyDictionary<string, Checker> folders, Checker? std, IReadOnlyDictionary<TypeDeclaration, IReadOnlyList<KurzType>>? reasons = null, bool quietBlocks = false)
+    private Checker(DiagnosticBag diagnostics, IReadOnlyCollection<string> grants, IReadOnlyDictionary<string, Checker> folders, Checker? std, IReadOnlyDictionary<object, IReadOnlyList<KurzType>>? reasons = null, bool quietBlocks = false)
     {
         this.diagnostics = diagnostics;
         allowRaw = grants.Contains("raw");
@@ -99,9 +99,11 @@ public sealed partial class Checker
     /// <c>Url</c>, <c>HttpDate</c> and <c>HttpQuery</c>, which the owner's answer of 2026-11-06, G1 (a) to G3 (a), added), and the names
     /// of regular expressions, <c>Regex</c>, <c>Match</c>, <c>RegexError</c> and <c>RegexKind</c> (G1; section 12, the owner, 2026-11-01, "In std"),
     /// and the runtime's error type and its kinds, <c>RuntimeError</c> and <c>RuntimeKind</c>, which the block of <c>on crash</c> names in an
-    /// arm over the child's <c>Reason</c> (U30; assumed, as the record makes the type a member of every <c>Reason</c> and names no place for it).
+    /// arm over the child's <c>Reason</c> (U30; assumed, as the record makes the type a member of every <c>Reason</c> and names no place for it),
+    /// and <c>Crashed</c>, the case of an <c>attempt</c>, which a signature names where the case propagates (U46; assumed, a reading of the
+    /// build, as the record names no place for it).
     /// </summary>
-    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders", "HttpRate", "HttpLimits", "HttpRequest", "HttpBody", "HttpResponse", "HttpWriter", "HttpServer", "Uri", "UriError", "UriKind", "Url", "HttpDate", "HttpQuery", "HttpClientOptions", "HttpResponseMessage", "HttpClient", "Regex", "Match", "RegexError", "RegexKind", "RuntimeError", "RuntimeKind"];
+    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders", "HttpRate", "HttpLimits", "HttpRequest", "HttpBody", "HttpResponse", "HttpWriter", "HttpServer", "Uri", "UriError", "UriKind", "Url", "HttpDate", "HttpQuery", "HttpClientOptions", "HttpResponseMessage", "HttpClient", "Regex", "Match", "RegexError", "RegexKind", "RuntimeError", "RuntimeKind", "Crashed"];
 
     /// <summary>The types of the variables the top level declares, by name, for a test to read.</summary>
     public IReadOnlyDictionary<string, KurzType> TopLevelVariables => topLevel;
@@ -156,14 +158,15 @@ public sealed partial class Checker
         // U30: a program with a block of `on crash` is read again with the `Reason` of each block's child that the reading before found,
         // until the `Reason`s found are the ones the reading read (CheckCrashBlock); a reading whose errors stand in blocks alone is read so
         // too, since a block's error can come from a `Reason` that has not settled: its sets are those of a reading that drops what the
-        // blocks report, without the bodies of the blocks that reported errors, and what is reported is the reading's where they settle
-        IReadOnlyDictionary<TypeDeclaration, IReadOnlyList<KurzType>>? reasons = null;
+        // blocks report, without the bodies of the blocks that reported errors, and what is reported is the reading's where they settle.
+        // U46: so is a program with an `attempt`, for the `Reason` of its `Crashed`, the arms of its `else` read as a block's body is
+        IReadOnlyDictionary<object, IReadOnlyList<KurzType>>? reasons = null;
         for (var reading = 0; ; reading++)
         {
             var bag = new DiagnosticBag();
             var checker = new Checker(bag, grants, folders, std, reasons);
             checker.Run(program);
-            if (checker.crashBlocks.Count > 0 && std is not null && !bag.HasNotSupported && bag.Items.All(d => !d.IsError || checker.blockErrors.Contains(d)))
+            if (checker.crashBlocks.Count + checker.attemptReads.Count > 0 && std is not null && !bag.HasNotSupported && bag.Items.All(d => !d.IsError || checker.blockErrors.Contains(d)))
             {
                 var read = checker; // the reading whose symbols the sets and the Reasons it read are of
                 if (bag.HasErrors)
@@ -172,15 +175,21 @@ public sealed partial class Checker
                     read.Run(program);
                 }
 
-                var sets = new ThrowSets(read, std, blocks: reading > 0, skipped: checker.erringBlocks);
-                var found = new Dictionary<TypeDeclaration, IReadOnlyList<KurzType>>(ReferenceEqualityComparer.Instance);
+                var sets = new ThrowSets(read, std, blocks: reading > 0, skipped: checker.erringBlocks, skippedArms: checker.erringAttempts);
+                var found = new Dictionary<object, IReadOnlyList<KurzType>>(ReferenceEqualityComparer.Instance);
                 foreach (var (_, child, _) in read.crashBlocks)
                 {
                     found[child.Declaration] = sets.ReasonOf(child);
                 }
 
+                foreach (var (attempt, _) in read.attemptReads)
+                {
+                    found[attempt] = sets.ReasonOf(attempt);
+                }
+
                 var changed = read.crashBlocks.FirstOrDefault(b => !SameTypes(b.Read, found[b.Child.Declaration]));
-                if (reading == 0 || changed.Policy is not null)
+                var grown = read.attemptReads.FirstOrDefault(b => !SameTypes(b.Read, found[b.Attempt]));
+                if (reading == 0 || changed.Policy is not null || grown.Attempt is not null)
                 {
                     if (reading < CrashReadings)
                     {
@@ -188,7 +197,14 @@ public sealed partial class Checker
                         continue;
                     }
 
-                    bag.NotSupported(changed.Policy!.Line, $"a block of `on crash` whose child's `Reason` grows by what the blocks of the program read, read {CrashReadings + 1} times (U30)");
+                    if (changed.Policy is not null)
+                    {
+                        bag.NotSupported(changed.Policy.Line, $"a block of `on crash` whose child's `Reason` grows by what the blocks of the program read, read {CrashReadings + 1} times (U30)");
+                    }
+                    else
+                    {
+                        bag.NotSupported(grown.Attempt!.Line, $"an `attempt` whose `Reason` grows by what the blocks and the `attempt`s of the program read, read {CrashReadings + 1} times (U46)");
+                    }
                 }
             }
 
@@ -401,6 +417,9 @@ public sealed partial class Checker
                     used[u.Target] = folder; // F10: before the bodies are checked, which call the folder's functions
                     uses.Add(u);
                     break;
+                case TestDeclaration t:
+                    DeclareTest(t); // Y1: a second test of one name is the second one's error
+                    break;
                 default:
                     break;
             }
@@ -464,6 +483,7 @@ public sealed partial class Checker
             }
         }
 
+        CheckTestBodies(); // Y5, Y7
         CheckMethodBodies(); // K7
         CheckConstructorBodies(); // K14
         CheckTypeBlocks(); // U27, U28: the block of a policy after an actor's name
@@ -2363,6 +2383,18 @@ public sealed partial class Checker
             case ConstAssertStatement c:
                 CheckConstAssert(c); // T37: checked while the program compiles
                 return Flow.Completes;
+            case TestDeclaration t:
+                CheckTestDeclaration(t); // Y1: declared in the first passes and its body checked with the functions'; the parser holds it to the top level
+                return Flow.Completes;
+            case AssertionStatement a:
+                CheckAssertion(a); // Y6
+                return Flow.Completes;
+            case MockStatement m:
+                CheckMock(m); // Y9
+                return Flow.Completes;
+            case AdvanceStatement a:
+                CheckAdvance(a); // Y10
+                return Flow.Completes;
             case FunctionDeclaration f:
                 if (blockDepth > 0)
                 {
@@ -2482,18 +2514,18 @@ public sealed partial class Checker
     /// U40: the bound of <c>within</c>, a block's or a clause's (U39), is a <c>duration</c>, read as a condition is (C3): a value of another
     /// type there is <c>type-mismatch</c> at its line, a <c>longduration</c> among them, a <c>duration?</c> is <c>nullable-unchecked</c>, and
     /// a call with a <c>void</c> success is <c>syntax</c> (O10) (section 6, assumed: the forms of that section write a duration and name no
-    /// other type).
+    /// other type). Y10: the duration of <c>advance</c> is read so too, <paramref name="of"/> and <paramref name="rule"/> naming it.
     /// </summary>
-    private void CheckBound(Expression bound)
+    private void CheckBound(Expression bound, string of = "the bound of `within`", string rule = "U40")
     {
         var t = CheckExpression(bound, Types.Duration);
         if (Types.IsVoid(t.Type))
         {
             Report(ErrorIds.Syntax, bound.Line, "a call with a `void` success used as a value (O10)");
         }
-        else if (!t.IsError && t.Type is not PrimitiveType { Kind: Primitive.Duration } && !Unchecked(t, bound.Line, "as the bound of `within`"))
+        else if (!t.IsError && t.Type is not PrimitiveType { Kind: Primitive.Duration } && !Unchecked(t, bound.Line, $"as {of}"))
         {
-            Report(ErrorIds.TypeMismatch, bound.Line, $"the bound of `within` is a `duration`, not {Types.A(t.Type)} (U40)");
+            Report(ErrorIds.TypeMismatch, bound.Line, $"{of} is a `duration`, not {Types.A(t.Type)} ({rule})");
         }
     }
 
@@ -2901,6 +2933,9 @@ public sealed partial class Checker
                 break;
             case ElseExpression el:
                 RecordThrough(e.Expression, CheckWhole(e.Expression, () => CheckElse(el, isStatement: true, expected: null)));
+                break;
+            case AttemptExpression a:
+                RecordThrough(e.Expression, CheckWhole(e.Expression, () => CheckAttempt(a, null, keepCases: false))); // U46, as a call
                 break;
             case MatchExpression m:
                 RecordThrough(e.Expression, new Typed(CheckMatch(m.Subject, m.Arms, isExpression: false, expected: null, m.Line).Type));
