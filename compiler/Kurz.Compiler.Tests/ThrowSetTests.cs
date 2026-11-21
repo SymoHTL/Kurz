@@ -79,6 +79,8 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         data EKept
         data EComparedText
         data EKeyedText
+        data ECheckText
+        data ECheckCall
 
         void Direct() {
             throw EDirect
@@ -607,6 +609,24 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
             print(k)
         }
 
+        data CheckedSide(int N) {
+            pub string Text() {
+                throw ECheckText
+            }
+        }
+
+        void ViaCheck(CheckedSide a) {
+            check a == CheckedSide(1)
+        }
+
+        bool CheckedCall() {
+            throw ECheckCall
+        }
+
+        void ViaCheckCondition() {
+            check CheckedCall()
+        }
+
         data Picked(int N)
 
         bool KeepPicked(Picked p) {
@@ -725,6 +745,8 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     [InlineData("ViaMapValueText", "EMapValueText")] // the Text() of the values of a map (A6)
     [InlineData("ViaUnionText", "EUnionText")] // the Text() of a case of a union (A4)
     [InlineData("ViaWeakText", "EWeakText")] // the Text() of the target of a `weak` field of a data type without its own Text() (A3, R3)
+    [InlineData("ViaCheck", "ECheckText")] // the Text() of each side of a comparison whose failure a `check` shows (Y6, F10)
+    [InlineData("ViaCheckCondition", "ECheckCall")] // the condition of a `check` (Y6)
     [InlineData("ViaSpawn", "ESpawn")] // the construction of an actor a spawn makes, whose throw is the spawner's crash (U3)
     [InlineData("ViaClause", "EClause")] // the bound of a call's clause, which runs in the caller (U39)
     [InlineData("ViaGeneric", "EGeneric")] // a throw of a type parameter, with the type argument the call gives it (T19)
@@ -960,6 +982,46 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void A_message_to_the_name_of_a_per_node_actor_brings_what_its_start_throws_and_nothing_of_its_methods()
+    {
+        // U52 (assumed: T29 of issue 519, comment 6983903100): a call or a `send` through the name of a `per node` actor starts it where
+        // none stands, its defaults run on the caller's stack, whose throw is the caller's crash, as at a `spawn` (U3); the method the
+        // message runs runs in the callee, whose crash its caller gets as `callee-crashed` (U20), so that its throw adds nothing
+        const string text = """
+            data EStart
+            data EMethod
+
+            int Started() {
+                throw EStart
+            }
+
+            actor Cache per node {
+                int first = Started()
+
+                pub int Get() {
+                    throw EMethod
+                }
+
+                pub void Add() {
+                    throw EMethod
+                }
+            }
+
+            pub void Call() {
+                print(Cache.Get())
+            }
+
+            pub void Send() {
+                send Cache.Add()
+            }
+
+            """;
+        var own = Own(text);
+        Assert.Equal(["EStart", "RuntimeError"], RaisedIn(own, "Call"));
+        Assert.Equal(["EStart", "RuntimeError"], RaisedIn(own, "Send"));
+    }
+
+    [Fact]
     public void A_text_reads_each_instantiation_of_one_generic_type_it_holds()
     {
         // section 5: `Two` holds a `Box<int>` and a `Box<Quiet>`, and its text reads both, `Quiet`'s Text() through the second
@@ -1021,6 +1083,59 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
                 void Muted() {
                     Show(Sub<Hushed>(1, Hushed(1)))
                 }
+            }
+
+            printer = spawn Printer()
+            send printer.Go()
+
+            """;
+        var own = Own(text);
+        var printer = own.Checker.Model.ClassOf(own.Tree.Statements.OfType<TypeDeclaration>().Single(t => t.Name == "Printer"));
+        Assert.Equal(["EShouty", "RuntimeError"], Names(own.Sets.ReasonOf(printer)));
+    }
+
+    [Fact]
+    public void An_instantiation_built_only_in_a_test_is_built()
+    {
+        // Y5, Y7, section 5: each test is a root of what the program builds, in every reading, since every command checks every test,
+        // so the text of `Sub<Shouty>`, built in a test alone, is in the actor's `Reason`; `Sub<Hushed>`, built in a function nothing
+        // calls, is built nowhere
+        const string text = """
+            data EShouty
+            data EHushed
+
+            data Plain(int N)
+
+            data Sub<U>(U X) : Plain
+
+            class Shouty(int N) {
+                pub string Text() {
+                    throw EShouty
+                }
+            }
+
+            class Hushed(int N) {
+                pub string Text() {
+                    throw EHushed
+                }
+            }
+
+            void Show(Plain p) {
+                print(p)
+            }
+
+            void Muted() {
+                Show(Sub<Hushed>(1, Hushed(1)))
+            }
+
+            actor Printer {
+                pub void Go() {
+                    Show(Plain(1))
+                }
+            }
+
+            test "shows" {
+                Show(Sub<Shouty>(1, Shouty(1)))
             }
 
             printer = spawn Printer()
@@ -1306,5 +1421,129 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         of = of[..of.IndexOf("\n}\n", StringComparison.Ordinal)];
         var arms = Regex.Matches(of, "\"([a-z-]+)\" => RuntimeKind\\.([A-Za-z]+)").Select(m => (m.Groups[1].Value, m.Groups[2].Value)).ToList();
         Assert.Equal(ids.Zip(kinds).ToList(), arms);
+    }
+
+    [Fact]
+    public void The_reason_of_an_attempt_is_what_its_block_throws_and_its_throw_leaves_neither_the_function_nor_the_actor()
+    {
+        // U46: an `attempt`'s `Reason` is what its block's code can throw, a function it calls among it, with the runtime's error type
+        // (assumed: the small defaults of comment 6980152255); that throw is the crash of the child, which the `attempt` holds, so it
+        // reaches neither the function around the block nor the `Reason` of the actor whose method runs it (section 6: an actor never
+        // catches its own exception, only its child's death), while what the function throws after it does
+        const string text = """
+            data ELost(int Code)
+            data EAfter(int Code)
+
+            int Lose(int n) {
+                if n > 0 {
+                    throw ELost(n)
+                }
+
+                return n
+            }
+
+            actor Worker {
+                pub int Go(int n) {
+                    v = attempt { Lose(n) } else {
+                        Crashed c => -1
+                    }
+
+                    if v > 5 {
+                        throw EAfter(v)
+                    }
+
+                    return v
+                }
+            }
+
+            int Plain(int n) {
+                v = attempt { Lose(n) } else {
+                    Crashed c => -1
+                }
+
+                return v
+            }
+
+            w = spawn Worker()
+            print(w.Go(1) + Plain(2))
+
+            """;
+        var own = Own(text);
+        var attempts = new List<AttemptExpression>();
+        var worker = own.Tree.Statements.OfType<TypeDeclaration>().Single(t => t.Name == "Worker");
+        foreach (var function in worker.Members!.OfType<FunctionDeclaration>().Concat(own.Tree.Statements.OfType<FunctionDeclaration>().Where(f => f.Name == "Plain")))
+        {
+            SyntaxCopy.Walk(function, e =>
+            {
+                if (e is AttemptExpression a)
+                {
+                    attempts.Add(a);
+                }
+            });
+        }
+
+        Assert.Equal(2, attempts.Count);
+        Assert.All(attempts, a => Assert.Equal(["ELost", "RuntimeError"], Names(own.Sets.ReasonOf(a))));
+        Assert.DoesNotContain("ELost", RaisedIn(own, "Plain"));
+        var reason = Names(own.Sets.ReasonOf(own.Checker.Model.ClassOf(worker)));
+        Assert.Contains("EAfter", reason);
+        Assert.DoesNotContain("ELost", reason);
+    }
+
+    [Fact]
+    public void The_reason_of_an_attempt_in_the_block_of_an_attempt_is_what_its_own_block_throws_and_a_throw_of_its_arms_the_outer_ones()
+    {
+        // U50 (assumed: the small defaults of comment 6980152255): the inner `attempt` belongs to the outer one's child, so that what its block
+        // throws is the inner child's crash, which the inner `attempt` holds and which stays out of the outer one's `Reason`, while what its
+        // arms throw, a crash the inner one does not hold, is the outer child's, as under `escalate`
+        const string text = """
+            data ELost(int Code)
+            data EArm(int Code)
+
+            int Lose(int n) {
+                if n > 0 {
+                    throw ELost(n)
+                }
+
+                return n
+            }
+
+            int ArmThrows(int n) {
+                if n > 0 {
+                    throw EArm(n)
+                }
+
+                return n
+            }
+
+            v = attempt {
+                w = attempt { Lose(1) } else {
+                    Crashed c => ArmThrows(2)
+                }
+
+                return w
+            } else {
+                Crashed c => -1
+            }
+
+            print(v)
+
+            """;
+        var own = Own(text);
+        var attempts = new List<AttemptExpression>();
+        foreach (var statement in own.Tree.Statements)
+        {
+            SyntaxCopy.Walk(statement, e =>
+            {
+                if (e is AttemptExpression a)
+                {
+                    attempts.Add(a);
+                }
+            });
+        }
+
+        Assert.Equal(2, attempts.Count);
+        Assert.Equal(["ELost", "RuntimeError"], Names(own.Sets.ReasonOf(attempts.MaxBy(a => a.Line)!)));
+        Assert.Equal(["EArm", "RuntimeError"], Names(own.Sets.ReasonOf(attempts.MinBy(a => a.Line)!)));
     }
 }

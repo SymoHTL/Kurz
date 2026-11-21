@@ -1,0 +1,22 @@
+// expect: throws check-failed at 17
+// | test "adds" ... ok
+// | test "counts" ... FAILED
+// |     check-failed "names.Count == 2 (3 == 2)" at tests/check-fails-in-test.kz:17
+// | test "throws" ... FAILED
+// |     thrown "down" at tests/check-fails-in-test.kz:21
+// | 3 tests: 1 passed, 2 failed
+// command: test
+// rules: Y3, Y6
+
+test "adds" {
+    check 1 + 1 == 2
+}
+
+test "counts" {
+    names = ["a", "b", "c"]
+    check names.Count == 2
+}
+
+test "throws" {
+    throw "down"
+}

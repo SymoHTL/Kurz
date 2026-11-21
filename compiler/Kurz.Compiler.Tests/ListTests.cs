@@ -2976,6 +2976,439 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         """;
 
+    // O5, C4: the arms of a postfix `else` over the case a call gave, which no place holds: an arm that reads the case and gives another
+    // value, one that returns it, one that binds no name, an interface's arm and a base class's arm over a class case, a method's call
+    // and a function value's, a case a `move` hands on, of a fat reference, which the move counts once more, and of a thin one, whose
+    // place it empties, the arm of `else`, an `else` that stands as a statement, a plain data case with a list, and one whose union field
+    // holds such a case; a `match` statement and a `match` as a value over the same unions, the controls; `Run` gives each row's sum
+    // over a call of each case, the rows of the counting test and of the fenced program the same
+    internal const string ArmCases = """
+        data Missing
+
+        data Inner(List<int> Xs)
+
+        data Outer(Inner | Missing U)
+
+        interface Sized {
+            int Size()
+        }
+
+        class Note(string Text, List<int> Marks) : Sized {
+            pub int Size() => Text.Bytes.Count + Marks.Count
+        }
+
+        class Letter(int Stamp) : Note
+
+        class Card(string Text, List<int> Marks)
+
+        class Shelf(int Base) {
+            pub int | Note | Missing Find(int id) {
+                if id == 1 {
+                    return Note("shelf {id}", [id, Base])
+                }
+
+                if id == 2 {
+                    return Missing
+                }
+
+                return id + Base
+            }
+        }
+
+        int | Note | Missing Find(int id) {
+            if id == 1 {
+                return Note("note {id}", [id, id])
+            }
+
+            if id == 2 {
+                return Missing
+            }
+
+            return id
+        }
+
+        int | Letter | Missing Mail(int id) {
+            if id == 1 {
+                return Letter("letter {id}", [id], 9)
+            }
+
+            if id == 2 {
+                return Missing
+            }
+
+            return id
+        }
+
+        int | Card | Missing Deal(int id) {
+            if id == 1 {
+                return Card("card {id}", [id, id])
+            }
+
+            if id == 2 {
+                return Missing
+            }
+
+            return id
+        }
+
+        int | Inner | Missing Plain(int id) {
+            if id == 1 {
+                return Inner([id, id])
+            }
+
+            if id == 2 {
+                return Missing
+            }
+
+            return id
+        }
+
+        int | Outer | Missing Nested(int id) {
+            if id == 1 {
+                return Outer(Inner([id]))
+            }
+
+            if id == 2 {
+                return Missing
+            }
+
+            return id
+        }
+
+        void | Note | Missing Act(int id) {
+            if id == 1 {
+                return Note("act {id}", [id])
+            }
+
+            if id == 2 {
+                return Missing
+            }
+        }
+
+        int Take(move Note k) => k.Marks.Count
+
+        int Keep(move Card k) => k.Marks.Count + k.Text.Bytes.Count
+
+        int Of(Inner | Missing u) {
+            match u {
+                Inner n => return n.Xs.Count
+                Missing => return 0
+            }
+        }
+
+        int Read(int id) {
+            v = Find(id) else {
+                Note n => n.Text.Bytes.Count
+                Missing => 0
+            }
+
+            return v
+        }
+
+        Note Back(int id) {
+            v = Find(id) else {
+                Note n => return n
+                Missing => 0
+            }
+
+            return Note("made {v}", [v])
+        }
+
+        int Ignored(int id) {
+            v = Find(id) else {
+                Note => 5
+                Missing => 0
+            }
+
+            return v
+        }
+
+        int Faced(int id) {
+            v = Find(id) else {
+                Sized s => s.Size()
+                Missing => 0
+            }
+
+            return v
+        }
+
+        int Based(int id) {
+            v = Mail(id) else {
+                Note n => n.Marks.Count
+                Missing => 0
+            }
+
+            return v
+        }
+
+        int Method(Shelf s, int id) {
+            v = s.Find(id) else {
+                Note n => n.Marks.Count
+                Missing => 0
+            }
+
+            return v
+        }
+
+        int Valued((int) => int | Note | Missing f, int id) {
+            v = f(id) else {
+                Note n => n.Marks.Count
+                Missing => 0
+            }
+
+            return v
+        }
+
+        int Moved(int id) {
+            v = Find(id) else {
+                Note n => Take(move n)
+                Missing => 0
+            }
+
+            return v
+        }
+
+        int MovedThin(int id) {
+            v = Deal(id) else {
+                Card c => Keep(move c)
+                Missing => 0
+            }
+
+            return v
+        }
+
+        int Rest(int id) {
+            v = Find(id) else {
+                else => 7
+            }
+
+            return v
+        }
+
+        int Effect(int id) {
+            mut t = 0
+            Act(id) else {
+                Note n => {
+                    t = n.Marks.Count
+                }
+
+                Missing => {
+                    t = 1
+                }
+            }
+
+            return t
+        }
+
+        int PlainCase(int id) {
+            v = Plain(id) else {
+                Inner n => n.Xs.Count
+                Missing => 0
+            }
+
+            return v
+        }
+
+        int NestedCase(int id) {
+            v = Nested(id) else {
+                Outer o => Of(o.U)
+                Missing => 0
+            }
+
+            return v
+        }
+
+        int Matched(int id) {
+            mut v = 0
+            match Find(id) {
+                int k => v = k
+                Note n => v = n.Text.Bytes.Count
+                Missing => v = 0
+            }
+
+            return v
+        }
+
+        int MatchValue(int id) {
+            v = match Nested(id) {
+                int k => k
+                Outer o => Of(o.U)
+                Missing => 0
+            }
+
+            return v
+        }
+
+        int Pick(int row, Shelf shelf, int id) {
+            if row == 0 {
+                return Read(id)
+            }
+
+            if row == 1 {
+                return Back(id).Marks.Count
+            }
+
+            if row == 2 {
+                return Ignored(id)
+            }
+
+            if row == 3 {
+                return Faced(id)
+            }
+
+            if row == 4 {
+                return Based(id)
+            }
+
+            if row == 5 {
+                return Method(shelf, id)
+            }
+
+            if row == 6 {
+                return Valued((int i) => Find(i), id)
+            }
+
+            if row == 7 {
+                return Moved(id)
+            }
+
+            if row == 8 {
+                return MovedThin(id)
+            }
+
+            if row == 9 {
+                return Rest(id)
+            }
+
+            if row == 10 {
+                return Effect(id)
+            }
+
+            if row == 11 {
+                return PlainCase(id)
+            }
+
+            if row == 12 {
+                return NestedCase(id)
+            }
+
+            if row == 13 {
+                return Matched(id)
+            }
+
+            return MatchValue(id)
+        }
+
+        int Run(int row, Shelf shelf) {
+            mut total = 0
+            for id in 1..<4 {
+                total = total + Pick(row, shelf, id)
+            }
+
+            return total
+        }
+
+        """;
+
+    // D9 with section 3: a `data` value whose union field holds a counted case, a plain data case with a list and a string, an instance
+    // and a list, let go of at its variable's end, on its variable's reassignment, with the list that holds it as an item and as the
+    // copy a call makes of it, and the same field in a class, the control; `Run` gives each row's value, the rows of the counting test
+    // and of the fenced program the same
+    internal const string UnionFields = """
+        data Missing
+
+        data Inner(List<int> Xs, string Name)
+
+        class Pen(string Name)
+
+        data Outer(Inner | Pen | List<int> | Missing U)
+
+        class Holder(Inner | Pen | List<int> | Missing U)
+
+        int Held(Inner | Pen | List<int> | Missing u) {
+            match u {
+                Inner n => return n.Xs.Count + n.Name.Bytes.Count
+                Pen p => return p.Name.Bytes.Count
+                List<int> l => return l.Count
+                Missing => return 0
+            }
+        }
+
+        Outer Make(int kind, int i) {
+            if kind == 0 {
+                return Outer(Inner([i, i], "inner {i}"))
+            }
+
+            if kind == 1 {
+                return Outer(Pen("pen {i}"))
+            }
+
+            return Outer([i, i + 1])
+        }
+
+        Holder Hold(int kind, int i) {
+            if kind == 0 {
+                return Holder(Inner([i, i], "inner {i}"))
+            }
+
+            if kind == 1 {
+                return Holder(Pen("pen {i}"))
+            }
+
+            return Holder([i, i + 1])
+        }
+
+        int Size(Outer o) => Held(o.U)
+
+        int Scope(int kind) {
+            o = Make(kind, 1)
+            return Size(o)
+        }
+
+        int Reassigned(int kind) {
+            mut o = Make(kind, 1)
+            n = Size(o)
+            o = Make(kind, 2)
+            return n + Size(o)
+        }
+
+        int Item(int kind) {
+            xs = [Make(kind, 1), Make(kind, 2)]
+            return Size(xs[0]) + Size(xs[1])
+        }
+
+        int Copied(int kind) {
+            o = Make(kind, 1)
+            return Size(copy o)
+        }
+
+        int Classed(int kind) {
+            h = Hold(kind, 1)
+            return Held(h.U)
+        }
+
+        int Run(int row, int kind) {
+            if row == 0 {
+                return Scope(kind)
+            }
+
+            if row == 1 {
+                return Reassigned(kind)
+            }
+
+            if row == 2 {
+                return Item(kind)
+            }
+
+            if row == 3 {
+                return Copied(kind)
+            }
+
+            return Classed(kind)
+        }
+
+        """;
+
     // the environments of fields of a function type, made, replaced and let go of with their instances each round
     private const string FunctionFieldRounds = """
         class Button(string Name, mut () => int OnClick)
@@ -4785,6 +5218,43 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(sortByChange, fenced, "sortby-change-fenced"), 0, ["1", "0", "6", "3", "20", "0", "z", "2", "0", "[1, 2, 3]", "[0]", "2", "[9, 3, 1, 1]", "0"], "");
+
+        // Y6: the failure of a `check` shows each side after its text, and the `Text()` of the left side replaces the field the right
+        // side was read through, a `mut` parameter, the place of its caller's, whose read takes no count of its own where nothing after it
+        // in the statement calls (a field read holds its block to the statement's end); the path of the failure counts each side before it
+        // makes a text, so that the right side's text reads the instance the field held, and lets go of both after
+        const string checkOperands = """
+            class Box(mut Probe Right) {
+                pub void Run(Probe left) {
+                    Check(left, mut Right)
+                }
+
+                void Check(Probe left, mut Probe right) {
+                    check left == right
+                }
+
+                pub void Swap() {
+                    Right = Probe(null, 9)
+                }
+            }
+
+            class Probe(mut weak Box? Home, int N) {
+                pub string Text() {
+                    if Home != null {
+                        Home.Swap()
+                    }
+
+                    return "probe {N}"
+                }
+            }
+
+            first = Probe(null, 1)
+            box = Box(Probe(null, 2))
+            first.Home = box
+            box.Run(first)
+
+            """;
+        Ran(BuildAndRun(checkOperands, fenced, "check-operands-fenced"), 1, [], "error: check-failed at program.kz:7:\nleft == right (probe 1 == probe 2)\n");
         // U17, M7: a call that waits parks its message, and a call of its chain runs the actor's own methods while it waits (section 6,
         // "Deadlocks", layer 1), so that one assigns a field the parked message read: a field passed to a `mut` parameter and read before
         // the wait, or before a direct call of the method that assigns it, which the count of such a read holds to its statement's end; a
@@ -5202,6 +5672,23 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(ValueMoves + valueMoveMain, fenced, "value-move-fenced"), 0, ["33", "11", "11", "24", "11", "11", "12", "11", "100", "100", "100", "17"], "");
+        // O5, C4: each row of `ArmCases` twice, an arm's case let go of at the arm's end: none before a read of it in the arm, a return
+        // of it or a `move` that hands it on; D9: each row of `UnionFields` and each case of the field twice
+        const string armCasesMain = """
+            held = Shelf(4)
+            for row in 0..<15 {
+                print("{Run(row, held)} {Run(row, held)}")
+            }
+
+            """;
+        Ran(BuildAndRun(ArmCases + armCasesMain, fenced, "arm-cases-fenced"), 0, ["9 9", "4 4", "8 8", "11 11", "4 4", "9 9", "5 5", "5 5", "11 11", "17 17", "2 2", "5 5", "4 4", "9 9", "4 4"], "");
+        const string unionFieldsMain = """
+            for row in 0..<5 {
+                print("{Run(row, 0)} {Run(row, 1)} {Run(row, 2)} {Run(row, 0)}")
+            }
+
+            """;
+        Ran(BuildAndRun(UnionFields + unionFieldsMain, fenced, "union-fields-fenced"), 0, ["9 5 2 9", "18 10 4 18", "18 10 4 18", "9 5 2 9", "9 5 2 9"], "");
         Ran(BuildAndRun(Interfaces, fenced, "class-interfaces-fenced"), 0, InterfacesPrint, "");
         Ran(BuildAndRun(ClassArms, fenced, "class-arms-fenced"), 0, ClassArmsPrint, "");
         // the first release a program lays out is of a class that holds another, whose release it lays out inside its own: the flag of
@@ -5386,6 +5873,69 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var sized = BuildAndRun(InterfaceRounds.Replace("    a = Make(100)\n", "    a = Make(100)\n    held.Add(Make(1000))\n", StringComparison.Ordinal).Replace("mut round = 0\n", "mut held = List<Sized>()\nmut round = 0\n", StringComparison.Ordinal).Replace("print(round)", "print(held.Count)", StringComparison.Ordinal), Budget(), "interface-rounds-held");
         Assert.Equal(1, sized.Code);
         Assert.StartsWith("error: allocation-failed (", sized.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_case_an_arm_of_a_postfix_else_takes_is_let_go_of_once_at_the_arm_s_end_and_not_where_a_move_emptied_its_place()
+    {
+        // O5, C4: each row of `ArmCases` takes the case of its call in an arm, which holds it as a variable of its block and lets go of
+        // it at its end, as a `match` arm's name lets go of its count (`HeldByArm`), where a `move` that emptied the name's place leaves
+        // nothing to let go of; the blocks live across a second call of each row, after one that warmed it up, and the sum of every
+        // row's value twice
+        const string main = """
+            names = ["Read", "Returned", "Ignored", "Faced", "Based", "Method", "Valued", "Moved", "MovedThin", "Rest", "Effect", "PlainCase", "NestedCase", "Matched", "MatchValue"]
+            held = Shelf(4)
+            mut sum = 0
+            for row in 0..<15 {
+                sum = sum + Run(row, held)
+                before = HttpServer.Live()
+                sum = sum + Run(row, held)
+                n = HttpServer.Live() - before
+                print("{names[row]} {n}")
+            }
+
+            print(sum)
+
+            """;
+        Ran(
+            BuildAndRun(ArmCases + main, ActorTests.Blocks.Value, "arm-cases-freed"),
+            0,
+            ["Read 0", "Returned 0", "Ignored 0", "Faced 0", "Based 0", "Method 0", "Valued 0", "Moved 0", "MovedThin 0", "Rest 0", "Effect 0", "PlainCase 0", "NestedCase 0", "Matched 0", "MatchValue 0", "214"],
+            "");
+    }
+
+    [Fact]
+    public void A_data_value_lets_go_of_the_case_its_union_field_holds_once_wherever_it_is_let_go_of()
+    {
+        // D9, section 3: each row of `UnionFields` lets go of a `data` value whose union field holds a plain data case with a list and a
+        // string, an instance or a list, which its release lets go of by the case it holds (`EachHeld`); the blocks live across a second
+        // call of each row and case, after one that warmed it up, and the sum of every value twice
+        const string main = """
+            names = ["Scope", "Reassigned", "Item", "Copied", "Classed"]
+            kinds = ["Inner", "Pen", "List"]
+            mut sum = 0
+            for row in 0..<5 {
+                for kind in 0..<3 {
+                    sum = sum + Run(row, kind)
+                    before = HttpServer.Live()
+                    sum = sum + Run(row, kind)
+                    n = HttpServer.Live() - before
+                    print("{names[row]} {kinds[kind]} {n}")
+                }
+            }
+
+            print(sum)
+
+            """;
+        Ran(
+            BuildAndRun(UnionFields + main, ActorTests.Blocks.Value, "union-fields-freed"),
+            0,
+            [
+                "Scope Inner 0", "Scope Pen 0", "Scope List 0", "Reassigned Inner 0", "Reassigned Pen 0", "Reassigned List 0",
+                "Item Inner 0", "Item Pen 0", "Item List 0", "Copied Inner 0", "Copied Pen 0", "Copied List 0",
+                "Classed Inner 0", "Classed Pen 0", "Classed List 0", "224",
+            ],
+            "");
     }
 
     [Fact]

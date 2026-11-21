@@ -1,0 +1,14 @@
+// expect: error pointer-crosses at 13
+// allow: raw
+// rules: R19
+
+actor Counter(AtomicLong Word) {
+    pub void Show() {
+        print(1)
+    }
+}
+
+mut long word = 5
+// a view crosses into no actor, as the pointer it holds does not (R19, U12)
+c = spawn Counter(AtomicLong.FromPtr(&word))
+c.Show()
