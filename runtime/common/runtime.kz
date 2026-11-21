@@ -4135,8 +4135,11 @@ pub string ActorText(string name, long number) {
 // unqueued (`Discard`), and a call raises `call-timeout` at its line, the crash of the actor that makes it,
 // while a `send` raises nothing (U37, U45; assumed: T1 of comment 6967147952, T10 of comment 6967625156), as
 // tonic's client fails a call whose deadline passed and a send on tokio's channel reads no deadline (neither
-// checked at source).
+// checked at source). A call's reply holds its place too, the file `file` at 48 and 56 and the line `line` at 64,
+// which the top-level code's wait that finds nothing left to run names where an actor's start keeps the call out
+// (`Kept`; U18, U22, U52; section 6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1).
 pub void Enqueue(long index, long number, byte* message, bool bounded, long bound, string file, int line) {
+    long fileCount = long(file.Bytes.Count)
     sys.Entered()
     byte* state = Lookup(index, number)
     if state == null {
@@ -4175,6 +4178,9 @@ pub void Enqueue(long index, long number, byte* message, bool bounded, long boun
             *Ptr<long>(reply + 16) = deadline
             *Ptr<byte*>(reply + 24) = null
             *Ptr<byte*>(reply + 32) = null
+            *Ptr<byte*>(reply + 48) = file.Pointer
+            *Ptr<long>(reply + 56) = fileCount
+            *Ptr<long>(reply + 64) = long(line)
         }
 
         *Ptr<long>(message + 40) = deadline
@@ -4257,8 +4263,9 @@ byte* Popped(byte* queue) {
 // it runs after the current message and before the queued ones (U28, U34); then each message, a call that waits
 // of the chain the actor's top activation waits in to the end of that activation's side list (layer 1; section
 // 6, "One-shot reply slot"), except while its constructor runs at a restart (`Rebuilding`), when such a call
-// waits in the inbox for that constructor's end, so that a constructor that waits for it is `deadlock` at the
-// top-level code's wait (U22; section 6, the owner, 2026-11-20, #599, comment 7051501153, "Option 1"), and every
+// waits in the inbox for that constructor's end, so that a constructor that waits for it is `deadlock`, which the
+// top-level code's wait names at that call's line (`Kept`; U22; section 6, the owner, 2026-11-20, #599, comment
+// 7051501153, "Option 1", and 2026-11-21, comment 7060156109, Q6 1), and every
 // other message to the end of the inbox, as tokio's `mpsc` channel pushes a
 // value at the tail of its list (not checked at source), so that an inbox keeps the order in which its messages were sent (U5, U15).
 // `Fall` and `EndActor` move them on a supervisor that the thread does not hold too, where a child's crash
@@ -4293,7 +4300,7 @@ void Moved(byte* state) {
         mut byte* message = Popped(state - 144)
         while message != null {
             byte* top = *Ptr<byte*>(state - 8)
-            if top != null && !rebuilding && *Ptr<byte*>(message + 16) != null && *Ptr<long>(message + 24) == *Ptr<long>(top + 344) && *Ptr<long>(message + 32) == *Ptr<long>(top + 352) {
+            if top != null && !rebuilding && CallOf(message, *Ptr<long>(top + 344), *Ptr<long>(top + 352)) {
                 Append(top + 376, message)
             } else {
                 Append(state - 32, message)
@@ -4301,6 +4308,15 @@ void Moved(byte* state) {
 
             message = Popped(state - 144)
         }
+    }
+}
+
+// Whether the message `message` is a call that waits, its reply named, made in the chain whose ID is `high` and `low`, the words a
+// message carries at 24 and 32 and an activation at 344 and 352 (`Enqueue`; section 6, "Deadlocks", layer 1): the test by which a
+// waiting chain lets a call in (`Moved`) and by which a start keeps one out (`Kept`).
+bool CallOf(byte* message, long high, long low) {
+    raw {
+        return *Ptr<byte*>(message + 16) != null && *Ptr<long>(message + 24) == high && *Ptr<long>(message + 32) == low
     }
 }
 
@@ -4369,6 +4385,17 @@ bool Rebuilding(byte* state) {
     }
 
     return (word & 32) != 0
+}
+
+// Whether the constructor of the actor runs at its `spawn` or at the first start of a `per node` actor, its BUILDING bit set
+// (`ActorNew`, `ActorBuilt`), loaded with acquire.
+bool Constructing(byte* state) {
+    mut int word = 0
+    raw {
+        word = StateWord(state).Load(MemoryOrder.Acquire)
+    }
+
+    return (word & 8) != 0
 }
 
 // The value the compare-exchange of the state word `word` from `seen` to `wanted` found there, `seen` where
@@ -4799,7 +4826,10 @@ void Discard(byte* message) {
 // thread's stack, which never parks (section 6, "Deadlocks", assumed there); where the run queue is empty
 // and the reply is not set, nothing is left that could set it, and the process ends with
 // `error: deadlock at <file>:<n>` at that call's line and the exit code 1 (section 6, the owner,
-// 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level wait"). The reply's waiter stands in it
+// 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level wait"), or at the place of a call that an
+// actor's start keeps out where one waits, the call that closes the loop (`Kept`; U22, U52; section 6, the owner,
+// 2026-11-21, #599, comment 7060156109, Q6 1), the chain of the top-level code's call read before the wait, since a
+// crash of its callee moves the message into a new heap. The reply's waiter stands in it
 // since before the call's `Enqueue` (`ReplyWaiter`), and its word is loaded with acquire (`ReplyState`), so
 // that the answer is seen with the result stored before it. Inside a message the
 // activation parks: the thread switches from its stack to the scheduler's, as corosensei's
@@ -4832,7 +4862,14 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
     sys.Entered()
     raw {
         if running == null {
+            long high = *Ptr<long>(message + 24)
+            long low = *Ptr<long>(message + 32)
             if !RootWait(reply) {
+                byte* kept = Kept(high, low)
+                if kept != null {
+                    Raise("deadlock", TextAt(*Ptr<byte*>(kept + 48), *Ptr<long>(kept + 56)), int(*Ptr<long>(kept + 64)))
+                }
+
                 Raise("deadlock", file, line)
             }
         } else {
@@ -4915,6 +4952,97 @@ bool RootWait(byte* reply) {
     }
 
     return true
+}
+
+// The reply of a call that an actor's start keeps out, which the top-level code's wait that found nothing left to run names in place
+// of its own call, since that call closes the loop: a call that waits in the actor's lists, made in the chain of the code that runs the
+// constructor, which that chain would let in were the actor not starting (U17), so that the error names the call a developer changes
+// (`Wait`; U18, U22, U52; section 6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1). The code that runs the constructor is the
+// actor's own top activation at a restart (REBUILDING); at a first start (BUILDING) it is the top-level code, whose chain is that of its
+// call that waits, `high` and `low`, where the top-level code runs it, else the activation whose header names the actor at 424
+// (`Building`), each walked from the actor its stack builds up the supervisors that stack builds too (`KeptBuilt`). Null where none
+// waits, a loop of chains that passes no start among them. The lists are read with plain loads, which holds while one thread runs
+// every program (U35): nothing runs while the top-level code's wait finds nothing left to run.
+byte* Kept(long high, long low) {
+    mut byte* found = null
+    raw {
+        found = KeptBuilt(rootBuilding, high, low)
+    }
+
+    long used = SlotsUsed()
+    mut long index = 0
+    while found == null && index < used {
+        raw {
+            byte* slot = Slot(index)
+            if *Ptr<long>(slot + 8) != 0 {
+                byte* state = *Ptr<byte*>(slot)
+                mut byte* at = *Ptr<byte*>(state - 8)
+                if at != null && Rebuilding(state) {
+                    found = KeptIn(state, *Ptr<long>(at + 344), *Ptr<long>(at + 352))
+                }
+
+                while found == null && at != null {
+                    found = KeptBuilt(*Ptr<byte*>(at + 424), *Ptr<long>(at + 344), *Ptr<long>(at + 352))
+                    at = *Ptr<byte*>(at + 368)
+                }
+            }
+        }
+
+        index = index + 1
+    }
+
+    return found
+}
+
+// The reply of a call of the chain `high` and `low` that the start of the actor whose state is `state`, built on a stack of that chain,
+// keeps out, or the start of an actor whose constructor that stack runs around it, its supervisor while it is built (`ActorNew`,
+// `Supervisor`), as a start nested in a constructor has it; null where none waits, and for an actor whose constructor no longer runs.
+byte* KeptBuilt(byte* state, long high, long low) {
+    mut byte* at = state
+    while at != null && Constructing(at) {
+        byte* found = KeptIn(at, high, low)
+        if found != null {
+            return found
+        }
+
+        raw {
+            at = *Ptr<byte*>(at - 72)
+        }
+    }
+
+    return null
+}
+
+// The reply of the first call of the chain `high` and `low` that waits in the inbox of the actor whose state is `state`, or on its
+// queue of many senders, read from the message its holder takes next (`Popped`), since an actor whose constructor runs at its first
+// start is not taken (`Claimed`); null where none waits. A block of a decision has no reply (`Pending`).
+byte* KeptIn(byte* state, long high, long low) {
+    mut byte* found = null
+    raw {
+        found = KeptFrom(*Ptr<byte*>(state - 32), null, high, low)
+        if found == null {
+            found = KeptFrom(*Ptr<byte*>(state - 136), state - 128, high, low)
+        }
+    }
+
+    return found
+}
+
+// The reply of the first call of the chain `high` and `low` among the messages linked from `first`, the stub `stub` of a queue of many
+// senders passed over, which links its messages and is none (`Pushed`); null where none stands there.
+byte* KeptFrom(byte* first, byte* stub, long high, long low) {
+    raw {
+        mut byte* at = first
+        while at != null {
+            if at != stub && CallOf(at, high, low) {
+                return *Ptr<byte*>(at + 16)
+            }
+
+            at = *Ptr<byte*>(at)
+        }
+    }
+
+    return null
 }
 
 // The first actor of the run queue taken off it, and what it can go on with run: a call of its chain on
@@ -6514,7 +6642,7 @@ pub void RunTests(byte* table, long count, string file) {
         *Ptr<extern "C" (byte*, byte*) => void>(run) = TestRun
         *Ptr<byte*>(run + 8) = null
         *Ptr<byte*>(run + 16) = null
-        reply = AllocateOwn(48)
+        reply = AllocateOwn(72)
     }
 
     mut long passed = 0

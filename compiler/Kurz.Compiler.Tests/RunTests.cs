@@ -249,7 +249,10 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     /// (section 6, the owner, 2026-11-17, #570, comment 6961064167, Q4; no case pins that trace's line, where it is taken being Q13 of
     /// comment 6964678868 on #573),
     /// and the root's <c>restart-limit</c>, whose trace is the top-level code's where it waits, and
-    /// not at the line of the <c>spawn</c> that its error line names (assumed readings of section 6, "Policy at <c>spawn</c>").
+    /// not at the line of the <c>spawn</c> that its error line names (assumed readings of section 6, "Policy at <c>spawn</c>"), and a
+    /// <c>deadlock</c> that names the call an actor's start keeps out, whose trace is the top-level code's where it waits, on a line that
+    /// call does not stand on, so that the error line is held to be the call's and not the wait's (U22, U52; section 6, the owner,
+    /// 2026-11-21, #599, comment 7060156109, Q6 1; the trace assumed there, a reading of the build).
     /// </summary>
     private static readonly Dictionary<string, (int First, string Last)> OwnTraces = new(StringComparer.Ordinal)
     {
@@ -257,6 +260,9 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         ["actors/block-escalate-root.kz"] = (6, "Worker.Fail"),
         ["actors/per-node-escalate.kz"] = (7, "Cache.Fail"), // U53: a `per node` actor's, whose supervisor is the root
         ["actors/crash-restart-limit.kz"] = (18, "main"),
+        ["actors/restart-reentrant.kz"] = (44, "main"),
+        ["actors/per-node-reentrant-in-message.kz"] = (23, "main"),
+        ["actors/per-node-reentrant-nested.kz"] = (26, "main"),
     };
 
     public static TheoryData<string> RunnableCases()

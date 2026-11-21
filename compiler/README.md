@@ -1178,7 +1178,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   in a loop until the word is set, as tokio's `block_on` runs its queue until its future is ready, so
   that a call behind any count of messages takes the stack of one, and ends the process with
   `deadlock` at the call's line where the queue is empty, no restart's pause runs and the word is not set
-  (U18, U42), and with `call-timeout` there once its deadline passes (U36); inside a
+  (U18, U42), or at the line of a call that an actor's start keeps out where one closes the loop, a place
+  `Enqueue` stores in that call's reply (U22, U52), and with `call-timeout` there once its deadline passes (U36); inside a
   message it parks the activation, switching to the thread's side until the word is set or a timer of the
   thread, the timers kept in the order of their deadlines, wakes it at its deadline (U37, U38), and the scheduler drops
   a message whose deadline passed before it starts it, its reply's word set to 4 (`ActorTests`).

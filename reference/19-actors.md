@@ -403,9 +403,9 @@ while a throw in its run at a restart is the actor's own crash under its policy 
 2026-11-14, #519, comment 6882624606, Q28, "All six leans (Recommended)").
 
 A call that reaches the actor while this constructor runs at its `spawn` waits in its inbox, as at a
-restart (U22), and no program can make one: no code holds the reference before `spawn` returns,
-since a field's default reads no `this` (K7) and a constructor in an actor's body is `syntax` (U2)
-*(assumed: Q3 of comment 7056452417, built at its default while it waits for the owner)*.
+restart (U22), one rule for every start of an actor (§6, the owner, 2026-11-21, #599, comment
+7060156109, Q3 1), and no program can make one: no code holds the reference before `spawn` returns,
+since a field's default reads no `this` (K7) and a constructor in an actor's body is `syntax` (U2).
 
 Case: [actors/constructor-arguments.kz](../corpus/actors/constructor-arguments.kz)
 
@@ -2373,7 +2373,8 @@ left to run, on any thread *(assumed in §6)*, ends the process with
 call each other from different chains and wait for each other, on one thread, do not hang silently
 (§6, "Deadlocks"; the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level
 wait"). A call that waits in a function the top-level code called is the top-level code's, at its
-own line. A deadline of a call that waits in a message is nothing left to run (U42) *(assumed: T6 of comment 6967625156)*. A loop of actors the top-level code never waits on stays until the end of the program,
+own line. Where a call that an actor's start keeps out closes the loop, the error names that call's
+line (U22, U52) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1). A deadline of a call that waits in a message is nothing left to run (U42) *(assumed: T6 of comment 6967625156)*. A loop of actors the top-level code never waits on stays until the end of the program,
 where U13 drops it.
 
 Case: [actors/deadlock.kz](../corpus/actors/deadlock.kz)
@@ -2884,8 +2885,10 @@ start does (U52), which the top-level code's wait on one thread reads as `deadlo
 owner, 2026-11-20, #599, comment 7051501153, "Option 1"). No actor crashes on it, so that no restart
 loops on it, and a `send` of that chain to the actor waits in its inbox behind the restart and is no
 `deadlock` *(assumed: the reading of "as T29 option 1 reads", #599, comment 7056452417)*. The error
-names the line of the top-level code's call that waits, as U18 names it, not the line of the call
-the inbox holds *(assumed: Q6 of #599, comment 7056452417, built at its default while it waits for the owner)*.
+names the line of the call the inbox holds, the call that closes the loop, not the line of the
+top-level code's call that waits (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and the
+trace below it is the top-level code's where it waits *(assumed: a reading of the build, the stack
+that raises)*.
 
 Case: [actors/crash-in-constructor-at-restart.kz](../corpus/actors/crash-in-constructor-at-restart.kz)
 ```kurz
@@ -3056,7 +3059,7 @@ print(Counter.Get())
 Case: [actors/restart-reentrant.kz](../corpus/actors/restart-reentrant.kz)
 ```kurz
 // at its restart `A`'s constructor waits on `B.Ask`, whose call of `Peek` waits in `A`'s inbox for that constructor, so that the
-// top-level code's wait on `Get` finds nothing left to run
+// top-level code's wait on `Get` finds nothing left to run, and the error names that call of `Peek`, which closes the loop
 
 actor B {
     mut A? a = null
@@ -4704,7 +4707,9 @@ crash of it ends, as at a `spawn` (U3, U21) *(assumed: a reading of the build, p
 throw in a constructor at `spawn` does *(assumed: a reading of the build, proposed with this record and not put to the owner)*. Messages that reach it while it is built wait in its
 inbox for its start, and a message to it from the code its own start runs, a default that calls a
 function that calls `Cache.Get()`, waits for a start that waits for it, which the top-level code's
-wait on one thread reads as `deadlock` at that message's line (U18) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*.
+wait on one thread reads as `deadlock` (U18) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*, at that message's line, the call that closes the loop,
+wherever the code that runs the start stands, the top-level code, an actor's message or another
+actor's constructor, as at a restart (U22) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1).
 
 Case: [actors/per-node-first-message.kz](../corpus/actors/per-node-first-message.kz)
 ```kurz
@@ -4808,6 +4813,58 @@ int Measured() {
 }
 
 print(Cache.Size())
+```
+
+Case: [actors/per-node-reentrant-in-message.kz](../corpus/actors/per-node-reentrant-in-message.kz)
+```kurz
+// `User`'s `Use` starts `Cache`, whose default calls `Cache.Size` in the chain of `Use`, so that the call waits in `Cache`'s inbox
+// for the start that waits on it, and the error names that call, not the top-level code's call that waits
+
+actor Cache per node {
+    int size = Measured()
+
+    pub int Size() => size
+}
+
+int Measured() {
+    return Cache.Size() + 1
+}
+
+actor User {
+    pub int Use() => Cache.Size()
+}
+
+u = spawn User()
+print(u.Use())
+```
+
+Case: [actors/per-node-reentrant-nested.kz](../corpus/actors/per-node-reentrant-nested.kz)
+```kurz
+// `Outer`'s start, which the top-level code runs, starts `Inner`, whose default waits on `Helper.Ask`, whose call of `Outer.Size`
+// waits in `Outer`'s inbox for the start that waits on it, and the error names that call, not the top-level code's call that waits
+
+actor Helper {
+    pub int Ask() => Outer.Size()
+}
+
+actor Inner per node {
+    int value = Asked()
+
+    pub int Get() => value
+}
+
+actor Outer per node {
+    int size = Inner.Get()
+
+    pub int Size() => size
+}
+
+int Asked() {
+    h = spawn Helper()
+    return h.Ask()
+}
+
+print(Outer.Size())
 ```
 
 Case: [actors/per-node-child.kz](../corpus/actors/per-node-child.kz)
