@@ -1106,7 +1106,7 @@ with its fields, the captured variables and the statics form one region outside 
 is read as a function whose variables are its own, since F16 keeps them from the top-level
 functions, so that they are no statics, and `move` before a value that names no place,
 `f(move Cart(1))`, stands where the word fits the parameter (§6, comment 6897778812, Q3; comment 6657251688, Q3), and ends nothing, the call taking the value it made *(assumed, §6: the
-readings of the top-level code and of a value with no place, which no answer named)*. A call merges the regions of all its arguments not written `copy` or `move`, written `mut` or not,
+top-level code read as a function, and a `move` that ends nothing, which no answer named)*. A call merges the regions of all its arguments not written `copy` or `move`, written `mut` or not,
 and its result's, as SE-0414 does, since `F(a, b)` can store `b` in a `mut` field of `a`, and an argument that crosses
 with no word merges nothing (§6, 2026-11-15, Q2) *(assumed, §6: the point of comment 6897444564 that the answers left standing,
 and for an argument written `copy` or `move`, whose copy is new and whose `move` ends its region at the call, the checker's
@@ -2179,9 +2179,11 @@ comment 6891937666, item 4, option (a), "Rust: by argument order", which named `
 `mut-in-message`); on one argument the checker reads `used-after-move` first, then `move-at-call`,
 then `move-reachable`, the call having the one error *(assumed, §6: the checker's reading, which no
 answer named)*. `mut-in-message` stands at the
-first argument the call writes that fills a `mut` parameter, and on one argument `mut-in-message` and an error of `move` never meet,
-an argument written with `move` that fills a `mut` parameter being `mut-at-call` (M7), its own error
-*(assumed: as §6 marks it)*. An argument's own error
+first argument the call writes that fills a `mut` parameter, and on one argument `mut-in-message` and `move-at-call` or
+`move-reachable` never meet, an argument written with `move` that fills a `mut` parameter being `mut-at-call` (M7), its own error
+*(assumed: as §6 marks it)*, while an argument written `mut` whose variable a `move` ended before it, which fills a `mut`
+parameter and reads that variable, has both `used-after-move` and `mut-in-message` at its line, in that order *(assumed, §6:
+the checker's reading, which no answer named)*. An argument's own error
 stands alone before U14's `cannot-infer` of `spawn`'s type arguments, which is said only where every
 argument reads clean (§6, the owner, 2026-11-15, issue 519, comment 6892275110, item 1, option (a),
 "Argument's error only"), one with no error of its own and no `send-needs-word`, so that
