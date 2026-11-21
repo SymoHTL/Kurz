@@ -2138,9 +2138,11 @@ last call that waits does not run, and a message parked in a wait when the top-l
 not go on (U13); of section 6's deadlocks the build makes layer 1 (U17) and the `deadlock` of a wait
 of the top-level code that nothing can end (U18), and the checker layer 2, the compile error `call-loop`
 on every program that declares an actor (U56 to U58), with the warning `vouch-unneeded` (U59), which the
-walk of the throw sets (`ThrowSets.ActorsCode`) and `Semantics/CallLoops.cs` read, and the build makes no
-layer 3, so that a wait that layer 2 lets through, by a `vouch` or as no loop of calls, and that the
-top-level code does not wait on stays to the end of the program; a crash in a message is the crash of its actor (U19): the runtime stores it in the
+walk of the throw sets (`ThrowSets.ActorsCode`) and `Semantics/CallLoops.cs` read, and the runtime layer 3 (U60 to
+U65): each wait of an actor follows the wait line from the callee its reply names (`Looped`) before it parks, and the
+waiter whose wait closes a loop raises `deadlock` at its call with the loop's waits below its error line (`LoopText`,
+`Deadlocked`), so that a loop that a crash closes, which layer 3 does not see, ends at U18 where the top-level code
+waits on it, and else stays to the end of the program; a crash in a message is the crash of its actor (U19): the runtime stores it in the
 activation's header and switches to the scheduler's stack, frees the actor's heap whole but for its
 first block, the record and the state, copies the messages of its inbox into a new heap, ends the
 open copy sessions of its activations, unhooks the reply each parked activation waits on by the swap

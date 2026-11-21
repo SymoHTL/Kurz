@@ -4039,9 +4039,11 @@ pub string ActorText(string name, long number) {
 // unqueued (`Discard`), and a call raises `call-timeout` at its line, the crash of the actor that makes it,
 // while a `send` raises nothing (U37, U45; assumed: T1 of comment 6967147952, T10 of comment 6967625156), as
 // tonic's client fails a call whose deadline passed and a send on tokio's channel reads no deadline (neither
-// checked at source).
+// checked at source). A call's reply holds the actor it reaches, the call's file and its line too, the edge
+// and the place of its wait that the wait line reads (`Looped`, `LoopText`; U60, U63).
 pub void Enqueue(long index, long number, byte* message, bool bounded, long bound, string file, int line) {
     sys.Entered()
+    long fileCount = long(file.Bytes.Count)
     byte* state = Lookup(index, number)
     if state == null {
         sys.Left()
@@ -4079,6 +4081,10 @@ pub void Enqueue(long index, long number, byte* message, bool bounded, long boun
             *Ptr<long>(reply + 16) = deadline
             *Ptr<byte*>(reply + 24) = null
             *Ptr<byte*>(reply + 32) = null
+            *Ptr<byte*>(reply + 48) = state
+            *Ptr<byte*>(reply + 56) = file.Pointer
+            *Ptr<long>(reply + 64) = fileCount
+            *Ptr<int>(reply + 72) = line
         }
 
         *Ptr<long>(message + 40) = deadline
@@ -4714,6 +4720,13 @@ void Discard(byte* message) {
 // and a reply set `callee crashed` or `gone` at a time, which `Signal` stored in it, at or past the call's own
 // deadline, whenever the waiter reads it (U43; assumed: T7 of comment 6967625156), as tonic reports a call's own
 // deadline (not checked at source).
+//
+// Before the activation of a message parks, its wait follows the wait line from its call (`Looped`; U60, U61), its bound
+// aside, and where the line leads back to the waiting actor, the wait closes a loop: the waiter raises `deadlock` at its
+// call's line, with the loop's waits below its error line (`LoopText`, `Deadlocked`; U62, U63), the header still naming the
+// reply and the message, so that its fall unhooks the reply as at any raise after a wait (section 6, "Deadlocks", layer 3; the
+// owner, 2026-11-20, #519, comment 7051071630, T63 to T69). The top-level code's waits follow no line (T64), U18 ending what layer
+// 3 does not see (T70).
 pub void Wait(byte* reply, byte* message, string file, int line) {
     sys.Entered()
     raw {
@@ -4755,6 +4768,12 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
             byte* header = running
             *Ptr<byte*>(header + 360) = reply
             *Ptr<byte*>(header + 432) = message
+            long hops = Looped(header, reply)
+            if hops > 0 {
+                sys.Left()
+                Deadlocked(LoopText(header, reply, hops), file, line)
+            }
+
             TimerAdd(reply)
             byte* heap = std.HeapUse(null)
             while ReplyState(reply) == 0 && !Waited(reply) {
@@ -4786,6 +4805,215 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
             Raise("actor-gone", file, line)
         }
     }
+}
+
+// The wait line from the call that the activation `header` of a message waits on, whose reply is `reply` (U60, U61; section 6,
+// "Deadlocks", layer 3; the owner, 2026-11-20, #519, comment 7051071630, T63 2, T65 1, T66 1): the count of the waits of the loop
+// that the call closes where the line leads back to the actor of `header`, else 0. A reply leads to the actor its call reaches,
+// which `Enqueue` stored in it, and an actor that waits for the decision of its block (U34) to its supervisor, whose block runs
+// after the supervisor's current message (U28), each such hop a wait of the loop too; the line ends at a child whose block the
+// top-level code runs (U33), at an actor that waits for its restart (U23), that ended or whose constructor runs at its `spawn`
+// (U3), at an idle actor, at a call that gets in, one whose chain is the chain its actor's top activation runs in (U17), and at a
+// top activation that runs, whose reply is set or whose deadline passed; else it goes on through the reply of the actor's top
+// activation, its bound aside. A line that runs into a loop its waiter is not in ends where it meets an actor again that a
+// tortoise holds, moved to the line's actor at each power of two of its hops, as Brent's check of a cycle moves it (not checked
+// at source), so that a walk takes at most about twice the actors that wait, and no memory. It reads the records and the
+// activations of other actors with plain loads, a reading that holds while one thread runs every program (U35).
+long Looped(byte* header, byte* reply) {
+    raw {
+        byte* home = *Ptr<byte*>(header + 320)
+        mut byte* at = reply
+        mut byte* waiter = header
+        mut byte* tortoise = null
+        mut long steps = 0
+        mut long limit = 1
+        mut long hops = 1
+        while true {
+            mut byte* callee = *Ptr<byte*>(at + 48)
+            mut bool called = true
+            while *Ptr<int>(callee - 88) == 5 {
+                callee = *Ptr<byte*>(callee - 72)
+                if callee == null {
+                    return 0
+                }
+
+                called = false
+                hops = hops + 1
+            }
+
+            byte* top = *Ptr<byte*>(callee - 8)
+            if *Ptr<int>(callee - 88) != 0 || top == null {
+                return 0
+            }
+
+            if called && *Ptr<long>(top + 344) == *Ptr<long>(waiter + 344) && *Ptr<long>(top + 352) == *Ptr<long>(waiter + 352) {
+                return 0
+            }
+
+            if callee == home {
+                return hops
+            }
+
+            byte* next = *Ptr<byte*>(top + 360)
+            if next == null || ReplyState(next) != 0 || Waited(next) || callee == tortoise {
+                return 0
+            }
+
+            steps = steps + 1
+            if steps == limit {
+                tortoise = callee
+                limit = limit * 2
+                steps = 0
+            }
+
+            at = next
+            waiter = top
+            hops = hops + 1
+        }
+    }
+}
+
+// The text of the loop of `hops` waits that the wait line found from the call that the activation `header` waits on, whose
+// reply is `reply` (`Looped`; U63; the owner, 2026-11-20, #519, comment 7051071630, T68 3): one line for each wait of the loop,
+// from the raiser's, `<Type>#<n> waits at <file>:<line> on <Type>#<m>` for a call and `<Type>#<n> waits for the decision of
+// <Type>#<m> on its crash` for a child whose block waits, each actor by its text (U2), as its log line names it (U24), each
+// line ending with ` in chain ` and a chain's ID, 32 lowercase hexadecimal digits as `Crashed.Chain` writes one (`ChainText`):
+// for a call the chain the waiting activation runs in, for a child the chain of the message whose crash its block decides on
+// (`Pending`) (assumed: T84 of comment 7058660596, at its default); built in the raiser's heap at the raise alone.
+string LoopText(byte* header, byte* reply, long hops) {
+    mut string text = ""
+    mut string gap = ""
+    mut byte* at = reply
+    mut byte* waiter = header
+    mut long count = 0
+    while count < hops {
+        mut byte* callee = null
+        mut string from = ""
+        mut string to = ""
+        mut string chain = ""
+        mut string place = ""
+        mut long line = 0
+        raw {
+            callee = *Ptr<byte*>(at + 48)
+            from = ActorNamed(*Ptr<byte*>(waiter + 320))
+            to = ActorNamed(callee)
+            chain = ChainText(waiter + 344)
+            place = TextAt(*Ptr<byte*>(at + 56), *Ptr<long>(at + 64))
+            line = long(*Ptr<int>(at + 72))
+        }
+
+        text = "{text}{gap}{from} waits at {place}:{line} on {to} in chain {chain}"
+        gap = "\n"
+        count = count + 1
+        mut bool child = true
+        while count < hops && child {
+            mut bool found = false
+            raw {
+                child = *Ptr<int>(callee - 88) == 5
+                if child {
+                    byte* parent = *Ptr<byte*>(callee - 72)
+                    byte* block = BlockOf(callee)
+                    from = ActorNamed(callee)
+                    to = ActorNamed(parent)
+                    found = block != null
+                    if found {
+                        chain = ChainText(block + 136)
+                    }
+
+                    callee = parent
+                }
+            }
+
+            if child && found {
+                text = "{text}{gap}{from} waits for the decision of {to} on its crash in chain {chain}"
+            } else if child {
+                text = "{text}{gap}{from} waits for the decision of {to} on its crash"
+            }
+
+            if child {
+                count = count + 1
+            }
+        }
+
+        raw {
+            waiter = *Ptr<byte*>(callee - 8)
+            at = *Ptr<byte*>(waiter + 360)
+        }
+    }
+
+    return text
+}
+
+// The text of the actor whose record is `state`: the name of its type, `#` and its number (U2), as its log line names it (U24).
+string ActorNamed(byte* state) {
+    mut string name = ""
+    mut long number = 0
+    raw {
+        byte* written = *Ptr<byte*>(state - 96)
+        name = TextAt(*Ptr<byte*>(written), *Ptr<long>(written + 8))
+        number = *Ptr<long>(state - 40)
+    }
+
+    return ActorText(name, number)
+}
+
+// The message of the block that decides on the crash of the child `child`, which waits for that decision (U34): on its
+// supervisor's queue of the blocks, where the supervisor's holder has not moved it yet, at the front of the supervisor's inbox, or
+// run by one of the supervisor's activations (`Post`, `Moved`, `Start`); null where none holds it. It reads the supervisor's
+// queue by plain loads from its holder's end, a reading that holds while one thread runs every program (U35).
+byte* BlockOf(byte* child) {
+    raw {
+        byte* parent = *Ptr<byte*>(child - 72)
+        byte* stub = parent - 104
+        mut byte* at = *Ptr<byte*>(parent - 112)
+        while at != null {
+            if at != stub && *Ptr<byte*>(at + 56) == child {
+                return at
+            }
+
+            at = *Ptr<byte*>(at)
+        }
+
+        at = *Ptr<byte*>(parent - 32)
+        while at != null && *Ptr<byte*>(at + 8) == BlockTable() {
+            if *Ptr<byte*>(at + 56) == child {
+                return at
+            }
+
+            at = *Ptr<byte*>(at)
+        }
+
+        at = *Ptr<byte*>(parent - 8)
+        while at != null {
+            byte* message = *Ptr<byte*>(at + 328)
+            if *Ptr<byte*>(message + 8) == BlockTable() && *Ptr<byte*>(message + 56) == child {
+                return message
+            }
+
+            at = *Ptr<byte*>(at + 368)
+        }
+
+        return null
+    }
+}
+
+// Layer 3's `deadlock` (U62, U63; section 6, "Deadlocks", layer 3): the crash of the actor whose wait closed a loop, at the line
+// of its call, with the loop's text `text` below its error line, as a `throw` keeps its text (`Throw`), so that its log line
+// holds the text in double quotes and a block of `on crash` reads it as the `Detail` of its `RuntimeError` (U24, U30); where its
+// policy and its supervisors' escalate the crash to the top-level code, the process ends here with the error line ending in a
+// colon, the text below it, the trace of this stack and the exit code 1 (U25).
+void Deadlocked(string text, string file, int line) {
+    CrashActor("deadlock", file, line, true, text)
+    sys.Crashing()
+    WriteError("error: deadlock at ")
+    WriteError(file)
+    WriteError(":")
+    WriteNumber(ulong(line))
+    WriteError(":\n")
+    WriteError(text)
+    WriteError("\n")
+    sys.Trace()
+    sys.Exit(1)
 }
 
 // The first actor of the run queue taken off it, and what it can go on with run: a call of its chain on
