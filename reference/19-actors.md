@@ -4418,8 +4418,8 @@ T49 (b), T60 (b) and T62 (a) read one: the walk reads every `spawn` of the type,
 `spawn` that fills it with another reference makes it none (the owner, 2026-11-21, #519, comment 7060155980, T75 1). A
 `spawn` fills the field as a caller that waits fills a parameter, `this` held in a local without `mut` among what it passes,
 and gives none in the code outside the actors' messages; any other write of the field makes it none, as of a field of the
-body; and a field of an actor that no `spawn` makes is none, as a method that nothing calls has no caller *(assumed: a
-reading of T75 1 of comment 7060155980)*.
+body *(assumed: a reading of T75 1 of comment 7060155980)*. A field of an actor that no `spawn` makes is none, as a
+method that nothing calls has no caller (§6, the owner, 2026-11-21, #519, comment 7067131456).
 
 No callback comes from a reference that a `send` passes, or that another caller that waits passes as anything but `this` or
 a callback (T60 (b)), nor from an item of a list, but for a list field of callbacks, or from a capture in a lambda, a local
