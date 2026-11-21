@@ -5233,7 +5233,9 @@ No case: a warning changes neither what a program prints nor whether it compiles
 A call that waits, made in an actor's message, makes an edge of the wait line from its activation to the actor it calls,
 unless it got in by its chain (U17) and no activation of that actor runs it yet, the waiter's own call that gets in making
 no edge; from that actor the line goes on through the wait of its top activation, and so through the activation that runs
-a call that got in by its chain, where that activation is newer in the chain than the hop's (the owner, 2026-11-21, #519, comment 7060155980, T86 2), and from a
+a call that got in by its chain, where that activation is newer in the chain than the hop's (the owner, 2026-11-21, #519, comment 7060155980, T86 2)
+*(assumed: a reading of the build of T86 2, comment 7059356106: "newer in the chain than the hop's" read as an activation of
+that actor, at or under its top activation, that runs the very call the hop's waiter waits on)*, and from a
 child whose block of `on crash` waits (U34) to its supervisor, an actor, through the wait of the supervisor's top activation,
 whose block runs only after the supervisor's current message (U28) (§6, "Deadlocks", layer 3; the owner, 2026-11-20, #519, comment 7051071630, T63 2). The line ends at
 an actor that is idle, that runs, or whose top activation can go on, its reply set or its deadline passed, at an actor that
@@ -5303,7 +5305,9 @@ it, from the wait that raised, as a `throw`'s text stands under its error line (
 (U60), each actor by the name of its type and its number (U2), as its log line names it (U24), and the IDs of the chains
 (§6, "Deadlocks", layer 3; the owner, 2026-11-20, #519, comment 7051071630, T68 3): each line ends with ` in chain ` and a chain's ID, 32 lowercase hexadecimal digits
 as a block's `Crashed.Chain` reads one (U30), for a call the chain of the activation that waits, for a child the chain of
-the message whose crash its block decides on (the owner, 2026-11-21, #519, comment 7060155980, T84 1). The crash's log line
+the message whose crash its block decides on (the owner, 2026-11-21, #519, comment 7060155980, T84 1); a child's line whose
+block's message stands neither on its supervisor's queue of blocks, nor in its inbox, nor under one of its activations ends
+with no chain ID *(assumed: a reading of the build of T68 3 and T84 1, comment 7058660596)*. The crash's log line
 holds the text in double quotes (U24), the IDs inside it while P8, the place of a chain ID among the line's own fields, stays
 open *(assumed: T68 3 read with option 1's cost, comment 7058660596)*, and a block of `on crash` reads it as the `Detail` of
 the `RuntimeError` in its `Reason`, whose `Kind` is `RuntimeKind.Deadlock` (U30); where a policy escalates the crash to the
@@ -5323,7 +5327,7 @@ message (U34), so that no wait closes the loop and the top-level code's wait on 
 deadline standing (U42) (§6, "Deadlocks", layer 3; the owner, 2026-11-20, #519, comment 7051071630, T63 2 and T70 1, which replaces the part of Q4 of comment
 6892812780 that kept layer 3 off one thread). That `deadlock` names the loop: one walk at U18's end follows the line from
 the top-level code's call (U60), and where it runs into a loop, the error line ends with a colon and the loop's waits stand
-below it in U63's form, one line for each, each with its chain's ID, from the first wait of the loop the walk meets; where
+below it in U63's form, one line for each, each with its chain's ID where U63 gives one, from the first wait of the loop the walk meets; where
 the line ends before any loop, the error line stands alone (the owner, 2026-11-21, #519, comment 7060155980, T85 2).
 
 Case: [actors/deadlock-pending-crash.kz](../corpus/actors/deadlock-pending-crash.kz)
