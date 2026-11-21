@@ -6014,6 +6014,247 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(constructors, Fenced, "class-constructors-fenced"), 0, ["A body", "B body", "A body", "A body", "D further 7", "7", "A body", "2", "x!?", "x! [3, 4] tx+", "anon!?", "anon! [3, 4, 5] tanon+-", "0", "5", "abc", "9", "9", "Animal 4", "Dog legs 4", "legs 4", "rex", "rex", "kim2", "pet"], "");
     }
 
+    /// <summary>
+    /// std/ whose <c>HttpServer</c> holds a probe, true where it holds, of each place that sets the heap the allocation entry serves and
+    /// that heap's table of size classes (<c>serving</c>, <c>servingHeads</c>): the entry serves the heap <c>HeapUse</c> names, the thread's
+    /// own after null and from its first use on, and gives the free block of a class the table of that heap holds, the table a heap
+    /// makes, resets or is made without where it serves and no other. A heap freed or reset gives its pages to the thread's pools, where
+    /// the fence does not see a read of them (knowledge/a-freed-heap-page-stays-readable-under-the-fence.md), so each probe that frees or
+    /// resets the heap that served writes the address 16 into the words of its record and its table the entry would read, before it
+    /// allocates again: a read of them ends the run with the system's signal.
+    /// </summary>
+    private static readonly Lazy<CheckedRuntime> Serving = new(() => Edited(("std/std.kz", "pub class HttpServer {\n", """
+        pub class HttpServer {
+            pub static bool UsedHeap() {
+                mut bool served = false
+                raw {
+                    byte* mine = Allocate(16)
+                    Free(mine, 16)
+                    byte* heap = HeapNew(0)
+                    byte* before = HeapUse(heap)
+                    served = Owner(Allocate(16), 16) == heap
+                    HeapUse(before)
+                    HeapFree(heap)
+                }
+
+                return served
+            }
+
+            pub static bool UsedHeapsTable() {
+                mut bool taken = false
+                raw {
+                    byte* heap = HeapNew(0)
+                    byte* before = HeapUse(heap)
+                    byte* p = Allocate(16)
+                    Free(p, 16)
+                    HeapUse(before)
+                    HeapUse(heap)
+                    taken = Allocate(16) == p
+                    HeapUse(before)
+                    HeapFree(heap)
+                }
+
+                return taken
+            }
+
+            pub static bool FreedWhileAnotherServes() {
+                mut bool held = false
+                raw {
+                    byte* mine = Allocate(16)
+                    Free(mine, 16)
+                    byte* heap = HeapNew(0)
+                    byte* before = HeapUse(heap)
+                    byte* p = Allocate(16)
+                    Free(p, 16)
+                    byte* q = Allocate(16)
+                    HeapUse(before)
+                    Free(q, 16)
+                    held = Allocate(16) == mine
+                    HeapUse(heap)
+                    held = held && Allocate(16) == q
+                    HeapUse(before)
+                    HeapFree(heap)
+                }
+
+                return held
+            }
+
+            pub static bool UsedNull() {
+                mut bool served = false
+                raw {
+                    byte* mine = HeapCurrent()
+                    byte* heap = HeapNew(0)
+                    byte* before = HeapUse(heap)
+                    byte* p = Allocate(16)
+                    Free(p, 16)
+                    long* table = *Ptr<long*>(heap + 32)
+                    HeapUse(null)
+                    HeapFree(heap)
+                    mut long i = 0
+                    while i < 16 {
+                        table[i] = 16
+                        i = i + 1
+                    }
+
+                    *Ptr<long>(heap) = 16
+                    *Ptr<long>(heap + 8) = 16
+                    *Ptr<long>(heap + 16) = 16
+                    *Ptr<long>(heap + 32) = 16
+                    served = Owner(Allocate(16), 16) == mine
+                    HeapUse(before)
+                }
+
+                return served
+            }
+
+            pub static bool FirstOwn() {
+                mut bool served = false
+                raw {
+                    byte* ownBefore = own
+                    byte* currentBefore = current
+                    byte* servingBefore = serving
+                    long* headsBefore = servingHeads
+                    own = null
+                    current = null
+                    serving = null
+                    servingHeads = null
+                    byte* p = Allocate(16)
+                    byte* q = Allocate(16)
+                    byte* made = own
+                    served = made != null && Owner(p, 16) == made && Owner(q, 16) == made
+                    own = ownBefore
+                    current = currentBefore
+                    serving = servingBefore
+                    servingHeads = headsBefore
+                    HeapFree(made)
+                }
+
+                return served
+            }
+
+            pub static bool MadeTable() {
+                mut bool held = false
+                raw {
+                    byte* heap = HeapNew(0)
+                    byte* before = HeapUse(heap)
+                    byte* p = Allocate(16)
+                    Free(p, 16)
+                    held = Allocate(16) == p
+                    byte* other = HeapNew(0)
+                    HeapUse(other)
+                    byte* q = Allocate(16)
+                    HeapUse(before)
+                    Free(q, 16)
+                    held = held && Owner(Allocate(16), 16) == HeapCurrent()
+                    HeapFree(heap)
+                    HeapFree(other)
+                }
+
+                return held
+            }
+
+            pub static bool ResetTable() {
+                mut bool held = false
+                raw {
+                    byte* heap = HeapNew(0)
+                    byte* before = HeapUse(heap)
+                    byte* p = Allocate(16)
+                    Free(p, 16)
+                    long* table = *Ptr<long*>(heap + 32)
+                    HeapReset(heap)
+                    mut long i = 0
+                    while i < 16 {
+                        table[i] = 16
+                        i = i + 1
+                    }
+
+                    held = Owner(Allocate(16), 16) == heap
+                    HeapUse(before)
+                    byte* mine = Allocate(16)
+                    Free(mine, 16)
+                    HeapReset(heap)
+                    held = held && Allocate(16) == mine
+                    HeapFree(heap)
+                }
+
+                return held
+            }
+
+            pub static bool NewTable() {
+                mut bool held = false
+                raw {
+                    byte* heap = HeapNew(0)
+                    byte* before = HeapUse(heap)
+                    byte* p = Allocate(16)
+                    Free(p, 16)
+                    long* table = *Ptr<long*>(heap + 32)
+                    HeapFree(heap)
+                    byte* again = HeapNew(0)
+                    mut long i = 0
+                    while i < 16 {
+                        table[i] = 16
+                        i = i + 1
+                    }
+
+                    held = again == heap && Owner(Allocate(16), 16) == again
+                    HeapUse(before)
+                    HeapFree(again)
+                    byte* mine = Allocate(16)
+                    Free(mine, 16)
+                    byte* other = HeapNew(0)
+                    held = held && Allocate(16) == mine
+                    HeapFree(other)
+                }
+
+                return held
+            }
+
+        """)));
+
+    [Theory]
+    [InlineData("UsedHeap")] // `HeapUse` with a heap: the entry serves it, not the thread's own heap, whose table holds a free block of the class
+    [InlineData("UsedHeapsTable")] // `HeapUse` with a heap: the entry gives the block that heap's table holds, read where it comes to serve again
+    [InlineData("FreedWhileAnotherServes")] // a block of a heap freed while the thread's own heap serves goes to the table of its heap, not to the one the entry serves
+    [InlineData("UsedNull")] // `HeapUse` with null: the entry serves the thread's own heap again and reads nothing of the heap that served, freed
+    [InlineData("FirstOwn")] // the thread's own heap made at its first use, as on a thread that never allocated: the entry serves it from then on
+    [InlineData("MadeTable")] // the table a heap makes where it serves is the entry's; one made while another serves is not
+    [InlineData("ResetTable")] // a heap reset where it serves leaves the entry no table, so nothing it held is given; one reset while another serves leaves that one's
+    [InlineData("NewTable")] // a heap made where the heap that served stood, freed while it served, leaves the entry no table; one made while another serves leaves that one's
+    public void The_heap_the_allocation_entry_serves_and_its_table_are_set_where_either_changes(string probe)
+    {
+        // the allocation entry finds the heap that serves and its table by one load of the thread, as mimalloc's `_mi_heap_default`
+        // (std/std.kz, `serving`): each probe is true where it is set where the heap that serves or its table changes
+        Ran(BuildAndRun($"print(HttpServer.{probe}())\n", Serving.Value, "heap-serving-" + probe), 0, ["true"], "");
+    }
+
+    [Fact]
+    public void The_allocation_entry_stays_a_call_where_its_size_is_a_constant()
+    {
+        // `Emitter.OutOfLine` marks `std.Allocate` `noinline`, as Rust's `__rust_alloc` is a call into the global allocator: a program
+        // that makes an instance of a class of one size in a loop calls the entry there once its IR is optimised as a release build
+        // optimises it, where LLVM put the entry into such a caller without the mark (LLVM writes a name without its quotes where it
+        // needs none)
+        const string text = """
+            class Point(int X, int Y)
+
+            mut total = 0
+            for i in 0..<1000 {
+                p = Point(i, i + 1)
+                total = total + p.X + p.Y
+            }
+
+            print(total)
+
+            """;
+        var program = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: false).Program!;
+        var main = OptimisedMain(program, "allocate-out-of-line");
+        // the instance's 24 bytes, a constant at the call; the slow path of an entry put into its caller would call `HeapCurrent`
+        Assert.Contains(main, l => l.Contains(" call ", StringComparison.Ordinal) && l.Contains("std.Allocate.", StringComparison.Ordinal) && l.Contains("(i64 24)", StringComparison.Ordinal));
+        Assert.DoesNotContain(main, l => l.Contains("std.HeapCurrent.", StringComparison.Ordinal));
+        var define = program.Ir.Split('\n').Single(l => l.StartsWith("define internal ptr @\"std.Allocate.", StringComparison.Ordinal));
+        Assert.Contains(") noinline ", define, StringComparison.Ordinal);
+    }
+
     // lists of 70000 items made and dropped for 200 rounds, which grow through blocks of 262160 and 524304 bytes, and the same lists
     // all held
     private const string LargeRounds = "long Fill(int n) {\n    mut xs = List<int>()\n    mut i = 0\n    while i < n {\n        xs.Add(i)\n        i = i + 1\n    }\n    return long(xs.Count)\n}\n\nmut round = 0\nmut long total = 0\nwhile round < 200 {\n    round = round + 1\n    total = total + Fill(70000)\n}\nprint(total)\n";

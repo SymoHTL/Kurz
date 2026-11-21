@@ -423,7 +423,19 @@ call `handle_alloc_error`. The entry serves a heap (record, section 3): the one 
 switch to an actor's stack and puts back after it, the running actor's, which a waiting call sets
 aside while it waits (`Wait`); the new actor's, while `spawn` runs its constructor and the defaults
 of its body; the heap of a copy's session, from `CopyUse` to `CopyLeft`; else the thread's own, which
-holds what the top-level code allocates and what lives as long as the process ("The runtime"). A heap
+holds what the top-level code allocates and what lives as long as the process ("The runtime"). The
+thread holds the heap the entry serves and that heap's table of free blocks by size class in two words
+of its own, kept true wherever the heap that serves or its table changes (`HeapUse`, `HeapCurrent`,
+`HeapNew`, `HeapReset`, `Heads`), as mimalloc's thread-local `_mi_heap_default` names the heap that
+serves, so that the entry finds the free block of its class by one load of the thread, where it loaded
+the heap set to serve, then the thread's own, then that heap's table, and `Free` takes that table for a
+block of the heap that serves; the entry stays a call at every caller (`Emitter.OutOfLine`), as Rust's
+`__rust_alloc` is a call into the global allocator (the owner, 2026-11-20, issue 157, comment
+7051500158, S4, against the allocator as it stood, an exception to "no row slower beyond noise": eight
+rows of that issue's sweep ran slower by 0.6% to 5.7%, `hex-encode-16mib` and `equal` the most, and
+`hex-decode-64-digits` 9% to 14% faster and `substring` 6% to 7%; pinned by
+`ListTests.The_heap_the_allocation_entry_serves_and_its_table_are_set_where_either_changes` and
+`ListTests.The_allocation_entry_stays_a_call_where_its_size_is_a_constant`). A heap
 takes its memory in pages, its first page sized to what it holds first, from 256 bytes, each later page
 twice the size of the one before it, up to 65536 bytes, and larger, the smallest power of two that holds
 the block, only where one block needs more (record, section 3: the owner, 2026-11-15, #519, comment
