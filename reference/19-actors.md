@@ -4207,18 +4207,6 @@ s = spawn Store()
 print(s.Get() within 2)
 ```
 
-Case: [actors/within-declaration-zero.kz](../corpus/actors/within-declaration-zero.kz)
-```kurz
-// the literal of `Late`'s declaration, 0 s, is a deadline that has passed at each call of `Late` that names no bound of its own
-
-actor Store {
-    pub int Late() within 0s => 0
-}
-
-s = spawn Store()
-print(s.Late())
-```
-
 ### U40 (assumed, §6) The word `within` and the bound's value
 
 `within` is a word only where it stands, as `on crash`, `attempt` and `vouch` are, so that a variable may be named `within`
@@ -4366,7 +4354,7 @@ s = spawn Store()
 print(s.Get())
 ```
 
-Case: [actors/within-declaration-zero.kz](../corpus/actors/within-declaration-zero.kz)
+Case: [actors/within-clauses.kz](../corpus/actors/within-clauses.kz)
 
 ### U42 (assumed, §6) A wait of the top-level code with no message to run while a deadline stands
 
