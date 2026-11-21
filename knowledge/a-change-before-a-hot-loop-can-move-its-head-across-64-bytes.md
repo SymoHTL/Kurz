@@ -47,7 +47,8 @@ three bytes) inlined into `std.UnicodeCase`, where a byte loop stood, and the he
   `-falign-loops=64`, in a sweep of every row of issue 157 on 2026-11-19 (checked, a run of its own, neither of the
   two runs of the shifts, best of 11), took `cyrillic` from 84.69 to 71.08 ms and `upper-cyrillic` from 83.83 to
   70.35 ms, -16.1% each, and made 42 of 102 rows slower beyond the band of two copies of `main`, by up to 12.2%: no free fix
-  either, and a choice of the build's layout, as the alignment of functions of pull request 240 was the owner's.
+  either, and a choice of the build's layout, as the alignment of functions of pull request 240 was the owner's. The
+  owner took it on 2026-11-20 (issue 157, comment 7051500158, S2): a release build aligns every loop's head at 64 bytes.
 - Every row of issue 157, timed with its program moved in those ways (checked, 2026-11-19, issue 157, comment 7004204396):
   `main` ad2239c9 and six layouts of its instructions, every function moved by 64, 256 or 4096 bytes or by 16, 32 or
   48 bytes within its 64, in two runs of 102 and 101 rows, best of 11; the 102nd row, `crc`'s one, timed in the
@@ -65,7 +66,8 @@ three bytes) inlined into `std.UnicodeCase`, where a byte loop stood, and the he
 - The recipe: keep the IR a release build hands clang (a script named `clang-23` first on `PATH` that copies the
   `.ll` it is given, as knowledge/kurz-ir-marks-no-parameter-noundef.md describes), compile it to assembly with the
   release build's options (`-O2 -mllvm -align-all-functions=6 -S`, `Clang.Release` in
-  `compiler/Kurz.Compiler/Build/Clang.cs`, read at ad2239c9 on 2026-11-19), put `.nops N` just before the function's
+  `compiler/Kurz.Compiler/Build/Clang.cs`, read at ad2239c9 on 2026-11-19, and `-falign-loops=64` with them since the
+  owner's answer S2 of 2026-11-20), put `.nops N` just before the function's
   label, after its `.p2align 6`, where they never run (after `.cfi_startproc` they run on every call), assemble it
   with clang's assembler and the feature `+fast-15bytenop` (`clang-23 -cc1as -triple x86_64-pc-linux-gnu -filetype
   obj -target-cpu x86-64 -target-feature +fast-15bytenop -mrelocation-model pic`), without which the assembler pads

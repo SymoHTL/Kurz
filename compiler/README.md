@@ -695,7 +695,14 @@ pinned clang compiles unoptimised, at `-O0`, in a test build, as Cargo's `dev` p
 `-O2` in a release build (the owner, 2026-10-29, "As Rust's dev profile, -O0"), every function of which
 it aligns at 64 bytes through LLVM's `-align-all-functions=6`, where LLVM, and rustc with it, aligns one
 at 16 (the owner, 2026-11-02, issue 156, comment 6580739215; pinned by
-`ClangTests.A_release_build_aligns_every_function_at_64_bytes_and_a_test_build_leaves_llvms_alignment`), and links with the C
+`ClangTests.A_release_build_aligns_every_function_at_64_bytes_and_a_test_build_leaves_llvms_alignment`),
+and the head of every loop at 64 bytes through clang's `-falign-loops=64`, which reaches IR, where LLVM
+aligns one at 16 on x86-64 and leaves it unaligned on 64-bit Arm (the owner, 2026-11-20, issue 157,
+comment 7051500158, S2, against leaving the loops to LLVM, an exception to "no row slower beyond noise"
+as the alignment of functions is: the Cyrillic rows of `ToLower` and `ToUpper` ran 16.1% faster, and 42
+of the 102 rows of that issue's sweep slower beyond the band of two copies of a build, by up to 12.2%, in
+a larger binary; pinned by
+`ClangTests.A_release_build_aligns_every_loop_at_64_bytes_and_a_test_build_leaves_llvms_alignment`), and links with the C
 library as the platform links it, on Linux its math library `libm` with it, as Rust's standard
 library links it through its `libc` crate (checked 2026-10-29: the `libc` crate's `src/unix/mod.rs`,
 which links `m` beside `c` on Linux), whose `fmod` an unoptimised `%` of a `double` calls, and with the

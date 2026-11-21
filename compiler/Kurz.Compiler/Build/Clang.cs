@@ -171,7 +171,7 @@ public sealed partial class Clang
     }
 
     /// <summary>The options of a release build's optimiser and code generator (<see cref="Arguments"/>).</summary>
-    private static readonly string[] Release = ["-O2", "-mllvm", "-align-all-functions=6"];
+    private static readonly string[] Release = ["-O2", "-mllvm", "-align-all-functions=6", "-falign-loops=64"];
 
     /// <summary>
     /// The arguments <see cref="Build"/> gives this clang, the one list on every target. A release build aligns every function at
@@ -181,7 +181,12 @@ public sealed partial class Clang
     /// their band and 8 slower: parsing doubles of 17 digits took 111.90 ms against 136.91, and of 5 digits 43.39 against 55.76,
     /// while setting and getting strings in a map took 77.35 against 71.07 and 69.96. The option goes to LLVM's code generator,
     /// which the IR is handed to: clang's <c>-falign-functions</c> is read by its front end, which IR does not pass through, and
-    /// aligns nothing here. A test build keeps LLVM's alignment.
+    /// aligns nothing here. A release build aligns the head of every loop at 64 bytes as well, clang's <c>-falign-loops=64</c>, which
+    /// reaches IR, where LLVM aligns a loop's head at 16 bytes on x86-64 and leaves it unaligned on 64-bit Arm: the owner's choice of
+    /// 2026-11-20 (issue 157, comment 7051500158, S2), an exception to "no row slower beyond noise" as the alignment of functions is,
+    /// taken against leaving the loops to LLVM. The Cyrillic rows of <c>ToLower</c> and <c>ToUpper</c>, whose walk's head stood at 48
+    /// mod 64, ran 16.1% faster, and 42 of the 102 rows of that issue's sweep ran slower beyond the band of two copies of a build, by
+    /// up to 12.2% (<c>sort-unstable-string</c>), in a larger binary. A test build keeps LLVM's alignment of both.
     /// </summary>
     internal List<string> Arguments(string irPath, string outputPath, IReadOnlyList<string> libraries, bool release, bool lines, string? cpuFlag = null)
     {
