@@ -598,6 +598,23 @@ public sealed class Parser
                 return ParseConstAssert(); // T37: a statement of its own; `const` and `assert` are names everywhere else (L18)
             }
 
+            if (token.Text == "test" && (Peek().Kind == TokenKind.StringLiteral
+                || (Peek() is { Kind: TokenKind.Name, Text: "cluster" } && CanStartExpression(Peek(2).Kind) && Peek(2).Kind != TokenKind.LeftBracket)))
+            {
+                return ParseTest(); // Y1, Y8: `test` before a string, or `test cluster`, and a name everywhere else (L18)
+            }
+
+            if (token.Text is "check" or "advance" && CanStartExpression(Peek().Kind) && Peek().Kind != TokenKind.LeftBracket)
+            {
+                // Y6, Y10: `check(x)` among them, as `const assert(` is the statement (L18); before `=`, `.` and `[` the word is a name
+                return token.Text == "check" ? ParseAssertion() : ParseAdvance();
+            }
+
+            if (token.Text == "mock" && Peek().Kind == TokenKind.Name && TryMock(out var mock))
+            {
+                return mock!; // Y9: `mock X with Y`; the word is a name where no `with` and type follow its type (L18)
+            }
+
             if (Peek().Kind == TokenKind.Assign)
             {
                 Advance();
@@ -879,6 +896,145 @@ public sealed class Parser
         SkipNewlines();
         Expect(TokenKind.RightParen, "`)`");
         return new ConstAssertStatement(keyword.Line, condition, ParseStringLiteral(text));
+    }
+
+    /// <summary>
+    /// Y1: <c>test "name" { ... }</c>, its name a plain string literal, a hole in it <c>syntax</c>, its block opening on the line of its name
+    /// as C1 has an <c>if</c>'s; it stands at the top level of a file alone, and inside a block it is <c>syntax</c> (E4), read all the same, as R16's
+    /// block is, so that the rest of the file is read. Y8: <c>test cluster N seed S { ... }</c> of section 13, whose words and body are
+    /// passed over, as an actor's <c>per</c> is (U1), and kept for the checker's <c>not supported</c>.
+    /// </summary>
+    private TestDeclaration ParseTest()
+    {
+        var word = Advance(); // `test`
+        if (statementDepth > 1)
+        {
+            ReportSyntax(word.Line, "a `test` block stands at the top level of a file alone (Y1)");
+        }
+
+        if (!At(TokenKind.StringLiteral))
+        {
+            Advance(); // `cluster`
+            return new TestDeclaration(word.Line, null, null, PassOverClusterTest(), Cluster: true);
+        }
+
+        var name = Advance();
+        var text = ((StringLiteralValue)name.Value!).PlainText;
+        if (text is null && statementDepth == 1)
+        {
+            ReportSyntax(name.Line, "the name of a test is a plain string, with no interpolation (Y1)");
+        }
+
+        return new TestDeclaration(word.Line, text, name.Text, ParseBlockAfter(name.Line, "a `test`"));
+    }
+
+    /// <summary>Y8: the words of <c>test cluster</c> up to the block that opens on their line, and the block, passed over; an empty block that ends on the line of its closing brace.</summary>
+    private Block PassOverClusterTest()
+    {
+        var open = 0;
+        while (!(At(TokenKind.LeftBrace) && open == 0))
+        {
+            if (At(TokenKind.EndOfFile) || (At(TokenKind.Newline) && open == 0))
+            {
+                throw Fail("the block of `test cluster`, on its line (Y8, C1)");
+            }
+
+            open = Current.Kind is TokenKind.LeftParen or TokenKind.LeftBracket ? open + 1
+                : Current.Kind is TokenKind.RightParen or TokenKind.RightBracket ? Math.Max(0, open - 1)
+                : open;
+            Advance();
+        }
+
+        var brace = Advance();
+        for (var depth = 1; depth > 0;)
+        {
+            if (At(TokenKind.EndOfFile))
+            {
+                throw Fail("`}`");
+            }
+
+            var token = Advance();
+            depth += token.Kind == TokenKind.LeftBrace ? 1 : token.Kind == TokenKind.RightBrace ? -1 : 0;
+        }
+
+        return new Block(brace.Line, [], tokens[index - 1].Line);
+    }
+
+    /// <summary>Y6: <c>check condition</c>, the condition read as any expression is, with its text as written (<see cref="WrittenBetween"/>).</summary>
+    private AssertionStatement ParseAssertion()
+    {
+        var word = Advance(); // `check`
+        var first = index;
+        var condition = ParseExpression();
+        return new AssertionStatement(word.Line, condition, WrittenBetween(first, index - 1));
+    }
+
+    /// <summary>Y10: <c>advance d</c>, its duration read as any expression is.</summary>
+    private AdvanceStatement ParseAdvance()
+    {
+        var word = Advance(); // `advance`
+        return new AdvanceStatement(word.Line, ParseExpression());
+    }
+
+    /// <summary>
+    /// Y9: <c>mock X with Y</c>, two types; tried, so that where no <c>with</c> and type follow the first type, the word is a name, a type
+    /// named <c>mock</c> in <c>mock x = 1</c> among such uses (L18). False, with the cursor back where it was, when it is no <c>mock</c>.
+    /// </summary>
+    private bool TryMock(out Statement? statement)
+    {
+        var word = Current;
+        TypeSyntax? target = null;
+        TypeSyntax? replacement = null;
+        var ok = Try(() =>
+        {
+            Advance();
+            target = ParseType();
+            if (!AtKeyword("with"))
+            {
+                throw Fail("`with` and the type that stands in for the first (Y9)");
+            }
+
+            Advance();
+            replacement = ParseType();
+        });
+        statement = ok ? new MockStatement(word.Line, target!, replacement!) : null;
+        return ok;
+    }
+
+    /// <summary>
+    /// F10's text of the tokens from <paramref name="first"/> to <paramref name="last"/>, the line breaks after the last passed over: each
+    /// token as the source writes it, and what stands between two tokens, spaces, line breaks and comments, one space, so that a condition
+    /// over several lines reads as one line; a <c>&gt;</c> of a <c>&gt;&gt;</c> the type arguments took apart (<see cref="ExpectGreater"/>)
+    /// stands between its two tokens as written.
+    /// </summary>
+    private string WrittenBetween(int first, int last)
+    {
+        while (last > first && tokens[last].Kind is TokenKind.Newline or TokenKind.EndOfFile)
+        {
+            last--;
+        }
+
+        var text = new System.Text.StringBuilder();
+        var end = -1;
+        for (var i = first; i <= last; i++)
+        {
+            var token = tokens[i];
+            if (token.Kind is TokenKind.Newline or TokenKind.EndOfFile)
+            {
+                continue;
+            }
+
+            if (end >= 0 && token.Offset > end)
+            {
+                var gap = System.Text.RegularExpressions.Regex.Replace(source.Text[end..token.Offset], "//[^\n]*", " ");
+                text.Append(System.Text.RegularExpressions.Regex.Replace(gap, "[ \t\r\n]+", " "));
+            }
+
+            text.Append(source.Text, token.Offset, token.Text.Length);
+            end = token.Offset + token.Text.Length;
+        }
+
+        return text.ToString();
     }
 
     /// <summary>
@@ -1740,7 +1896,8 @@ public sealed class Parser
     /// U1: the clauses after an actor's name, before its body, in any order (section 6, the owner, 2026-11-13, #519, comment 6847932993,
     /// Q10): each starts with <c>per</c>, <c>yield</c>, <c>inbox</c>, <c>stack</c> or <c>on crash</c>, words only there, which the parser
     /// keeps with their lines, and passes over the words that follow each, which the checker says <c>not supported</c> to, but for a
-    /// <c>:</c>, whose list stands in the head before the clauses (U1). <c>stack</c> takes one literal of bytes, <c>stack 8mb</c>, and a
+    /// <c>:</c>, whose list stands in the head before the clauses (U1), and keeps the words after <c>per</c> as its own, which the checker
+    /// reads, <c>per node</c> among them (U51). <c>stack</c> takes one literal of bytes, <c>stack 8mb</c>, and a
     /// size written another way, or a second <c>stack</c>, is <c>syntax</c>, as C# refuses a modifier written twice (U1; section 6, the
     /// owner, 2026-11-15, #519, comment 6892812780, Q3, "Build it now"). <c>on crash</c> takes the words of a policy, the type's default
     /// (U27, <see cref="ParseCrashPolicy"/>), its block <c>on crash (c) { ... }</c> among them (U28), so that the braces after the block
@@ -1751,6 +1908,7 @@ public sealed class Parser
     {
         var clauses = new List<ActorClause>();
         var passing = false; // whether the words after the last clause are its own, which the parser passes over
+        List<string>? words = null; // the words of the last clause where it is `per`, which the parser keeps (U51)
         while (!At(TokenKind.LeftBrace) && !At(TokenKind.Newline) && !At(TokenKind.EndOfFile))
         {
             if (Current is { Kind: TokenKind.Name, Text: "stack" })
@@ -1773,7 +1931,8 @@ public sealed class Parser
             else if (Current is { Kind: TokenKind.Name, Text: "per" or "yield" or "inbox" })
             {
                 var word = Advance();
-                clauses.Add(new ActorClause(word.Line, word.Text));
+                words = word.Text == "per" ? [] : null;
+                clauses.Add(new ActorClause(word.Line, word.Text, Words: words));
                 passing = true;
             }
             else if (Current is { Kind: TokenKind.Name, Text: "on" } && Peek() is { Kind: TokenKind.Name, Text: "crash" })
@@ -1802,7 +1961,8 @@ public sealed class Parser
             }
             else
             {
-                Advance(); // a word of the clause before it
+                var passed = Advance(); // a word of the clause before it
+                words?.Add(passed.Text); // kept where the clause is `per` (U51)
             }
         }
 

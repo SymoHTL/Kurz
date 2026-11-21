@@ -26,13 +26,16 @@ namespace Kurz.Compiler.Build;
 /// and runs it, and <c>kurz exec [--release] [--lines] [--cpu name] "program text"</c> builds its argument, whose lines are named <c>exec</c>, and runs
 /// it, each in a place of its own (<see cref="Place"/>), which it removes after the run, with the places a run cut short left removed at its
 /// start; the program takes the words after <c>--</c> and the command's streams (<see cref="Processes.Run"/>), and the command ends with the
-/// program's exit code. A command line it cannot read gets the usage on standard error and the exit code 1.
+/// program's exit code. <c>kurz test [--release] [--lines] [--cpu name] file.kz</c> builds the file's tests in place of its top-level code
+/// and runs them as <c>run</c> runs a program, with no words for it, and ends with the exit code of the run (chapter 20, Y2 to Y5). A
+/// command line it cannot read gets the usage on standard error and the exit code 1.
 /// </summary>
 public static class Command
 {
     /// <summary>What the command prints for a command line it cannot read.</summary>
     public const string Usage = "usage: kurz --version [--verbose]\n       kurz build [--release] [--lines] [--cpu <name>] <file.kz> [-o <output>]\n"
         + "       kurz run [--release] [--lines] [--cpu <name>] <file.kz> [-- <argument>...]\n       kurz exec [--release] [--lines] [--cpu <name>] \"<program text>\" [-- <argument>...]\n"
+        + "       kurz test [--release] [--lines] [--cpu <name>] <file.kz>\n"
         + "       run and exec pass the words after -- to the program\n";
 
     private const string OnThePath = " on the path";
@@ -69,6 +72,8 @@ public static class Command
                 return RunFile(arguments.Skip(1).ToList(), error, find, host, places);
             case ["exec", ..]:
                 return Exec(arguments.Skip(1).ToList(), error, find, host, places);
+            case ["test", ..]:
+                return TestFile(arguments.Skip(1).ToList(), error, find, host, places);
         }
 
         bool verbose;
@@ -217,6 +222,41 @@ public static class Command
         return sourcePath is null ? Usage1(error) : BuildAndRun(() => Read(sourcePath, error), program, release, lines, cpu, error, find, host, places);
     }
 
+    /// <summary>
+    /// <c>test</c>'s options, each once, and its file, as <c>run</c> takes them, with no word for the program: a test reads no <c>args</c>, so
+    /// <c>--</c> and an argument after the file are the usage's (Y2, F17). The build runs the program's tests and the command ends with its
+    /// exit code, 0 where every test passed, else 1 (Y3, Q4).
+    /// </summary>
+    private static int TestFile(List<string> arguments, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
+    {
+        var release = false;
+        var lines = false;
+        string? cpu = null;
+        string? sourcePath = null;
+        for (var i = 0; i < arguments.Count; i++)
+        {
+            switch (arguments[i])
+            {
+                case "--release" when !release:
+                    release = true;
+                    break;
+                case "--lines" when !lines:
+                    lines = true;
+                    break;
+                case "--cpu" when cpu is null && i + 1 < arguments.Count:
+                    cpu = arguments[++i];
+                    break;
+                case var p when sourcePath is null && !p.StartsWith('-'):
+                    sourcePath = p;
+                    break;
+                default:
+                    return Usage1(error);
+            }
+        }
+
+        return sourcePath is null ? Usage1(error) : BuildAndRun(() => Read(sourcePath, error), [], release, lines, cpu, error, find, host, places, tests: true);
+    }
+
     /// <summary><c>exec</c>'s options, each once, before its text, which is the last argument before <c>--</c> and no option.</summary>
     private static int Exec(List<string> arguments, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
     {
@@ -257,9 +297,10 @@ public static class Command
     /// <summary>
     /// Builds the program <paramref name="read"/> reads, a file or <c>exec</c>'s text, into a place of its own and runs it with
     /// <paramref name="program"/> as its arguments; the program's exit code, or 1 where it was refused or the command failed. The
-    /// places a run cut short left are removed at the start, before the build.
+    /// places a run cut short left are removed at the start, before the build. Where <paramref name="tests"/> holds, the build runs the
+    /// program's tests (<c>kurz test</c>).
     /// </summary>
-    private static int BuildAndRun(Func<SourceText?> read, IReadOnlyList<string> program, bool release, bool lines, string? cpu, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
+    private static int BuildAndRun(Func<SourceText?> read, IReadOnlyList<string> program, bool release, bool lines, string? cpu, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places, bool tests = false)
     {
         if (host is not { } target)
         {
@@ -276,7 +317,7 @@ public static class Command
         }
 
         Place.RemoveLeft(root);
-        if (read() is not { } source || Compile(source, target, release, lines, CpuOf(cpu, find, error), error) is not { } emitted)
+        if (read() is not { } source || Compile(source, target, release, lines, CpuOf(cpu, find, error), error, tests) is not { } emitted)
         {
             return 1;
         }
@@ -371,13 +412,22 @@ public static class Command
         return source;
     }
 
-    /// <summary>The program the compiler emits for the source and the CPU <paramref name="cpu"/> gives, or null where it refused it, with its lines written, named by the source's name, or where the CPU failed.</summary>
-    private static EmittedProgram? Compile(SourceText source, Target target, bool release, bool lines, Func<Cpu?> cpu, TextWriter error)
+    /// <summary>
+    /// The program the compiler emits for the source and the CPU <paramref name="cpu"/> gives, or null where it refused it, with its lines
+    /// written, named by the source's name, or where the CPU failed; in the build of <c>kurz test</c> (<paramref name="tests"/>), null for a
+    /// program with no test too, with the command's failure written, so that a run that checked nothing does not look like a pass (Y4, Q6).
+    /// </summary>
+    private static EmittedProgram? Compile(SourceText source, Target target, bool release, bool lines, Func<Cpu?> cpu, TextWriter error, bool tests = false)
     {
-        var compilation = Builder.Compile(source, [], Builder.CheckRuntime(target), testBuild: !release, lines, cpu);
+        var compilation = Builder.Compile(source, [], Builder.CheckRuntime(target), testBuild: !release, lines, cpu, tests);
         foreach (var d in compilation.Diagnostics.Sorted)
         {
             error.Write(d.At(source.Name) + "\n");
+        }
+
+        if (compilation.NoTest)
+        {
+            error.Write($"error: no test in {source.Name}\n  help: write a test as `test \"name\" {{ ... }}` at the top level of the file\n");
         }
 
         return compilation.Program;

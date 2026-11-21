@@ -31,6 +31,13 @@ public sealed partial class Emitter
     private List<List<(string Value, KurzType Type)>> regions = [];
     private List<List<(string Slot, KurzType Type)>> scopes = [];
 
+    // the names among a region's temporaries that stand for what the region's end, or a jump out of it, lets go of in their place, by
+    // the function they stand in, of two kinds: a made-up name, which no IR value has, for a value a slot of a call took before the
+    // call's last argument (Taken), and the copy's own slot, an IR name, for a copy a call of more than one copy made before its
+    // last, loaded when it is let go of (CopiedLate)
+    private readonly Dictionary<(IrFunction Function, string Name), Func<string>> standIns = new();
+    private int takenNames;
+
     /// <summary>Whether a value of the type holds the block of a list, of a map, of a string, of an instance, of a data value or of a file's handle or the environment of a lambda: a list, a map, a string, a file or a socket, a hasher, a command (S17), the block of a list of strings, a function value, an instance, a data value laid out as a block, a plain data value with a field that does, a union with a case that does.</summary>
     private bool Counted(KurzType type) => type switch
     {
@@ -96,6 +103,30 @@ public sealed partial class Emitter
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// The value a slot of a call takes, a field of a construction or a parameter written <c>move</c>, listed among the temporaries of
+    /// the region under a name of its own (<see cref="standIns"/>) until the call has its last argument, when <paramref name="taken"/>
+    /// is taken off again (<see cref="Arguments"/>): a jump out of the call that a later argument takes, a case it propagates among
+    /// them, lets go of it there with the region's other temporaries, the last made first (R1), as Rust drops the operands of an expression
+    /// that one of its operands leaves (the Rust Reference, "Destructors", the drop scopes of operands; issue 569). The name is its own,
+    /// since the value may be a literal or a constant, which another read gives by the same name and which <see cref="Take"/> would
+    /// then take for that read. A value of no counted type holds nothing to let go of, nor does null, a list's or a map's without items,
+    /// as <see cref="Temp"/> lists neither; a function with no region, a helper's, takes no slot from a program's argument, as it
+    /// makes no counted temporary (<see cref="Temp"/> refuses one there).
+    /// </summary>
+    private string Taken(string value, KurzType type, List<string> taken)
+    {
+        if (Counted(type) && value != "null")
+        {
+            var name = $"taken#{++takenNames}";
+            standIns[(fn, name)] = () => value;
+            regions[^1].Add((name, type));
+            taken.Add(name);
+        }
+
+        return value;
     }
 
     /// <summary>Emits <paramref name="body"/> as a region of its own, whose end lets go of its temporaries where the code goes on.</summary>
@@ -170,7 +201,7 @@ public sealed partial class Emitter
                 fn.Emit($"call void {StdFunction("MapWalk")}(ptr {temporaries[i].Value}, i32 -1)"); // the loop over the map ends: at its end, a `break`, a `return` or a case propagated out of its body
             }
 
-            Release(temporaries[i].Value, temporaries[i].Type);
+            Release(standIns.TryGetValue((fn, temporaries[i].Value), out var stood) ? stood() : temporaries[i].Value, temporaries[i].Type);
         }
 
         EndHeaps(temporaries);

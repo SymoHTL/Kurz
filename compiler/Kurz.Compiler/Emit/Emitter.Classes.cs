@@ -51,11 +51,13 @@ public sealed partial class Emitter
     private const int LinkSlot = 4;
     private const int CopySlot = 5;
 
-    // each class whose body's defaults are queued for their function, with its name (K7)
-    private readonly Queue<(ClassSymbol Class, string Name)> defaultsPending = new();
+    // each class whose body's defaults are queued for their function, with its name and the program's statement that first needed
+    // it, which a refusal for Windows names (K7, S11)
+    private readonly Queue<(ClassSymbol Class, string Name, int From)> defaultsPending = new();
 
-    // each constructor of a class's body queued for its function, with its name (K14)
-    private readonly Queue<(ConstructorSymbol Constructor, string Name)> constructorsPending = new();
+    // each constructor of a class's body queued for its function, with its name and the program's statement that first needed it,
+    // which a refusal for Windows names (K14, S11)
+    private readonly Queue<(ConstructorSymbol Constructor, string Name, int From)> constructorsPending = new();
 
     /// <summary>
     /// K1, K7, K10, K14: an instance with both counts at one, filled as <see cref="Construct"/> fills it. A class with derived classes
@@ -190,7 +192,7 @@ public sealed partial class Emitter
         {
             name = $"@\"{key}\"";
             instances[key] = name;
-            defaultsPending.Enqueue((symbol, name));
+            defaultsPending.Enqueue((symbol, name, origin));
         }
 
         return name;
@@ -239,7 +241,7 @@ public sealed partial class Emitter
         {
             name = $"@\"{key}\"";
             instances[key] = name;
-            constructorsPending.Enqueue((made, name));
+            constructorsPending.Enqueue((made, name, origin));
         }
 
         return name;

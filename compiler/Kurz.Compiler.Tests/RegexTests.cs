@@ -397,9 +397,19 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         + pattern.Split("(?<n>").Length - 1;
 
     /// <summary>
+    /// The rows, a pattern's texts on each engine, that a fenced program of <see cref="HoldToNet"/> holds at most. The fence maps each
+    /// block a program makes and gives it back at its free, and a search makes many: the backtracking engine's 6422 rows in one program
+    /// made 818441 blocks, 1.8 percent of them for the lines it prints, and ran 4.7 s under the fence and 0.13 s without it alone, and
+    /// up to 7.9 s while the whole suite ran, in the dev container on 2026-11-19; in the `gates` job it met the 30 s of a program's run
+    /// (runs 43260266243, 43624514303 and 43634665720). Its time grows with its blocks alone, its two halves 2.3 s and 2.4 s, so a
+    /// fenced program of 1500 rows makes about a quarter of the blocks of the one that met the limit.
+    /// </summary>
+    private const int FencedRows = 1500;
+
+    /// <summary>
     /// A program that runs every pattern on each engine <paramref name="engines"/> names, a Kurz list of the flag's values, and
     /// prints for each text the line <see cref="Walked"/> writes of .NET's matches, held to <paramref name="expected"/> under both
-    /// runtimes, the fenced one among them.
+    /// runtimes, the fenced one among them, whose run takes the patterns in programs of at most <see cref="FencedRows"/> rows.
     /// </summary>
     private void HoldToNet(List<(string Pattern, int Groups)> patterns, List<string> texts, List<string> expected, string engines, string name, int perPattern)
     {
@@ -417,7 +427,7 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         program.Append("]\nengines = ").Append(engines).Append("""
 
-            for k in 0..<patterns.Count {
+            for k in from..<to {
                 for engine in engines {
                 match Regex.New(patterns[k], backtracking: engine) {
                     Regex re => {
@@ -451,12 +461,20 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             """);
-        foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced") })
+        var size = Math.Max(1, FencedRows / (texts.Count * perPattern)); // the patterns of a fenced program
+        foreach (var (runtime, suffix, each) in new[] { (toolchain.Runtime, "", patterns.Count), (ListTests.Fenced, "-fenced", size) })
         {
-            var compilation = Builder.Compile(SourceText.FromString("program.kz", program.ToString()), [], runtime, testBuild: true);
-            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
-            var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, name + suffix));
-            Assert.Equal((0, ""), (code, error));
+            var output = new List<string>();
+            for (var start = 0; start < patterns.Count; start += each)
+            {
+                var text = $"from = {start}\nto = {Math.Min(start + each, patterns.Count)}\n{program}";
+                var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], runtime, testBuild: true);
+                Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+                var (code, lines, error) = Toolchain.Run(toolchain.Build(compilation.Program, $"{name}{suffix}-{start / each}"));
+                Assert.True(code == 0 && error.Length == 0, $"`{name}{suffix}` from pattern {start}: exit {code}, error `{error}`");
+                output.AddRange(lines);
+            }
+
             Assert.Equal(expected.Count, output.Count);
             for (var i = 0; i < expected.Count; i++)
             {

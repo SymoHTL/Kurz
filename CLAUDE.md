@@ -141,8 +141,15 @@ Each line names a trap; its evidence is in the entry it links.
   heads (run 43929000363), and the `gates` job took 23 min 44 s of its 25
   ([knowledge/a-suite-grows-into-its-timeout.md](knowledge/a-suite-grows-into-its-timeout.md)).
   The budget, with what each job that runs the gate spends outside it, ends before that job's
-  `timeout-minutes`. Gate: `self-tests` (the compiler gate's case of the budget and its red proofs);
-  that a job's share still covers what it spends outside the gate is a `judgment step`.
+  `timeout-minutes`. A test whose program `gave no answer within 30 s`, the limit of a program's run,
+  is the same at that limit: the fenced program of `RegexTests`' backtracking engine, 818441 blocks in
+  one run, met it three times in the `gates` job (runs 43260266243, 43624514303 and 43634665720), and
+  its work is split into programs of at most 1500 rows since 2026-11-19
+  ([knowledge/a-fenced-program-grows-into-the-limit-of-its-run.md](knowledge/a-fenced-program-grows-into-the-limit-of-its-run.md)).
+  Gate: `self-tests` (the compiler gate's case of the budget and its red proofs), and `compiler-tests`
+  for the split's rows (the two tests through `RegexTests.HoldToNet`); that a job's share still covers
+  what it spends outside the gate, and that a program a test runs stays well within its limit, are a
+  `judgment step`.
 - A run of a program that comes back at its limit with "an orphan holds its output": a child the
   program left running held its streams after the program ended, a forked server whose `kill` an
   error skipped among them. A run of the suite waited on such a child for 80 minutes on 2026-11-05
@@ -457,6 +464,33 @@ Gate: review rule "rules for sessions".
   ([knowledge/a-class-of-std-is-no-class-of-the-file.md](knowledge/a-class-of-std-is-no-class-of-the-file.md)).
   Gate: `compiler-tests` (`CheckerTests.A_class_of_the_file_may_hold_a_class_of_std_in_its_fields`)
   for the cycle rule; another walk keyed by the file's classes: review rule "compiler".
+
+- **A system call's number and a layout of the kernel's structs stand in each architecture's file.**
+  `runtime/linux/linux.kz` is the runtime of every Linux architecture, and the numbers of the system calls
+  and the structs the kernel fills differ between them: `futex` is 202 on x86-64 and 98 on AArch64, where
+  202 is `accept`, and `st_mode` stands at byte 24 of x86-64's `struct stat` and at byte 16 of AArch64's,
+  where 24 is `st_uid`. The lock's wait and wake reached `main` with x86-64's number in that file, which pull
+  request 579 moved into each architecture's file, and the read of `st_mode` at x86-64's byte reached it too,
+  found on 2026-11-18
+  ([knowledge/a-system-calls-number-is-the-architectures.md](knowledge/a-system-calls-number-is-the-architectures.md)).
+  Gate: `compiler-tests`
+  (`EmitterTests.The_lock_word_s_wait_and_wake_call_futex_by_its_number_on_each_architecture_and_windows_waits_on_the_address`
+  for `futex`, its operations and its value,
+  `EmitterTests.A_directory_s_creation_reads_st_mode_at_the_byte_of_its_architecture_s_struct_stat` for
+  `st_mode`), each reading the IR emitted for each Linux target; another number or layout written in
+  `linux.kz`: review rule "compiler".
+
+- **A function the emitter queues carries the line of the statement that queued it.** A lambda, the
+  defaults of a class's body and a constructor are emitted after the function that made or first needed
+  them, and a refusal of the build names the line the emitter stands on. They took the line of the function
+  emitted before them, and on the first head of pull request 579, which queued functions of the runtime at
+  line 0, a streamed response's lambda was emitted at line 0 and ten tests of the Windows job ended in the
+  compiler's own error (run 44295220997). A test of a line puts its target on a line nothing else the program emits stands
+  on: the mutation that kept the line before the lambda passed twice where that line was the lambda's own
+  ([knowledge/a-queued-function-carries-the-line-that-queued-it.md](knowledge/a-queued-function-carries-the-line-that-queued-it.md)).
+  Gate: `compiler-tests`
+  (`HttpResponseTests.A_build_for_windows_says_not_supported_at_the_statement_that_made_a_lambda_whose_write_reaches_a_socket`)
+  for the three queues; another queue: review rule "compiler"; the line a test's target stands on alone: `judgment step`.
 
 ### A public repository
 
