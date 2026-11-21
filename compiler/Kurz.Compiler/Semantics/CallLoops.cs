@@ -135,8 +135,10 @@ public sealed class CallLoops
     /// (b)); or none does and the actor's own code calls the method directly (U10), whose entries read its calls with the arguments they
     /// pass. A field of an actor's body is one where every write of it, and for a list every item put into it, stands in code an entry
     /// reaches and takes, in the terms of each entry that reaches it, a value that is a callback (T49 (c)), a field with no such write among
-    /// them; a field of its primary constructor, which its <c>spawn</c> sets, is none (the writes, assumed: a reading of T49 (c) of comment
-    /// 7051071630). It is the least fixed point, read over the parameters and the fields together: every one starts as no callback, and
+    /// them (the writes, assumed: a reading of T49 (c) of comment 7051071630); a field of its primary constructor is one where, beside
+    /// those writes, every <c>spawn</c> of the actor fills it with a callback, as a caller that waits fills a parameter (the owner,
+    /// 2026-11-21, #519, comment 7060155980, T75 1), and none where no <c>spawn</c> makes the actor, as a method that nothing calls has
+    /// no caller (assumed: a reading of T75 1 of comment 7060155980). It is the least fixed point, read over the parameters and the fields together: every one starts as no callback, and
     /// the rounds read each again as long as one changes, so that a cycle of parameters that no <c>this</c> fills stays none, and so does one that a <c>this</c> enters (T62 (a)). The walk keeps no context per
     /// call, so one caller that passes another reference makes the parameter's calls edges for every caller, and a method that nothing calls
     /// has no caller to call back, so that its loop is refused as a loop no code reaches is (T53).
@@ -155,9 +157,17 @@ public sealed class CallLoops
             callbacks[entry] = new bool[entry.Method!.Parameters.Count];
         }
 
-        foreach (var field in code.SelectMany(c => c.Actor.Fields))
+        // T75 1: the `spawn`s of each actor, and of each field the actor's primary constructor gives the parameter that fills it, -1 for
+        // a field of its body
+        var spawns = sites.Where(s => s.Kind == SiteKind.Spawn).ToLookup(s => s.Actor, ReferenceEqualityComparer.Instance as IEqualityComparer<ClassSymbol>);
+        var slots = new Dictionary<FieldSymbol, (ClassSymbol Actor, int Slot)>(ReferenceEqualityComparer.Instance);
+        foreach (var actor in code.Select(c => c.Actor))
         {
-            fields[field] = false;
+            foreach (var field in actor.Fields)
+            {
+                fields[field] = false;
+                slots[field] = (actor, actor.Constructor.FindIndex(s => ReferenceEquals(s.Field, field)));
+            }
         }
 
         for (var changed = true; changed;)
@@ -180,8 +190,8 @@ public sealed class CallLoops
             foreach (var field in fields.Keys.ToList())
             {
                 // T49 (c): a field of the actor's body, every write of which stands in code an entry reaches, and each entry that reaches it gives
-                // it a callback; a field of the primary constructor, which its `spawn` sets, is none
-                if ((field.Body is not null && byField[field].All(w => written[w].Any() && written[w].All(r => r.Reached.Values.All(o => Callback(r.Entry, o))))) != fields[field])
+                // it a callback; T75 1: a field of the primary constructor too, where every `spawn` of the actor fills it with one
+                if (((field.Body is not null || Spawned(field)) && byField[field].All(w => written[w].Any() && written[w].All(r => r.Reached.Values.All(o => Callback(r.Entry, o))))) != fields[field])
                 {
                     fields[field] = !fields[field];
                     changed = true;
@@ -189,10 +199,19 @@ public sealed class CallLoops
             }
         }
 
-        // a caller that waits in the code of entries alone, each of which fills the parameter with its own reference or a callback of its own
+        // a caller that waits, or a `spawn` (T75 1), in the code of entries alone, each of which fills the parameter with its own reference or a
+        // callback of its own
         bool Fills(ActorSite caller, int parameter) =>
-            caller.Kind == SiteKind.Wait && !outside.Contains(caller) && reaching[caller].Any()
+            caller.Kind != SiteKind.Send && !outside.Contains(caller) && reaching[caller].Any()
             && reaching[caller].All(r => parameter < r.Reached.Arguments.Count && r.Reached.Arguments[parameter].All(o => Callback(r.Entry, o)));
+
+        // T75 1: a field of the primary constructor that every `spawn` of its actor fills with a callback, by the parameter that gives it;
+        // none where no `spawn` makes the actor, as a method that nothing calls has no caller (T53)
+        bool Spawned(FieldSymbol field)
+        {
+            var (actor, slot) = slots[field];
+            return slot >= 0 && spawns[actor].Any() && spawns[actor].All(s => Fills(s, slot));
+        }
     }
 
     // U57: whether a reference of that origin in the entry's terms reaches the caller that waits: the actor itself, or a parameter of the

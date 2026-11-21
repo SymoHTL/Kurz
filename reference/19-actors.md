@@ -2381,7 +2381,7 @@ loop that a crash closes, whose waits then stand below the error line, which end
 2026-11-20, #519, comment 7051071630, T70 1; the owner, 2026-11-21, #519, comment 7060155980, T85 2). A call that waits in a function the top-level code called is the top-level code's, at its
 own line. Two chains that cross through two different methods, as `deadlock.kz`'s do, `Left.Ask` waiting on `Right.Value` and
 `Right.Ask` on `Left.Value`, are no loop of U56, whose loop comes back to a type on it (§6, the owner, 2026-11-20, #519, comment 7051071630, T40 (c)), so
-that `deadlock.kz` reaches its run with no `vouch` *(assumed: a reading of T58 (a) under T40 (c) of comment 7051071630)*. A deadline of a call that waits in a message is nothing left to run (U42) *(assumed: T6 of comment 6967625156)*. A loop that layer 3 does not see (U64) and that the top-level code never waits on stays until the end of the program,
+that `deadlock.kz` reaches its run with no `vouch` (the owner, 2026-11-21, #519, comment 7060155980, T76 1). A deadline of a call that waits in a message is nothing left to run (U42) *(assumed: T6 of comment 6967625156)*. A loop that layer 3 does not see (U64) and that the top-level code never waits on stays until the end of the program,
 where U13 drops it.
 
 Case: [actors/deadlock-pending-crash.kz](../corpus/actors/deadlock-pending-crash.kz)
@@ -4803,8 +4803,17 @@ no edge, and any other write makes the field none *(assumed: a reading of T49 (c
 assignment of a field of the actor's body in any method, by its name or through `this`, and its default, and of a list every
 item that `Add` or `Insert` puts in, every item assigned and each item of a list literal assigned; `null` and an empty list
 write nothing, and a field with no other write is a callback; a list that `AddRange` puts in, the field passed as `mut` and a
-write in a lambda write another reference, and a write in a lambda that no code runs makes the field none; a field of the
-actor's primary constructor, which its `spawn` sets, is none *(assumed: a reading of T49 (c) of comment 7051071630)*.
+write in a lambda write another reference, and a write in a lambda that no code runs makes the field none *(assumed: a
+reading of T49 (c) of comment 7051071630)*.
+
+A field of the actor's primary constructor that every `spawn` fills with `this` of a caller that waits is a callback, as
+T49 (b), T60 (b) and T62 (a) read one: the walk reads every `spawn` of the type, as it reads every write of a field, so that
+`spawn Worker(this)` that calls back through the field gets no `call-loop`, as the same field set by a method does, and a
+`spawn` that fills it with another reference makes it none (the owner, 2026-11-21, #519, comment 7060155980, T75 1). A
+`spawn` fills the field as a caller that waits fills a parameter, `this` held in a local without `mut` among what it passes,
+and gives none in the code outside the actors' messages; any other write of the field makes it none, as of a field of the
+body *(assumed: a reading of T75 1 of comment 7060155980)*. A field of an actor that no `spawn` makes is none, as a
+method that nothing calls has no caller (§6, the owner, 2026-11-21, #519, comment 7067131456).
 
 No callback comes from a reference that a `send` passes, or that another caller that waits passes as anything but `this` or
 a callback (T60 (b)), nor from an item of a list, but for a list field of callbacks, or from a capture in a lambda, a local
