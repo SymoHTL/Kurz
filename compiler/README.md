@@ -1090,13 +1090,17 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   end of the run queue, so that an inbox keeps the order its messages were sent in
   (U5, U15, U17). The function of a method's messages, made at its first use and named outside the
   program's functions, so that a trace leaves its frame out with the runtime's, calls the method on
-  the state, lets go of the arguments, takes the reply off the message by the runtime's `ReplyTaken`,
+  the state, lets go of the arguments, so that a crash in that release, an overflow of the actor's
+  stack among it, finds the reply still on the message and is answered `callee crashed` (U20), takes
+  the reply off the message by the runtime's `ReplyTaken`,
   one atomic swap that leaves null there, so that of it and the crash of the waiter's actor, which
   unhooks the reply by the same swap, exactly one owns the reply, as tokio's `oneshot` decides
   between its two ends by one word (not checked at source), and where it owns the reply moves the
   result beside it and calls the runtime's `Replied`, which reads the reply's waiter, then stores the
   reply's word with release, then wakes the actor where the activation that waits on it is its top,
-  as tokio's `oneshot` stores its value and wakes its receiver, and frees the message. An argument of a message or of `spawn` crosses as the type of its parameter says,
+  as tokio's `oneshot` stores its value and wakes its receiver, lets go of the method's own result
+  once the reply is set, so that no code whose fault is the actor's crash stands between the swap and
+  `Replied`, and frees the message. An argument of a message or of `spawn` crosses as the type of its parameter says,
   where it is evaluated, before a later argument's call that waits can change what it reads, and a
   result crosses before it moves beside the reply, while the method's count of it still holds it
   (U12): a value that holds a block is copied deep into the receiver's heap, the actor's or, for a
@@ -2180,8 +2184,10 @@ reads the guarantee in force on Windows and on Linux compiles the program alone.
 Of section 6 the emitter builds the actors of one thread, each message run to its end or to a wait that parks it (Q1 (a), the
 answers of 2026-11-14, issue 519, comment 6880404917), and no case shows
 where a program it builds differs from the section: every actor runs on the one thread the runtime
-runs, each message on a stack of its own ("The runtime"), its state word and the replies of its
-calls changed by atomic operations that hold on any number of threads ("What the emitter emits"), with no worker thread, no line `threads`
+runs, each message on a stack of its own ("The runtime"), its state word, and the choice of the one owner of
+each reply of its calls by a swap, changed by atomic operations that hold on any number of threads ("What the
+emitter emits"), while the lifetimes of the message a crash's swap reads and of the record of the waiter's actor,
+which the owner of a reply reads after its store, hold on one thread alone, with no worker thread, no line `threads`
 and no `KURZ_THREADS` read (U35), so that a program started with a `KURZ_THREADS` that U35 refuses, `0`
 among them, runs on the one thread with no error line, and the compiler reads no `project.kz`, so no line
 of one reaches it, and the top-level code's wait runs the scheduler in place on the
@@ -2256,7 +2262,10 @@ a call of its own chain; the swap by which a crash unhooks a reply reads the mes
 waits on, which the callee frees once it answered, so that on threads of their own that message has to
 stay while either can reach it, as tokio's `oneshot` keeps its state in an `Arc` (not checked at
 source), which is not built, where on the one thread the crash reads the reply's word first and no
-answer comes between; and the copies a crashed message made of the
+answer comes between; the owner of a reply reads the record of the waiter's actor after its release store, to wake
+that actor (`Replied`, `Signal`), so that on threads of their own that record has to stay by a count the owner
+takes before the store and drops after the wake, the record freed by its last holder, which is not built
+either, where on the one thread nothing runs between the store and the wake; and the copies a crashed message made of the
 arguments of a call it had not sent yet, in the callee's heap where no argument could wait, and the heap of a `spawn` whose arguments it was still
 evaluating, stay in their heaps until those are freed. A message has 2 MiB of
 stack where its clause sets no other size, where a message on Linux had the main thread's 8 MiB
@@ -3083,9 +3092,9 @@ reaches a value of a type parameter, an instance of a class of `std/`, `HttpRequ
 `HttpHeaders` among them, or a handle of section 12, a value after `copy` at a call that is no message
 that reaches a pointer or a view of an atomic type, which crosses into no actor (`pointer-crosses`,
 U12), an argument written `move` only where it
-reaches a handle, a hasher, a command or a child process by any path the copy follows, a lambda's capture and
-a field of any class among them, or a value of a type parameter, which the copy of its function for such a type
-argument makes one of them, whose copy would share the sender's block by its count (U12); `copy` at a call that is no message before a value that
+reaches a handle, a hasher, a command or a child process, whose copy would share the sender's block by its count, by any
+path the copy follows, a lambda's capture and a field of any class among them, or a value of a type parameter, since the
+copy of its function for a type argument that is one of them would share that block (U12); `copy` at a call that is no message before a value that
 reaches a function value or an interface's value, which no word makes cross (U12); a log call
 inside an actor (P8); the cluster test of section 13, `test cluster N seed S { ... }`, whose words and
 block the parser passes over (Y8); and `mock X with Y` and `advance d`, whose questions are open (Y9, Y10),

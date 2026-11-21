@@ -1584,10 +1584,12 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // U12, U17, R19: the call stores its reply's waiter (`ReplyWaiter`) before `Enqueue` queues its message; the message's function
         // takes the reply off the message after the method returned by one swap (`ReplyTaken`), as the crash's unhook does, so that one
         // of them owns it, as tokio's `oneshot` decides by one word (not checked at source); the owner reads the waiter, then stores the
-        // reply's word with release, then wakes (`Replied`, `Signal`), the waiter loads it with acquire
-        // (`ReplyState`); a wake sets QUEUED by one `or` (`Wake`), a take, a hold's end and a constructor's end change the state word by
-        // one compare-exchange (`Exchanged`); the orders are Rust's for each, which a thread of their own needs and one thread does not
-        // show
+        // reply's word with release, then wakes (`Replied`, `Signal`), the waiter loads it with acquire (`ReplyState`), which the
+        // waits, the readiness, the take and the crash call (`Wait`, its loop in the top-level code in `RootWait`, its loop in an activation and its
+        // kind, `Ready`, `RunOne`, `Fall`), as the crash and the end take a reply by the swap (`Fall`, `EndActor`); a wake sets QUEUED by
+        // one `or` (`Wake`), a take, a hold's end, a constructor's end and a restart's hold change the state word by one compare-exchange
+        // (`Exchanged`) after a load with acquire, the restart's hold loading it with acquire again while a take holds the actor
+        // (`HeldAlone`); the orders are Rust's for each, which a thread of their own needs and one thread does not show
         const string text = "actor Counter {\n    mut long count = 0\n\n    pub void Add(long n) {\n        count = count + n\n    }\n\n    pub long Get() => count\n}\n\n"
             + "c = spawn Counter()\nsend c.Add(2)\nprint(c.Get())\n";
         var program = Emit(text);
@@ -1622,10 +1624,19 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         InOrder(Runtime("Signal"), @"store ptr %t\d+, ptr %v\.waiter\.\d+", @"store atomic i32 %t\d+, ptr %t\d+ release, align 4", @"call void @""rt\.common\.Wake\.\d+""");
         InOrder(Runtime("Wake"), @"atomicrmw or ptr %t\d+, i32 2 acq_rel, align 4", @"call void @""rt\.common\.Queue\.\d+""");
         InOrder(Runtime("Exchanged"), @"cmpxchg ptr %t\d+, i32 %t\d+, i32 %t\d+ acq_rel acquire, align 4");
-        foreach (var name in new[] { "Claimed", "LetGo", "ActorBuilt" })
+        foreach (var name in new[] { "Claimed", "LetGo", "ActorBuilt", "HeldAlone" })
         {
             InOrder(Runtime(name), @"load atomic i32, ptr %t\d+ acquire, align 4", @"call i32 @""rt\.common\.Exchanged\.\d+""");
         }
+
+        InOrder(Runtime("HeldAlone"), @"call i32 @""rt\.common\.Exchanged\.\d+""", @"load atomic i32, ptr %t\d+ acquire, align 4");
+        const string state = @"call i32 @""rt\.common\.ReplyState\.\d+""", taken = @"call ptr @""rt\.common\.ReplyTaken\.\d+""";
+        InOrder(Runtime("Wait"), state, state);
+        InOrder(Runtime("RootWait"), state);
+        InOrder(Runtime("Ready"), state);
+        InOrder(Runtime("RunOne"), state);
+        InOrder(Runtime("Fall"), state, taken, state, taken);
+        InOrder(Runtime("EndActor"), taken);
 
         Ran(Toolchain.Run(toolchain.Build(program, "reply-orders")), 0, ["2"], string.Empty);
     }
