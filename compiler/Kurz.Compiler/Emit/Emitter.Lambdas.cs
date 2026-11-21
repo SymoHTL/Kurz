@@ -27,6 +27,9 @@ public sealed partial class Emitter
     {
         /// <summary>The sets of the function the lambda is made in, which a test there guarded it with (R18).</summary>
         public System.Collections.Immutable.ImmutableSortedSet<string> Features { get; init; } = NoFeatures;
+
+        /// <summary>The program's statement the lambda is made in, or that reached the function it is made in, which a refusal for Windows names (S11, W1).</summary>
+        public int Origin { get; init; }
     }
 
     /// <summary>The function value of a lambda where it is made: its code, and an environment of the values it reads (F15), a temporary of the region.</summary>
@@ -42,7 +45,7 @@ public sealed partial class Emitter
         var captures = Model.LambdaOf(l).Captures;
         if (captures.Count == 0)
         {
-            lambdas.Enqueue(new PendingLambda(unit, l, map, name, null, captures, display) { Features = features });
+            lambdas.Enqueue(new PendingLambda(unit, l, map, name, null, captures, display) { Features = features, Origin = origin });
             return $"{{ ptr {name}, ptr null }}";
         }
 
@@ -54,7 +57,7 @@ public sealed partial class Emitter
 
         var environment = $"%\"env.{key}\"";
         module.Global($"{environment} = type {{ i64, ptr{string.Concat(types.Select(t => ", " + Ir(t)))} }}");
-        lambdas.Enqueue(new PendingLambda(unit, l, map, name, environment, captures, display) { Features = features });
+        lambdas.Enqueue(new PendingLambda(unit, l, map, name, environment, captures, display) { Features = features, Origin = origin });
         var drop = Helper($"drop.{key}", "void", ["ptr"], () =>
         {
             for (var i = 0; i < types.Count; i++)
@@ -131,35 +134,20 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// F11: a call of a function value, its code given its environment and the arguments, which it borrows for the call. The value
-    /// it calls and each argument are borrowed across the arguments after them: the checker holds them there (M7), refuses a change
-    /// of a list among them, <c>f(xs, Push(mut xs))</c>, and marks a read of a copied type that a change meets, <c>f</c> in
-    /// <c>f(Swap(mut f))</c>, which <see cref="HeldCopy"/> counts.
+    /// F11: a call of a function value, its code given its environment and the arguments, taken as a direct call takes them
+    /// (<see cref="Arguments"/>): an argument of a parameter its type writes <c>move</c> is handed over to the lambda, which owns it
+    /// and lets go of it at its end (<see cref="OwningMoved"/>), a value <see cref="Taken"/> lists to the call's last
+    /// argument, so that a jump out of the call that an argument after it takes lets go of it there (issue 587); every other argument it
+    /// borrows for the call. The value it calls and each argument it borrows are borrowed across the arguments after them: the
+    /// checker holds them there (M7), refuses a change of a list among them, <c>f(xs, Push(mut xs))</c>, and marks a read of a copied
+    /// type that a change meets, <c>f</c> in <c>f(Swap(mut f))</c>, which <see cref="HeldCopy"/> counts.
     /// </summary>
     private string EmitFunctionValueCall(CallExpression c, FunctionType type)
     {
         var callee = EmitExpression(c.Callee);
-        var arguments = new List<string> { $"ptr {fn.Value($"extractvalue %kz.fn {callee}, 1")}" };
-        var late = new List<(int Index, Func<string, string> Read)>(); // U12: the copies read after the call's last copy (CopiedLate)
-        string? copied = null;
-        for (var i = 0; i < c.Arguments.Count; i++)
-        {
-            var a = c.Arguments[i].Value;
-            var parameter = type.Parameters[i];
-            if (copySessions.TryGetValue(a, out var shared))
-            {
-                var own = TypeOf(a);
-                copied = shared;
-                CopiedLate(a, held: true);
-                late.Add((arguments.Count, v => $"{Ir(parameter)} {Convert(Temp(v, own), own, parameter, a.Line)}"));
-                arguments.Add("");
-                continue;
-            }
-
-            arguments.Add($"{Ir(parameter)} {Convert(EmitExpression(a), TypeOf(a), parameter, a.Line)}");
-        }
-
-        ReadLate(copied, (k, v) => arguments[late[k].Index] = late[k].Read(v));
+        var environment = $"ptr {fn.Value($"extractvalue %kz.fn {callee}, 1")}";
+        var arguments = Arguments(c, Model.CallOf(c), j => type.Parameters[j], _ => false, _ => null, cConvention: false, owned: false);
+        arguments.Insert(0, environment);
 
         var call = $"call {Ir(type.Result)} {fn.Value($"extractvalue %kz.fn {callee}, 0")}({string.Join(", ", arguments)})";
         return Types.IsVoid(type.Result) ? Emitted(call) : fn.Value(call);

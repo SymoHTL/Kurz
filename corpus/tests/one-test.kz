@@ -1,0 +1,9 @@
+// expect: output
+// | test "adds" ... ok
+// | 1 test: 1 passed, 0 failed
+// command: test
+// rules: Y3
+
+test "adds" {
+    check 1 + 1 == 2
+}

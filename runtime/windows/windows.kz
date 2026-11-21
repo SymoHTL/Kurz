@@ -16,6 +16,13 @@ extern "C" in "kernel32" {
     uint SleepEx(uint milliseconds, int alertable)
 }
 
+// The wait on a word and its wake, which Windows gives in `synchronization.lib`, as Rust's futex on Windows
+// calls them (`library/std/src/sys/pal/windows/futex.rs`).
+extern "C" in "synchronization" {
+    int WaitOnAddress(void* address, void* compare, ulong size, uint milliseconds)
+    void WakeByAddressSingle(void* address)
+}
+
 // The start of the process: Windows raises no signal at a write to a closed pipe, whose `WriteFile`
 // returns the error itself. The main thread's stack takes a guarantee of 0x5000 bytes, the room the
 // system keeps on it for the handling of its overflow, as Rust's standard library sets it at its start
@@ -310,4 +317,28 @@ pub long Inside(long count) {
     }
 
     return before
+}
+
+// The thread put to sleep while the lock word at `word` holds `expected`, by `WaitOnAddress` with no time limit
+// (`INFINITE`), as Rust's `futex_wait` waits on Windows: 1 where it returned with no failure, the word already
+// other than `expected` or a wake come, spurious or not, 0 where it failed, which the caller does not read, since
+// it tries the lock again after every return (`Lock`).
+pub long LockWait(int* word, int expected) {
+    mut int compare = expected
+    mut long result = 0
+    raw {
+        result = long(WaitOnAddress(Ptr<void>(word), Ptr<void>(&compare), 4, uint(4294967295)))
+    }
+
+    return result
+}
+
+// One thread that sleeps on the lock word at `word` woken, by `WakeByAddressSingle`, as Rust's `futex_wake`
+// wakes one on Windows: 0 (`Unlock`).
+pub long LockWake(int* word) {
+    raw {
+        WakeByAddressSingle(Ptr<void>(word))
+    }
+
+    return 0
 }
