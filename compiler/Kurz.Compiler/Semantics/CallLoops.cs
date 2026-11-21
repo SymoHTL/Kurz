@@ -135,9 +135,9 @@ public sealed class CallLoops
     /// (b)); or none does and the actor's own code calls the method directly (U10), whose entries read its calls with the arguments they
     /// pass. A field of an actor's body is one where every write of it, and for a list every item put into it, stands in code an entry
     /// reaches and takes, in the terms of each entry that reaches it, a value that is a callback (T49 (c)), a field with no such write among
-    /// them; a field of its primary constructor, which its <c>spawn</c> sets, is none. It is the least fixed point, read over the parameters
-    /// and the fields together: every one starts as no callback, and the rounds read each again as long as one changes, so that a cycle of
-    /// parameters that no <c>this</c> fills stays none, and so does one that a <c>this</c> enters (T62 (a)). The walk keeps no context per
+    /// them; a field of its primary constructor, which its <c>spawn</c> sets, is none (the writes, assumed: a reading of T49 (c) of comment
+    /// 7051071630). It is the least fixed point, read over the parameters and the fields together: every one starts as no callback, and
+    /// the rounds read each again as long as one changes, so that a cycle of parameters that no <c>this</c> fills stays none, and so does one that a <c>this</c> enters (T62 (a)). The walk keeps no context per
     /// call, so one caller that passes another reference makes the parameter's calls edges for every caller, and a method that nothing calls
     /// has no caller to call back, so that its loop is refused as a loop no code reaches is (T53).
     /// </summary>

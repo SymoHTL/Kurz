@@ -206,8 +206,9 @@ public sealed class ThrowSets
     /// <summary>
     /// U57, T74 (b): every site that code outside the messages of the program's actor types reaches after <see cref="ActorsCode"/>: the
     /// top-level code, and each root of the sets that no code of an actor reaches, a <c>pub</c> function or a <c>pub</c> method of a class or
-    /// a data type that only a caller outside the program could call, through every function, method and lambda they run; a method of a
-    /// class, an interface or a data type that the actors' code alone calls runs in their messages, as their own methods do.
+    /// a data type that only a caller outside the program could call (assumed: a reading of T74 (b) of comment 7051071630), through every
+    /// function, method and lambda they run; a method of a class, an interface or a data type that the actors' code alone calls runs in
+    /// their messages, as their own methods do.
     /// </summary>
     public IReadOnlySet<ActorSite> Outside()
     {
@@ -1432,8 +1433,9 @@ public sealed class ThrowSets
         /// parameter, by its place; a field of the actor, read by its name or through <c>this</c>, is that field, and an item of the
         /// list it holds, read by an index or as the variable of a <c>for</c> over it, an item of it (T49 (c)); anything else, a field of
         /// a class, a capture in a lambda, a call's result, is other. In a lambda nothing is the actor's, a parameter, a field or a local of the code around it, since its body
-        /// is a unit read by a walk of its own, whose locals hold none of that code's (the owner, 2026-11-20, #519, comment 7051071630:
-        /// T49 (c) and T61 (a)).
+        /// is a unit read by a walk of its own, whose locals hold none of that code's: <c>this</c> inside a lambda and a capture are none
+        /// (the owner, 2026-11-20, #519, comment 7051071630: T61 (a) and T49 (c)), and so are a parameter and a field read in a lambda
+        /// (assumed: a reading of T61 (a) of comment 7051071630).
         /// </summary>
         private Origin OriginOf(Expression e)
         {

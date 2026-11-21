@@ -4384,45 +4384,50 @@ print(c.Start())
 ### U57 (decided, §6) A call back to the caller that waits
 
 A call through a reference that can only be the actor whose message makes it is no edge of U56's graph: `this` as a value
-outside a lambda, or a local without `mut` that holds it. Neither is a call through a parameter of an actor's method that is
-a callback. A parameter is a callback where calls through a reference reach the method, every one of them a call that waits,
-and each passes there `this`, as the call writes it, or a parameter of the method whose message makes the call that is a
-callback itself (the owner, 2026-11-20, #519, comment 7051071630, T60 (b)). A
-parameter of a method that no call through a reference reaches, and that the actor's own code calls directly (U10), is read
-through its callers: each of them reads the method's calls with what it passes there. The parameter is followed through
-locals without `mut` and through the arguments of the functions and methods the message calls, to the method a call picks
-and to each of its overrides and of the methods that implement it, a data type's method taking the value it is called on
-first (D16). The callbacks are the least fixed point: every parameter starts as none, and each is read again as long as one
-changes, so that a reference handed on through a chain of calls that wait is one and a cycle of parameters that no `this`
-fills is none (T60 (b)), and so is a cycle that a `this` enters, a recursion through two actor types that hands the
-reference back and forth among them (the owner, 2026-11-20, #519, comment 7051071630, T62 (a)), and the same fixed point reads the fields that are
-callbacks (T49 (c)). Such a call reaches the
-caller that waits, which takes it as a call of its chain (U17), as layer 1 runs `A.Load` inside `A.Save` (§6, "Deadlocks",
-layer 2, "Exempt without override: a callback through a reference the caller passed in that same call").
+outside a lambda, or a local without `mut` that holds it (the owner, 2026-11-20, #519, comment 7051071630, T49 (c), T61 (a)). Neither is a call through a
+parameter of an actor's method that is a callback. A parameter is a callback where calls through a reference reach the
+method, every one of them a call that waits, and each passes there `this`, as the call writes it, or a parameter of the
+method whose message makes the call that is a callback itself, read to a fixed point (the owner, 2026-11-20, #519, comment 7051071630, T60 (b)). The
+parameter is followed through locals without `mut` and through the arguments of the functions and methods the message calls
+(T49 (c)). A parameter of a method that no call through a reference reaches, and that the actor's own code calls directly
+(U10), is read through its callers, each of them reading the method's calls with what it passes there, and a call's
+arguments reach the method it picks and each of its overrides and of the methods that implement it, a data type's method
+taking the value it is called on first (D16) *(assumed: a reading of T49 (c) of comment 7051071630)*. The callbacks are the
+least fixed point: every parameter starts as none, and each is read again as long as one changes, so that a reference handed
+on through a chain of calls that wait is one (T60 (b)), and only a parameter that the rounds reach from a `this` without
+passing through itself is one, so that a cycle of parameters that no `this` fills is none, and so is a cycle that a `this`
+enters, a recursion through two actor types that hands the reference back and forth among them (the owner, 2026-11-20, #519, comment 7051071630, T62 (a)). Such a call reaches the caller that waits, which takes it as a call of its chain (U17), as layer 1 runs `A.Load`
+inside `A.Save` (§6, "Deadlocks", layer 2, "Exempt without override: a callback through a reference the caller passed in
+that same call").
 
-A field of an actor whose every write takes a callback is one, and so is each item of a list field whose every item
-written takes one, so that a call through the field, or through an item of the list, read by an index or as the variable of
-a `for` over it, is no edge, and any other write makes the field none (the owner, 2026-11-20, #519, comment 7051071630, T49 (c)); a field outlives
-the message that set it, so that another message's call through it can reach an actor the caller's chain does not hold, as
-T49 (c) of #519, comment 7007991607, says of it. A write is an assignment of a field of the actor's body in any method, by its name or
-through `this`, and its default, and of a list every item that `Add` or `Insert` puts in, every item assigned and each
-item of a list literal assigned; `null` and an empty list write nothing, and a field with no other write is a callback; a
-list that `AddRange` puts in, the field passed as `mut` and a write in a lambda write another reference, and a write in a
-lambda that no code runs makes the field none; a field of the actor's primary constructor, which its `spawn` sets, is none
-*(assumed: a reading of T49 (c) of comment 7051071630)*.
+A field set from a parameter that is a callback is one, and so is a list of them (the owner, 2026-11-20, #519, comment 7051071630, T49 (c)); a field
+outlives the message that set it, so that another message's call through it can reach an actor the caller's chain does not
+hold, as T49 (c) of #519, comment 7007991607, says of it. A field of an actor is one where every write of it takes a callback,
+and so is each item of a list field whose every item written takes one, read in the least fixed point with the parameters,
+so that a call through the field, or through an item of the list, read by an index or as the variable of a `for` over it, is
+no edge, and any other write makes the field none *(assumed: a reading of T49 (c) of comment 7051071630)*. A write is an
+assignment of a field of the actor's body in any method, by its name or through `this`, and its default, and of a list every
+item that `Add` or `Insert` puts in, every item assigned and each item of a list literal assigned; `null` and an empty list
+write nothing, and a field with no other write is a callback; a list that `AddRange` puts in, the field passed as `mut` and a
+write in a lambda write another reference, and a write in a lambda that no code runs makes the field none; a field of the
+actor's primary constructor, which its `spawn` sets, is none *(assumed: a reading of T49 (c) of comment 7051071630)*.
 
-No callback comes from a reference that a `send` passes, or that another caller passes as anything but `this` or a
-callback. Nor does a call that code outside the actors' messages runs make one: a call that the top-level code reaches, or
-a `pub` function or a `pub` method of a class or a data type that no actor's message reaches, through every function,
-method and lambda they run; a method of a class, an interface or a data type that the actors' code alone calls runs in
-their messages, as their own methods do, so that a `this` handed on through it is a callback where every caller of that
-method is an actor's message (the owner, 2026-11-20, #519, comment 7051071630, T74 (b)). A `static` method of an actor is no message of it, so that
-the code only such a method reaches is outside *(assumed: a reading of T74 (b) of comment 7051071630)*. A reference that an item of another
-collection holds gives none, and neither does one that a lambda captures, `this` and a local that holds it among them,
-since a lambda can cross into another actor's message (U12), one that runs in place, a key of `SortBy`, among them
-(the owner, 2026-11-20, #519, comment 7051071630, T61 (a)). The walk keeps no context per call, so that one caller that passes another reference makes
-the parameter's calls edges for every caller (T49 (c)). A method that nothing calls has no caller to call back, so that a loop through its parameters is refused, as U56
-refuses a loop no code calls into *(assumed: a reading of the build, proposed with this record and not put to the owner)*.
+No callback comes from a reference that a `send` passes, or that another caller that waits passes as anything but `this` or
+a callback (T60 (b)), nor from an item of a list, but for a list field of callbacks, or from a capture in a lambda, a local
+that holds `this` among them (T49 (c)); an item of a collection that is no list gives none either *(assumed: a reading of
+T60 (b) of comment 7051071630)*. `this` inside a lambda gives none, since a lambda can be handed to another actor's message
+(U12), where `this` names an actor outside the chain, and so does `this` in a lambda that runs in place, a key of `SortBy`
+among them, which T61 (b) of #519, comment 7009683539, would have made a callback (the owner, 2026-11-20, #519, comment 7051071630, T61 (a)). Nor
+does a call that code outside the actors' messages runs make one: the outside is what the top-level code and the code no
+actor's message reaches run, not every `pub` method, so that a `this` handed on through a method of a class, an interface or
+a data type is a callback where every caller of that method is an actor's message (the owner, 2026-11-20, #519, comment 7051071630, T74 (b)). The code
+no actor's message reaches is read from the `pub` functions and the `pub` methods of the classes and the data types, which a
+caller outside the program could call, through every function, method and lambda they run, and a `static` method of an actor
+is no message of it, so that the code only such a method reaches is outside *(assumed: a reading of T74 (b) of comment
+7051071630)*. The walk keeps no context per call, so that one caller that passes another reference makes the parameter's
+calls edges for every caller (T49 (c)). A method that nothing calls has no caller to call back, so that a loop through its
+parameters is refused, as U56 refuses a loop no code calls into *(assumed: a reading of the build, proposed with this record
+and not put to the owner)*.
 
 Case: [actors/callback.kz](../corpus/actors/callback.kz)
 
@@ -4656,11 +4661,11 @@ Case: [actors/call-loop-unreached.kz](../corpus/actors/call-loop-unreached.kz)
 `vouch` before a call that waits on an actor's method through a reference (U4), `vouch c.Size()`, takes that call out of
 U56's graph, and with it every loop through it, and says that the call reaches another actor than the one of the loop that
 waits (§6, "Deadlocks", layer 2, "`vouch` on the call overrides it and means 'different instance, I vouch'"), which nothing
-checks at run time. Where it does not hold, the call runs as it would without the word: a call that reaches an actor busy in
+checks at run time, U18's `deadlock` and `call-timeout` being the net for a false promise (the owner, 2026-11-20, #519, comment 7051071630, T57 (a)). Where it does not hold, the call runs as it would without the word: a call that reaches an actor busy in
 another chain waits on it, so that the two chains wait on each other and U18, the call's bound (U36) or, for a loop the
 top-level code never waits on, the end of the program (U13) ends the wait, and a call that reaches an actor waiting in the
 call's own chain gets in as a call of that chain (U17), so that a recursion of one chain through a `vouch` that does not hold
-runs to its result (the owner, 2026-11-20, #519, comment 7051071630, T57 (a), T58 (a)).
+runs to its result *(assumed: a reading of T57 (a) of comment 7051071630)*.
 It binds to the call after it, so that `n + vouch c.Size()` adds the call's result to `n`, and the call's clause and its
 `else` stand after the call, `vouch c.Size() within 1s` (U39); of a chain of calls after it, it takes the last, so that
 `vouch c.Child().Size()` takes the call of `Size` out and leaves `c.Child()` a call as any other *(assumed: a reading of the
