@@ -4253,15 +4253,16 @@ otherwise it is a name, so that `within(3)` is a call, `within + 1` a sum and
 `type-mismatch`, a `duration?` is `nullable-unchecked` (N2), and a call with a `void` success is `syntax` (O10); and a `{`
 of the block on a line after the bound's is `braces-required` at the line where the bound ends, as C1 has it of an `if`
 *(assumed in §6: proposed there and not put to the owner)*. A bound of zero or less is refused, as the sockets refuse such a
-time (S9), against a deadline that has passed (§6, the owner, 2026-11-20, #519, comment 7051492844, "T4 (2)"). A duration literal
-of 0 ns or less, its unary minus included, `0s`, `-1s` or `0ms`, is the compile error `bound-not-positive` at its line, whose text
-names the form and the bound as written, "the bound of `within` is 0s; a bound is positive"; every other bound, `0s + 0s` and a
-variable among them, is read at run time, at the block's entry, before its first statement, so that a block with no call in it is
-refused too, and one of 0 ns or less raises `invalid-input` at the bound's line, the crash of the code that runs it, at the
-top-level code the end of the process with the exit code 1 (U19), its value standing on the line after the error line, "the bound
-of `within` is 0ms; a bound is positive", while 1 ns is a bound *(assumed in §6: T77, T78, T79 and T81 of comment 7055305138, and
-the product pass's reading of zero, comment 7055304984)*. A literal in brackets, `(0s)`, is read as the literal; a bound of another
-type has its `type-mismatch` and a literal its own error, `inexact-literal` among them, alone (E1); and the value after the error
+time (S9), against a deadline that has passed (§6, the owner, 2026-11-20, #519, comment 7051492844, "T4 (2)"). A constant bound
+of 0 ns or less, a constant as T25 reads one, a literal or one folded from literals, `0s`, `-1s`, `(0s)` or `1s - 1s`, is the
+compile error `bound-not-positive` at its line, whose text names the form and the bound as written, "the bound of `within` is
+0s; a bound is positive"; every other bound, a variable's name among them whatever it was given, is read at run time, at the
+block's entry, before its first statement, so that a block with no call in it is refused too, and one of 0 ns or less raises
+`invalid-input` at the bound's line, the crash of the code that runs it, at the top-level code the end of the process with the
+exit code 1 (U19), its value standing on the line after the error line, "the bound
+of `within` is 0ms; a bound is positive", while 1 ns is a bound *(assumed in §6: T77, T78 and T81 of comment 7055305138, T79 of
+it as corrected on 2026-11-21, and the product pass's reading of zero, comment 7055304984)*. A bound of another type has its
+`type-mismatch` and a constant its own error, `inexact-literal` or `constant-overflow`, alone (E1); and the value after the error
 line is written as a duration's text is (A12), as the position of `not-char-boundary` is written (X2) *(assumed in §6: readings of
 the build, proposed there and not put to the owner)*. A
 bound whose deadline would pass the largest time the clock holds sets no deadline of its own: the calls it bounds wait with no
@@ -4290,6 +4291,20 @@ actor Store {
 
 s = spawn Store()
 within -1s {
+    print(s.Get())
+}
+```
+
+Case: [actors/within-folded-zero.kz](../corpus/actors/within-folded-zero.kz)
+```kurz
+// a bound folded from literals is a constant, as T25 reads one, and one of zero is refused where it is written
+
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+within 1s - 1s {
     print(s.Get())
 }
 ```
@@ -4366,10 +4381,10 @@ one, the word where a `{` follows its expression and a name otherwise, so that `
 `syntax` at its line, `within` being a name there; inside a
 `(` or a `[`, where a line break ends no statement (L4), it may stand on a line after the call's *(assumed: a
 reading of the build, proposed with this record and not put to the owner)*. The bound of a call's clause of zero or less is refused
-as U40 refuses a block's, a literal as `bound-not-positive` and every other bound at run time as `invalid-input` at the bound's
+as U40 refuses a block's, a constant as `bound-not-positive` and every other bound at run time as `invalid-input` at the bound's
 line, read after the call's arguments and before the call is queued, where its actor is looked up, so that over an actor that
 ended it is `invalid-input` and not `actor-gone` (U43), and under a block whose deadline wins over the clause too (U39)
-*(assumed in §6: T80 and T81 of comment 7055305138)*. The operand of a declaration's clause is a number
+*(assumed in §6: T80 and T81 of comment 7055305138, and T79 of it as corrected on 2026-11-21)*. The operand of a declaration's clause is a number
 literal alone, its sign included, any other operand being `syntax`, its type read as U40 reads a bound. That the operand is a
 literal alone, any other operand `syntax`, as a knob of a policy is read (U26), is T13's *(assumed: T13 of comment 6967625156,
 whose option names a duration literal)*; that the literal is a number literal of any type, its sign included, as a knob of a
