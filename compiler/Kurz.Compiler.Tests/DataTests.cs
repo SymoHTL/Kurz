@@ -346,8 +346,8 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // an instance thrown as a base that has no `Text()` shows what the `Text()` of its own class gives, found when the program runs, its
         // class's own or that of a base between the two, a `virtual` one's override among them, as C#'s virtual `ToString()` (the owner,
         // 2026-11-21, issue 598, comment 7060156252, Q9 of comment 7055578588); an instance whose class's chain declares none keeps its name,
-        // a sibling class's `Text()` aside; and an instance a thrown `data` value holds as such a base takes the text by the same rule
-        // (section 5, assumed: the build's reading)
+        // a sibling class's `Text()` aside; an instance a thrown `data` value holds as such a base takes the text by the same rule (F1),
+        // and a `Text()` without `pub` is called as one with it (F2) (the owner, 2026-11-21, issue 598, comment 7063693020)
         const string Texted = "class Animal(string Name)\n\nclass Dog(int Legs) : Animal {\n    pub string Text() => \"dog {Name}\"\n}\n\nvoid Fail(Animal a) {\n    throw a\n}\n\n";
         Ran(BuildAndRun(Texted + "print(Dog(\"rex\", 4))\nFail(Dog(\"rex\", 4))\n", "throw-class-derived-text"), 1, ["dog rex"], "error: thrown at program.kz:8:\ndog rex\n");
         const string Kinds = Texted + "class Puppy(int Age) : Dog\n\nclass Cat(int Lives) : Animal\n\n";
@@ -356,6 +356,7 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Kinds + "Fail(Animal(\"any\"))\n", "throw-class-base-of-text"), 1, [], "error: thrown at program.kz:8:\nAnimal\n");
         Ran(BuildAndRun(Texted.Replace("pub string", "pub virtual string") + "class Puppy(int Age) : Dog {\n    pub override string Text() => \"puppy {Name}\"\n}\n\nFail(Puppy(\"pip\", 4, 1))\n", "throw-class-override-text"), 1, [], "error: thrown at program.kz:8:\npuppy pip\n");
         Ran(BuildAndRun(Texted + "data Pen(Animal Item)\n\nthrow Pen(Dog(\"rex\", 4))\n", "throw-class-held-text"), 1, [], "error: thrown at program.kz:13:\nPen { Item = dog rex }\n");
+        Ran(BuildAndRun(Texted.Replace("pub string", "string") + "Fail(Dog(\"rex\", 4))\n", "throw-class-private-text"), 1, [], "error: thrown at program.kz:8:\ndog rex\n");
         Ran(BuildAndRun("class Counter(mut int Count)\ndata Box(Counter Item)\n\nthrow Box(Counter(1))\n", "throw-class-held"), 1, [], "error: thrown at program.kz:4:\nBox { Item = Counter }\n");
         Ran(BuildAndRun("class Counter(mut int Count)\n\nthrow [Counter(1), Counter(2)]\n", "throw-class-list"), 1, [], "error: thrown at program.kz:3:\n[Counter, Counter]\n");
     }

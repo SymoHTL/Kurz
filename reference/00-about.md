@@ -485,7 +485,7 @@ is the one place where such a value has a text: a thrown `data` value or list th
 instance has the text A3 and A4 derive from what it holds, the instance's part of it being its
 class's name (O7; §5, the owner, 2026-11-21, issue 598, comment 7060156252, Q8 of comment
 7055578588), or what the `Text()` of the instance's own class gives where that class's chain declares
-one, as for a thrown instance (O7) *(assumed, §5: the build's reading, which no answer named)*.
+one, as for a thrown instance (O7; §5, the owner, 2026-11-21, issue 598, comment 7063693020, F1).
 
 Case: [classes/print-list-without-text.kz](../corpus/classes/print-list-without-text.kz)
 ```kurz
