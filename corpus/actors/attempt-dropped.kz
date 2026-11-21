@@ -1,0 +1,27 @@
+// expect: throws call-timeout at 22
+// threads: 1
+// rules: U49
+
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Holder {
+    pub void Busy() {
+        Hold(300ms)
+    }
+}
+
+// `Busy`, queued ahead of the block's message, holds the one thread past the deadline, and the message is dropped
+h = spawn Holder()
+within 100ms {
+    send h.Busy()
+    v = attempt { 1 } else {
+        Crashed c => 0
+    }
+
+    print(v)
+}

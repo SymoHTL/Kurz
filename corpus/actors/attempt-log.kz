@@ -1,0 +1,10 @@
+// expect: output
+// | held
+// rules: U50
+
+// the crash writes its one `Error` line as the case reaches the top-level code, a line the case leaves out
+attempt {
+    throw "no stock"
+} else {
+    Crashed c => print("held")
+}
