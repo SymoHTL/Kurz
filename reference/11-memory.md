@@ -43,12 +43,12 @@ and the memo of a call of more than one copy once its last copy is made; where a
 after its first copy and before its last, the memo ends before the jump lets go of anything, the values made
 after the first copy among them; so each copy goes after the end of its call's memo, which points the `weak`
 references of the call's copies (U12) *(assumed: a reading of the build, proposed with `kurz-design.md`
-section 3, the bullet "Lifetimes", and not put to the owner)*. What becomes of the copies a message's
-arguments made, and where the memo of those copies ends, at a jump out of a message before its last
-argument, is T24 of issue 519 (comment 6981296432), a question put to the owner, of which this rule states
-nothing; its options there are four: the copies freed where the raise leaves, by building the message in a
-heap of its own; freed by the crash path; every argument evaluated before any is copied, so that a raise
-leaves no copy; or kept in the callee's heap to its restart or its end, as the record reads it. No case shows
+section 3, the bullet "Lifetimes", and not put to the owner)*. The copies a message's
+arguments made before a jump out of it are freed where the builder leaves, with the heap of the message's
+own they were built in, which a message takes wherever an argument after one that crosses can leave it, one
+that can wait or one that can raise (U21; §6, the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)"),
+the memo of those copies ending before that heap is freed *(assumed: a reading of the build, as for a call
+that is no message)*. No case shows
 that order either: nothing of the program runs at a release, nor between the end of a memo and the release
 of the copies.
 

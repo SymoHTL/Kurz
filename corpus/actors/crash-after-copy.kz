@@ -1,0 +1,31 @@
+// expect: output
+// | 5
+// | 5
+// rules: U21
+
+// the first `Go` crashes `Caller` at the index, after the list crossed into the message: the copy is freed where the builder
+// leaves, and `Keeper` runs on with its total unchanged
+
+actor Keeper {
+    mut int total = 0
+
+    pub int Take(List<int> xs, int n) {
+        total = total + xs.Count + n
+        return total
+    }
+
+    pub int Total() => total
+}
+
+actor Caller(Keeper Target) {
+    pub void Go(List<int> xs, int at) {
+        ys = [1, 2]
+        print(Target.Take(xs, ys[at]))
+    }
+}
+
+k = spawn Keeper()
+c = spawn Caller(k)
+send c.Go([10, 20, 30], 5)
+c.Go([10, 20, 30], 1)
+print(k.Total())

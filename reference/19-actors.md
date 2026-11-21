@@ -2627,7 +2627,17 @@ pool, the messages of
 its inbox copied into the new instance's heap first, as a crossing copies them (U12), and the
 actor's reference names the same actor after the restart (U2) (§6; the taken points of comment
 6899225864). A crash ends the actors the crashed instance spawned as an end does, after their
-current message, their queued messages dropped (U13), and none of them restarts.
+current message, their queued messages dropped (U13), and none of them restarts. The copies of the
+arguments of a message whose builder crashes at an argument that can raise after one that crosses are
+freed where the builder leaves, as Rust's drop order frees the values a function had built: such a
+message is built in a heap of its own, which the builder's crash frees, and is copied into the
+callee's heap at its queueing (§6, the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)"). An
+argument can raise where it has no call in it and is neither a literal, a number, a string with no hole,
+a `char`, a `bool`, `null` or a duration's, its sign included, nor a read of a name, either in brackets;
+a message whose argument that can raise comes before every argument that crosses, or none of whose
+arguments crosses, takes no heap of its own for it; and a `send`, a message to a `per node` actor and a
+call with a clause take the same path *(assumed: the reading of the product pass, #519, comment
+7056985643)*.
 
 Case: [actors/crash-inbox-kept.kz](../corpus/actors/crash-inbox-kept.kz)
 ```kurz
@@ -2685,6 +2695,125 @@ b = spawn Box()
 s = spawn Slow()
 send b.Boom()
 print(b.Sum([10, 20, 30], s.Get()))
+```
+
+Case: [actors/crash-after-copy.kz](../corpus/actors/crash-after-copy.kz)
+```kurz
+// the first `Go` crashes `Caller` at the index, after the list crossed into the message: the copy is freed where the builder
+// leaves, and `Keeper` runs on with its total unchanged
+
+actor Keeper {
+    mut int total = 0
+
+    pub int Take(List<int> xs, int n) {
+        total = total + xs.Count + n
+        return total
+    }
+
+    pub int Total() => total
+}
+
+actor Caller(Keeper Target) {
+    pub void Go(List<int> xs, int at) {
+        ys = [1, 2]
+        print(Target.Take(xs, ys[at]))
+    }
+}
+
+k = spawn Keeper()
+c = spawn Caller(k)
+send c.Go([10, 20, 30], 5)
+c.Go([10, 20, 30], 1)
+print(k.Total())
+```
+
+Case: [actors/crash-after-copy-send.kz](../corpus/actors/crash-after-copy-send.kz)
+```kurz
+// the first `Go` crashes `Caller` at the index, after the list crossed into the message it sends: the copy is freed where the
+// builder leaves, and `Keeper` runs on with its total unchanged
+
+actor Keeper {
+    mut int total = 0
+
+    pub void Add(List<int> xs, int n) {
+        total = total + xs.Count + n
+    }
+
+    pub int Total() => total
+}
+
+actor Caller(Keeper Target) {
+    pub void Go(List<int> xs, int at) {
+        ys = [1, 2]
+        send Target.Add(xs, ys[at])
+    }
+}
+
+k = spawn Keeper()
+c = spawn Caller(k)
+send c.Go([10, 20, 30], 5)
+c.Go([10, 20, 30], 1)
+print(k.Total())
+```
+
+Case: [actors/crash-before-copy.kz](../corpus/actors/crash-before-copy.kz)
+```kurz
+// the first `Go` crashes `Caller` at the index, before the list after it crossed: no copy was made, and `Keeper` runs on with its
+// total unchanged
+
+actor Keeper {
+    mut int total = 0
+
+    pub int Take(int n, List<int> xs) {
+        total = total + xs.Count + n
+        return total
+    }
+
+    pub int Total() => total
+}
+
+actor Caller(Keeper Target) {
+    pub void Go(List<int> xs, int at) {
+        ys = [1, 2]
+        print(Target.Take(ys[at], xs))
+    }
+}
+
+k = spawn Keeper()
+c = spawn Caller(k)
+send c.Go([10, 20, 30], 5)
+c.Go([10, 20, 30], 1)
+print(k.Total())
+```
+
+Case: [actors/crash-between-copies.kz](../corpus/actors/crash-between-copies.kz)
+```kurz
+// the first `Go` crashes `Caller` at the index, after the first list crossed into the message and before the second: the copy is
+// freed where the builder leaves, and `Keeper` runs on with its total unchanged
+
+actor Keeper {
+    mut int total = 0
+
+    pub int Take(List<int> xs, int n, List<int> zs) {
+        total = total + xs.Count + n + zs.Count
+        return total
+    }
+
+    pub int Total() => total
+}
+
+actor Caller(Keeper Target) {
+    pub void Go(List<int> xs, int at) {
+        ys = [1, 2]
+        print(Target.Take(xs, ys[at], xs))
+    }
+}
+
+k = spawn Keeper()
+c = spawn Caller(k)
+send c.Go([10, 20, 30], 5)
+c.Go([10, 20, 30], 1)
+print(k.Total())
 ```
 
 Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
