@@ -949,12 +949,12 @@ public sealed partial class Emitter
 
     /// <summary>
     /// U46, U50: the IR type of the reply of an <c>attempt</c>, a call's (<see cref="Reply"/>) with the caller's heap at
-    /// <see cref="ReplyHeap"/> whatever the block gives, then the slot of the crash's message, at byte 56, where the runtime's
+    /// <see cref="ReplyHeap"/> whatever the block gives, then the slot of the crash's message, at byte 88, where the runtime's
     /// <c>Fell</c> stores it, then the block's value, where it gives one.
     /// </summary>
     private string AttemptReply(KurzType success) => success is Semantics.VoidType
-        ? "{ i32, ptr, i64, ptr, ptr, i64, ptr, ptr }"
-        : $"{{ i32, ptr, i64, ptr, ptr, i64, ptr, ptr, {Ir(success)} }}";
+        ? "{ i32, ptr, i64, ptr, ptr, i64, ptr, %kz.str, i32, ptr, ptr }"
+        : $"{{ i32, ptr, i64, ptr, ptr, i64, ptr, %kz.str, i32, ptr, ptr, {Ir(success)} }}";
 
     /// <summary>
     /// U46, U47: the function of the message of an <c>attempt</c> whose block has the function type <paramref name="block"/>, which the

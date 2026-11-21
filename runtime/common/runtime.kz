@@ -5699,7 +5699,7 @@ void Fell(byte* state, byte* header, bool hasText, byte* id, long idCount, byte*
             byte* message = Pending(taker, above, null, header, hasText, id, idCount, file, fileCount, line, from, count, number, slot, copy)
             byte* reply = *Ptr<byte*>(*Ptr<byte*>(*Ptr<byte*>(taker - 8) + 328) + 16)
             if reply != null {
-                *Ptr<byte*>(reply + 56) = message
+                *Ptr<byte*>(reply + 88) = message
             }
 
             Fall(state, header, null)
@@ -6759,7 +6759,7 @@ pub byte* AttemptNew(byte* name) {
 // The wait of the `attempt` whose child is `child` for the reply `reply` of the block's message `message`, at the
 // line `line` of the file `file`, as a call waits (`Answer`; U49) but with no deadline of its own, the block's
 // calls carrying the chain's (`Enqueue`): null where the block's value stands in the reply, and where the child
-// crashed the message of its crash, which `Fell` set in the reply at 56 and which the emitted code reads `Crashed`
+// crashed the message of its crash, which `Fell` set in the reply at 88 and which the emitted code reads `Crashed`
 // from and frees (`PendingLeft`; U46, U50). A message dropped at its deadline, at its queueing (`Enqueue`) or
 // before the child took it (`Dropped`), raises `call-timeout` at the line, a call's (U37), whose crash of the
 // code that waits ends the child, a child of that code, as it ends every child (U13).
@@ -6775,7 +6775,7 @@ pub byte* Attempted(byte* reply, byte* message, string file, int line) {
 
     if kind == 2 {
         raw {
-            return *Ptr<byte*>(reply + 56)
+            return *Ptr<byte*>(reply + 88)
         }
     }
 
@@ -6951,7 +6951,7 @@ pub void RunTests(byte* table, long count, string file) {
         *Ptr<extern "C" (byte*, byte*) => void>(run) = TestRun
         *Ptr<byte*>(run + 8) = null
         *Ptr<byte*>(run + 16) = null
-        reply = AllocateOwn(48)
+        reply = AllocateOwn(80)
     }
 
     mut long passed = 0
