@@ -396,6 +396,9 @@ public sealed partial class Checker
                     used[u.Target] = folder; // F10: before the bodies are checked, which call the folder's functions
                     uses.Add(u);
                     break;
+                case TestDeclaration t:
+                    DeclareTest(t); // Y1: a second test of one name is the second one's error
+                    break;
                 default:
                     break;
             }
@@ -471,6 +474,7 @@ public sealed partial class Checker
             }
         }
 
+        CheckTestBodies(); // Y5, Y7
         CheckMethodBodies(); // K7
         CheckConstructorBodies(); // K14
         CheckTypeBlocks(); // U27, U28: the block of a policy after an actor's name
@@ -2435,6 +2439,18 @@ public sealed partial class Checker
             case ConstAssertStatement c:
                 CheckConstAssert(c); // T37: checked while the program compiles
                 return Flow.Completes;
+            case TestDeclaration t:
+                CheckTestDeclaration(t); // Y1: declared in the first passes and its body checked with the functions'; the parser holds it to the top level
+                return Flow.Completes;
+            case AssertionStatement a:
+                CheckAssertion(a); // Y6
+                return Flow.Completes;
+            case MockStatement m:
+                CheckMock(m); // Y9
+                return Flow.Completes;
+            case AdvanceStatement a:
+                CheckAdvance(a); // Y10
+                return Flow.Completes;
             case FunctionDeclaration f:
                 if (blockDepth > 0)
                 {
@@ -2554,18 +2570,18 @@ public sealed partial class Checker
     /// U40: the bound of <c>within</c>, a block's or a clause's (U39), is a <c>duration</c>, read as a condition is (C3): a value of another
     /// type there is <c>type-mismatch</c> at its line, a <c>longduration</c> among them, a <c>duration?</c> is <c>nullable-unchecked</c>, and
     /// a call with a <c>void</c> success is <c>syntax</c> (O10) (section 6, assumed: the forms of that section write a duration and name no
-    /// other type).
+    /// other type). Y10: the duration of <c>advance</c> is read so too, <paramref name="of"/> and <paramref name="rule"/> naming it.
     /// </summary>
-    private void CheckBound(Expression bound)
+    private void CheckBound(Expression bound, string of = "the bound of `within`", string rule = "U40")
     {
         var t = CheckExpression(bound, Types.Duration);
         if (Types.IsVoid(t.Type))
         {
             Report(ErrorIds.Syntax, bound.Line, "a call with a `void` success used as a value (O10)");
         }
-        else if (!t.IsError && t.Type is not PrimitiveType { Kind: Primitive.Duration } && !Unchecked(t, bound.Line, "as the bound of `within`"))
+        else if (!t.IsError && t.Type is not PrimitiveType { Kind: Primitive.Duration } && !Unchecked(t, bound.Line, $"as {of}"))
         {
-            Report(ErrorIds.TypeMismatch, bound.Line, $"the bound of `within` is a `duration`, not {Types.A(t.Type)} (U40)");
+            Report(ErrorIds.TypeMismatch, bound.Line, $"{of} is a `duration`, not {Types.A(t.Type)} ({rule})");
         }
     }
 

@@ -1,0 +1,10 @@
+// expect: error syntax at 8
+// rules: Y1
+
+test "adds" {
+    check 1 + 1 == 2
+}
+
+test "adds" {
+    check 2 + 2 == 4
+}

@@ -612,7 +612,10 @@ before `static`)*. `Ptr` and `SizeOf`, which R14 uses as syntax, are core words 
 everywhere else *(assumed, §13)*. `internal`, which F9 uses as syntax for a member visible to its
 folder (§8, the owner, 2026-11-03), is a core word too *(assumed, §8: as C# reserves it)*. `base` is a
 word right after a constructor's `:` (K14) and a name everywhere else (§4, the owner, 2026-11-03).
-`actor`, `spawn` and `send`, which chapter 19 uses as syntax, are core words too (U1).
+`actor`, `spawn` and `send`, which chapter 19 uses as syntax, are core words too (U1). `test`, `check`,
+`mock` and `advance`, which chapter 20 uses as syntax, are words only where its forms stand, `check(x)`
+among them, and names everywhere else, a variable named so among them (Y1; §11, assumed there: D2 of issue
+586, comment 6992687784).
 
 Case: [source/core-word-as-name.kz](../corpus/source/core-word-as-name.kz)
 ```kurz
@@ -662,6 +665,15 @@ base = Dog(4) // a name here: `base` is a word right after a constructor's `:` a
 print(base.Name)
 print(Dog("rex").Name)
 print(Cat().Name)
+```
+
+Case: [source/test-words-as-names.kz](../corpus/source/test-words-as-names.kz)
+```kurz
+test = 1
+check = 2
+mock = 3
+advance = 4
+print(test + check + mock + advance)
 ```
 
 ### L19 (decided, §8) The names of the built-in types are core words

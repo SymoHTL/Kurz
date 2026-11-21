@@ -79,6 +79,8 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         data EKept
         data EComparedText
         data EKeyedText
+        data ECheckText
+        data ECheckCall
 
         void Direct() {
             throw EDirect
@@ -607,6 +609,24 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
             print(k)
         }
 
+        data CheckedSide(int N) {
+            pub string Text() {
+                throw ECheckText
+            }
+        }
+
+        void ViaCheck(CheckedSide a) {
+            check a == CheckedSide(1)
+        }
+
+        bool CheckedCall() {
+            throw ECheckCall
+        }
+
+        void ViaCheckCondition() {
+            check CheckedCall()
+        }
+
         data Picked(int N)
 
         bool KeepPicked(Picked p) {
@@ -725,6 +745,8 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     [InlineData("ViaMapValueText", "EMapValueText")] // the Text() of the values of a map (A6)
     [InlineData("ViaUnionText", "EUnionText")] // the Text() of a case of a union (A4)
     [InlineData("ViaWeakText", "EWeakText")] // the Text() of the target of a `weak` field of a data type without its own Text() (A3, R3)
+    [InlineData("ViaCheck", "ECheckText")] // the Text() of each side of a comparison whose failure a `check` shows (Y6, F10)
+    [InlineData("ViaCheckCondition", "ECheckCall")] // the condition of a `check` (Y6)
     [InlineData("ViaSpawn", "ESpawn")] // the construction of an actor a spawn makes, whose throw is the spawner's crash (U3)
     [InlineData("ViaClause", "EClause")] // the bound of a call's clause, which runs in the caller (U39)
     [InlineData("ViaGeneric", "EGeneric")] // a throw of a type parameter, with the type argument the call gives it (T19)
@@ -960,6 +982,46 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void A_message_to_the_name_of_a_per_node_actor_brings_what_its_start_throws_and_nothing_of_its_methods()
+    {
+        // U52 (assumed: T29 of issue 519, comment 6983903100): a call or a `send` through the name of a `per node` actor starts it where
+        // none stands, its defaults run on the caller's stack, whose throw is the caller's crash, as at a `spawn` (U3); the method the
+        // message runs runs in the callee, whose crash its caller gets as `callee-crashed` (U20), so that its throw adds nothing
+        const string text = """
+            data EStart
+            data EMethod
+
+            int Started() {
+                throw EStart
+            }
+
+            actor Cache per node {
+                int first = Started()
+
+                pub int Get() {
+                    throw EMethod
+                }
+
+                pub void Add() {
+                    throw EMethod
+                }
+            }
+
+            pub void Call() {
+                print(Cache.Get())
+            }
+
+            pub void Send() {
+                send Cache.Add()
+            }
+
+            """;
+        var own = Own(text);
+        Assert.Equal(["EStart", "RuntimeError"], RaisedIn(own, "Call"));
+        Assert.Equal(["EStart", "RuntimeError"], RaisedIn(own, "Send"));
+    }
+
+    [Fact]
     public void A_text_reads_each_instantiation_of_one_generic_type_it_holds()
     {
         // section 5: `Two` holds a `Box<int>` and a `Box<Quiet>`, and its text reads both, `Quiet`'s Text() through the second
@@ -1083,6 +1145,59 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
                 void Muted() {
                     Show(Sub<Hushed>(1, Hushed(1)))
                 }
+            }
+
+            printer = spawn Printer()
+            send printer.Go()
+
+            """;
+        var own = Own(text);
+        var printer = own.Checker.Model.ClassOf(own.Tree.Statements.OfType<TypeDeclaration>().Single(t => t.Name == "Printer"));
+        Assert.Equal(["EShouty", "RuntimeError"], Names(own.Sets.ReasonOf(printer)));
+    }
+
+    [Fact]
+    public void An_instantiation_built_only_in_a_test_is_built()
+    {
+        // Y5, Y7, section 5: each test is a root of what the program builds, in every reading, since every command checks every test,
+        // so the text of `Sub<Shouty>`, built in a test alone, is in the actor's `Reason`; `Sub<Hushed>`, built in a function nothing
+        // calls, is built nowhere
+        const string text = """
+            data EShouty
+            data EHushed
+
+            data Plain(int N)
+
+            data Sub<U>(U X) : Plain
+
+            class Shouty(int N) {
+                pub string Text() {
+                    throw EShouty
+                }
+            }
+
+            class Hushed(int N) {
+                pub string Text() {
+                    throw EHushed
+                }
+            }
+
+            void Show(Plain p) {
+                print(p)
+            }
+
+            void Muted() {
+                Show(Sub<Hushed>(1, Hushed(1)))
+            }
+
+            actor Printer {
+                pub void Go() {
+                    Show(Plain(1))
+                }
+            }
+
+            test "shows" {
+                Show(Sub<Shouty>(1, Shouty(1)))
             }
 
             printer = spawn Printer()

@@ -1,0 +1,37 @@
+// expect: throws actor-gone at 37
+// | 9
+// threads: 1
+// rules: U52, U25
+
+// `User`'s `Use` starts `Cache`, whose default waits on `Slow`, while `Probe`'s `Ping` answers the top-level code, whose call
+// then waits in `Cache`'s inbox, as one thread runs the ready actors first in, first out (U35)
+
+actor Slow per node {
+    pub int Get() => 1
+}
+
+actor Cache per node {
+    int first = Fails(Slow.Get())
+
+    pub int Get() => first
+}
+
+int Fails(int n) {
+    throw "start fails at {n}"
+}
+
+actor User {
+    pub void Use() {
+        print(Cache.Get())
+    }
+}
+
+actor Probe {
+    pub int Ping() => 9
+}
+
+u = spawn User() on crash stop
+p = spawn Probe()
+send u.Use()
+print(p.Ping())
+print(Cache.Get())

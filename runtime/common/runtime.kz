@@ -388,6 +388,24 @@ pub void Throw(string text, string file, int line) {
     sys.Exit(1)
 }
 
+// A `check` whose condition was false (Y6): the error line `error: check-failed at <file>:<n>:`, the condition's text on the line
+// after it, as the parser kept it with the values of its sides, as a thrown value's text follows a `throw`'s error line (O6), the
+// trace after the text, and the end of the process with the exit code 1; inside a message, the crash of the actor that runs it, which
+// keeps that text for its log line (U19, U24), and under `kurz test` for the line under its test's `FAILED` (Y3).
+pub void CheckFailed(string text, string file, int line) {
+    CrashActor("check-failed", file, line, true, text)
+    sys.Crashing()
+    WriteError("error: check-failed at ")
+    WriteError(file)
+    WriteError(":")
+    WriteNumber(ulong(line))
+    WriteError(":\n")
+    WriteError(text)
+    WriteError("\n")
+    sys.Trace()
+    sys.Exit(1)
+}
+
 // The error line of `not-char-boundary` (X2, X10): `error: not-char-boundary at <file>:<n>:`, the
 // position of the cut on the line below it, `byte <at> is inside a code point`, where the text of a
 // `throw` stands (O6), the trace of the calls below that, and the end of the process with the exit code 1;
@@ -3907,6 +3925,83 @@ pub void ActorBuilt(byte* state) {
     }
 }
 
+// The cell of a `per node` actor type (U51, U52), a global of the emitted program, 24 bytes: a lock word, then
+// the index of the slot of its one actor and that actor's number, which a reference holds (`Lookup`), 0 before
+// its first start, the slot stored before the number and the number with release (`PerStarted`). The actor of
+// the cell `cell` where one stands, ended or not, its state found by its slot and its number as a reference finds
+// its actor, with no lock, as Rust's `OnceLock` reads its value after one acquire load of its state (not
+// checked at source); else the cell's lock taken and the cell read again under it, and null, the lock still held,
+// where no actor stands there either, so that the code that called starts one (the emitter's `PerStart`) and
+// `PerStarted` lets go of the lock once that actor stands in the cell: the lock is held around the check and the
+// publication alone, never around the constructor or a wait (assumed: T27 to T33 of issue 519, comment
+// 6983903100, the defaults said back, a lock of the type on the threads of section 6). A number of 0 is no actor's,
+// and is read before the slot, since `Slot` reads the directory of the table, which no take made before the first
+// actor's.
+pub byte* PerFind(byte* cell) {
+    raw {
+        long number = AtomicLong.FromPtr(Ptr<long>(cell + 16)).Load(MemoryOrder.Acquire)
+        if number != 0 {
+            byte* state = Lookup(AtomicLong.FromPtr(Ptr<long>(cell + 8)).Load(MemoryOrder.Relaxed), number)
+            if state != null {
+                return state
+            }
+        }
+    }
+
+    raw {
+        Lock(Ptr<int>(cell))
+        long again = AtomicLong.FromPtr(Ptr<long>(cell + 16)).Load(MemoryOrder.Acquire)
+        if again != 0 {
+            byte* state = Lookup(AtomicLong.FromPtr(Ptr<long>(cell + 8)).Load(MemoryOrder.Relaxed), again)
+            if state != null {
+                Unlock(Ptr<int>(cell))
+                return state
+            }
+        }
+    }
+
+    return null
+}
+
+// The actor whose state is `state`, which `ActorNew` made for the cell `cell`, whose lock `PerFind` holds, the
+// one actor of its type from now on (U52): the pause of its block of a restart and the count of the ring of its
+// knobs set to 0, since that block and those knobs are the type's own, globals of the emitted program, which the
+// actor that ended past its limit left as they were, so that a fresh one pauses first as `Pause` does after no
+// crash and counts its window from its start (assumed: a reading of the build, proposed with this record and not
+// put to the owner); a pause writes the other words of the block before it reads them, and the ring's first,
+// with a count of 0, names a slot the ring has (`Limited`). Then its slot and its number stored in the cell, the number with
+// release, and the lock let go of, before its constructor runs, so that a message that reaches it while it builds
+// waits for it (BUILDING, `Claimed`, `ActorBuilt`).
+pub void PerStarted(byte* cell, byte* state) {
+    raw {
+        byte* side = *Ptr<byte*>(state - 80)
+        if side != null {
+            *Ptr<long>(side + 16) = 0
+            byte* knobs = *Ptr<byte*>(side + 48)
+            if knobs != null {
+                *Ptr<long>(knobs + 48) = 0
+            }
+        }
+
+        AtomicLong.FromPtr(Ptr<long>(cell + 8)).Store(*Ptr<long>(state - 56), MemoryOrder.Relaxed)
+        AtomicLong.FromPtr(Ptr<long>(cell + 16)).Store(*Ptr<long>(state - 40), MemoryOrder.Release)
+        Unlock(Ptr<int>(cell))
+    }
+}
+
+// The end of the constructor of the one actor of a `per node` type, whose state is `state`, at its start (U52,
+// U53): its supervisor, the code that sent its first message while its constructor ran, so that a crash of that
+// code ended it, half built, becomes the top-level code, the root, so that it outlives that code and ends with
+// the process; then the end of its constructor as at a `spawn` (`ActorBuilt`). The store is a plain one, which
+// holds while one thread runs every program (U35), as `EndChildren` reads the supervisor by a plain load.
+pub void PerBuilt(byte* state) {
+    raw {
+        *Ptr<byte*>(state - 72) = null
+    }
+
+    ActorBuilt(state)
+}
+
 // The actor whose constructor runs in the code of the thread, which the emitted `spawn` sets around the
 // constructor it runs, so that an actor that constructor spawns is a child of the actor it constructs (U13):
 // the top-level code's here, and each activation's at 424 of its header.
@@ -4718,38 +4813,8 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
     sys.Entered()
     raw {
         if running == null {
-            long deadline = *Ptr<long>(reply + 16)
-            while ReplyState(reply) == 0 {
-                long now = PauseClock()
-                if deadline <= now {
-                    break
-                }
-
-                tick = now
-                Fire(now)
-                byte* block = RootTaken()
-                long due = PauseDue()
-                if block != null {
-                    RootBlock(block)
-                } else if due != Never() {
-                    byte* ended = PauseEnded(now)
-                    if ended != null {
-                        // the restart runs the constructor through `Start` and `Run`, which clears the count of the
-                        // entries under way on its way to the actor's stack, so that the count raised here is not the
-                        // constructor's (O11)
-                        Restart(ended)
-                    } else if runFirst == null {
-                        PauseSleep(Earliest(Earliest(due, deadline), Next()) - now)
-                    } else {
-                        RunOne()
-                    }
-                } else {
-                    if runFirst == null {
-                        Raise("deadlock", file, line)
-                    }
-
-                    RunOne()
-                }
+            if !RootWait(reply) {
+                Raise("deadlock", file, line)
             }
         } else {
             byte* header = running
@@ -4786,6 +4851,51 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
             Raise("actor-gone", file, line)
         }
     }
+}
+
+// The loop of the top-level code's wait for the reply `reply` (`Wait`; U18, U23, U33, U36): at each turn the clock read, the timers
+// fired, then the block of a child the top-level code spawned, a restart whose pause ended, the sleep to the first pause's end, the
+// first timer or the deadline, or the run queue's first actor, as long as the reply is not set and its deadline has not passed; true
+// where one of those ends the loop, false where none of them is left, so that nothing could set the reply, where `Wait` raises
+// `deadlock` at the call's line and the test runner fails the test at its own (`RunTests`; Y5).
+bool RootWait(byte* reply) {
+    raw {
+        long deadline = *Ptr<long>(reply + 16)
+        while ReplyState(reply) == 0 {
+            long now = PauseClock()
+            if deadline <= now {
+                return true
+            }
+
+            tick = now
+            Fire(now)
+            byte* block = RootTaken()
+            long due = PauseDue()
+            if block != null {
+                RootBlock(block)
+            } else if due != Never() {
+                byte* ended = PauseEnded(now)
+                if ended != null {
+                    // the restart runs the constructor through `Start` and `Run`, which clears the count of the
+                    // entries under way on its way to the actor's stack, so that the count raised here is not the
+                    // constructor's (O11)
+                    Restart(ended)
+                } else if runFirst == null {
+                    PauseSleep(Earliest(Earliest(due, deadline), Next()) - now)
+                } else {
+                    RunOne()
+                }
+            } else {
+                if runFirst == null {
+                    return false
+                }
+
+                RunOne()
+            }
+        }
+    }
+
+    return true
 }
 
 // The first actor of the run queue taken off it, and what it can go on with run: a call of its chain on
@@ -5164,11 +5274,14 @@ void Crashed(byte* state, byte* header) {
 // falls (`Fall`), and after it each supervisor its policy crashes on the way up, `escalate` passing the
 // crash up whole, and an actor whose constructor runs at its `spawn` passing it to its spawner, whose fall
 // ends it (U3, U25). The actor that takes the crash writes the log line (U24), the supervisor that escalated
-// writing none, and restarts after its pause (U22, U23), or ends where its policy is `stop`, where it was to
+// writing none, and a test's own actor none either, whose crash's words the test runner keeps (`TestCrashKept`; Y5), and
+// restarts after its pause (U22, U23), or ends where its policy is `stop`, where it was to
 // end after its current message or where its supervisor crashed (U25); where its crash passes the limit of
 // its `max N in`, its supervisor crashes with `restart-limit` at the line of its `spawn` (U26), and it ends in
 // that fall, as a child with no activation, its own fall having cleared it, which `EndChildren` ends at once,
-// a call queued to it set `gone`; at the top level the process ends.
+// a call queued to it set `gone`; at the top level the process ends; but the one actor of a `per node` type,
+// whose knobs hold 1 at 80, which ends there as at a `stop`, with no `restart-limit`, so that the first message
+// to its name after that starts a fresh one (U54; section 6, the owner, 2026-11-17, #561, comment 6945857315, Q2).
 // Where the actor that takes the crash runs and its policy is a block, the crash, the thrown value among it,
 // is copied into that heap, the actor waits for the block's decision, its stack that raised kept, and the
 // block runs as a message of its supervisor, or in the wait of the top-level code (`Pending`; U28, U33).
@@ -5233,7 +5346,12 @@ void Fell(byte* state, byte* header, bool hasText, byte* id, long idCount, byte*
             at = up
         }
 
-        Logged(taker, what, idCount, file, fileCount, line, hasText, text, count)
+        if taker == testActor {
+            TestCrashKept(what, idCount, file, fileCount, line, hasText, text, count)
+        } else {
+            Logged(taker, what, idCount, file, fileCount, line, hasText, text, count)
+        }
+
         if what != null {
             std.Free(what, idCount)
         }
@@ -5250,6 +5368,11 @@ void Fell(byte* state, byte* header, bool hasText, byte* id, long idCount, byte*
 
         byte* knobs = *Ptr<byte*>(side + 48)
         if knobs != null && Limited(knobs, above, PauseClock()) {
+            if *Ptr<long>(knobs + 80) == 1 {
+                EndActor(taker)
+                return
+            }
+
             if parent == null {
                 Ends(false, "restart-limit".Pointer, 13, *Ptr<byte*>(knobs + 56), *Ptr<long>(knobs + 64), *Ptr<long>(knobs + 72), null, 0)
             }
@@ -5756,7 +5879,8 @@ void PauseSleep(long nanoseconds) {
 // quotes as a `string` field is written (P7), and the place, ` at <file>:<n>`, as the error line of a `throw`
 // at the root carries them, `Counter#3 crashed: thrown "no stock" at shop.kz:12`; for a stack overflow the
 // id and the place as its error line writes them. One line at `Error` through the runtime's writer, where
-// the filter leaves `Kurz.Actor` on at `Error` (P4), with no chain ID while P8 is open.
+// the filter leaves `Kurz.Actor` on at `Error` (P4), with no chain ID while P8 is open. The fields after the id are `CrashFields`'s,
+// which the crash of a test's own actor keeps for the line under its `FAILED` in place of this line (`TestCrashKept`; Y3, Y5).
 void Logged(byte* state, byte* id, long idCount, byte* file, long fileCount, long line, bool hasText, byte* text, long count) {
     if !LogEnabled("Kurz.Actor", 4) {
         return
@@ -5764,16 +5888,31 @@ void Logged(byte* state, byte* id, long idCount, byte* file, long fileCount, lon
 
     mut string name = ""
     mut string what = ""
-    mut string place = ""
-    mut string thrown = ""
     mut long number = 0
     raw {
         byte* written = *Ptr<byte*>(state - 96)
         name = TextAt(*Ptr<byte*>(written), *Ptr<long>(written + 8))
         what = TextAt(id, idCount)
+        number = *Ptr<long>(state - 40)
+    }
+
+    mut long now = 0
+    if !sys.Now(mut now) {
+        now = 0
+    }
+
+    LogLine(4, "Kurz.Actor", "{name}#{number} crashed: {what}", CrashFields(file, fileCount, line, hasText, text, count), now)
+}
+
+// The fields of the log line of a crash after its id (U24): where `hasText` holds, the text that follows its error line, `count` bytes at
+// `text`, in double quotes as a `string` field is written (P7), then its place, ` at <file>:<n>`, where it has one, `fileCount` bytes
+// at `file` and the line `line`.
+string CrashFields(byte* file, long fileCount, long line, bool hasText, byte* text, long count) {
+    mut string place = ""
+    mut string thrown = ""
+    raw {
         place = TextAt(file, fileCount)
         thrown = TextAt(text, count)
-        number = *Ptr<long>(state - 40)
     }
 
     mut string fields = ""
@@ -5785,12 +5924,7 @@ void Logged(byte* state, byte* id, long idCount, byte* file, long fileCount, lon
         fields = "{fields} at {place}:{line}"
     }
 
-    mut long now = 0
-    if !sys.Now(mut now) {
-        now = 0
-    }
-
-    LogLine(4, "Kurz.Actor", "{name}#{number} crashed: {what}", fields, now)
+    return fields
 }
 
 // ---- the block of `on crash` (chapter 19, U28 to U34) ---------------------------------------------------
@@ -6310,6 +6444,267 @@ extern "C" void ActorStart() {
         extern "C" (byte*, byte*) => void run = *Ptr<extern "C" (byte*, byte*) => void>(*Ptr<byte*>(message + 8))
         run(state, message)
         sys.Switch(header, threadSide)
+    }
+}
+
+// ---- the tests of `kurz test` (chapter 20, Y2, Y3, Y5) -------------------------------------------------------
+
+// The actor the running test runs in, null outside `kurz test` and between its tests, whose own crash writes no log line and keeps
+// its words for the line under the test's `FAILED` (`Fell`, `TestCrashKept`); those words, in the thread's own heap, their count and
+// the room they were given, null and 0 where the test's actor did not crash.
+thread static mut byte* testActor = null
+thread static mut byte* testWords = null
+thread static mut long testWordsCount = 0
+thread static mut long testWordsRoom = 0
+
+// The run of the tests of a program under `kurz test`, which the emitted top-level code calls in place of the program's statements,
+// which do not run (Y2, D1): the `count` tests of the table `table` in its order, the order of the file, each entry 32 bytes, the
+// test's function, its name as written, a `string`'s two words, and its line in the file `file`. Each test runs in an actor of its
+// own, a child of the top-level code with the policy `stop`, named `test` (Q2, F2), as Rust's harness runs each test on a thread of
+// its own and catches its panic (`TestRan`). It passes where its actor answered, and fails where that actor crashed, the words of the
+// crash under its `FAILED` line (`TestCrashKept`), or where the wait found nothing left that could answer it, `deadlock at
+// <file>:<the test's line>` under it, since a parked wait keeps no place of its own (F5); then every actor the test made ends at once
+// (`TestEnded`; F6). The line of its result is written on standard output after the lines the test printed (F4), `test "name" ...
+// ok` or `test "name" ... FAILED`, the words indented by four spaces under a failed one, and after the last test the counts, `2 tests:
+// 1 passed, 1 failed`, `1 test:` for one (Q3, F21); the process then ends with the exit code 0 where every test passed, else 1 (Q4).
+// A line the runner cannot write raises `print-failed` at the line of the test it reports, the counts at the last test's line (A17).
+pub void RunTests(byte* table, long count, string file) {
+    mut byte* name = null
+    mut byte* run = null
+    mut byte* reply = null
+    raw {
+        name = AllocateOwn(16)
+        *Ptr<byte*>(name) = "test".Pointer
+        *Ptr<long>(name + 8) = 4
+        run = AllocateOwn(24)
+        *Ptr<extern "C" (byte*, byte*) => void>(run) = TestRun
+        *Ptr<byte*>(run + 8) = null
+        *Ptr<byte*>(run + 16) = null
+        reply = AllocateOwn(48)
+    }
+
+    mut long passed = 0
+    mut long index = 0
+    mut int line = 0
+    while index < count {
+        mut string written = ""
+        mut byte* test = null
+        raw {
+            byte* entry = table + index * 32
+            test = *Ptr<byte*>(entry)
+            written = TextAt(*Ptr<byte*>(entry + 8), *Ptr<long>(entry + 16))
+            line = int(*Ptr<long>(entry + 24))
+        }
+
+        int kind = TestRan(test, name, run, reply, file, line)
+        if kind == 1 {
+            passed = passed + 1
+            Print(1, "test {written} ... ok", file, line)
+        } else {
+            mut string words = "deadlock at {file}:{line}"
+            if kind != 0 {
+                raw {
+                    words = TextAt(testWords, testWordsCount)
+                }
+            }
+
+            Print(1, "test {written} ... FAILED", file, line)
+            Print(1, "    {words}", file, line)
+        }
+
+        TestEnded()
+        index = index + 1
+    }
+
+    mut string tests = "tests"
+    if count == 1 {
+        tests = "test"
+    }
+
+    Print(1, "{count} {tests}: {passed} passed, {count - passed} failed", file, line)
+    EndActors()
+    if passed < count {
+        sys.Exit(1)
+    }
+
+    sys.Exit(0)
+}
+
+// The test whose function is `test` run in an actor of its own, a child of the top-level code, of no state, with a stack of 2 MiB (U1),
+// the policy `stop`, which its null block of a restart says, and the name `name` (`RunTests`): one message to it, in its heap, whose
+// table `run` names the runtime's `TestRun` and whose function stands at 56, queued as a call of the top-level code is, its reply
+// `reply` in the thread's own heap, with no deadline (D6), and the top-level code's wait for it (`RootWait`), which runs the messages
+// of the test's actors meanwhile; the reply's word once the wait ended, 1 where the test answered and 2 where its actor crashed (U20),
+// and 0 where nothing was left that could answer it.
+int TestRan(byte* test, byte* name, byte* run, byte* reply, string file, int line) {
+    byte* heap = ActorHeapNew(0)
+    byte* state = ActorNew(heap, 0, 2097152, null, name)
+    ActorBuilt(state)
+    raw {
+        byte* message = AllocateIn(heap, 64)
+        *Ptr<byte*>(message + 8) = run
+        *Ptr<byte*>(message + 16) = reply
+        *Ptr<byte*>(message + 56) = test
+        *Ptr<int>(reply) = 0
+        *Ptr<long>(reply + 40) = 0
+        testActor = state
+        ReplyWaiter(reply)
+        Enqueue(*Ptr<long>(state - 56), *Ptr<long>(state - 40), message, true, Never(), file, line)
+    }
+
+    sys.Entered()
+    bool answered = RootWait(reply)
+    sys.Left()
+    raw {
+        testActor = null
+    }
+
+    if !answered {
+        return 0
+    }
+
+    return ReplyState(reply)
+}
+
+// The function of a test's one message (`TestRan`), which the scheduler runs on the test's actor as a message's function
+// (`ActorStart`): the test's function, at 56 of the message, called, then the reply taken off the message (`ReplyTaken`), the message
+// freed and the reply set (`Replied`), as the emitted function of a method's messages answers a call that waits (U4); a crash in the
+// test never returns here, and its actor's fall sets the reply `callee crashed` (`Fall`; U20). The message is the one message its actor
+// gets, which no reference of the program names and which has no deadline, so its table names no copy and no drop: no crash copies
+// it, the crash of its actor dropping the message that runs (U21), and no deadline drops it (U37).
+extern "C" void TestRun(byte* state, byte* message) {
+    raw {
+        extern "C" () => void test = *Ptr<extern "C" () => void>(message + 56)
+        test()
+        byte* reply = ReplyTaken(message)
+        std.Free(message, 64)
+        if reply != null {
+            Replied(reply)
+        }
+    }
+}
+
+// The crash of the test's own actor (`Fell`; F1, F3): the words its log line would carry after its `crashed: `, the id and the fields
+// after it (`CrashFields`), a line break as `\n` as `LogLine` writes the fields, kept in the thread's own heap for the line under the
+// test's `FAILED` whatever the filter of the log says (P4), and no line on standard error.
+void TestCrashKept(byte* id, long idCount, byte* file, long fileCount, long line, bool hasText, byte* text, long count) {
+    mut string what = ""
+    raw {
+        what = TextAt(id, idCount)
+    }
+
+    string words = "{what}{CrashFields(file, fileCount, line, hasText, text, count)}"
+    long size = 2 * long(words.Bytes.Count)
+    raw {
+        testWords = AllocateOwn(size)
+        testWordsRoom = size
+        testWordsCount = LogEscaped(testWords, 0, words, false)
+    }
+}
+
+// The end of every actor of a test once its result stands (`RunTests`; F6), at once, parked ones too, as `EndActors` ends them at the
+// end of a program (U13), and of what their activations and messages hold of the thread, so that the test after it starts with no
+// actor, no timer, no pause and no block of the one before it: the records of the actors that ended while they stood in the run queue
+// freed and the queue emptied; for each actor of the table, the stack a block that waits in its inbox keeps given back (`BlockLeft`),
+// and each activation, from the top down, its open copy sessions ended (`CopyAbort`), its stack back in the pool; once no session is
+// open, each actor's heaps freed whole, the heaps of their own that messages were built in freed (`MessageHeapNew`), and each slot freed
+// for the actors spawned after it, whose numbers go on counting (U2); the timers, whose replies stood on those stacks, the queue of the
+// pauses, the clock the scheduler read, the deadline of the top-level code's `within` block, and the value of a `throw` and the
+// decision of a block that ran left at none; and the words of the test's crash freed.
+void TestEnded() {
+    raw {
+        mut byte* queued = runFirst
+        while queued != null {
+            byte* after = *Ptr<byte*>(queued - 16)
+            if *Ptr<int>(queued - 88) == 3 {
+                std.HeapFree(queued - 192)
+            }
+
+            queued = after
+        }
+
+        runFirst = null
+        runLast = null
+        long used = SlotsUsed()
+        mut long index = 0
+        while index < used {
+            byte* slot = Slot(index)
+            if *Ptr<long>(slot + 8) != 0 {
+                byte* at = *Ptr<byte*>(slot)
+                Moved(at)
+                mut byte* m = *Ptr<byte*>(at - 32)
+                while m != null {
+                    if *Ptr<byte*>(m + 8) == BlockTable() {
+                        BlockLeft(m)
+                    }
+
+                    m = *Ptr<byte*>(m)
+                }
+
+                mut byte* header = *Ptr<byte*>(at - 8)
+                while header != null {
+                    while *Ptr<byte*>(header + 440) != null {
+                        byte* session = *Ptr<byte*>(header + 440)
+                        CopyAbort(session)
+                        if *Ptr<byte*>(header + 440) == session {
+                            *Ptr<byte*>(header + 440) = *Ptr<byte*>(session + 72)
+                        }
+                    }
+
+                    byte* under = *Ptr<byte*>(header + 368)
+                    Give(header)
+                    header = under
+                }
+
+                *Ptr<byte*>(at - 8) = null
+            }
+
+            index = index + 1
+        }
+
+        index = 0
+        while index < used {
+            byte* slot = Slot(index)
+            if *Ptr<long>(slot + 8) != 0 {
+                byte* at = *Ptr<byte*>(slot)
+                byte* heap = *Ptr<byte*>(at - 64)
+                if heap != at - 192 {
+                    std.HeapFree(heap)
+                }
+
+                std.HeapFree(at - 192)
+                SlotFree(index)
+            }
+
+            index = index + 1
+        }
+
+        while messageHeaps != null {
+            MessageHeapFree(messageHeaps)
+        }
+
+        timers = null
+        timersLast = null
+        if sharedWords != null {
+            Lock(PauseLock())
+            paused = null
+            Unlock(PauseLock())
+        }
+
+        tick = 0
+        rootBlock = 0
+        thrownNumber = 0
+        thrownSlot = null
+        thrownCopy = null
+        raising = null
+        decision = 0
+        if testWords != null {
+            std.Free(testWords, testWordsRoom)
+        }
+
+        testWords = null
+        testWordsCount = 0
+        testWordsRoom = 0
     }
 }
 
