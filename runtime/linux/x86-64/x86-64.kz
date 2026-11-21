@@ -81,7 +81,8 @@ pub long LockWake(int* word) {
 }
 
 // The byte of `st_mode` in the `struct stat` that `stat` and `fstat` fill on x86-64, 24, after `st_dev`, `st_ino` and
-// an `st_nlink` of 8 bytes (the kernel's `arch/x86/include/uapi/asm/stat.h`, as a system installs it; the C library's
-// struct on x86-64 not checked at source), where AArch64's is 16 (`IsDirectory` in `runtime/linux/linux.kz`, which
-// the emitted `Directory.Create` passes it to).
+// an `st_nlink` of 8 bytes (the kernel's `asm/stat.h` of x86-64, as a system installs it; the C library's
+// struct on x86-64 not checked at source), where AArch64's is 16; the emitted `Directory.Create` passes it to
+// `CreateDirectories` in `runtime/linux/linux.kz`, which hands it through `MakeDirectory` to `IsDirectory`, the reader
+// of the byte.
 pub long StatModeAt() => 24

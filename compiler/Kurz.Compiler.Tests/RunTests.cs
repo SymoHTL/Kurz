@@ -150,7 +150,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             ? CrashLine().Replace(written, string.Empty) : written;
 
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the cases whose <c>system:</c> line names Linux, the stack overflows', nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls, the reads of standard input and running a program. The number for Linux is the count measured in the gates image, with no margin, so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156). The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 607 : 746;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 631 : 999;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -256,6 +256,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     {
         ["actors/crash-escalate-root.kz"] = (7, "Worker.Fail"),
         ["actors/block-escalate-root.kz"] = (6, "Worker.Fail"),
+        ["actors/per-node-escalate.kz"] = (7, "Cache.Fail"), // U53: a `per node` actor's, whose supervisor is the root
         ["actors/crash-restart-limit.kz"] = (18, "main"),
     };
 
@@ -280,7 +281,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     {
         var bytes = File.ReadAllBytes(Path.Combine(CorpusTests.Root, "corpus", relativePath));
         var source = SourceText.FromBytes(relativePath, bytes, out _)!;
-        var compilation = Builder.Compile(source, header.Grants, runtime ?? toolchain.Runtime, testBuild: header.Build != BuildKind.Release);
+        var compilation = Builder.Compile(source, header.Grants, runtime ?? toolchain.Runtime, testBuild: header.Build != BuildKind.Release, tests: header.Tests);
         Assert.False(compilation.Diagnostics.HasErrors, $"{relativePath}: the compiler refuses a case that expects a run: {string.Join("; ", compilation.Diagnostics.Sorted)}");
         if (compilation.Program is { } program)
         {
@@ -347,6 +348,23 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         var (code, output, written) = Toolchain.Run(executable, null);
         var all = LeftOut(written, header.Rules);
         Assert.Equal(header.OutputLines, output);
+        if (header.Tests)
+        {
+            // Y3, E3: what `kurz test` writes is its standard output, which the header's lines hold, and nothing on standard error but the
+            // log lines of crashes it leaves out; a case that throws names the id and the place of the words under the first `FAILED` line
+            Assert.Equal("", all);
+            if (header.Expectation == Expectation.Throws)
+            {
+                var failed = output.ToList().FindIndex(l => l.EndsWith(" ... FAILED", StringComparison.Ordinal));
+                Assert.True(failed >= 0 && failed + 1 < output.Count, $"{relativePath}: no `FAILED` line with its words under it");
+                Assert.StartsWith($"    {header.ErrorId} ", output[failed + 1], StringComparison.Ordinal);
+                Assert.EndsWith($" at {relativePath}:{header.ErrorLine}", output[failed + 1], StringComparison.Ordinal);
+            }
+
+            Assert.Equal(header.Expectation == Expectation.Throws ? 1 : 0, code);
+            return;
+        }
+
         if (header.Expectation == Expectation.Output)
         {
             Assert.Equal((0, ""), (code, all));
@@ -355,7 +373,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
 
         var (error, trace) = TraceTests.Split(all);
         var line = $"error: {header.ErrorId} at {relativePath}:{header.ErrorLine}";
-        if (header.ErrorId == ErrorIds.Thrown)
+        if (header.ErrorId is ErrorIds.Thrown or ErrorIds.CheckFailed)
         {
             Assert.StartsWith(line + ":\n", error, StringComparison.Ordinal);
             Assert.True(Toolchain.Lines(error).Count >= 2, $"{relativePath}: no text below the error line: {error}");

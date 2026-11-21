@@ -1,0 +1,24 @@
+// expect: output
+// | started
+// | sent
+// | 1
+// rules: U52
+
+actor Journal per node {
+    mut int count = Started()
+
+    pub void Add() {
+        count = count + 1
+    }
+
+    pub int Count() => count
+}
+
+int Started() {
+    print("started")
+    return 0
+}
+
+send Journal.Add()
+print("sent")
+print(Journal.Count())

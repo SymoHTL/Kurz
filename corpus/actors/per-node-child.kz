@@ -1,0 +1,27 @@
+// expect: throws actor-gone at 27
+// | 1
+// | 0
+// rules: U52, U21
+
+actor Worker {
+    pub int Ping() => 1
+}
+
+actor Holder per node {
+    Worker worker = spawn Worker()
+    mut int count = 0
+
+    pub Worker Get() => worker
+
+    pub int Count() => count
+
+    pub void Fail() {
+        throw "holder fails"
+    }
+}
+
+w = Holder.Get()
+print(w.Ping())
+send Holder.Fail()
+print(Holder.Count())
+print(w.Ping())

@@ -13,6 +13,9 @@ public sealed record Compilation(DiagnosticBag Diagnostics, EmittedProgram? Prog
 {
     /// <summary>Whether the program was accepted: the front end and the checker found no error, and nothing in it is <c>not supported</c>.</summary>
     public bool Accepted => Program is not null;
+
+    /// <summary>Y4: the build of <c>kurz test</c> of a program the checker accepted with no test, which gets no IR and no diagnostic.</summary>
+    public bool NoTest { get; init; }
 }
 
 /// <summary>
@@ -68,9 +71,11 @@ public static partial class Builder
     /// line tables in a release build where <paramref name="lines"/> asks for them (<c>--lines</c>), for the CPU <paramref name="cpu"/>
     /// gives once the checker accepted the program, the machine's baseline where it is null (section 2). A program the front end or the
     /// checker refuses, and one that uses what the checker or the emitter does not read, gets no IR, and the diagnostics say why; where
-    /// <paramref name="cpu"/> gives null, it wrote why itself, and the program gets no IR either.
+    /// <paramref name="cpu"/> gives null, it wrote why itself, and the program gets no IR either. Where <paramref name="tests"/> holds, the
+    /// build is <c>kurz test</c>'s, which runs the program's tests in place of its top-level code (Y2), and a program with no test gets no
+    /// IR (<see cref="Compilation.NoTest"/>; Y4).
     /// </summary>
-    public static Compilation Compile(SourceText source, IReadOnlyCollection<string> grants, CheckedRuntime runtime, bool testBuild, bool lines = false, Func<Cpu?>? cpu = null)
+    public static Compilation Compile(SourceText source, IReadOnlyCollection<string> grants, CheckedRuntime runtime, bool testBuild, bool lines = false, Func<Cpu?>? cpu = null, bool tests = false)
     {
         ArgumentNullException.ThrowIfNull(source);
         var diagnostics = new DiagnosticBag();
@@ -86,8 +91,13 @@ public static partial class Builder
             return new Compilation(diagnostics, null);
         }
 
+        if (tests && checker.Model.Tests.Count == 0)
+        {
+            return new Compilation(diagnostics, null) { NoTest = true };
+        }
+
         return (cpu ?? (() => HostCpu))() is { } named
-            ? new Compilation(diagnostics, Emitter.Emit(tree, checker, runtime, source.Name, testBuild, diagnostics, lines, named))
+            ? new Compilation(diagnostics, Emitter.Emit(tree, checker, runtime, source.Name, testBuild, diagnostics, lines, named, tests))
             : new Compilation(diagnostics, null);
     }
 

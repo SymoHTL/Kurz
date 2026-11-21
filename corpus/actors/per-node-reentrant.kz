@@ -1,0 +1,15 @@
+// expect: throws deadlock at 12
+// threads: 1
+// rules: U52
+
+actor Cache per node {
+    int size = Measured()
+
+    pub int Size() => size
+}
+
+int Measured() {
+    return Cache.Size() + 1
+}
+
+print(Cache.Size())

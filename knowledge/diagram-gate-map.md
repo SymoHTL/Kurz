@@ -87,7 +87,7 @@ flowchart TD
         a case on an open rule; a sample that differs from its corpus file;
         a code block that is neither a case sample nor marked text, or that is never closed;
         a fence indented or made of tildes outside a code block, which the lint would not read (inside one it is content);
-        a corpus header that cannot be read or names an unknown rule;
+        a corpus header that cannot be read, a command line other than `// command: test` among them, or names an unknown rule;
         an error id its table (compile or run-time) does not list, or lists for other rules;
         a table row whose id no case expects, unless it is a run-time row whose no-case note gives the reason none can,
         and such a note on a compile-error row or on a row that a case does expect;
@@ -145,7 +145,9 @@ flowchart TD
         without the entry block's branch, and on a function without uwtable, or without the inline stack probe on Linux
         or with it on Windows, and on a lock word's wait or wake by another architecture's number of futex, another
         operation or another value, on st_mode read at a byte other than the one its architecture's struct stat holds it
-        at, and on a function of sys that neither file or both give whose error names not both files; and
+        at, or handed on by a function between the emitted call and that read as another value than its own parameter,
+        and on a function of sys that neither file gives whose error names not both files and the function, and on one
+        that both give that is taken rather than refused or whose error names not each declaration by its file and line; and
         HttpResponseTests, red on a build for Windows that says not supported at a line other than the statement that
         made or first needed a queued lambda, class's defaults or constructor; and ListTests, red on a mut field of the
         instance passed as mut in its method that the
@@ -305,7 +307,9 @@ flowchart TD
         Nothing asserts the policy: HAZARD issue 10"]
         R5["review rules, .review/review-rules.yaml of the default branch: one section per surface, the
         section compiler for compiler/, runtime/ and std/, which reads a borrow of the emitter that names no count and
-        no refusal of the checker, and a change inside an expression that the checker's walk of M7 does not count,
+        no refusal of the checker, a change inside an expression that the checker's walk of M7 does not count, a system
+        call's number or a byte of a struct the kernel fills, of one architecture, written in runtime/linux/linux.kz, and
+        a queued function emitted at another line than the statement that queued it,
         the section design record, which reads a change to the record whose description neither names the research
         finding it meets nor says it meets none (node B4 of the design playbook; the citations are G3's).
         Red: a finding above low that is left unresolved, or resolved without its edit (G8, pr-findings).

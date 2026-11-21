@@ -61,7 +61,11 @@ public sealed partial class Checker
             return;
         }
 
-        CheckStackClause(d);
+        if (!PerNodeParameters(d))
+        {
+            CheckStackClause(d);
+        }
+
         DeclareClass(d);
         foreach (var member in d.Members ?? [])
         {
@@ -115,7 +119,8 @@ public sealed partial class Checker
 
     /// <summary>
     /// The first part of an actor's declaration that the build does not read beyond a class's, with its line and what it is; null where
-    /// there is none: a clause, a modifier, type parameters, a type after its name and a <c>static</c> member (U1), and a modifier of a
+    /// there is none: a clause but <c>stack</c>, a policy and the <c>per node</c> of an actor that writes it once (U51), <c>per cluster</c>
+    /// with a text of its own, a modifier, type parameters, a type after its name and a <c>static</c> member (U1), and a modifier of a
     /// method but <c>pub</c> (U9). A type after the name is named here as an interface, since <see cref="RefuseUnreadActors"/>
     /// reads every such type once the types are resolved and leaves an actor to this part only where each is one; <c>equal by</c> and a
     /// constructor in the body are no part of it, being <c>syntax</c> (U2; Q26 of issue 519, comment 6882624606).
@@ -127,9 +132,12 @@ public sealed partial class Checker
             return (block.Line, "the block `on crash (c) { ... }` after the name of a `per` actor (U27, U28)");
         }
 
-        if ((d.Clauses ?? []).FirstOrDefault(c => c.Word != "stack" && c.Policy is null) is { } clause)
+        var perNode = ClassSymbol.DeclaresPerNode(d);
+        if ((d.Clauses ?? []).FirstOrDefault(c => c.Word != "stack" && c.Policy is null && !(perNode && c.Word == "per")) is { } clause)
         {
-            return (clause.Line, $"the clause `{clause.Word}` after an actor's name (U1)");
+            return clause is { Word: "per", Words: ["cluster"] }
+                ? (clause.Line, "the clause `per cluster` after an actor's name, one actor in the cluster, which needs the directory of section 7 (U1, U51)")
+                : (clause.Line, $"the clause `{clause.Word}` after an actor's name (U1)");
         }
 
         if ((d.Modifiers & ~Modifiers.Pub) != 0)
@@ -198,6 +206,11 @@ public sealed partial class Checker
     /// </summary>
     private bool ActorDeclarationError(TypeDeclaration d)
     {
+        if (PerNodeParameters(d))
+        {
+            return true;
+        }
+
         foreach (var b in d.Bases)
         {
             if (b.Type is NamedType n && actorNames.Contains(n.Name))
@@ -251,6 +264,23 @@ public sealed partial class Checker
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// U51, T31 and T32 of issue 519, comment 6983903100 (assumed, at their defaults): a parameter of the primary constructor of a
+    /// <c>per node</c> actor is <c>syntax</c> at the first one, since its one actor starts at its first message, which gives it no
+    /// argument, as a class's name where a value stands is (E4); <c>()</c> with none is read. It stands in the head, before the clauses
+    /// and the body, so that it is the declaration's first error in the order of its words (U16); whether it reported it.
+    /// </summary>
+    private bool PerNodeParameters(TypeDeclaration d)
+    {
+        if (!ClassSymbol.DeclaresPerNode(d) || d.PrimaryConstructor is not [var first, ..])
+        {
+            return false;
+        }
+
+        Report(ErrorIds.Syntax, first.Line, $"`{d.Name}` is declared `per node`, and its one actor starts at its first message, `{d.Name}.M(...)`, with no argument: a parameter of its constructor is text no rule gives a meaning (U51, E4)");
+        return true;
     }
 
     /// <summary>
@@ -606,6 +636,14 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (symbol.PerNode)
+        {
+            // U51, T31 and T32 of comment 6983903100 (assumed): no `spawn` makes a `per node` actor, as U14 refuses one of what it cannot make
+            Report(ErrorIds.TypeMismatch, s.Line, $"`{name}` is declared `per node`: its one actor stands per process and starts at its first message, `{name}.M(...)`, and `spawn` makes none (U51, U14)");
+            CheckArgumentsLoosely(s.Call);
+            return Typed.Error;
+        }
+
         var outer = spawning;
         spawning = s.Call;
         Push();
@@ -812,12 +850,22 @@ public sealed partial class Checker
         return true;
     }
 
-    /// <summary>U2: an actor's name called without <c>spawn</c> is <c>spawn-required</c>.</summary>
+    /// <summary>
+    /// U2: an actor's name called without <c>spawn</c> is <c>spawn-required</c>, but a <c>per node</c> actor's, which no <c>spawn</c> makes
+    /// (U51), and which the build says <c>not supported</c> to, since T27 to T33 of issue 519, comment 6983903100, name no id for it.
+    /// </summary>
     private bool SpawnRequired(ClassSymbol symbol, CallExpression c)
     {
         if (!symbol.IsActor || ReferenceEquals(c, spawning))
         {
             return false;
+        }
+
+        if (symbol.PerNode)
+        {
+            NotSupported(c.Line, $"the name of the `per node` actor `{symbol.Name}` called as a function, which neither spawns it nor calls a method of it (U51, U2)");
+            CheckArgumentsLoosely(c);
+            return true;
         }
 
         Report(ErrorIds.SpawnRequired, c.Line, $"`{symbol.Name}` is an actor; make it with `spawn {symbol.Name}(...)` (U2)");
@@ -948,6 +996,23 @@ public sealed partial class Checker
 
         RecordWaits(c);
         model.RecordCall(c, model.CallOf(c) with { Kind = send ? CallKind.ActorSend : CallKind.ActorCall, Target = type });
+        return typed;
+    }
+
+    /// <summary>
+    /// U51, U55 (assumed: T31 and T33 of issue 519, comment 6983903100, at their defaults): a call of a method through the name of a
+    /// <c>per node</c> actor, <c>Cache.Get(1)</c>, or after <c>send</c>, read as a call through a reference to its one actor is
+    /// (<see cref="CallActor"/>; U4, U6, U9, U12), inside the actor's own methods too, where it is a message as one through the reference
+    /// <c>this</c> gives is (U10), and recorded as <see cref="CallInfo.ByName"/>, so that the emitter finds or starts that actor (U52).
+    /// </summary>
+    private Typed CallByName(ClassSymbol symbol, MemberAccess m, CallExpression c, KurzType? expected)
+    {
+        var typed = CallActor(new ActorType(symbol), m, c, expected);
+        if (!typed.IsError && model.TryCallOf(c) is { Kind: CallKind.ActorCall or CallKind.ActorSend } info)
+        {
+            model.RecordCall(c, info with { ByName = true });
+        }
+
         return typed;
     }
 

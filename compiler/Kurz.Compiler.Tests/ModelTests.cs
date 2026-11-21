@@ -672,13 +672,13 @@ public sealed class ModelTests
     }
 
     /// <summary>
-    /// The timer of the call's deadline: the clock past it at a turn of the scheduler (<c>Answer</c>), then the timers fired
-    /// (<c>Fire</c>): where the reply stands among them, it is taken off them and its waiter read, one move under the timers' owner, and
-    /// the waiter's actor woken; the timer owns no reply.
+    /// The timer of the call's deadline: the clock past it at a turn of the scheduler (<c>RootWait</c>, the root loop of <c>Answer</c>),
+    /// then the timers fired (<c>Fire</c>): where the reply stands among them, it is taken off them and its waiter read, one move under
+    /// the timers' owner, and the waiter's actor woken; the timer owns no reply.
     /// </summary>
     private static Strand Timer(int at, Break broken) => new("timer", at,
     [
-        new("Answer", "tick = now", _ => true, s => { s[Due] = 1; s[at] = 1; }),
+        new("RootWait", "tick = now", _ => true, s => { s[Due] = 1; s[at] = 1; }),
         new("Fire", "TimerRemove(reply)", _ => true, s =>
         {
             if (s[Listed] == 0)
@@ -797,7 +797,9 @@ public sealed class ModelTests
         new("Popped", "*Ptr<byte*>(queue + 8) = next\n            first = next", _ => true, s =>
         {
             s[Out] = s[at + 2];
-            s[at] = 1; // the load of the new first node's link is a move of its own, the first's
+            // the load of the new first node's link is a move of its own, the first's, which reads `first` from `out` (`var first =
+            // s[Out]`), the one consumer's own word, so that this store of `out` is the text's `first = next` too
+            s[at] = 1;
         }),
         new("Popped", "if first != AtomicPtr<byte>.FromPtr(Ptr<byte*>(queue)).Load(MemoryOrder.Acquire) {", _ => true,
             s => { s[at] = s[at + 1] != s[In] ? 0 : 4; }, ["Pushed(queue, stub)"]),

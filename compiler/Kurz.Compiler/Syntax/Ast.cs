@@ -281,6 +281,31 @@ public sealed record AsmStatement(int Line, IReadOnlyList<AsmTemplate> Templates
 public sealed record ConstAssertStatement(int Line, Expression Condition, StringLiteral Text) : Statement(Line);
 
 /// <summary>
+/// <c>test "name" { ... }</c> (Y1, record section 11): a test of the program, which <c>kurz test</c> runs and no other command runs (Y2,
+/// Y7). <paramref name="Name"/> is the value of its plain string literal and <paramref name="Written"/> that literal as written, its quotes
+/// included, which the command prints (Y3). <paramref name="Cluster"/> marks section 13's <c>test cluster N seed S { ... }</c>, whose words
+/// and body the parser passes over, so that it has no name and an empty body, and which the checker says <c>not supported</c> to (Y8).
+/// </summary>
+public sealed record TestDeclaration(int Line, string? Name, string? Written, Block Body, bool Cluster = false) : Statement(Line);
+
+/// <summary>
+/// <c>check condition</c> (Y6): a <c>bool</c> that crashes the actor that runs it with the run-time error <c>check-failed</c> where it is
+/// false. <paramref name="Text"/> is the condition as written, from its first token to its last, each run of spaces, line breaks and comments
+/// between two tokens one space. Named neither <c>CheckStatement</c> nor <c>CheckCondition</c>, the names of two methods of the checker, which
+/// a type pattern inside that class would bind to.
+/// </summary>
+public sealed record AssertionStatement(int Line, Expression Condition, string Text) : Statement(Line);
+
+/// <summary><c>mock X with Y</c> (Y9, record section 11): read, and said <c>not supported</c> to by the checker, while what it accepts is open.</summary>
+public sealed record MockStatement(int Line, TypeSyntax Target, TypeSyntax Replacement) : Statement(Line);
+
+/// <summary>
+/// <c>advance d</c> (Y10, record section 11): read, its duration read as any expression is, and said <c>not supported</c> to by the checker,
+/// while where it stands is open.
+/// </summary>
+public sealed record AdvanceStatement(int Line, Expression Duration) : Statement(Line);
+
+/// <summary>
 /// A template of an <c>asm</c>, its text with the escapes of a string literal read and its braces as written; for a <c>"""</c> block (L13),
 /// <paramref name="LineStarts"/> holds the offset in the text at which each line of the block starts, the first on the line after
 /// <paramref name="Line"/>, which is the opening quotes'.
@@ -384,10 +409,11 @@ public enum TypeDeclarationKind
 /// <summary>
 /// A word that starts a clause after an actor's name (section 6): <c>per</c>, <c>yield</c>, <c>inbox</c>, <c>stack</c> or <c>on crash</c>,
 /// with its line. The parser keeps the word and passes over what follows it, which the checker says <c>not supported</c> to, but for
-/// <c>stack</c>, whose <paramref name="Size"/> is the literal of bytes after it (U1), and for an <c>on crash</c>, whose words of a
-/// policy or block, the type's default, <paramref name="Policy"/> holds (U27, U28).
+/// <c>stack</c>, whose <paramref name="Size"/> is the literal of bytes after it (U1), for an <c>on crash</c>, whose words of a
+/// policy or block, the type's default, <paramref name="Policy"/> holds (U27, U28), and for <c>per</c>, whose words before the clause
+/// after it or the body <paramref name="Words"/> holds, <c>node</c> alone for <c>per node</c> (U51).
 /// </summary>
-public sealed record ActorClause(int Line, string Word, UnitLiteral? Size = null, CrashPolicy? Policy = null);
+public sealed record ActorClause(int Line, string Word, UnitLiteral? Size = null, CrashPolicy? Policy = null, IReadOnlyList<string>? Words = null);
 
 /// <summary>A base class or an interface after the colon (K6, K10), with the arguments of the explicit form.</summary>
 public sealed record BaseSpecifier(int Line, TypeSyntax Type, IReadOnlyList<Argument>? Arguments);

@@ -40,6 +40,10 @@ public sealed partial class Emitter
     // the count of the call sites and `spawn`s whose table or restart a function of its own serves, which names each one
     private int actorSites;
 
+    // U51, U52: the function that finds or starts the one actor of each `per node` type, set for its type before its globals are
+    // declared and before any function its start calls is built, so that a builder nested in it finds it and declares nothing again
+    private readonly Dictionary<ClassSymbol, string> perStarts = [];
+
     /// <summary>
     /// U2, U3: <c>spawn Name(args)</c>, the state constructed as an instance of a class is (K1, K7, D11) in the room the runtime's
     /// <c>ActorNew</c> gives behind the actor's record, both its counts at one, as <see cref="EmitClassNew"/> makes them, which the
@@ -64,9 +68,7 @@ public sealed partial class Emitter
         var info = Model.CallOf(s.Call);
         var symbol = ((ClassType)info.Target!).Symbol;
         var block = layout.ClassBlock(symbol);
-        var stack = symbol.Declaration.Clauses?.FirstOrDefault(c => c.Size is not null)?.Size is { } size
-            ? ((IntegerConstant)Model.TypeOf(size).Constant!).Value.ToString(System.Globalization.CultureInfo.InvariantCulture)
-            : "2097152";
+        var stack = StackOf(symbol);
         var supervisor = fn.Value($"call ptr {StdFunction("HeapCurrent")}()");
         var heap = fn.Value($"call ptr {RuntimeFunction("ActorHeapNew")}(i64 {IrSize(block)})");
         var left = HeapBegun(heap, "HeapLeft");
@@ -96,6 +98,11 @@ public sealed partial class Emitter
         return Reference(state);
     }
 
+    /// <summary>U1: the size of the stack each message of an actor of the type <paramref name="symbol"/> runs on, the one its <c>stack</c> clause writes or 2 MiB.</summary>
+    private string StackOf(ClassSymbol symbol) => symbol.Declaration.Clauses?.FirstOrDefault(c => c.Size is not null)?.Size is { } size
+        ? ((IntegerConstant)Model.TypeOf(size).Constant!).Value.ToString(System.Globalization.CultureInfo.InvariantCulture)
+        : "2097152";
+
     /// <summary>
     /// U2, U10, U11: the reference of the actor whose state is <paramref name="state"/>, the two words its record holds: the index of its
     /// slot in the runtime's table and its number (the runtime's <c>ActorNew</c>; section 6).
@@ -105,6 +112,81 @@ public sealed partial class Emitter
         var slot = fn.Value($"load i64, ptr {fn.Value($"getelementptr i8, ptr {state}, i64 -56")}");
         var number = fn.Value($"load i64, ptr {fn.Value($"getelementptr i8, ptr {state}, i64 -40")}");
         return fn.Value($"insertvalue %kz.actor {fn.Value($"insertvalue %kz.actor undef, i64 {slot}, 0")}, i64 {number}, 1");
+    }
+
+    /// <summary>U51, U52: the reference of the one actor of the <c>per node</c> type <paramref name="symbol"/>, found or started (<see cref="PerStart"/>).</summary>
+    private string PerReference(ClassSymbol symbol) => fn.Value($"call %kz.actor {PerStart(symbol)}()");
+
+    /// <summary>
+    /// U51 to U54 (assumed: T27 to T33 of issue 519, comment 6983903100, at their defaults): the function a message to the name of the
+    /// <c>per node</c> type <paramref name="symbol"/> calls before its arguments run, made once for the type with three globals of its
+    /// own, declared here, once, where its entry is set: its cell, the lock, the slot and the number of its one actor (the runtime's
+    /// <c>PerFind</c>); its block of a restart, as <see cref="KeptArguments"/> makes a <c>spawn</c>'s with no argument kept, naming the
+    /// function of its restart (<see cref="Restarted"/>), or none for <c>escalate</c>, the policy after its name or <c>restart</c> (U27),
+    /// and no block for <c>stop</c>; and its knobs where <c>after</c> or <c>max N in</c> is written, marked as a <c>per node</c> type's
+    /// (<see cref="KnobsValue"/>), whose place no <c>restart-limit</c> names, so that it holds none. The function finds the actor that
+    /// stands in the cell; where none does, a crash or a <c>stop</c> having ended the one before or no message having named it, it makes
+    /// one with that block of a restart, whose supervisor <c>ActorNew</c> takes as at a <c>spawn</c>, the code that runs (U53), stores it
+    /// in the cell before its constructor runs (<c>PerStarted</c>), so that a message that reaches it meanwhile waits for it, and runs the
+    /// constructor, the defaults of its body, on the stack of that code, as a <c>spawn</c> runs it (<see cref="EmitActorSpawn"/>; U3), so
+    /// that a throw there is that code's crash, which ends the actor half built, its supervisor's child; then the root becomes its
+    /// supervisor (<c>PerBuilt</c>). A message to it from the code its constructor runs waits for a constructor that waits for it, the
+    /// top-level code's <c>deadlock</c> on one thread (U18).
+    /// </summary>
+    private string PerStart(ClassSymbol symbol)
+    {
+        if (perStarts.TryGetValue(symbol, out var start))
+        {
+            return start;
+        }
+
+        var n = Number(perStarts.Count);
+        perStarts[symbol] = start = $"@\"actor.per.{n}\"";
+        var cell = $"@\"per.{n}.cell\"";
+        module.Global($"{cell} = internal global {{ i32, i64, i64 }} zeroinitializer, align 8");
+        var policy = symbol.Declaration.Clauses?.FirstOrDefault(c => c.Policy is not null)?.Policy ?? new CrashPolicy(symbol.Line, "restart");
+        var knobs = "null";
+        if (policy.Word == "restart" && (policy.After is not null || policy.Max is not null))
+        {
+            knobs = $"@\"per.{n}.knobs\"";
+            module.Global($"{knobs} = internal global {KnobsType} {KnobsValue(policy, "zeroinitializer", 0, perNode: true)}, align 8");
+        }
+
+        var side = "null";
+        if (policy.Word is "restart" or "escalate")
+        {
+            side = $"@\"per.{n}.side\"";
+            var restart = policy.Word == "restart" ? Restarted(symbol, null, [], []) : "null";
+            module.Global($"{side} = internal global {SideType([])} {{ ptr {restart}, ptr null, i64 0, i64 0, i64 0, ptr null, ptr {knobs}, ptr null, {Kept([])} zeroinitializer }}, align 8");
+        }
+
+        return Helper($"actor.per.{n}", "%kz.actor", [], () =>
+        {
+            var block = layout.ClassBlock(symbol);
+            var found = fn.Value($"call ptr {RuntimeFunction("PerFind")}(ptr {cell})");
+            var stands = fn.Label("stands");
+            var starts = fn.Label("starts");
+            fn.CondBranch(fn.Value($"icmp ne ptr {found}, null"), stands, starts);
+            fn.Block(stands);
+            fn.Return($"%kz.actor {Reference(found)}");
+            fn.Block(starts);
+            var heap = fn.Value($"call ptr {RuntimeFunction("ActorHeapNew")}(i64 {IrSize(block)})");
+            var state = fn.Value($"call ptr {RuntimeFunction("ActorNew")}(ptr {heap}, i64 {IrSize(block)}, i64 {StackOf(symbol)}, ptr {side}, ptr {ActorName(symbol)})");
+            fn.Emit($"call void {RuntimeFunction("PerStarted")}(ptr {cell}, ptr {state})");
+            fn.Emit($"store i64 1, ptr {state}");
+            fn.Emit($"store i64 1, ptr {fn.Value($"getelementptr {block}, ptr {state}, i32 0, i32 1")}");
+            var building = fn.Value($"call ptr {RuntimeFunction("Building")}(ptr {state})");
+            var caller = fn.Value($"call ptr {StdFunction("HeapUse")}(ptr {heap})");
+            if (symbol.Fields.Any(f => f.Body?.Value is not null))
+            {
+                fn.Emit($"call void {ClassDefaults(symbol)}(ptr {state})"); // K7: a `per node` actor has no parameter (U51) and no constructor of its body (U2)
+            }
+
+            fn.Emit($"call ptr {RuntimeFunction("Building")}(ptr {building})");
+            fn.Emit($"call void {RuntimeFunction("PerBuilt")}(ptr {state})");
+            fn.Emit($"call ptr {StdFunction("HeapUse")}(ptr {caller})");
+            fn.Return($"%kz.actor {Reference(state)}");
+        });
     }
 
     /// <summary>The reference <paramref name="reference"/> as the two arguments the runtime's functions take for it: the index of the slot, then the number.</summary>
@@ -140,7 +222,7 @@ public sealed partial class Emitter
     {
         var copiesInto = CopiesInto(c, info, types);
         var side = SideType(types);
-        var restart = Restarted(symbol, info, types, copiesInto);
+        var restart = Restarted(symbol, info.Constructor, types, copiesInto);
         var block = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr {heap}, i64 {IrSize(side)})");
         fn.Emit($"store {side} {{ ptr {restart}, ptr null, i64 0, i64 0, i64 0, ptr null, ptr null, ptr null, {Kept(types)} zeroinitializer }}, ptr {block}");
         if (Knobs(policy, heap, c.Line) is { } knobs)
@@ -168,13 +250,14 @@ public sealed partial class Emitter
 
     /// <summary>
     /// U3, U22: the function a restart of the actor of the type <paramref name="symbol"/> runs, with the state and the restart's message
-    /// (the runtime's <c>Restart</c>), made for its <c>spawn</c>: a copy of each kept argument in the actor's heap, the one the allocation
+    /// (the runtime's <c>Restart</c>), made for its <c>spawn</c>, or for the type where it is <c>per node</c>, which keeps no argument
+    /// (<see cref="PerStart"/>): a copy of each kept argument in the actor's heap, the one the allocation
     /// entry serves, the state's counts at one, and the constructor run on them as at the <c>spawn</c>, a constructor of the body
     /// borrowing them, since <c>move</c> before a parameter of a constructor is <c>not supported</c> (<c>Semantics/Checker.Constructors.cs</c>),
     /// so that the copies are released after it, the primary one owning them, then the defaults of the body (K7); then the message freed. A
     /// throw there is the actor's own crash (U3).
     /// </summary>
-    private string Restarted(ClassSymbol symbol, CallInfo info, List<KurzType> types, List<string?> copiesInto) =>
+    private string Restarted(ClassSymbol symbol, ConstructorSymbol? constructor, List<KurzType> types, List<string?> copiesInto) =>
         Helper($"actor.restart.{symbol.Name}.{Number(++actorSites)}", "void", ["ptr", "ptr"], () =>
         {
             var side = SideType(types);
@@ -209,7 +292,7 @@ public sealed partial class Emitter
             var block = layout.ClassBlock(symbol);
             fn.Emit("store i64 1, ptr %a0");
             fn.Emit($"store i64 1, ptr {fn.Value($"getelementptr {block}, ptr %a0, i32 0, i32 1")}");
-            if (info.Constructor is { } made)
+            if (constructor is { } made)
             {
                 fn.Emit($"call void {Constructor(made)}({string.Join(", ", values.Select((v, i) => $"{Ir(types[i])} {v}").Prepend("ptr %a0"))})");
                 for (var i = 0; i < types.Count; i++)
@@ -352,8 +435,8 @@ public sealed partial class Emitter
     /// U26: the block of the knobs of a restart's policy, in the heap <paramref name="heap"/> of the supervisor, made where <c>after</c> or
     /// <c>max N in</c> is written, else null, so that a <c>spawn</c> that writes neither keeps one word for them: the first pause, 100 ms or what
     /// <c>after</c> writes, the count of <c>max N in</c>, 0 where no limit holds, and its window, then the ring of the times of the crashes in
-    /// the window, its slots, its first and its count, the runtime's (<c>Limited</c>), and the place of the <c>spawn</c> at the line
-    /// <paramref name="line"/>, which <c>restart-limit</c> names.
+    /// the window, its slots, its first and its count, the runtime's (<c>Limited</c>), the place of the <c>spawn</c> at the line
+    /// <paramref name="line"/>, which <c>restart-limit</c> names, and 0, a <c>spawn</c>'s mark (<see cref="KnobsValue"/>).
     /// </summary>
     private string? Knobs(CrashPolicy policy, string heap, int line)
     {
@@ -362,13 +445,25 @@ public sealed partial class Emitter
             return null;
         }
 
-        const string type = "{ i64, i64, i64, ptr, i64, i64, i64, %kz.str, i64 }";
+        var block = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr {heap}, i64 {IrSize(KnobsType)})");
+        fn.Emit($"store {KnobsType} {KnobsValue(policy, StringValue(unit.File), line, perNode: false)}, ptr {block}");
+        return block;
+    }
+
+    /// <summary>The IR type of the block of a policy's knobs (<see cref="Knobs"/>).</summary>
+    private const string KnobsType = "{ i64, i64, i64, ptr, i64, i64, i64, %kz.str, i64, i64 }";
+
+    /// <summary>
+    /// U26, U54: the constant value of the block of the knobs of <paramref name="policy"/>, the place <paramref name="file"/> and
+    /// <paramref name="line"/> after them, then a word that holds 1 where the block is a <c>per node</c> type's, whose actor past its
+    /// limit ends with no <c>restart-limit</c> (the runtime's <c>Fell</c>), and 0 for a <c>spawn</c>'s.
+    /// </summary>
+    private string KnobsValue(CrashPolicy policy, string file, int line, bool perNode)
+    {
         var first = policy.After is { } after ? Knob(after) : "100000000";
         var max = policy.Max is { } count ? Knob(count) : "0";
         var window = policy.Within is { } within ? Knob(within) : "0";
-        var block = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr {heap}, i64 {IrSize(type)})");
-        fn.Emit($"store {type} {{ i64 {first}, i64 {max}, i64 {window}, ptr null, i64 0, i64 0, i64 0, %kz.str {StringValue(unit.File)}, i64 {Number(line)} }}, ptr {block}");
-        return block;
+        return $"{{ i64 {first}, i64 {max}, i64 {window}, ptr null, i64 0, i64 0, i64 0, %kz.str {file}, i64 {Number(line)}, i64 {(perNode ? "1" : "0")} }}";
     }
 
     /// <summary>U26: the constant a knob of a policy holds, read by the checker: a duration's nanoseconds or the count.</summary>
@@ -475,7 +570,7 @@ public sealed partial class Emitter
 
     /// <summary>
     /// U4, U6, U11: a call of an actor's method as a message: the actor's reference, read first, or, inside it, made from <c>this</c>
-    /// (U11), then the arguments, each a copy of its own in the actor's heap where it holds a block (U12,
+    /// (U11), or the one actor of a <c>per node</c> type found or started by its name (<see cref="PerStart"/>; U52), then the arguments, each a copy of its own in the actor's heap where it holds a block (U12,
     /// <see cref="Crossed"/>; comment 6902210646, Q5), stored into a block of that heap that the message's function frees once it ran; the block goes to the end of the actor's inbox (U5, U15), or of its side list, where it is a
     /// call of the chain the actor waits in (U17). A call that waits (U4), wherever it stands, passes a reply in its own frame, the one-shot
     /// slot of section 6, a word the message's function sets once the result stands beside it, the activation that waits on it, which the
@@ -502,6 +597,7 @@ public sealed partial class Emitter
         var f = info.Function!;
         var actor = c.Callee switch
         {
+            _ when info.ByName => PerReference(((ActorType)info.Target!).Symbol), // U51, U52: `Cache.Get(1)`, its one actor found or started
             MemberAccess m when Sub(Model.TypeOf(m.Target).Type) is ActorType => EmitExpression(m.Target),
             MemberAccess m => Reference(EmitExpression(m.Target)), // U11: `send this.Add(1)`, `this` the actor's own instance
             NameExpression n => Reference(This(n, n.Line)),

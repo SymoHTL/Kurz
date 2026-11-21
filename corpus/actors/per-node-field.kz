@@ -1,0 +1,10 @@
+// expect: error not-visible at 10
+// rules: U51
+
+actor Cache per node {
+    mut int hits = 0
+
+    pub int Get() => hits
+}
+
+print(Cache.hits)

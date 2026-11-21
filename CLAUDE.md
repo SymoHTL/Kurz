@@ -141,8 +141,15 @@ Each line names a trap; its evidence is in the entry it links.
   heads (run 43929000363), and the `gates` job took 23 min 44 s of its 25
   ([knowledge/a-suite-grows-into-its-timeout.md](knowledge/a-suite-grows-into-its-timeout.md)).
   The budget, with what each job that runs the gate spends outside it, ends before that job's
-  `timeout-minutes`. Gate: `self-tests` (the compiler gate's case of the budget and its red proofs);
-  that a job's share still covers what it spends outside the gate is a `judgment step`.
+  `timeout-minutes`. A test whose program `gave no answer within 30 s`, the limit of a program's run,
+  is the same at that limit: the fenced program of `RegexTests`' backtracking engine, 818441 blocks in
+  one run, met it three times in the `gates` job (runs 43260266243, 43624514303 and 43634665720), and
+  its work is split into programs of at most 1500 rows since 2026-11-19
+  ([knowledge/a-fenced-program-grows-into-the-limit-of-its-run.md](knowledge/a-fenced-program-grows-into-the-limit-of-its-run.md)).
+  Gate: `self-tests` (the compiler gate's case of the budget and its red proofs), and `compiler-tests`
+  for the split's rows (the two tests through `RegexTests.HoldToNet`); that a job's share still covers
+  what it spends outside the gate, and that a program a test runs stays well within its limit, are a
+  `judgment step`.
 - A run of a program that comes back at its limit with "an orphan holds its output": a child the
   program left running held its streams after the program ended, a forked server whose `kill` an
   error skipped among them. A run of the suite waited on such a child for 80 minutes on 2026-11-05
@@ -478,7 +485,7 @@ Gate: review rule "rules for sessions".
   them, and a refusal of the build names the line the emitter stands on. They took the line of the function
   emitted before them, and on the first head of pull request 579, which queued functions of the runtime at
   line 0, a streamed response's lambda was emitted at line 0 and ten tests of the Windows job ended in the
-  compiler's own error. A test of a line puts its target on a line nothing else the program emits stands
+  compiler's own error (run 44295220997). A test of a line puts its target on a line nothing else the program emits stands
   on: the mutation that kept the line before the lambda passed twice where that line was the lambda's own
   ([knowledge/a-queued-function-carries-the-line-that-queued-it.md](knowledge/a-queued-function-carries-the-line-that-queued-it.md)).
   Gate: `compiler-tests`
