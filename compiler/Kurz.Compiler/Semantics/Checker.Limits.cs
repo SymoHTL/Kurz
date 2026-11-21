@@ -22,6 +22,12 @@ public sealed partial class Checker
     /// </summary>
     private readonly Dictionary<VariableSymbol, KurzType> views = new(ReferenceEqualityComparer.Instance);
 
+    /// <summary>T19, T33: in a copy, each call whose result, as the function's text writes it, names one of the function's type parameters, with that type (Q22).</summary>
+    private readonly Dictionary<CallExpression, KurzType> writtenResults = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>T19, T33 (Q22): the function type of the callee's text that the lambda checked next is passed for, which its check takes.</summary>
+    private KurzType? lambdaText;
+
     /// <summary>
     /// T19: whether a type argument meets an interface limit. A class meets it by naming the interface, itself or through a base (K6),
     /// and an interface meets its own (Q11, Q17); a type parameter meets it through its own limits alone, an interface among them or a
@@ -210,18 +216,139 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// T19, T33: the type in the function's text of the parameter or local through which a copy reads a value, and of an item read from
-    /// one that holds a list; null for every other target, the result of a call among them, which is read on the type the copy binds.
+    /// T19, T33: in a copy, the type in the function's text of a value whose type there names one of the function's type parameters: a
+    /// parameter or a local, an item of a list or a map, a field of a <c>data</c> value, each also after <c>?.</c> or <c>?[</c>, the
+    /// result of a call of a function or of such a value of a function type, a <c>with</c> on such a value, the value after <c>??</c>, a
+    /// list of such items, a <c>match</c> and an <c>else</c> (Q8 and Q22 of issue 605, comment 7051071380); null for every other value,
+    /// which is read on the type the copy binds.
     /// </summary>
-    private KurzType? View(Expression target) => views.Count == 0 ? null : Unwrap(target) switch
+    private KurzType? View(Expression target) => CurrentCopy() is null ? null : Unwrap(target) switch
     {
         NameExpression n when Lookup(n.Name, capture: false).Variable is { } variable && views.TryGetValue(variable, out var written) => written,
-        IndexExpression { Conditional: false } x when View(x.Target) is ListType list => list.Element,
+        IndexExpression x => Through(View(x.Target), x.Conditional || InChain(x.Target), target => target switch
+        {
+            ListType list => list.Element,
+            MapType map => Types.Nullable(map.Value), // M9: an entry or `null`
+            _ => null,
+        }),
+        MemberAccess m => Through(View(m.Target), m.Conditional || InChain(m.Target), target => target is DataType d && d.Symbol.Field(m.Member) is { } field
+            ? Types.Substitute(field.Type, d.Symbol.TypeParameters.Zip(d.TypeArguments).ToDictionary(p => p.First, p => p.Second))
+            : null),
+        ListLiteral { Items.Count: > 0 } l when Agreed(l.Items, null) is { } item => new ListType(item),
+        CallExpression c when writtenResults.TryGetValue(c, out var result) => result,
+        CallExpression { Callee: var callee } when View(callee) is FunctionType function => function.Result,
+        WithExpression w => View(w.Target),
+        BinaryExpression { Operator: TokenKind.QuestionQuestion } b when View(b.Left) is { } left => Types.NonNull(left),
+        MatchExpression m => Agreed(ArmValues(m.Arms), null),
+        ElseExpression { Call: CallExpression call } x when View(call) is { } whole => Agreed(ArmValues(x.Arms), whole is UnionType u && Types.NonNull(u) is null ? u.Cases[0] : whole),
         _ => null,
     };
 
+    /// <summary>
+    /// T19, T33: the view read through a value of the view <paramref name="target"/>, after <c>?.</c> or <c>?[</c> or in their chain
+    /// through its case other than <c>null</c>, which makes the view nullable (N5).
+    /// </summary>
+    private static KurzType? Through(KurzType? target, bool conditional, Func<KurzType, KurzType?> read) =>
+        target is null ? null
+        : !conditional ? read(target)
+        : Types.NonNull(target) is { } inner && read(inner) is { } result ? Types.Nullable(result) : null;
+
+    /// <summary>
+    /// T19, T33: the view of the items of a list (M9) and of the arms of a <c>match</c> or an <c>else</c> (C9, O5): the one that the
+    /// values and the success of the call before an <c>else</c> give alike; null where one of them has none or two differ.
+    /// </summary>
+    private KurzType? Agreed(IEnumerable<Expression> values, KurzType? success)
+    {
+        var seen = success;
+        foreach (var value in values)
+        {
+            if (View(value) is not { } view || (seen is not null && !Types.Same(seen, view)))
+            {
+                return null;
+            }
+
+            seen = view;
+        }
+
+        return seen;
+    }
+
+    /// <summary>
+    /// T19, T33: the view of a value whose type the copy reads, held to that type: the view where the copy's binding makes it that type,
+    /// the type it makes nullable where a check narrowed the value (N2), and no view where neither holds, so that a value is never read
+    /// on a type of the function's text that is not its own.
+    /// </summary>
+    private KurzType? View(Expression target, KurzType actual)
+    {
+        if (View(target) is not { } written || CurrentCopy() is not { } copy || Types.IsError(actual))
+        {
+            return null;
+        }
+
+        if (Types.Same(Types.Substitute(written, copy.Map), actual))
+        {
+            return written;
+        }
+
+        return Types.NonNull(written) is { } narrowed && Types.Same(Types.Substitute(narrowed, copy.Map), actual) ? narrowed : null;
+    }
+
+    /// <summary>
+    /// T19, T33 (Q22): in a copy, the result of a call as the function's text writes it, where an argument read through a view gives a
+    /// type argument of the callee, the type parameter the text writes, and the type the call binds for every other.
+    /// </summary>
+    private void RecordWritten(CallExpression c, Candidate picked, KurzType result)
+    {
+        if (WrittenType(picked, result) is { } text)
+        {
+            writtenResults[c] = text;
+        }
+    }
+
+    /// <summary>
+    /// T19, T33 (Q22): in a copy, <paramref name="type"/>, a type of the callee's text, with the type arguments the call writes or its
+    /// arguments read through a view give as the function's text writes them and the ones the call binds for every other; null where none
+    /// of them is written so or the type names no type parameter of the function.
+    /// </summary>
+    private KurzType? WrittenType(Candidate picked, KurzType type)
+    {
+        if (picked.Written is not { Count: > 0 } written || CurrentCopy() is not { } copy)
+        {
+            return null;
+        }
+
+        var merged = new Dictionary<TypeParameterSymbol, KurzType>(picked.Map);
+        foreach (var (parameter, argument) in written)
+        {
+            merged[parameter] = argument;
+        }
+
+        var text = Types.Substitute(type, merged);
+        return copy.Original.TypeParameters.Any(t => t.Constant is null && Types.Mentions(text, t)) ? text : null;
+    }
+
+    /// <summary>
+    /// T19, T33 (Q22): in a copy, the parameters without a written type of a lambda passed where <paramref name="text"/>, the function type
+    /// of the callee's text that <see cref="WrittenType"/> gives, has parameters that name a type parameter of the function.
+    /// </summary>
+    private void ViewLambdaParameters(LambdaExpression l, KurzType? text)
+    {
+        if (CurrentCopy() is not { } copy || (text is null ? null : Types.NonNull(text) ?? text) is not FunctionType function)
+        {
+            return;
+        }
+
+        foreach (var (p, type) in l.Parameters.Zip(function.Parameters))
+        {
+            if (p.Type is null && copy.Original.TypeParameters.Any(t => t.Constant is null && Types.Mentions(type, t)) && Lookup(p.Name, capture: false).Variable is { } variable)
+            {
+                views[variable] = type;
+            }
+        }
+    }
+
     /// <summary>T19, T33: the type parameter with limits through whose parameter or local a copy reads a member; null for every other target (Q13).</summary>
-    private TypeParameterSymbol? ViewedLimit(Expression target) => View(target) is TypeParameterType { Symbol.HasLimits: true } p ? p.Symbol : null;
+    private TypeParameterSymbol? ViewedLimit(Expression target, KurzType actual) => View(target, actual) is TypeParameterType { Symbol.HasLimits: true } p ? p.Symbol : null;
 
     /// <summary>
     /// T19, T33 with Q8 and Q22 of issue 605 (comment 7051071380): in a copy, the type arguments a call's arguments give its type
@@ -231,18 +358,86 @@ public sealed partial class Checker
     /// </summary>
     private Dictionary<TypeParameterSymbol, KurzType>? WrittenArguments(Candidate candidate, List<Pre> pres)
     {
-        if (views.Count == 0 || CurrentCopy() is null)
+        if (CurrentCopy() is null)
         {
             return null;
         }
 
-        Dictionary<TypeParameterSymbol, KurzType>? written = null;
+        var written = candidate.WrittenTypeArguments is { } typeArguments ? new Dictionary<TypeParameterSymbol, KurzType>(typeArguments) : null;
         for (var i = 0; i < pres.Count; i++)
         {
-            if (View(pres[i].Argument.Value) is { } type)
+            if (View(pres[i].Argument.Value, pres[i].Typed.Type) is { } type)
             {
                 written ??= [];
                 Unify(candidate.Slots[candidate.Binding[i]].Type, type, written);
+            }
+        }
+
+        return written;
+    }
+
+    /// <summary>
+    /// T19, T33: in a copy, the type in the function's text of a type written <paramref name="syntax"/>, which the copy resolves to
+    /// <paramref name="resolved"/>: the name of one of the function's type parameters is that parameter, and so is it in each part of a
+    /// nullable type, a list, a map, a <c>data</c> type and a function type; null for a type that names none of them.
+    /// </summary>
+    private KurzType? Written(TypeSyntax syntax, KurzType resolved)
+    {
+        if (CurrentCopy() is not { } copy || Types.IsError(resolved))
+        {
+            return null;
+        }
+
+        var text = Text(syntax, resolved);
+        return copy.Original.TypeParameters.Any(t => t.Constant is null && Types.Mentions(text, t)) ? text : null;
+
+        KurzType Text(TypeSyntax s, KurzType r) => (s, r) switch
+        {
+            (NamedType { TypeArguments.Count: 0 } n, _) when copy.Original.TypeParameters.FirstOrDefault(p => p.Name == n.Name) is { Constant: null } p => new TypeParameterType(p),
+            (NullableType n, _) when Types.NonNull(r) is { } inner => Types.Nullable(Text(n.Inner, inner)),
+            (NamedType { TypeArguments: [var e] }, ListType l) => new ListType(Text(e, l.Element)),
+            (NamedType { TypeArguments: [var k, var v] }, MapType m) => new MapType(Text(k, m.Key), Text(v, m.Value)),
+            (NamedType n, DataType d) when n.TypeArguments.Count == d.TypeArguments.Count => new DataType(d.Symbol, [.. n.TypeArguments.Zip(d.TypeArguments, Text)]),
+            (Syntax.FunctionType f, FunctionType t) when f.Parameters.Count == t.Parameters.Count => new FunctionType([.. f.Parameters.Zip(t.Parameters, Text)], Text(f.Result, t.Result), t.Moves),
+            _ => r,
+        };
+    }
+
+    /// <summary>T19, T33: in a copy, the names of a loop over a list or a map that has a view, with the view of an item or an entry (C6).</summary>
+    private void ViewLoop(ForInStatement f)
+    {
+        switch (View(f.Collection))
+        {
+            case ListType list:
+                See(f.Variable, list.Element);
+                break;
+            case MapType map when f.Second is null:
+                See(f.Variable, new DataType(dataTypes["Entry"], [map.Key, map.Value]));
+                break;
+            case MapType map:
+                See(f.Variable, map.Key);
+                See(f.Second.Name, map.Value);
+                break;
+        }
+
+        void See(string name, KurzType type)
+        {
+            if (Lookup(name, capture: false).Variable is { } variable)
+            {
+                views[variable] = type;
+            }
+        }
+    }
+
+    /// <summary>T19, T33 (Q8, Q22): in a copy, the type arguments a call writes that name the function's type parameters, as written; null for none.</summary>
+    private Dictionary<TypeParameterSymbol, KurzType>? WrittenTypeArguments(CallExpression c, IReadOnlyList<TypeParameterSymbol> parameters, IReadOnlyList<KurzType> typeArguments)
+    {
+        Dictionary<TypeParameterSymbol, KurzType>? written = null;
+        foreach (var (parameter, (syntax, type)) in parameters.Zip(c.TypeArguments.Zip(typeArguments)))
+        {
+            if (Written(syntax, type) is { } text)
+            {
+                (written ??= [])[parameter] = text;
             }
         }
 
@@ -267,21 +462,24 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// T19, T33: in a copy, a local whose written type is the name of one of the function's type parameters, or one without a written
-    /// type whose value is read through such a parameter or local.
+    /// T19, T33: in a copy, a local or a parameter of a lambda whose written type names one of the function's type parameters, and a
+    /// local without a written type whose value has a view.
     /// </summary>
     private void ViewLocal(string name, TypeSyntax? written, Expression? value)
     {
-        if (CurrentCopy() is not { } copy || Lookup(name, capture: false).Variable is not { } variable)
+        if (CurrentCopy() is null || Lookup(name, capture: false).Variable is not { } variable)
         {
             return;
         }
 
-        if (written is NamedType { TypeArguments.Count: 0 } n && copy.Original.TypeParameters.FirstOrDefault(p => p.Name == n.Name) is { Constant: null } parameter)
+        if (written is not null)
         {
-            views[variable] = new TypeParameterType(parameter);
+            if (Written(written, variable.Type) is { } text)
+            {
+                views[variable] = text;
+            }
         }
-        else if (written is null && value is not null && View(value) is { } viewed)
+        else if (value is not null && View(value) is { } viewed)
         {
             views[variable] = viewed;
         }

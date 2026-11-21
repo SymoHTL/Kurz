@@ -3063,6 +3063,8 @@ public sealed partial class Checker
             model.RecordSecondName(f); // U12: a `move` of either name reads the loop (SemanticModel.LoopOf)
         }
 
+        ViewLoop(f); // T19, T33
+
         var fields = WalksFieldsOfTypeParameter(f); // T34: a loop over `T.Fields` read on a function's text, outside a copy
         if (fields)
         {

@@ -3196,22 +3196,28 @@ round can ask about it by the rule's id.
   a written type has nothing to infer them from. A count that is neither none nor the type's is
   E4's `syntax` (above).
 - T19 with T33: a copy of a function that reads its type reaches the limits' members alone through
-  a parameter whose type is a type parameter with limits, a local written with that type and a
-  local without a written type that takes the value of one of them. Q8 of issue 605 holds in its
-  copies too (Q22, comment 7051071380): where a call in a copy passes a parameter whose type is
-  written with a type parameter, a local written with one, a local that takes the value of either or
-  an item of a parameter written as a list of one, the call meets its limits by the type the
-  function's text writes, so `int M<T>(T item)` that reads `T.Kind` and calls `AreaOf(item)` is
-  `type-mismatch` at that call in every copy, with the text of a type parameter of the caller. A value
-  that a call or a field gives is read on the type the copy binds, so `AreaOf(Id(item))` compiles in
-  the copy for a `Square`: the build's reading, which the record marks.
+  a value whose type the function's text writes as a type parameter with limits. Q8 of issue 605
+  holds in its copies too (Q22, comment 7051071380): where a call in a copy passes a value whose type
+  the function's text writes with a type parameter, or writes the type parameter as a type argument,
+  the call meets its limits by the type the function's text writes, so `int M<T>(T item)` that reads
+  `T.Kind` and calls `AreaOf(item)` or `AreaOf(Id(item))` is `type-mismatch` at that call in every
+  copy, with the text of a type parameter of the caller. The checker reads that type for a parameter;
+  a local, written or taking such a value; a parameter of a lambda, written or given by the call it
+  is passed to; the names of a loop over a list or a map; an item of a list or a map; a field of a
+  `data` value, also after `?.` or `?[`; the result of a call of a function or of a value of a
+  function type; a `with`; the value after `??`; a list literal; a `match` and an `else` whose arms
+  and success give one type; and a type argument written in the call. A value of `T?` that a check
+  narrowed (N2) is read as `T`, and a value whose type in the copy is not the one its type in the text
+  becomes there is read on the type the copy binds.
 - T19 with K6, K7 and A10: a class as a limit (Q5 of issue 605, comment 7051071380) gives a value of
   the type parameter the class's visible methods, before the methods of its interfaces among the
   limits, and the class's text; the value converts to the class, to a base of it and to an interface
   the class implements, as C# converts a value of a type parameter to its class constraint; and a
   method that the class and an interface among the limits declare with the same parameters is
   `ambiguous-call`, as for two interfaces, where C# takes the class's member. These are the build's
-  readings, which the record marks.
+  readings, which the record marks. A class of `std/` that the prelude brings, `HttpHeaders` (W1),
+  stands as a limit as any class does, though one after `:` is `not supported` (K6, above): the
+  record's reading of Q5 (b) under W1.
 - F12: of two functions that do not differ in their parameters the second is `duplicate-function`,
   and it is left out of overload resolution, so a call of the name gets no second error (E1).
 - O5: an arm of a postfix `else` that names a type the call cannot return beside its success, and
