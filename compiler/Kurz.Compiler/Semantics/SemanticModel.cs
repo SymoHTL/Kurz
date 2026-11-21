@@ -395,8 +395,9 @@ public sealed record LogSite(int Level, string? Category, IReadOnlyList<string> 
 
 /// <summary>
 /// Y6: a <c>check</c> as the checker read it: the condition's text as the parser kept it (F10), and where the condition, its parentheses
-/// passed over, is one of the six comparisons whose two sides have a text (A4), that comparison with the type of each side, the values its
-/// failure shows; null for any other condition, whose failure shows its text alone.
+/// passed over, is one of the six comparisons whose two sides show their values as <c>Checker.Shows</c> reads them, each a value with a
+/// text (A2 to A15) that holds no raw pointer and no C function value and reaches no <c>Text()</c> without <c>pub</c> (A9, A15), that
+/// comparison with the type of each side, the values its failure shows; null for any other condition, whose failure shows its text alone.
 /// </summary>
 public sealed record Assertion(string Text, BinaryExpression? Comparison, KurzType? Left, KurzType? Right);
 

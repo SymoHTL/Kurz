@@ -405,9 +405,9 @@ public sealed class ThrowSets
     // call gives it (section 5, the owner, 2026-11-17, #560, comment 6952257456, "(b) As built (Recommended)"); the list holds each
     // actor's `pub` methods, which alone take messages (U9), so that what an actor builds is built: its other methods run from its own
     // code alone, and its construction from a `spawn` that a root reaches; and each test of the file, which the build of `kurz test`
-    // runs as a function of its own (Y5), as Rust's `cargo test` builds each `#[test]` function as a root of its harness, in every
-    // reading, since the checker reads every test whatever command the build is for (Y7), so that a `Reason` is one set under every
-    // command
+    // runs as a function of its own (Y5), as Rust's `cargo test` builds each `#[test]` function as a root of its harness, which Rust
+    // does in the test build alone, where Kurz takes the tests as roots in every reading, since the checker reads every test whatever
+    // command the build is for (Y7), so that a `Reason` is one set under every command
     private IEnumerable<object> Roots() => Pub().Concat(program.Model.Tests.Select(program.Model.TestOf)).Prepend<object>(new TopLevel(program.Model));
 
     // a type once, at the earliest place that throws it

@@ -2779,14 +2779,21 @@ that sit under a rule by its id. Every one is pinned by a test.
   closing `"""`, so that the block's text is not read as code, and reads what follows the
   closing quotes on their line as code.
 
-- Y1, Y6, Y9: where `test`, `check`, `mock` and `advance` are words, inside D2's letter (issue 586, comment
-  6992687784). `test cluster` is the cluster test only where a token that can start an expression follows
-  `cluster`, so that `test cluster = 1` declares a variable `cluster` of a type named `test`; `mock` is the
-  statement only where a type, `with` and a type follow it, so that `mock x = 1` declares a variable `x` of
-  a type named `mock`; a `test` block in a class's body is the member parser's `syntax` at its line; and
-  the text of a `check` is its tokens as the source writes them, a `>` of a `>>` that type arguments took
-  apart among them, each run of spaces, line breaks and comments between two tokens one space. Pinned by
-  `ParserTests`.
+- Y1, Y6, Y9, Y10: where `test`, `check`, `mock` and `advance` are words, inside D2's letter (issue 586,
+  comment 6992687784). `test cluster` is the cluster test only where a token that can start an expression
+  and is no `[` follows `cluster`, so that `test cluster = 1` declares a variable `cluster` of a type named
+  `test`; `mock` is the statement only where a type, `with` and a type follow it, so that `mock x = 1`
+  declares a variable `x` of a type named `mock`; `check` and `advance` are the statements before a token
+  that can start an expression and is no `[`, with no look at what the name is, and fall back to no
+  declaration, so that a call of a variable so named at the start of a statement is the statement, a
+  function value named `check` is not called there, and `check x = 1`, a declaration of a variable of a type
+  named `check`, is a `check` of `x` with `= 1` after it, `syntax` at its line; a `test` block in a class's
+  body is the member parser's `syntax` at its line; a test's name is a string literal of one line with at
+  least one character, so that the empty name, `""` or `r""`, and a `"""` block, raw or not, are `syntax`
+  at the line of its `test` (Q12 (a) of comment 6998786049, the owner's answer of 2026-11-20, comment
+  7051499099); and the text of a `check` is its tokens as the source writes them, a `>` of a `>>` that
+  type arguments took apart among them, each run of spaces, line breaks and comments between two tokens
+  one space. Pinned by `ParserTests`.
 
 Six shapes still get two errors, or an uneven one, from the front end, each low: `if x print(1)
 else print(2)` is `braces-required` twice on one line, because the postfix `else` binds to the call
@@ -3082,7 +3089,8 @@ a field of any class among them, or a value of a type parameter, which the copy 
 argument makes one of them, whose copy would share the sender's block by its count (U12); `copy` at a call that is no message before a value that
 reaches a function value or an interface's value, which no word makes cross (U12); a log call
 inside an actor (P8); the cluster test of section 13, `test cluster N seed S { ... }`, whose words and
-block the parser passes over (Y8); and `mock X with Y` and `advance d`, whose questions are open (Y9, Y10),
+block the parser passes over (Y8); and `mock X with Y` and `advance d`, whose answers of 2026-11-20 it
+does not build (Y9, Y10),
 the duration of an `advance` checked as the bound of `within` is (U40) and its error reported beside the
 line. The refusal of
 the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered
@@ -3650,5 +3658,5 @@ round can ask about it by the rule's id.
   is still nullable (N2), as Rust's `assert!` narrows no type, where C#'s `Debug.Assert` tells its
   flow analysis the condition held. A comparison shows its sides' values where it stands alone or in
   parentheses and each side shows its value as a hole of an interpolation does; a test's name is its
-  own by its value, so that `"A"` and `"\u0041"` are one name. Pinned by
+  own by its value (Y1), so that `"A"` and `"\u0041"` are one name. Pinned by
   `CheckerTests`.

@@ -1,0 +1,19 @@
+// expect: throws thrown at 13
+// | test "throws" ... FAILED
+// |     thrown "down" at tests/two-tests-fail.kz:13
+// | ran
+// | test "throws again" ... FAILED
+// |     thrown "again" at tests/two-tests-fail.kz:18
+// | 2 tests: 0 passed, 2 failed
+// command: test
+// rules: Y5
+
+// both tests fail, the run going on after the first, and `throws` names the words under the first `FAILED` line (E3)
+test "throws" {
+    throw "down"
+}
+
+test "throws again" {
+    print("ran")
+    throw "again"
+}
