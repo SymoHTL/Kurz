@@ -665,7 +665,8 @@ the units read off with `BigInteger`, and that of 4000 timestamps and the edges 
 
 The error lines are the record's (section 6): `error: <id> at <file>:<n>` for an exception of the
 run-time table, the file named as the command line gave it, and `error: thrown at <file>:<n>:` for
-a `throw`, with the thrown value's text on the line below it. A `print` passes its file and its line
+a `throw`, with the thrown value's text on the line below it, the name of the instance's own class for an
+instance of a class with no `Text()` (O7). A `print` passes its file and its line
 to `Print`, which raises `print-failed` there where the system refuses the write or a write takes
 no byte, as Rust's `write_all` fails on a write of zero bytes, in every build (the owner,
 2026-10-23, "Caller passes it"), but for error 9 on Linux: there a write the system fails with error
@@ -942,7 +943,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   held by a field of an instance, and an item or an entry written into one (M4, M5, M9); a method, a function of the module whose first parameter is
   the instance, `this`, borrowed from the caller as a parameter is (K7); a read of a property, `b.Count` or `Count` inside its
   class, the call of its method, whose result is a temporary of its statement, as a call's is (K7); the text of an instance, which
-  its `Text()` gives (A5); a class some class derives from (K6), whose reference is two words, the
+  its `Text()` gives (A5), or at a `throw` where its class has none the name of the instance's own class, read off the
+  table where a class derives from its type (O7); a class some class derives from (K6), whose reference is two words, the
   address of the instance's block and the table of the instance's class, as Rust lays out
   `Rc<dyn Trait>`, while the reference to a class nothing derives from, a derived one among them, stays
   the address alone, and no block holds a table; the table, one constant per class, holds the release of
@@ -2840,7 +2842,8 @@ links a call, an assignment to a field or an item, a `with`, a lambda's captures
 `else`, `&&` and `||`, whose join keeps the moves of the right side, and a loop's rounds until both
 stand still; a value that crosses with no word joins none. A
 `move` ends the variable it names and every variable its region reaches, on the paths that reach a
-later read, which is `used-after-move` at the read, naming each `move`'s line; a loop whose body
+later read, which is `used-after-move` at the read, naming each `move`'s line, a bare `throw` reading the name
+of its arm of `else` (O7); a loop whose body
 moves either of its variables takes its list, whatever its item, and one the build cannot take, over
 a range, a map or a list of a type parameter's items, is `not supported`; a `move` of what the region outside reaches is `move-reachable`,
 and a word that does not fit a plain call's parameter `move-at-call`, in U16's order; a block that

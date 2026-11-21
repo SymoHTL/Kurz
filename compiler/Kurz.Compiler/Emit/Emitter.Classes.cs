@@ -51,6 +51,11 @@ public sealed partial class Emitter
     private const int LinkSlot = 4;
     private const int CopySlot = 5;
 
+    // O7: the text of a thrown value is being made, in which an instance of a class that neither declares nor inherits a `Text()` has its
+    // class's name (the owner, 2026-11-20, issue 598, comment 7051500939); everywhere else the checker reports such an instance's text as
+    // `no-text` (A4, A7), so that a helper this text builds for a type that holds one is built for a throw alone
+    private bool namesClasses;
+
     // each class whose body's defaults are queued for their function, with its name and the program's statement that first needed
     // it, which a refusal for Windows names (K7, S11)
     private readonly Queue<(ClassSymbol Class, string Name, int From)> defaultsPending = new();
@@ -693,9 +698,38 @@ public sealed partial class Emitter
         return Types.IsVoid(result) ? Emitted(call) : fn.Value(call);
     }
 
-    /// <summary>A5, A9: the text of an instance, which its <c>Text()</c> gives, the override of the instance's class where it is <c>virtual</c>; the caller holds a count of it.</summary>
+    /// <summary>
+    /// A5, A9: the text of an instance, which its <c>Text()</c> gives, the override of the instance's class where it is <c>virtual</c>; the
+    /// caller holds a count of it. In the text of a thrown value an instance of a class with none has its class's name (O7,
+    /// <see cref="ClassName"/>).
+    /// </summary>
     private string InstanceText(string value, ClassType type) =>
-        CallOn(type.Symbol.TextMethod ?? throw new InvalidOperationException($"`{type}` has no `Text()`: `no-text`, which the checker reports (A4)"), value, type, []);
+        type.Symbol.TextMethod is { } text ? CallOn(text, value, type, [])
+        : namesClasses ? ClassName(value, type.Symbol)
+        : throw new InvalidOperationException($"`{type}` has no `Text()`: `no-text`, which the checker reports (A4)");
+
+    /// <summary>
+    /// O7: the name of the instance's own class, which the text of a thrown value gives an instance of a class with no <c>Text()</c> (the
+    /// owner, 2026-11-20, issue 598, comment 7051500939; the name of the instance's own class, as Q3 of comment 7055011193 has it by
+    /// default, assumed): a literal, which no count holds. Where a class derives from the value's, the table the value carries is
+    /// compared with the table of each class of the program that derives from it, as <see cref="FaceArm"/> searches.
+    /// </summary>
+    private string ClassName(string value, ClassSymbol symbol)
+    {
+        var name = StringValue(symbol.Name);
+        if (!Layout.Fat(symbol))
+        {
+            return name;
+        }
+
+        var table = fn.Value($"extractvalue %kz.obj {value}, 1");
+        foreach (var derived in Model.Classes.Where(c => !ReferenceEquals(c, symbol) && c.HasBaseOrIs(symbol)))
+        {
+            name = fn.Value($"select i1 {fn.Value($"icmp eq ptr {table}, {Table(derived)}")}, %kz.str {StringValue(derived.Name)}, %kz.str {name}");
+        }
+
+        return name;
+    }
 
     /// <summary>One more strong count of an instance.</summary>
     private string RetainInstance() => Helper("retain.instance", "void", ["ptr"], () =>
