@@ -4139,8 +4139,8 @@ pub string ActorText(string name, long number) {
 // which the top-level code's wait that finds nothing left to run names where an actor's start keeps the call out
 // (`Kept`; U18, U22, U52; section 6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1).
 pub void Enqueue(long index, long number, byte* message, bool bounded, long bound, string file, int line) {
-    long fileCount = long(file.Bytes.Count)
     sys.Entered()
+    long fileCount = long(file.Bytes.Count)
     byte* state = Lookup(index, number)
     if state == null {
         sys.Left()
