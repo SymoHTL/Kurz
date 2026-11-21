@@ -433,6 +433,33 @@ pub void NotCharBoundary(long at, string file, int line) {
     sys.Exit(1)
 }
 
+// The error line of `invalid-input` for a bound of `within` of zero or less that is no literal, a block's or a call's clause's (U40,
+// U41; design record, section 6, the owner, 2026-11-20, "T4 (2)"; assumed: T78 of comment 7055305138): `error: invalid-input at
+// <file>:<n>:`, the bound on the line below it, `the bound of `within` is <bound>; a bound is positive`, written as a duration's text
+// is (A12), where the text of a `throw` stands (O6), the trace of the calls below that, and the end of the process with the exit code
+// 1; inside a message, the crash of the actor that runs it, which keeps that text for its log line (U19, U24).
+pub void InvalidBound(long bound, string file, int line) {
+    mut string sign = ""
+    mut ulong magnitude = 0
+    if bound < 0 {
+        sign = "-"
+        magnitude = ulong(-(bound + 1)) + 1
+    }
+
+    string text = "the bound of `within` is {sign}{TextOfDuration(magnitude, 0)}; a bound is positive"
+    CrashActor("invalid-input", file, line, true, text)
+    sys.Crashing()
+    WriteError("error: invalid-input at ")
+    WriteError(file)
+    WriteError(":")
+    WriteNumber(ulong(line))
+    WriteError(":\n")
+    WriteError(text)
+    WriteError("\n")
+    sys.Trace()
+    sys.Exit(1)
+}
+
 // The text of a signed integer (A2): its decimal digits, with a leading `-` when it is negative, in
 // one block, as Rust's `Display` writes the sign and the digits into one `String`.
 pub string TextOfLong(long value) {
@@ -4582,7 +4609,8 @@ void Signal(byte* reply, int kind) {
 long Never() => 9223372036854775807
 
 // The deadline `bound` nanoseconds after `now`, the bound rounded up to whole milliseconds (U36): `now` for a
-// bound of zero or less, a deadline that has passed (U40; assumed: T4 of comment 6967147952), and none where it
+// bound of zero or less, a deadline that has passed, which no bound of a `within` gives it, since the emitted code refuses
+// one where it is read (U40, U41), and none where it
 // would pass the largest time the clock holds, as Tokio's `timeout` falls back on a far future where its sum
 // overflows (not checked at source) (U40; assumed in section 6, proposed with the record and not put to the owner).
 long Due(long now, long bound) {

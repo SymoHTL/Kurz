@@ -1,0 +1,32 @@
+// expect: throws call-timeout at 24
+// threads: 1
+// rules: U37, U25
+
+// `Ask` holds the thread past the 100 ms of the chain's root, the top-level code's call, so that its call `S.Get()`, which
+// takes the time its chain has left, raises `call-timeout` at its line, the crash of `Front`, whose policy passes the crash up
+// to the root, which ends the process with that line (U25); a call that took its own 5 seconds would wait, and the top-level
+// code's call raise `call-timeout` at its own line
+
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Store {
+    pub int Get() => 1
+}
+
+actor Front(Store S) {
+    pub int Ask() {
+        Hold(150ms)
+        return S.Get()
+    }
+}
+
+s = spawn Store()
+f = spawn Front(s) on crash escalate
+within 100ms {
+    print(f.Ask())
+}

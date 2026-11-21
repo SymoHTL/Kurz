@@ -545,6 +545,7 @@ public sealed partial class Emitter
     private void EmitWithin(WithinStatement w)
     {
         var bound = EmitExpression(w.Bound);
+        Positive(w.Bound, bound);
         regionBlocks[regions[^1]] = fn.Value($"call i64 {RuntimeFunction("BlockEnter")}(i64 {bound})");
         EmitBlock(w.Body);
     }
@@ -559,20 +560,37 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// U39, U19: whether the bound of a call's clause can raise with no call in it, an index out of range or an operator's
-    /// <c>overflow</c> or <c>divide-by-zero</c> (chapter 12), which crashes the actor whose code runs it: anything but a duration's literal,
-    /// a number with its unit (L14), its sign included, or a read of a name, either in brackets, a bound of another type being
-    /// <c>type-mismatch</c> (U39, U40); a bound that runs a call, a name that runs a property's among them, can wait
-    /// (<see cref="SemanticModel.CanWait"/>).
+    /// U40, U41: a bound of <c>within</c> that is no constant (<see cref="Checker.ConstantBound"/>), a block's or a call's clause's, read
+    /// where it is read, at the block's entry before its first statement or at the call after its arguments and before its queueing, and
+    /// of zero or less the run-time error <c>invalid-input</c> at the bound's line, whose text the runtime's <c>InvalidBound</c> writes,
+    /// the crash of the code that runs it (section 6, the owner, 2026-11-20, #519, comment 7051492844, "T4 (2)"; assumed: T78 and T81 of
+    /// comment 7055305138, and T79 of it as corrected on 2026-11-21); a constant one, a literal or one folded from literals, the checker
+    /// refused where it is zero or less, and it takes no compare.
     /// </summary>
-    private static bool Raises(Expression bound) => bound switch
+    private void Positive(Expression bound, string value)
     {
-        ParenthesizedExpression p => Raises(p.Inner),
-        UnitLiteral => false,
-        UnaryExpression { Operand: UnitLiteral } => false,
-        NameExpression => false,
-        _ => true,
-    };
+        if (Checker.ConstantBound(Model, bound))
+        {
+            return;
+        }
+
+        var refused = fn.Label("bound.refused");
+        var positive = fn.Label("bound.positive");
+        fn.CondBranch(fn.Value($"icmp sgt i64 {value}, 0"), positive, refused);
+        fn.Block(refused);
+        fn.Emit($"call void {RuntimeFunction("InvalidBound")}(i64 {value}, %kz.str {StringValue(unit.File)}, i32 {Number(bound.Line)})");
+        fn.Unreachable();
+        fn.Block(positive);
+    }
+
+    /// <summary>
+    /// U39, U19: whether the bound of a call's clause can raise with no call in it, an index out of range or an operator's
+    /// <c>overflow</c> or <c>divide-by-zero</c> (chapter 12), and <c>invalid-input</c> for a bound of zero or less (<see cref="Positive"/>),
+    /// which crashes the actor whose code runs it: anything but a constant as T25 reads one, a literal or one folded from literals
+    /// (<see cref="Checker.ConstantBound"/>), a read of a name among such bounds, a bound of another type being <c>type-mismatch</c> (U39,
+    /// U40); a bound that runs a call, a name that runs a property's among them, can wait (<see cref="SemanticModel.CanWait"/>).
+    /// </summary>
+    private bool Raises(Expression bound) => !Checker.ConstantBound(Model, bound);
 
     /// <summary>
     /// U4, U6, U11: a call of an actor's method as a message: the actor's reference, read first, or, inside it, made from <c>this</c>
@@ -652,10 +670,21 @@ public sealed partial class Emitter
 
         // U39: the call's bound, that of its clause, run after the arguments, at every call it stands on, under a `within` block whose
         // deadline wins over it too (assumed: a reading of the build), else the literal of the method's declaration, the call's clause
-        // winning over the declaration's, which the runtime's `Enqueue` takes where no `within` block runs (assumed in section 6); the
-        // callee's reference and its heap, read before the arguments, stay the callee's while the bound runs, since a bound that
-        // changes the variable the callee was read from, `s.Get() within Swap(mut s)`, is `changed-while-held` (M7), as an argument is
+        // winning over the declaration's, which the runtime's `Enqueue` takes where no `within` block runs (assumed in section 6). The
+        // callee's reference, its two words read before the arguments as a receiver is (F12, U2), is the call's own while the bound
+        // runs; the callee's heap is read before the arguments too only where the message is built in it, its bound none or a
+        // constant (T25), which runs no code and raises nothing, and a message built in a heap of its own reads it at its queueing alone.
+        // A bound that changes the variable the callee was read from, `s.Get() within Swap(mut s)`, or the list it was read from as an item,
+        // `ss[0].Get() within Clear(mut ss)`, is `changed-while-held` (M7), as an argument is; one that gives the field it was read from
+        // another actor, through its instance passed as `mut`, `b.s.Get() within Swap(mut b)`, or in a method of the actor the bound
+        // calls, `helper.Get() within Reset()`, leaves the call with the actor read before the bound, which stands while its slot holds
+        // its number (U2)
         var bound = c.Within is { } clause ? EmitExpression(clause) : f.Declaration!.Within is { } declared ? EmitExpression(declared) : null;
+        if (c.Within is { } read)
+        {
+            Positive(read, bound!); // U41: after the arguments, before the queueing that looks the actor up (assumed: T81 of comment 7055305138)
+        }
+
         var result = f.ReturnType;
         var reply = fn.Alloca(Reply(result), "reply");
         fn.Emit($"store i32 0, ptr {reply}");

@@ -2537,9 +2537,9 @@ print(c.Done())
 
 Case: [actors/timeout-chain-nested.kz](../corpus/actors/timeout-chain-nested.kz)
 ```kurz
-// `Ask` holds the thread past the 100 ms of the chain's root, so its call `S.Get()`, which takes the time its chain has left,
-// raises `call-timeout` in `Front`, its crash, and the top-level code's call, whose callee crashed once its deadline had
-// passed, raises `call-timeout` too
+// `Ask` holds the thread past the 100 ms of the chain's root before it calls `S.Get()`: the top-level code's call raises
+// `call-timeout`, its callee's crash set once its deadline had passed (U43), where a crash set before it is `callee-crashed`
+// (U20); the time the nested call takes from its chain is shown by `timeout-chain-left.kz` (U37)
 
 // the thread held for `d`, with no call and no wait
 void Hold(duration d) {
@@ -3114,8 +3114,15 @@ Case: [actors/block-escalate.kz](../corpus/actors/block-escalate.kz)
 
 Case: [actors/timeout-gone-queued.kz](../corpus/actors/timeout-gone-queued.kz)
 ```kurz
-// `Store` crashed and its policy stopped it in the wait of `o.Ping()`, before the call of `Get` is queued past its deadline:
-// the actor is looked up before the deadline is compared
+// `Store` crashed and its policy stopped it in the wait of `o.Ping()`, before the call of `Get` is queued past the block's deadline,
+// which the hold of 100 ms passes: the actor is looked up before the deadline is compared
+
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
 
 actor Store {
     pub void Fail() {
@@ -3133,8 +3140,66 @@ gone = spawn Store() on crash stop
 o = spawn Other()
 send gone.Fail()
 print(o.Ping())
-within 0s {
+within 50ms {
+    Hold(100ms)
     print(gone.Get())
+}
+```
+
+Case: [actors/within-clause-zero-gone.kz](../corpus/actors/within-clause-zero-gone.kz)
+```kurz
+// `Store` crashed and its policy stopped it in the wait of `o.Ping()`; the bound of the call of `Get`, computed as zero, is read
+// after the call's arguments and before the call is queued, where the actor is looked up, so that it is refused, and not `actor-gone`
+
+actor Store {
+    pub void Fail() {
+        throw "gone"
+    }
+
+    pub int Get() => 1
+}
+
+actor Other {
+    pub int Ping() => 2
+}
+
+gone = spawn Store() on crash stop
+o = spawn Other()
+send gone.Fail()
+print(o.Ping())
+zero = 1s - 1s
+print(gone.Get() within zero)
+```
+
+Case: [actors/timeout-chain-left.kz](../corpus/actors/timeout-chain-left.kz)
+```kurz
+// `Ask` holds the thread past the 100 ms of the chain's root, the top-level code's call, so that its call `S.Get()`, which
+// takes the time its chain has left, raises `call-timeout` at its line, the crash of `Front`, whose policy passes the crash up
+// to the root, which ends the process with that line (U25); a call that took its own 5 seconds would wait, and the top-level
+// code's call raise `call-timeout` at its own line
+
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Store {
+    pub int Get() => 1
+}
+
+actor Front(Store S) {
+    pub int Ask() {
+        Hold(150ms)
+        return S.Get()
+    }
+}
+
+s = spawn Store()
+f = spawn Front(s) on crash escalate
+within 100ms {
+    print(f.Ask())
 }
 ```
 
@@ -3802,8 +3867,8 @@ and of the runtime's error type, `RuntimeError(RuntimeKind Kind, string Detail)`
 `Reason` (O7; §5, the owner, 2026-10-03), so that a run-time error of chapter 12 reaches the block as
 a `RuntimeError` of its kind, with the detail its error line names, the kinds being `Overflow`, `DivideByZero`,
 `IndexOutOfRange`, `ReversedRangeAtRunTime`, `InvalidOrderingAtRunTime`, `StackOverflow`, `PrintFailed`, `AllocationFailed`,
-`NotCharBoundary`, `RandomFailed`, `Deadlock`, `CalleeCrashed`, `ActorGone`, `RestartLimit`, `CpuLacksSet`
-and `SettingsUnpublished`, each run-time row's id of chapter 12 as one capitalised word for each of its
+`NotCharBoundary`, `RandomFailed`, `Deadlock`, `CalleeCrashed`, `ActorGone`, `RestartLimit`, `CpuLacksSet`,
+`SettingsUnpublished` and `InvalidInput`, each run-time row's id of chapter 12 as one capitalised word for each of its
 parts, in the table's order, `thrown` left out, and `InvalidArgument` after them, for `invalid-argument`
 (S13), which chapter 12 names outside its table *(assumed: its place after the table's, which the order
 of the table does not give)*; the child's code is its
@@ -4058,7 +4123,7 @@ Case: [actors/timeout-capped.kz](../corpus/actors/timeout-capped.kz)
 
 Case: [actors/timeout-send.kz](../corpus/actors/timeout-send.kz)
 
-Case: [actors/timeout-chain-nested.kz](../corpus/actors/timeout-chain-nested.kz)
+Case: [actors/timeout-chain-left.kz](../corpus/actors/timeout-chain-left.kz)
 
 ### U38 (decided, §6) The block `within`
 
@@ -4069,7 +4134,7 @@ owner, 2026-11-13, #519, comment 6850539879, "One deadline for the block (Recomm
 deadline binds the calls that wait, and their waits, made by the code the block runs, in the functions it calls too, as Tokio's
 `timeout` cancels its future with every wait in it (checked in §6 on 2026-11-13, at Tokio 1.54.1) *(assumed in §6)*. The
 message of such a call carries the call's own deadline (U44), which caps the calls its callee makes, each taking its own bound
-(U36, U39) *(assumed: T8 of comment 6967625156)*. A `send` in the block carries the chain's own deadline (U37), and a message of
+(U36, U39) *(assumed in §6: T8 of comment 6967625156)*. A `send` in the block carries the chain's own deadline (U37), and a message of
 another chain or a policy's block that runs in the top-level code's wait is not bound by it (U44, U45). The waits it binds are
 those of calls on actors: a socket's wait keeps its own bound of §12 (S9), which no `within` bounds *(assumed in §6: whether a
 block bounds a socket's wait stands open in §14, T5 of comment 6967147952)*. The deadline
@@ -4187,13 +4252,23 @@ otherwise it is a name, so that `within(3)` is a call, `within + 1` a sum and
 `duration`, read as a condition is (C3): a value of another type there is
 `type-mismatch`, a `duration?` is `nullable-unchecked` (N2), and a call with a `void` success is `syntax` (O10); and a `{`
 of the block on a line after the bound's is `braces-required` at the line where the bound ends, as C1 has it of an `if`
-*(assumed in §6: proposed there and not put to the owner)*. A bound of zero or less sets a deadline that has passed, so
-that each call it bounds raises `call-timeout` at once, but a call to an actor that ended, which raises `actor-gone` first (U43)
-*(assumed: T14 of comment 6972461413)*, and no id of its own is added, as Tokio's
-`timeout(Duration::ZERO, f)` elapses at its first wait (not checked at source) *(assumed: T4 of comment 6967147952)*. A
-bound whose deadline would pass the largest time the clock holds sets no deadline, which the calls it bounds take over the 5
-seconds of U36, each waiting with no bound but the time its chain has left (U37), as Tokio's `timeout` falls back on a far
-future where its sum overflows (not checked at source) *(assumed in §6)*.
+*(assumed in §6: proposed there and not put to the owner)*. A bound of zero or less is refused, as the sockets refuse such a
+time (S9), against a deadline that has passed (§6, the owner, 2026-11-20, #519, comment 7051492844, "T4 (2)"). A constant bound
+of 0 ns or less, a constant as T25 reads one, a literal or one folded from literals, `0s`, `-1s`, `(0s)` or `1s - 1s`, is the
+compile error `bound-not-positive` at its line, whose text names the form and the bound as written, "the bound of `within` is
+0s; a bound is positive"; every other bound, a variable's name among them whatever it was given, is read at run time, at the
+block's entry, before its first statement, so that a block with no call in it is refused too, and one of 0 ns or less raises
+`invalid-input` at the bound's line, the crash of the code that runs it, at the top-level code the end of the process with the
+exit code 1 (U19), its value standing on the line after the error line, "the bound
+of `within` is 0ms; a bound is positive", while 1 ns is a bound *(assumed in §6: T77, T78 and T81 of comment 7055305138, T79 of
+it as corrected on 2026-11-21, and the product pass's reading of zero, comment 7055304984)*. A bound of another type has its
+`type-mismatch` and a constant its own error, `inexact-literal` or `constant-overflow`, alone (E1); and the value after the error
+line is written as a duration's text is (A12), as the position of `not-char-boundary` is written (X2) *(assumed in §6: readings of
+the build, proposed there and not put to the owner)*. A
+bound whose deadline would pass the largest time the clock holds sets no deadline of its own: the calls it bounds wait with no
+bound of their own in place of U36's 5 seconds, each capped by the time its chain has left (U37) and by the deadline of a block
+it stands in (U38), as Tokio's `timeout` falls back on a far future where its sum overflows (not checked at source)
+*(assumed in §6)*.
 
 Case: [actors/timeout-zero.kz](../corpus/actors/timeout-zero.kz)
 ```kurz
@@ -4205,6 +4280,62 @@ s = spawn Store()
 print(s.Get())
 within 0s {
     print(s.Get())
+}
+```
+
+Case: [actors/within-negative.kz](../corpus/actors/within-negative.kz)
+```kurz
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+within -1s {
+    print(s.Get())
+}
+```
+
+Case: [actors/within-folded-zero.kz](../corpus/actors/within-folded-zero.kz)
+```kurz
+// a bound folded from literals is a constant, as T25 reads one, and one of zero is refused where it is written
+
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+within 1s - 1s {
+    print(s.Get())
+}
+```
+
+Case: [actors/within-computed-zero.kz](../corpus/actors/within-computed-zero.kz)
+```kurz
+// a bound computed at run time is read at the block's entry: one of 1 s runs, and one of zero is refused
+
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+one = 2s - 1s
+within one {
+    print(s.Get())
+}
+
+zero = one - 1s
+within zero {
+    print(s.Get())
+}
+```
+
+Case: [actors/within-zero-no-call.kz](../corpus/actors/within-zero-no-call.kz)
+```kurz
+// the bound is read at the block's entry, before its first statement, so that a block with no call in it is refused too
+
+zero = 1s - 1s
+within zero {
+    print("inside")
 }
 ```
 
@@ -4245,16 +4376,23 @@ bound standing in parentheses, and the clause stands before a postfix `else` (O5
 *(assumed: T12 of comment 6967625156)*. An `else` after a call inside the operand is that call's, as a unary expression takes its
 own postfix forms (T35) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. A call takes one
 clause, a second `within` after its clause being `syntax`, and outside brackets the clause stands on the line where the call
-ends: a line break ends the call first, so that a `within` at the start of the next line begins a statement, U40's; inside a
+ends: a line break ends the call first, so that a `within` at the start of the next line begins a statement, read as U40 reads
+one, the word where a `{` follows its expression and a name otherwise, so that `within 2s` there with no block after it is
+`syntax` at its line, `within` being a name there; inside a
 `(` or a `[`, where a line break ends no statement (L4), it may stand on a line after the call's *(assumed: a
-reading of the build, proposed with this record and not put to the owner)*. The operand of a declaration's clause is a number
+reading of the build, proposed with this record and not put to the owner)*. The bound of a call's clause of zero or less is refused
+as U40 refuses a block's, a constant as `bound-not-positive` and every other bound at run time as `invalid-input` at the bound's
+line, read after the call's arguments and before the call is queued, where its actor is looked up, so that over an actor that
+ended it is `invalid-input` and not `actor-gone` (U43), and under a block whose deadline wins over the clause too (U39)
+*(assumed in §6: T80 and T81 of comment 7055305138, and T79 of it as corrected on 2026-11-21)*. The operand of a declaration's clause is a number
 literal alone, its sign included, any other operand being `syntax`, its type read as U40 reads a bound. That the operand is a
 literal alone, any other operand `syntax`, as a knob of a policy is read (U26), is T13's *(assumed: T13 of comment 6967625156,
 whose option names a duration literal)*; that the literal is a number literal of any type, its sign included, as a knob of a
 policy takes one (U26), and is read as U40 reads a bound, so that a number literal of another type, `within 2`, is
-`type-mismatch`, as a knob's is (U26), and not `syntax`, and one of zero or less a deadline that has passed at each call, where a
-knob refuses a value of 0 or less (U26), is the build's *(assumed: a reading of the build, proposed with this record and not put
-to the owner)*.
+`type-mismatch`, as a knob's is (U26), and not `syntax`, is the build's *(assumed: a reading of the build, proposed with this
+record and not put to the owner)*; and a literal of zero or less there is `bound-not-positive`, as U40 reads one and as a knob
+refuses a value of 0 or less (U26), the one error a declaration's bound of zero or less meets *(assumed in §6: T80 of comment
+7055305138)*.
 
 Case: [actors/within-clause-send.kz](../corpus/actors/within-clause-send.kz)
 ```kurz
@@ -4319,6 +4457,30 @@ s = spawn Store()
 print(s.Get())
 ```
 
+Case: [actors/within-clauses.kz](../corpus/actors/within-clauses.kz)
+
+Case: [actors/within-clause-zero.kz](../corpus/actors/within-clause-zero.kz)
+```kurz
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+print(s.Get() within 0ms)
+```
+
+Case: [actors/within-declaration-zero.kz](../corpus/actors/within-declaration-zero.kz)
+```kurz
+actor Store {
+    pub int Get() within 0s => 1
+}
+
+s = spawn Store()
+print(s.Get())
+```
+
+Case: [actors/within-clause-zero-gone.kz](../corpus/actors/within-clause-zero-gone.kz)
+
 ### U42 (assumed, §6) A wait of the top-level code with no message to run while a deadline stands
 
 A deadline of a call that waits in a message is nothing left to run (U18): a wait of the top-level code that finds no message to
@@ -4345,7 +4507,7 @@ message's actor with `call-timeout` and its caller with `callee-crashed` where t
 crash was set (U20, U44). A result set before the caller reads its deadline is the call's result (U36), and a crash or an end set
 before the deadline is `callee-crashed` or `actor-gone` though the caller reads it after. A call queued past its deadline to an
 actor that had ended before the call was queued raises `actor-gone`, its actor looked up before its deadline is compared, so that
-`within 0s { gone.Get() }` is `actor-gone`, as Tokio's `Timeout::poll` polls its future before its timer (not checked at source)
+a call to such an actor in a block whose deadline has passed is `actor-gone`, as Tokio's `Timeout::poll` polls its future before its timer (not checked at source)
 *(assumed: T14 of comment 6972461413)*, against `call-timeout` first, as a gRPC client fails a call whose deadline passed before
 it starts (not checked at source).
 

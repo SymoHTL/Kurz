@@ -5534,8 +5534,9 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_deadline_is_a_bound_from_now_in_whole_milliseconds_rounded_up_and_none_past_the_clock()
     {
-        // U36, U40: a part of a millisecond rounds up, a bound of zero or less is a deadline that has passed, `now` itself (T4 of comment
-        // 6967147952), and a deadline past the largest time is none, the largest `long`
+        // U36, U40: a part of a millisecond rounds up, a bound of zero or less is a deadline that has passed, `now` itself, which no bound
+        // of a `within` gives it, since the emitted code refuses one where it is read, and a deadline past the largest time is none, the
+        // largest `long`
         var printed = ListTests.Edited(("runtime/common/runtime.kz", "pub void Finish() {\n    EndActors()\n",
             "pub void Finish() {\n    Print(1, \"{Due(1000, 1)} {Due(1000, 1000000)} {Due(1000, 1500000)} {Due(1000, 0)} {Due(1000, -1)}\", \"\", 0)\n" +
             "    Print(1, \"{Due(1000, 9223372036854775807)} {Due(9223372036854775000, 5000000000)} {Due(9223372030000000000, 5000000000)}\", \"\", 0)\n    EndActors()\n"));
@@ -6279,13 +6280,17 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // U39, F12: the bound of a call's clause runs after the call's arguments, as it is written after them, and the literal of a
         // declaration's clause bounds every call of the method that names none: `Add`'s answers within its 2 seconds, and `Late`'s, whose
-        // literal of 0 s is a deadline that has passed at each call (U41; assumed: a reading of the build), raises `call-timeout` at its
-        // line, which only that literal bounds
-        const string text = """
+        // literal of 50 ms passes while `Busy` holds the thread for 150 ms before it (U41), raises `call-timeout` at its line, which only
+        // that literal bounds; a literal of zero or less there is `bound-not-positive` (CheckerTests)
+        const string text = Hold + """
             actor Store {
                 pub int Add(int x) within 2s => x + 1
 
-                pub int Late() within 0s => 0
+                pub void Busy() {
+                    Hold(150ms)
+                }
+
+                pub int Late() within 50ms => 0
             }
 
             int Note(string text, int x) {
@@ -6301,10 +6306,243 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             s = spawn Store()
             print(s.Add(Note("argument", 1)) within Bound("bound"))
             print(s.Add(2))
+            send s.Busy()
             print(s.Late())
 
             """;
-        Ran(BuildAndRun(text, toolchain.Runtime, "actor-clause-order"), 1, ["argument", "bound", "2", "3"], "error: call-timeout at program.kz:20\n");
+        if (ClockRefusedOnWindows(text))
+        {
+            return;
+        }
+
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-clause-order"), 1, ["argument", "bound", "2", "3"], "error: call-timeout at program.kz:30\n");
+    }
+
+    /// <summary>
+    /// An actor, a function that prints a note and gives its number, one that prints a note and gives a bound, a call of the actor, and
+    /// a block bounded by <c>2ns - 1ns</c>, the smallest positive bound, which runs: the line after it is the first of a row of
+    /// <see cref="A_bound_of_zero_or_less_read_at_run_time_is_invalid_input_at_its_line_where_it_is_read"/>.
+    /// </summary>
+    private const string Bounds = """
+        actor Store {
+            pub int Get(int x) => x
+        }
+
+        int Note(string text, int x) {
+            print(text)
+            return x
+        }
+
+        duration Bound(string text, duration d) {
+            print(text)
+            return d
+        }
+
+        s = spawn Store()
+        print(s.Get(0))
+        tiny = 2ns - 1ns
+        within tiny {
+            print("tiny")
+        }
+
+        """;
+
+    [Theory]
+    [InlineData("within Bound(\"block\", BOUND) {\n    print(s.Get(1))\n}\n", "1s - 1s", 0, "block", "0ms", "1")]
+    [InlineData("within Bound(\"block\", BOUND) {\n    print(\"inside\")\n}\n", "1s - 2s", 0, "block", "-1s", "inside")]
+    [InlineData("print(s.Get(Note(\"argument\", 1)) within Bound(\"bound\", BOUND))\n", "1s - 1s", 0, "argument bound", "0ms", "1")]
+    [InlineData("within 1s {\n    print(s.Get(1) within Bound(\"bound\", BOUND))\n}\n", "0s - 1ms", 1, "bound", "-1ms", "1")]
+    public void A_bound_of_zero_or_less_read_at_run_time_is_invalid_input_at_its_line_where_it_is_read(string tail, string zero, int below, string notes, string bound, string last)
+    {
+        // U40, U41: a bound that is no constant (T25) is read where it is read, and one of zero or less is `invalid-input` at the bound's
+        // line, its value on the line below the error line, written as a duration's text is (section 6, the owner, 2026-11-20, #519, comment
+        // 7051492844, "T4 (2)"; assumed: T78 and T81 of comment 7055305138, and T79 of it as corrected on 2026-11-21): at a block's entry,
+        // before its first statement, so that
+        // no call in it runs and a block with no call in it is refused too, and at a call's clause after the call's arguments, before
+        // the call is queued, under a block whose deadline wins over the clause too (U39); `2ns - 1ns`, the smallest positive bound, is
+        // a bound (the product pass's default, comment 7055304984), and so is a computed bound of 1 s in the same place, the control
+        var line = Bounds.Split('\n').Length + below;
+        Ran(BuildAndRun(Bounds + tail.Replace("BOUND", zero, StringComparison.Ordinal), toolchain.Runtime, "actor-bound-zero"), 1, ["0", "tiny", .. notes.Split(' ')],
+            $"error: invalid-input at program.kz:{line}:\nthe bound of `within` is {bound}; a bound is positive\n");
+        Ran(BuildAndRun(Bounds + tail.Replace("BOUND", "2s - 1s", StringComparison.Ordinal), toolchain.Runtime, "actor-bound-positive"), 0,
+            ["0", "tiny", .. notes.Split(' '), last], "");
+    }
+
+    [Fact]
+    public void A_calls_bound_of_zero_or_less_over_an_actor_that_ended_is_invalid_input_and_a_positive_one_actor_gone()
+    {
+        // U41, U43, U25: the bound of a call's clause is read after the call's arguments and before the call is queued, where the actor
+        // is looked up, so that a bound of zero or less over an actor that ended is `invalid-input`, not `actor-gone` (assumed: T81 of
+        // comment 7055305138), where a positive bound over it is `actor-gone`, the control
+        const string text = """
+            actor Store {
+                pub void Fail() {
+                    throw "gone"
+                }
+
+                pub int Get() => 1
+            }
+
+            actor Other {
+                pub int Ping() => 2
+            }
+
+            gone = spawn Store() on crash stop
+            o = spawn Other()
+            send gone.Fail()
+            print(o.Ping())
+            d = 2s - BOUND
+            print(gone.Get() within d)
+
+            """;
+        var zero = BuildAndRun(text.Replace("BOUND", "2s", StringComparison.Ordinal), toolchain.Runtime, "actor-bound-zero-gone");
+        var (crashes, rest) = Logged(zero.Error);
+        Assert.Equal(["Store#1 crashed: thrown \"gone\" at program.kz:3"], crashes);
+        Ran((zero.Code, zero.Output, rest), 1, ["2"], "error: invalid-input at program.kz:18:\nthe bound of `within` is 0ms; a bound is positive\n");
+        var positive = BuildAndRun(text.Replace("BOUND", "1s", StringComparison.Ordinal), toolchain.Runtime, "actor-bound-positive-gone");
+        (crashes, rest) = Logged(positive.Error);
+        Assert.Equal(["Store#1 crashed: thrown \"gone\" at program.kz:3"], crashes);
+        Ran((positive.Code, positive.Output, rest), 1, ["2"], "error: actor-gone at program.kz:18\n");
+    }
+
+    [Fact]
+    public void A_bound_of_zero_or_less_in_a_message_crashes_its_actor_whose_block_reads_invalid_input()
+    {
+        // U40, U19, U30: `invalid-input` is raised as `call-timeout` is, the crash of the actor whose code reads the bound (assumed: T78 of
+        // comment 7055305138), whose log line carries the bound, and whose block reads the runtime's error of the kind `InvalidInput`,
+        // its detail the text below the error line, at the bound's line; the restarted actor answers
+        const string text = """
+            actor Worker {
+                pub void Go(duration d) {
+                    within d {
+                        print("inside")
+                    }
+                }
+
+                pub int Ping() => 2
+            }
+
+            w = spawn Worker() on crash (c) {
+                print("{c.Reason.Kind} {c.Place.Line} {c.Reason.Detail}")
+                restart
+            }
+            send w.Go(1s - 1s)
+            print(w.Ping())
+
+            """;
+        var run = BuildAndRun(text, ListTests.Fenced, "actor-bound-zero-crash");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Worker#1 crashed: invalid-input \"the bound of `within` is 0ms; a bound is positive\" at program.kz:3"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["InvalidInput 3 the bound of `within` is 0ms; a bound is positive", "2"], "");
+    }
+
+    [Fact]
+    public void A_message_whose_clauses_bound_is_refused_at_run_time_leaves_no_block_in_its_callees_heap()
+    {
+        // U41, U12, U19: the bound `d`, a name, runs after the message and the copy of its list were built, and its `invalid-input` for a
+        // bound of zero crashes `Front` before their queueing; the message is built in a heap of its own, which that crash frees, so that
+        // `Store`'s heap holds no more blocks than it held before, where a message built in `Store`'s heap would leave the list's copy
+        // there, unqueued; the call of 1 s is the control that the count sees that copy in `Store`'s heap while its message runs; under
+        // the allocator that makes every freed block inaccessible
+        const string text = """
+            actor Store {
+                pub long Held(List<int> xs) => HttpServer.Big()
+
+                pub long Big() => HttpServer.Big()
+            }
+
+            actor Front {
+                pub void Ask(Store s, duration d, long start) {
+                    mut xs = List<int>()
+                    for n in 0..<40000 {
+                        xs.Add(n)
+                    }
+
+                    held = s.Held(xs) within d
+                    print(held - start)
+                }
+
+                pub int Ping() => 2
+            }
+
+            store = spawn Store()
+            f = spawn Front()
+            before = store.Big()
+            send f.Ask(store, 1s, before)
+            send f.Ask(store, 1s - 1s, before)
+            print(f.Ping())
+            print(store.Big() - before)
+
+            """;
+        var run = BuildAndRun(text, ListTests.Edited([.. ListTests.Fence, .. BigBlocks]), "actor-clause-bound-refused");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Front#2 crashed: invalid-input \"the bound of `within` is 0ms; a bound is positive\" at program.kz:14"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["1", "2", "0"], "");
+    }
+
+    [Fact]
+    public void A_bound_that_gives_the_field_its_callee_was_read_from_another_actor_through_its_instance_leaves_the_call_with_the_actor_read_before_it()
+    {
+        // U39, F12, U2: the callee's reference, two words, is read before the arguments and the bound, as a receiver is, so that a bound
+        // that gives the field it was read from another actor, through its instance passed as `mut`, leaves the call with the actor read
+        // before it, which answers `1`, and the next read of the field the other actor, which answers `2`; M7 refuses no such bound, as
+        // it refuses one that changes the callee's variable or its list
+        // (`CheckerTests.The_bound_of_a_calls_clause_changes_nothing_its_callee_was_read_from`); under the allocator that makes every
+        // freed block inaccessible
+        const string swap = """
+            actor Store(int N) {
+                pub int Get() => N
+            }
+
+            class Box {
+                pub mut Store s = spawn Store(1)
+            }
+
+            duration Swap(mut Box held) {
+                held.s = spawn Store(2)
+                return 1s
+            }
+
+            mut b = Box()
+            print(b.s.Get() within Swap(mut b))
+            print(b.s.Get())
+
+            """;
+        Ran(BuildAndRun(swap, ListTests.Fenced, "actor-callee-field-swap"), 0, ["1", "2"], "");
+    }
+
+    [Fact]
+    public void A_bound_that_gives_the_actors_field_its_callee_was_read_from_another_actor_in_its_method_leaves_the_call_with_the_actor_read_before_it()
+    {
+        // U39, F12, U2: as through an instance passed as `mut`
+        // (`A_bound_that_gives_the_field_its_callee_was_read_from_another_actor_through_its_instance_leaves_the_call_with_the_actor_read_before_it`),
+        // a bound that calls a method of the actor that holds the field, which gives the field another actor, leaves the call with the
+        // actor read before it, which answers `1`, and the next read of the field the other actor, which answers `2`; under the
+        // allocator that makes every freed block inaccessible
+        const string reset = """
+            actor Store(int N) {
+                pub int Get() => N
+            }
+
+            actor Front {
+                mut Store helper = spawn Store(1)
+
+                duration Reset() {
+                    helper = spawn Store(2)
+                    return 1s
+                }
+
+                pub int Ask() => helper.Get() within Reset()
+
+                pub int Now() => helper.Get()
+            }
+
+            f = spawn Front()
+            print(f.Ask())
+            print(f.Now())
+
+            """;
+        Ran(BuildAndRun(reset, ListTests.Fenced, "actor-callee-field-reset"), 0, ["1", "2"], "");
     }
 
     [Fact]

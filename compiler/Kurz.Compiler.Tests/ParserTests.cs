@@ -1898,7 +1898,7 @@ public sealed class ParserTests
         // applies to the call's result and a computed bound stands in parentheses, and the clause stands before a postfix `else` (O5)
         // (U41; assumed: T12 of comment 6967625156), the `else` after a call in the operand that call's, as a unary expression takes its
         // own postfix forms (T35) (U41; assumed: a reading of the build); whether the call is one a clause applies to is the checker's
-        // (U41; T11)
+        // (U41; assumed: T11 of comment 6967625156)
         Assert.Equal(tree, Tree(program));
     }
 
@@ -1938,8 +1938,9 @@ public sealed class ParserTests
     [InlineData("actor Store {\n    pub int Get() within Bound() => 1\n}", 2)]
     public void The_clause_of_a_declaration_takes_a_number_literal_alone(string program, int line)
     {
-        // U41: anything but a number literal, with its sign where it has one, after the declaration's `within` is `syntax`, as after a
-        // knob of a policy (U26) (assumed: T13 of comment 6967625156)
+        // U41: anything but a literal after the declaration's `within` is `syntax`, as after a knob of a policy (U26) (assumed: T13 of
+        // comment 6967625156, the literal alone); the literal a number literal, with its sign where it has one (U41; assumed: a reading
+        // of the build)
         Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
     }
 

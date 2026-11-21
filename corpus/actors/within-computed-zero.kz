@@ -1,0 +1,20 @@
+// expect: throws invalid-input at 18
+// | 1
+// rules: U40
+
+// a bound computed at run time is read at the block's entry: one of 1 s runs, and one of zero is refused
+
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+one = 2s - 1s
+within one {
+    print(s.Get())
+}
+
+zero = one - 1s
+within zero {
+    print(s.Get())
+}
