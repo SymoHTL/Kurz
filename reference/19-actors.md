@@ -402,6 +402,11 @@ the `spawn` is the spawner's crash (§6, the owner, 2026-11-14, #519, comment 68
 while a throw in its run at a restart is the actor's own crash under its policy (§6, the owner,
 2026-11-14, #519, comment 6882624606, Q28, "All six leans (Recommended)").
 
+A call that reaches the actor while this constructor runs at its `spawn` waits in its inbox, as at a
+restart (U22), and no program can make one: no code holds the reference before `spawn` returns,
+since a field's default reads no `this` (K7) and a constructor in an actor's body is `syntax` (U2)
+*(assumed: Q3 of comment 7056452417, built at its default while it waits for the owner)*.
+
 Case: [actors/constructor-arguments.kz](../corpus/actors/constructor-arguments.kz)
 
 Case: [actors/constructor-waits.kz](../corpus/actors/constructor-waits.kz)
@@ -423,6 +428,22 @@ s = spawn Config()
 p = spawn Pool(s)
 print("spawned")
 print(p.Count())
+```
+
+Case: [actors/constructor-this-refused.kz](../corpus/actors/constructor-this-refused.kz)
+```kurz
+actor B {
+    pub int Ask(A x) => x.Peek()
+}
+
+actor A(B Other) {
+    int first = Other.Ask(this)
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+}
+
+print(spawn A(spawn B()).Peek())
 ```
 
 ### U4 (decided, §5, §6) A call through a reference waits
@@ -2220,7 +2241,9 @@ starts, and the parked message resumes once the calls above it end (§6, the own
 it is queued, the newest message its target has started and not ended, running or parked in a wait,
 carries its chain, so that a call that a message makes through a reference to its own actor gets in
 too *(assumed in §6)*. An actor under construction takes no
-message until its `spawn` returns, one of its chain neither *(assumed in §6)*. The chain ID is 16 bytes,
+message until its `spawn` returns, one of its chain neither *(assumed in §6)*, and an actor whose
+restart runs its constructor takes no call of the restart's chain, which waits in its inbox for the
+constructor's end (U22; §6, the owner, 2026-11-20, #599, comment 7051501153, "Option 1"). The chain ID is 16 bytes,
 drawn at random from a generator of its thread that the system's randomness seeds once, and a system
 that gives no randomness when a thread starts its first chain ends the program with `random-failed`,
 as a thread's first map does (M9) *(assumed in §6)*.
@@ -2307,6 +2330,36 @@ a = spawn A(b)
 send a.Ask(0)
 print(a.Ping())
 print(b.Get(2))
+```
+
+Case: [actors/restart-then-callback.kz](../corpus/actors/restart-then-callback.kz)
+```kurz
+// after a restart whose constructor ended, `B.Check`'s call of `Load` gets into `A`, which waits in `Save` on that chain
+
+actor B {
+    pub int Check(A x) => x.Load() * 10
+}
+
+actor A(B Other) {
+    mut int saved = 0
+
+    pub int Save(int n) {
+        saved = n
+        return Other.Check(this) + 1
+    }
+
+    pub int Load() => saved
+
+    pub void Fail() {
+        throw "a fails"
+    }
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Save(4))
+send a.Fail()
+print(a.Save(5))
 ```
 
 ### U18 (decided, §6) A wait of the top-level code that nothing can end
@@ -2824,6 +2877,16 @@ supervisor *(assumed, §6)*. The new instance has its state from the constructor
 defaults alone, as a new actor has it; a throw in the constructor at a restart is the actor's own
 crash, which restarts it again (U3).
 
+A call that reaches the actor while its restart runs its constructor, a call of the chain the restart
+starts, waits in its inbox and is not let in by that chain (U17), so that a constructor that waits on
+it waits on a call that waits for that constructor, as a message to a `per node` actor from its own
+start does (U52), which the top-level code's wait on one thread reads as `deadlock` (U18) (§6, the
+owner, 2026-11-20, #599, comment 7051501153, "Option 1"). No actor crashes on it, so that no restart
+loops on it, and a `send` of that chain to the actor waits in its inbox behind the restart and is no
+`deadlock` *(assumed: the reading of "as T29 option 1 reads", #599, comment 7056452417)*. The error
+names the line of the top-level code's call that waits, as U18 names it, not the line of the call
+the inbox holds *(assumed: a reading of the build, proposed with this record and not put to the owner)*.
+
 Case: [actors/crash-in-constructor-at-restart.kz](../corpus/actors/crash-in-constructor-at-restart.kz)
 ```kurz
 actor Tally {
@@ -2989,6 +3052,140 @@ send Counter.Fail()
 send Counter.Add(5)
 print(Counter.Get())
 ```
+
+Case: [actors/restart-reentrant.kz](../corpus/actors/restart-reentrant.kz)
+```kurz
+// at its restart `A`'s constructor waits on `B.Ask`, whose call of `Peek` waits in `A`'s inbox for that constructor, so that the
+// top-level code's wait on `Get` finds nothing left to run
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Get())
+b.Set(a)
+send a.Fail()
+print(a.Get())
+```
+
+Case: [actors/restart-no-call-back.kz](../corpus/actors/restart-no-call-back.kz)
+```kurz
+// the program of `actors/restart-reentrant.kz` with `B` given no `A`: at the restart `B.Ask` calls nothing back, and the constructor
+// ends
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Get())
+send a.Fail()
+print(a.Get())
+```
+
+Case: [actors/restart-send-waits.kz](../corpus/actors/restart-send-waits.kz)
+```kurz
+// at its restart `A`'s constructor waits on `B.Ask`, whose `send` of `Note` waits in `A`'s inbox behind that constructor and behind the
+// top-level code's `Get`, and runs on the new instance
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            send x.Note()
+            return 5
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+    List<int> items = [1, 2, 3]
+
+    pub void Note() {
+        print("note {items.Count}")
+    }
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Get())
+b.Set(a)
+send a.Fail()
+print(a.Get())
+print(a.Get())
+```
+
+Case: [actors/restart-then-callback.kz](../corpus/actors/restart-then-callback.kz)
 
 ### U23 (decided, §6) The pause before a restart grows
 
