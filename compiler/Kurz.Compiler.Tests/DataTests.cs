@@ -342,6 +342,11 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
         const string Animals = "class Animal(string Name)\n\nclass Dog(int Legs) : Animal\n\nvoid Fail(Animal a) {\n    throw a\n}\n\n";
         Ran(BuildAndRun(Animals + "Fail(Dog(\"rex\", 4))\n", "throw-class-derived"), 1, [], "error: thrown at program.kz:6:\nDog\n");
         Ran(BuildAndRun(Animals + "Fail(Animal(\"tom\"))\n", "throw-class-base"), 1, [], "error: thrown at program.kz:6:\nAnimal\n");
+
+        // a derived class that declares its own `Text()`, thrown as a base that has none, is named too: the type the value has at the
+        // `throw` decides whether it has a text, as at a `print` (A4, A7; assumed: the build's reading, Q9 of comment 7055578588)
+        const string Texted = "class Animal(string Name)\n\nclass Dog(int Legs) : Animal {\n    pub string Text() => \"dog {Name}\"\n}\n\nvoid Fail(Animal a) {\n    throw a\n}\n\n";
+        Ran(BuildAndRun(Texted + "print(Dog(\"rex\", 4))\nFail(Dog(\"rex\", 4))\n", "throw-class-derived-text"), 1, ["dog rex"], "error: thrown at program.kz:8:\nDog\n");
         Ran(BuildAndRun("class Counter(mut int Count)\ndata Box(Counter Item)\n\nthrow Box(Counter(1))\n", "throw-class-held"), 1, [], "error: thrown at program.kz:4:\nBox { Item = Counter }\n");
         Ran(BuildAndRun("class Counter(mut int Count)\n\nthrow [Counter(1), Counter(2)]\n", "throw-class-list"), 1, [], "error: thrown at program.kz:3:\n[Counter, Counter]\n");
     }
