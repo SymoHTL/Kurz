@@ -311,7 +311,7 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(text, "else-statement"), 0, ["done"], "");
     }
 
-    /// <summary>The functions whose arm <c>else</c> holds a bare <c>throw</c>, over a union of one case beside a <c>void</c> success, of three, of three after an arm that took one, and of a success with a value.</summary>
+    /// <summary>The functions whose arm <c>else</c> holds a bare <c>throw</c>, over a union of one case beside a <c>void</c> success, of three, of three after an arm that took one, of a success with a value, and of two classes, whose values have one IR type.</summary>
     private const string ElseThrows = """
         data NotFound
         data A(int N)
@@ -370,6 +370,29 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
             return v
         }
+
+        class Note(string Body) {
+            pub string Text() => "note {Body}"
+        }
+
+        class Memo(int Id) {
+            pub string Text() => "memo {Id}"
+        }
+
+        void | Note | Memo Write(string w) {
+            if w == "n" {
+                return Note("got {w}")
+            }
+            if w == "m" {
+                return Memo(4)
+            }
+        }
+
+        void Classes(string w) {
+            Write(w) else {
+                else => throw
+            }
+        }
         """;
 
     [Theory]
@@ -379,12 +402,15 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("else-throw-c", "Three(\"c\")", new string[0], 41, "C #3")]
     [InlineData("else-throw-after-a", "AfterA(\"a\")\nAfterA(\"b\")", new[] { "took A { N = 1 }" }, 48, "B { S = got b }")]
     [InlineData("else-throw-valued", "print(Kept(\"a\"))\nprint(Kept(\"b\"))", new[] { "0" }, 54, "B { S = got b }")]
+    [InlineData("else-throw-note", "Classes(\"none\")\nprint(\"ok\")\nClasses(\"n\")", new[] { "ok" }, 78, "note got n")]
+    [InlineData("else-throw-memo", "Classes(\"m\")", new string[0], 78, "memo 4")]
     public void A_bare_throw_in_the_arm_else_throws_the_text_of_the_case_that_reached_it(string name, string calls, string[] lines, int line, string thrown)
     {
         // O7 with A7: a union whose success is `void` has no text, so the arm `else` over it throws the case that reached it, as the arm
         // of that case's type does (issue 612): of one case beside the success, that case's value; of more, each case by its own text, a
         // `Text()` of its own among them, and after an arm that took another case; a union whose success has a value is thrown as it is,
-        // the text of its case; under the allocator that makes every freed block inaccessible, with a string the run made
+        // the text of its case; two classes, each by its own `Text()`, whose values clang cannot tell apart, so that only the tag tells
+        // which case it is; under the allocator that makes every freed block inaccessible, with a string the run made
         var compilation = Builder.Compile(SourceText.FromString("program.kz", $"{ElseThrows}\n\n{calls}\n"), [], ListTests.Fenced, testBuild: true);
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, name));
