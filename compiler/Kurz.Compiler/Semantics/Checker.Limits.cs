@@ -25,7 +25,7 @@ public sealed partial class Checker
     /// <summary>T19, T33: in a copy, each call whose result, as the function's text writes it, names one of the function's type parameters, with that type (Q22).</summary>
     private readonly Dictionary<CallExpression, KurzType> writtenResults = new(ReferenceEqualityComparer.Instance);
 
-    /// <summary>T19, T33 (Q22): the function type of the callee's text that the lambda checked next is passed for, which its check takes.</summary>
+    /// <summary>T19, T33 (Q22): the function type of the callee's text that a lambda argument is passed for, which the lambda's check takes.</summary>
     private KurzType? lambdaText;
 
     /// <summary>
