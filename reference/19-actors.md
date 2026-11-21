@@ -2885,7 +2885,7 @@ owner, 2026-11-20, #599, comment 7051501153, "Option 1"). No actor crashes on it
 loops on it, and a `send` of that chain to the actor waits in its inbox behind the restart and is no
 `deadlock` *(assumed: the reading of "as T29 option 1 reads", #599, comment 7056452417)*. The error
 names the line of the top-level code's call that waits, as U18 names it, not the line of the call
-the inbox holds *(assumed: a reading of the build, proposed with this record and not put to the owner)*.
+the inbox holds *(assumed: Q6 of #599, comment 7056452417, built at its default while it waits for the owner)*.
 
 Case: [actors/crash-in-constructor-at-restart.kz](../corpus/actors/crash-in-constructor-at-restart.kz)
 ```kurz
