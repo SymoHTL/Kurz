@@ -4880,9 +4880,11 @@ byte* Along(byte* callee) {
 // `waiter` is null, by the top-level code's call or as the supervisor of a child whose block waits (U60): a child whose block of
 // `on crash` waits (U34) is reached, and so is an actor that runs or waits, but by a call that got in by its chain, the chain its
 // top activation runs in (U17), which no activation of the actor runs yet: the waiter's own call that gets in makes no edge, and
-// a call that got in and runs leads on through the actor's top activation, newer in the chain than the waiter (`Runs`; the owner,
-// 2026-11-21, #519, comment 7060155980, T86 2). An actor that waits for its restart (U23), that ended or whose constructor runs at
-// its `spawn` (U3), and an idle one end the line.
+// the line goes on through the activation that runs a call that got in by its chain, where that activation is newer in the chain
+// than the hop's (the owner, 2026-11-21, #519, comment 7060155980, T86 2), read as an activation of the actor, at or under its
+// top activation, that runs the very call the waiter waits on (`Runs`; assumed: a reading of the build of T86 2, comment
+// 7059356106). An actor that waits for its restart (U23), that ended or whose constructor runs at its `spawn` (U3), and an idle
+// one end the line.
 bool Reached(byte* callee, byte* waiter) {
     raw {
         int life = *Ptr<int>(callee - 88)
@@ -4903,8 +4905,11 @@ bool Reached(byte* callee, byte* waiter) {
     }
 }
 
-// Whether an activation of the actor whose record is `state` runs the message `message`, a call that got in by its chain and
-// started, at or below the actor's top activation (`Start`; U17, U60; T86 2 of comment 7060155980).
+// Whether an activation of the actor whose record is `state`, at or below its top activation, runs the message `message`, a call
+// that got in by its chain and started (`Start`; U17, U60). The owner's T86 2 (2026-11-21, #519, comment 7060155980) has the line
+// go on through the activation that runs a call that got in by its chain, where that activation is newer in the chain than the
+// hop's; `Reached` reads that as the activation that runs the very call the hop's waiter waits on (assumed: a reading of the build
+// of T86 2, comment 7059356106).
 bool Runs(byte* state, byte* message) {
     raw {
         mut byte* at = *Ptr<byte*>(state - 8)
@@ -4966,7 +4971,8 @@ string LoopText(byte* first, long hops) {
 // of <Type>#<m> on its crash` for a child whose block waits, each actor by its text (U2), as its log line names it (U24), each
 // line ending with ` in chain ` and a chain's ID, 32 lowercase hexadecimal digits as `Crashed.Chain` writes one (`ChainText`):
 // for a call the chain the waiting activation runs in, for a child the chain of the message whose crash its block decides on
-// (`Pending`) (the owner, 2026-11-21, #519, comment 7060155980, T84 1), and none where no block holds that message (`BlockOf`).
+// (`Pending`) (the owner, 2026-11-21, #519, comment 7060155980, T84 1), and none where no block holds that message (`BlockOf`;
+// assumed: a reading of the build of T68 3 and T84 1, comment 7058660596).
 string WaitText(byte* state) {
     mut string from = ""
     mut string to = ""
