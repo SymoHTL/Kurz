@@ -4820,6 +4820,26 @@ void Discard(byte* message) {
 // deadline, whenever the waiter reads it (U43; assumed: T7 of comment 6967625156), as tonic reports a call's own
 // deadline (not checked at source).
 pub void Wait(byte* reply, byte* message, string file, int line) {
+    int kind = Answer(reply, message, file, line)
+    raw {
+        if kind == 0 || kind == 4 || (kind != 1 && *Ptr<long>(reply + 16) <= *Ptr<long>(reply + 40)) {
+            Raise("call-timeout", file, line)
+        }
+
+        if kind == 2 {
+            Raise("callee-crashed", file, line)
+        }
+
+        if kind == 3 {
+            Raise("actor-gone", file, line)
+        }
+    }
+}
+
+// The wait of `Wait` for the reply `reply` of the message `message`, at the line `line` of the file `file`, to an
+// answer or to its deadline, and the reply's word read once after it, which it gives, the header then naming no
+// reply where one stands; the raises are the caller's, a call's (`Wait`) and an `attempt`'s (`Attempted`).
+int Answer(byte* reply, byte* message, string file, int line) {
     sys.Entered()
     raw {
         if running == null {
@@ -4849,24 +4869,14 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
             *Ptr<byte*>(running + 432) = null
         }
 
-        if kind == 0 || kind == 4 || (kind != 1 && *Ptr<long>(reply + 16) <= *Ptr<long>(reply + 40)) {
-            Raise("call-timeout", file, line)
-        }
-
-        if kind == 2 {
-            Raise("callee-crashed", file, line)
-        }
-
-        if kind == 3 {
-            Raise("actor-gone", file, line)
-        }
+        return kind
     }
 }
 
-// The loop of the top-level code's wait for the reply `reply` (`Wait`; U18, U23, U33, U36): at each turn the clock read, the timers
+// The loop of the top-level code's wait for the reply `reply` (`Answer`; U18, U23, U33, U36): at each turn the clock read, the timers
 // fired, then the block of a child the top-level code spawned, a restart whose pause ended, the sleep to the first pause's end, the
 // first timer or the deadline, or the run queue's first actor, as long as the reply is not set and its deadline has not passed; true
-// where one of those ends the loop, false where none of them is left, so that nothing could set the reply, where `Wait` raises
+// where one of those ends the loop, false where none of them is left, so that nothing could set the reply, where `Answer` raises
 // `deadlock` at the call's line and the test runner fails the test at its own (`RunTests`; Y5).
 bool RootWait(byte* reply) {
     raw {
@@ -5331,6 +5341,30 @@ void Fell(byte* state, byte* header, bool hasText, byte* id, long idCount, byte*
         }
 
         byte* policy = *Ptr<byte*>(taker - 80)
+        if policy == taker {
+            // U46, U50: the child of an `attempt`, whose policy word names its own state (`AttemptNew`): the crash's
+            // copy, the thrown value's among it, made in the heap of the parent as a block's is (`Pending`), in the
+            // reply of the child's one message before its fall sets that reply `callee crashed`, which wakes the
+            // parent (`Attempted`); the log line written as the crash reaches the parent, and the child ended, its
+            // heap and its stacks freed as a stopped actor's are
+            byte* message = Pending(taker, above, null, header, hasText, id, idCount, file, fileCount, line, from, count, number, slot, copy)
+            byte* reply = *Ptr<byte*>(*Ptr<byte*>(*Ptr<byte*>(taker - 8) + 328) + 16)
+            if reply != null {
+                *Ptr<byte*>(reply + 56) = message
+            }
+
+            Fall(state, header, null)
+            mut byte* up = state
+            while up != taker {
+                up = *Ptr<byte*>(up - 72)
+                Fall(up, *Ptr<byte*>(up - 8), null)
+            }
+
+            BlockLogged(message)
+            EndActor(taker)
+            return
+        }
+
         if life == 0 && policy != null && *Ptr<byte*>(policy + 56) != null {
             byte* message = Pending(taker, above, kept, header, hasText, id, idCount, file, fileCount, line, from, count, number, slot, copy)
             Fall(state, header, kept)
@@ -6195,17 +6229,7 @@ void Decided(byte* child, byte* message, long word) {
 
         BlockLogged(message)
         BlockLeft(message)
-        long idCount = *Ptr<long>(message + 80)
-        long count = *Ptr<long>(message + 128)
-        if idCount > 0 {
-            std.Free(*Ptr<byte*>(message + 72), idCount)
-        }
-
-        if count > 0 {
-            std.Free(*Ptr<byte*>(message + 120), count)
-        }
-
-        std.Free(message, 184)
+        PendingLeft(message)
         HeldAlone(child)
         if word == 1 {
             *Ptr<int>(child - 88) = 1
@@ -6332,6 +6356,86 @@ pub string TextAt(byte* bytes, long count) {
     }
 
     return text
+}
+
+// The copies of the crash's id and text that the message `message` of a block or of an `attempt` holds, and the
+// message itself, freed (`Pending`), once its block decided or its `Crashed` was read (U30, U46).
+pub void PendingLeft(byte* message) {
+    raw {
+        long idCount = *Ptr<long>(message + 80)
+        long count = *Ptr<long>(message + 128)
+        if idCount > 0 {
+            std.Free(*Ptr<byte*>(message + 72), idCount)
+        }
+
+        if count > 0 {
+            std.Free(*Ptr<byte*>(message + 120), count)
+        }
+
+        std.Free(message, 184)
+    }
+}
+
+// ---- the block `attempt { ... }` (chapter 19, U46 to U50) ----------------------------------------------
+
+// The child actor of an `attempt` (U46), named `name` for the log line of its crash: an actor of its own heap
+// and its pooled stack of 2 MiB, as a `spawn` without a `stack` clause makes one (U1), supervised by the actor
+// that runs the code or by the top-level code (`Supervisor`), whose state of 64 bytes holds no field, and whose
+// policy word names its own state, so that its crash is its own to take (`Taker`, whose test it passes as a
+// `restart` passes it) and is taken as an `attempt` takes it (`Fell`); built at once, and ending after its first
+// message (`Run`), as Erlang's `spawn_monitor` starts a process that ends with its function (not checked at
+// source).
+pub byte* AttemptNew(byte* name) {
+    byte* heap = ActorHeapNew(64)
+    byte* state = ActorNew(heap, 64, 2097152, null, name)
+    raw {
+        mut long word = 0
+        while word < 64 {
+            *Ptr<long>(state + word) = 0
+            word = word + 8
+        }
+
+        *Ptr<long>(state) = 1
+        *Ptr<byte*>(state - 80) = state
+    }
+
+    ActorBuilt(state)
+    raw {
+        StateWord(state).FetchOr(16, MemoryOrder.AcqRel)
+    }
+
+    return state
+}
+
+// The wait of the `attempt` whose child is `child` for the reply `reply` of the block's message `message`, at the
+// line `line` of the file `file`, as a call waits (`Answer`; U49) but with no deadline of its own, the block's
+// calls carrying the chain's (`Enqueue`): null where the block's value stands in the reply, and where the child
+// crashed the message of its crash, which `Fell` set in the reply at 56 and which the emitted code reads `Crashed`
+// from and frees (`PendingLeft`; U46, U50). A message dropped at its deadline, at its queueing (`Enqueue`) or
+// before the child took it (`Dropped`), raises `call-timeout` at the line, a call's (U37), whose crash of the
+// code that waits ends the child, a child of that code, as it ends every child (U13).
+pub byte* Attempted(byte* reply, byte* message, string file, int line) {
+    raw {
+        *Ptr<long>(reply + 16) = Never()
+    }
+
+    int kind = Answer(reply, message, file, line)
+    if kind == 1 {
+        return null
+    }
+
+    if kind == 2 {
+        raw {
+            return *Ptr<byte*>(reply + 56)
+        }
+    }
+
+    if kind == 3 {
+        Raise("actor-gone", file, line)
+    }
+
+    Raise("call-timeout", file, line)
+    return null
 }
 
 // ---- the stacks of actors (design record, section 6) ---------------------------------------------

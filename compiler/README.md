@@ -2248,8 +2248,25 @@ the child's error line and its trace; a supervisor's crash or end, and the end o
 code, drop its pending blocks and end their children. On Linux the `Crashed` value of a stack
 overflow holds an empty file and the line 0 in its `Place`, its place standing in its `Detail`, and
 an overflow escalated to the top level writes the trace of the top-level code where it waits, since
-the stack the child overflowed on, whose state the signal's stack held, is not kept. What stays `not
-supported` of section 6's supervision: `attempt { ... }` and `retry { ... }`; a block whose child can
+the stack the child overflowed on, whose state the signal's stack held, is not kept. The block
+`attempt { ... }` is built (U46 to U50): the checker reads its block as a lambda of no parameter, the
+fields of the actor whose method runs it that the block names taken through variables of their own,
+and its `Reason` as a block's child's is read, again at each reading; the emitted code makes a child
+actor (the runtime's `AttemptNew`) with a heap of its own and a pooled stack, whose policy word names
+its own state, puts one message in its heap that holds a copy of the block's function value, made as a
+message's argument crosses (U12), queues it with the chain's deadline and no bound of its own, and
+waits for its reply as a call waits (`Attempted`), with no deadline of its own; the reply holds the
+block's value, copied into the heap of the code that waits, and the child's crash, taken in `Fell` as
+a block's is, puts the copy of the crash in that heap, writes the log line, ends the child and wakes
+the waiter, whose code builds `Crashed` as a block's function does and frees the copy
+(`PendingLeft`); an arm of its `else` lets go of the case it takes. A pointer or a view of an atomic type
+that the block takes, or that its value reaches, is `pointer-crosses`, as at a message (U47, U12). What stays `not supported` of
+section 6's supervision: `retry { ... }`; of `attempt { ... }`, a block that names `this`, a method or
+a property of the class whose method runs it, a `move` in the block of a variable or a field around
+it, a block whose value is a union, a nullable value among them, or a value the crossing copy does not
+bring back, a block that takes a value no word makes cross or that the crossing copy does not copy, a
+block that can throw a type the crossing copy does not copy, one in a file read without `std/` and one
+whose `Reason` still grows at the fifth reading; a block of `on crash` whose child can
 throw a type the crossing copy does not copy (U12), a block in a file read without `std/`, and a block
 whose child's `Reason` grows by what the blocks of the program read, read five times, the first and four more; `per` with other
 words than `node`, `per cluster` with a text of its own, since it needs the directory of section 7, and a policy after such a
@@ -2765,7 +2782,8 @@ that sit under a rule by its id. Every one is pinned by a test.
   `escalate` before anything but `=` are statements, and `return` is `syntax`, the words names in a
   lambda inside it; no name, a second one or a type in the parentheses, a block on a line of its own,
   a knob after `restart` and a word after a decision are `syntax` (U28, U29). `attempt` and `retry`
-  before a block are an expression of that block, which the checker says `not supported` to (section 6),
+  before a block are an expression of that block, which the checker reads for `attempt`, with a postfix
+  `else` after it as after a call (U46), and says `not supported` to for `retry` (section 6),
   but in the condition, the collection or the subject before the block of an `if`, a `while`, a `for`
   or a `match` the word is a name, as a struct literal is no condition in Rust, and inside that header's parentheses,
   brackets, arms and blocks the expression again, as Rust reads a struct literal there (U28; assumed: section 6, comment
@@ -3081,7 +3099,8 @@ may take as a class's does (U1, U9), each of which leaves the
 actor and every use of its name unread, besides what a class's body does not read, as the checker's `syntax` for a base after
 an actor's name, `equal by` and a constructor in its body (U1, U2), and its `static-state` for a `static mut` field and one
 whose type is or holds a class (U1), leave it too, while an actor after a class's `:` is `syntax` and the class is read without
-that base (U1); `attempt { ... }` and `retry { ... }` (section 6, U28); a block of `on crash` whose child can throw a type the
+that base (U1); `retry { ... }` (section 6, U28), and of `attempt { ... }` what the build does not bring into its child or
+out of it, one in a file read without `std/` and one whose `Reason` still grows at the fifth reading (U46, U47); a block of `on crash` whose child can throw a type the
 crossing copy does not copy, one in a file read without `std/` and one whose child's `Reason` still grows at the fifth reading
 (U30); `move` before a field of a primary
 constructor, a parameter of a constructor of K14, of a C function's declaration or of a `naked`

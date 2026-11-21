@@ -25,7 +25,7 @@ namespace Kurz.Compiler.Tests;
 /// message while its constructor runs (U17) or before its restart (U22), and no owner of a reply, and no timer, that reads or writes the waiter's
 /// frame once it is gone; the
 /// timer that fires at a call's deadline wakes the waiter and owns no reply (U36, U37); no <c>Ready</c> reads the reply of a wait that
-/// returned, which <c>Wait</c> takes off its activation at its read of the set word; no message of a queue lost, moved twice or moved
+/// returned, which <c>Answer</c> takes off its activation at its read of the set word; no message of a queue lost, moved twice or moved
 /// before an earlier message of its sender (U5), no two holders of a lock and no thread asleep on a free one, and no lookup that gives
 /// another actor's state, and no child of an ended supervisor that does not end, ends twice or has its record written while another thread
 /// holds it (U13); and it finds each of these but the bound broken in a model broken so, the cases of <see cref="Break"/>. Its
@@ -410,7 +410,7 @@ public sealed class ModelTests
         : (s[Early] & 2) != 0 ? "a message started before the actor's restart"
         : s[Owners] > 1 ? "two owners of the reply"
         : s[Touched] != 0 ? "an owner of the reply read or wrote the waiter's frame once it was gone"
-        : s[ReadLate] != 0 ? "Ready read the reply once its wait had returned, which Wait took off the activation"
+        : s[ReadLate] != 0 ? "Ready read the reply once its wait had returned, which Answer took off the activation"
         : null;
 
     /// <summary>What a state of the state word's models in which no thread can move keeps.</summary>
@@ -442,7 +442,7 @@ public sealed class ModelTests
 
     /// <summary>
     /// The waiter of a call, whose thread holds its actor at the start: the reply's waiter stored (<c>ReplyWaiter</c>) and the message
-    /// queued (<c>Enqueue</c>), the reply's word read (<c>Wait</c>), and where it is 0 the activation parked: <c>Ready</c> and the end of
+    /// queued (<c>Enqueue</c>), the reply's word read (<c>Answer</c>), and where it is 0 the activation parked: <c>Ready</c> and the end of
     /// the hold; then the takes of the actor's entries, each resuming the activation where the word is set (<c>RunOne</c>), as long as it
     /// neither returned nor crashed.
     /// </summary>
@@ -456,7 +456,7 @@ public sealed class ModelTests
         [
             late ? queued : stored,
             late ? stored : queued,
-            new("Wait", "while ReplyState(reply) == 0 && !Waited(reply) { long entries = sys.Inside(0)", _ => true, s =>
+            new("Answer", "while ReplyState(reply) == 0 && !Waited(reply) { long entries = sys.Inside(0)", _ => true, s =>
             {
                 if (s[Answer] != 0)
                 {
@@ -598,7 +598,7 @@ public sealed class ModelTests
     /// <summary>
     /// The waiter of a call with a deadline, whose thread holds its actor at the start: the reply's waiter stored (<c>ReplyWaiter</c>), the
     /// message queued (<c>Enqueue</c>), the reply among the timers (<c>TimerAdd</c>), the loop's test of the reply's word and of the
-    /// deadline (<c>Wait</c>), and where neither holds the activation parked: <c>Ready</c> and the end of the hold, then the takes of the
+    /// deadline (<c>Answer</c>), and where neither holds the activation parked: <c>Ready</c> and the end of the hold, then the takes of the
     /// actor's entries, each resuming the activation where the word is set or the deadline passed (<c>RunOne</c>), which tests again.
     /// Out of the loop: the reply off the timers (<c>TimerRemove</c>) and its word read once; where it is set the wait returns, the
     /// activation naming the reply no more, and the strand goes on at the end of the hold, not at <c>Ready</c>, and else
@@ -614,8 +614,8 @@ public sealed class ModelTests
         [
             new("ReplyWaiter", "*Ptr<byte*>(reply + 8) = running", _ => true, s => { s[Waiter] = 1; s[at] = 1; }),
             new("Enqueue", "Pushed(state - 144, message)", _ => true, s => { s[Published] = 1; s[at] = 2; }),
-            new("Wait", "TimerAdd(reply)", _ => true, s => { s[Listed] = 1; s[at] = 3; }),
-            new("Wait", "while ReplyState(reply) == 0 && !Waited(reply)", _ => true, s =>
+            new("Answer", "TimerAdd(reply)", _ => true, s => { s[Listed] = 1; s[at] = 3; }),
+            new("Answer", "while ReplyState(reply) == 0 && !Waited(reply)", _ => true, s =>
             {
                 if (s[Answer] != 0 || s[Due] != 0)
                 {
@@ -645,8 +645,8 @@ public sealed class ModelTests
                 s[at + 2] = 0;
                 s[at] = 5;
             }),
-            new("Wait", "TimerRemove(reply)", _ => true, s => { s[Listed] = 0; s[at] = 13; }),
-            new("Wait", "int kind = ReplyState(reply)", _ => true, s =>
+            new("Answer", "TimerRemove(reply)", _ => true, s => { s[Listed] = 0; s[at] = 13; }),
+            new("Answer", "int kind = ReplyState(reply)", _ => true, s =>
             {
                 if (s[Answer] != 0)
                 {
@@ -701,7 +701,7 @@ public sealed class ModelTests
     }
 
     /// <summary>
-    /// The timer of the call's deadline: the clock past it at a turn of the scheduler (<c>RootWait</c>, the root loop of <c>Wait</c>),
+    /// The timer of the call's deadline: the clock past it at a turn of the scheduler (<c>RootWait</c>, the root loop of <c>Answer</c>),
     /// then the timers fired (<c>Fire</c>): where the reply stands among them, it is taken off them and its waiter read, one move under
     /// the timers' owner, and the waiter's actor woken; the timer owns no reply.
     /// </summary>

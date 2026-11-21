@@ -3573,8 +3573,8 @@ type's default (U27), the braces after it the actor's body; no parentheses after
 name in them, a second one, and a block that does not open on the line of its parameter are `syntax` (E4)
 *(assumed: as §6 marks it)*. The blocks `attempt { ... }` and `retry { ... }` of §6, which keep a crash to a piece of
 code, have no rule here but where each word is a name, and where, inside a header's brackets, arms, blocks and
-parentheses, each is the block's word again, and
-`compiler/README.md` says what the build does with them; in
+parentheses, each is the block's word again, but for `attempt`'s block, whose rules are U46 to U50, and
+`compiler/README.md` says what the build does with `retry`'s; in
 the condition, the collection or the subject before the block of an `if`, a `while`, a `for` or a `match` each word is a
 name, so that a variable of either name stands there, as a struct literal is no condition in Rust *(assumed: §6, the
 owner, 2026-11-13, #519, comment 6847932993, Q10, which makes the words words only where they stand, so that a variable
@@ -4455,6 +4455,444 @@ deadline (not checked at source) *(assumed: T10 of comment 6967625156)*, against
 call.
 
 Case: [actors/timeout-send.kz](../corpus/actors/timeout-send.kz)
+
+### U46 (assumed, §6, §5) `attempt { ... }` and its value
+
+`attempt { ... }` runs its block as a one-shot child actor whose supervisor is the actor whose code runs it, or the
+top-level code (U49); the child's exception arrives as the union case `Crashed`, and the parent lives: an actor never
+catches its own exception, only its child's death, so that §5's "no `catch`" holds (§6). The value of an `attempt` is a
+union, the block's value, its success, then `Crashed<R>`, read by §5's rules as a call's union is: a postfix `else`
+handles the cases it names and the others propagate, a case that propagates is listed in the function's signature, the
+top-level code handles every case (`unlisted-case`), and a written union type keeps the cases *(assumed: T18 of comment
+6980152255, built at the default while it waits for the owner)*. The case is U30's `Crashed<R>`, with its `Reason`,
+`Place` and `Chain`, and `R` is the union of every type the block's code can throw, found over the whole program as an
+actor's `Reason` is (§5), and `RuntimeError`; what the block throws is the child's crash, which leaves neither the
+function around the `attempt` nor the `Reason` of the actor whose code runs it *(assumed: the small defaults of comment
+6980152255, not asked)*. Every file sees `Crashed`, as it sees `RuntimeError` (U30), so that a signature names the
+case, and a file's own type of that name is `redeclared` (V9); in the arms of an `attempt`'s `else`, `Crashed` written
+with no type arguments names that case, as the record's sample in §6 writes `Crashed c` *(assumed: a reading of the
+build, proposed with this record and not put to the owner)*. `retry { ... }`, a loop over `attempt`, is `not supported`:
+how its attempts' calls are told apart is open (§14).
+
+Case: [actors/attempt-crash.kz](../corpus/actors/attempt-crash.kz)
+```kurz
+data Lost(int Code)
+
+int Take(int n) {
+    if n == 7 {
+        throw Lost(n)
+    }
+
+    xs = [1, 2]
+    return xs[n]
+}
+
+// the crash of the block is held as the case `Crashed`, whose `Reason` is what `Take` throws or the runtime's error
+int Read(int n) {
+    v = attempt { Take(n) } else {
+        Crashed c => {
+            match c.Reason {
+                Lost l => print("lost {l.Code}")
+                RuntimeError e => print(e.Kind)
+            }
+
+            -1
+        }
+    }
+
+    return v
+}
+
+print(Read(7))
+print(Read(5))
+print(Read(0))
+```
+
+Case: [actors/attempt-success.kz](../corpus/actors/attempt-success.kz)
+```kurz
+v = attempt { 1 + 2 } else {
+    Crashed c => 0
+}
+print(v)
+name = "kurz"
+s = attempt { "hello {name}" } else {
+    Crashed c => "crashed"
+}
+print(s)
+```
+
+Case: [actors/attempt-propagates.kz](../corpus/actors/attempt-propagates.kz)
+```kurz
+data Bad(string Why)
+
+int Check(int n) {
+    if n > 9 {
+        throw Bad("too big")
+    }
+
+    return n
+}
+
+// with no `else`, the case `Crashed` leaves `Read` through its signature, as a call's case does
+int | Crashed<Bad | RuntimeError> Read(int n) {
+    v = attempt { Check(n) }
+    return v + 6
+}
+
+r = Read(9) else {
+    Crashed<Bad | RuntimeError> c => 0
+}
+print(r)
+q = Read(10) else {
+    Crashed<Bad | RuntimeError> c => {
+        print(c.Place.Line)
+        0
+    }
+}
+print(q)
+```
+
+### U47 (assumed, §6) What the block of an `attempt` takes
+
+The block gets values only and cannot touch the parent's `mut` state, so that nothing half-changed survives (§6). It takes
+values, immutable class instances and actor references freely, and a mutable class instance only with `copy` before it,
+for a deep copy, or `move`, else the compile error `capture-needs-word`, at the name; an assignment of a variable it takes
+is `capture-assign`, as in any lambda (F11); and a field of the actor whose code runs the `attempt` that the block names
+is taken by value at the block's start, as a variable is, so that an assignment of it is `capture-assign` too. What it
+takes is taken by value at its start, as a lambda takes it (F15), and copied into the child's heap as a message's
+arguments are (U12) *(assumed: T19 of comment 6980152255, built at the default while it waits for the owner)*. A pointer (R10)
+or a view of an atomic type (R19) that the block takes, or a value that reaches one, is the compile error `pointer-crosses`
+at its first read in the block, and so is a value of the block that reaches one, at the `attempt`, as for a message's
+argument and result (U12; §6, the owner, 2026-11-21, #582, comment 7062996932, Q25 1). A field of
+an instance of a class that is no actor, whose method runs the `attempt`, is taken so too *(assumed: a reading of the
+build, proposed with this record and not put to the owner)*.
+
+Case: [actors/attempt-capture-needs-word.kz](../corpus/actors/attempt-capture-needs-word.kz)
+```kurz
+class Cart(mut int Items)
+
+int Count(Cart c) => c.Items
+
+// the block takes the mutable instance `cart` with `copy` before it, and bare it is the error
+cart = Cart(2)
+n = attempt { Count(copy cart) } else {
+    Crashed c => 0
+}
+m = attempt { cart.Items } else {
+    Crashed c => 0
+}
+print(n + m)
+```
+
+Case: [actors/attempt-capture-assign.kz](../corpus/actors/attempt-capture-assign.kz)
+```kurz
+// the block takes `tries` by value, as a lambda does, and cannot assign it
+mut tries = 0
+v = attempt {
+    tries = tries + 1
+    return tries
+} else {
+    Crashed c => 0
+}
+print(v + tries)
+```
+
+Case: [actors/attempt-field.kz](../corpus/actors/attempt-field.kz)
+```kurz
+// `count` is taken by value at the block's start: the call back into `Counter`, which the wait of its `attempt` lets in,
+// changes the field and not the block's value
+actor Counter {
+    mut int count = 5
+
+    pub void Bump() {
+        count = count + 1
+    }
+
+    pub int Peek() {
+        me = this
+        v = attempt {
+            me.Bump()
+            return count
+        } else {
+            Crashed c => -1
+        }
+
+        return v * 10 + count
+    }
+}
+
+k = spawn Counter()
+print(k.Peek())
+```
+
+Case: [actors/attempt-pointer-crosses.kz](../corpus/actors/attempt-pointer-crosses.kz)
+```kurz
+int Look(long* q) => 1
+
+// the block takes the value of `word`, and the pointer `ptr` is the error, as at a message (U12)
+mut long word = 5
+ptr = &word
+n = attempt { word > 1 } else {
+    Crashed c => false
+}
+m = attempt { Look(ptr) } else {
+    Crashed c => 0
+}
+print(n)
+print(m)
+```
+
+### U48 (assumed, §6) `return` in an `attempt`
+
+`return` in the block ends the block with its value, as `return` in a lambda's body ends the lambda (F7), and a block of
+one expression gives that expression's value; `return` in an arm of its `else` leaves the function around it, as the
+record's sample returns `ImportFailed(c.Reason)` *(assumed: T20 of comment 6980152255, built at the default while it waits
+for the owner)*.
+
+Case: [actors/attempt-return.kz](../corpus/actors/attempt-return.kz)
+```kurz
+data Bad(string Why)
+
+int F(int n) {
+    if n > 0 {
+        throw Bad("big")
+    }
+
+    return n
+}
+
+// `return` in the block gives the block's value, an `int`, and in the arm leaves `Read` with its `string`
+string Read(int n) {
+    v = attempt {
+        if n > 1 {
+            return 2
+        }
+
+        return F(n)
+    } else {
+        Crashed c => return "crashed"
+    }
+
+    return "{v}"
+}
+
+print(Read(1))
+print(Read(2))
+print(Read(0))
+```
+
+### U49 (assumed, §6) The chain, the deadline and the wait of an `attempt`
+
+The child runs a call of its parent's chain: its message carries the chain's ID and the deadline the chain has left
+(U37), a `within` block's around the `attempt` among it (U38), and no bound of its own; the parent waits for it as for a
+call, letting in the calls of its chain (U17), so that a call back into the parent from the block runs; a call or a wait
+of the block past the deadline raises `call-timeout` in the child (U36), which reaches the parent as `Crashed` *(assumed:
+T21 of comment 6980152255, built at the default while it waits for the owner)*. In the top-level code the top-level code
+supervises the child as the root actor and waits for it in its wait, which runs the scheduler (§6, "Deadlocks")
+*(assumed: T22 of comment 6980152255, built at the default while it waits for the owner)*. A message whose deadline
+passed at its queueing, or before the child takes it, is dropped (U37), and the `attempt` raises `call-timeout` at its
+line in the parent, as a call does, the crash of the parent ending the child (U13) *(assumed: T25 of comment
+6982985447, built at the default while it waits for the owner)*. An `attempt` of the top-level code outside a `within`
+roots a chain with no deadline, each call of its block bounded on its own (U36) *(assumed: T26 of comment 6982985447,
+built at the default while it waits for the owner)*.
+
+Case: [actors/attempt-callback.kz](../corpus/actors/attempt-callback.kz)
+```kurz
+// the block runs a call of the chain of `Run`, so that its call back into `Store` runs while `Run` waits
+actor Store {
+    mut int count = 0
+
+    pub int Add() {
+        count = count + 1
+        return count
+    }
+
+    pub int Run() {
+        me = this
+        v = attempt { me.Add() * 10 } else {
+            Crashed c => -1
+        }
+
+        return v + count
+    }
+}
+
+s = spawn Store()
+print(s.Run())
+print(s.Add())
+```
+
+Case: [actors/attempt-top-level.kz](../corpus/actors/attempt-top-level.kz)
+```kurz
+actor Store {
+    pub int Get() => 1
+}
+
+// the top-level code supervises the child of each `attempt` and waits for it, as it waits for a call
+s = spawn Store()
+v = attempt { s.Get() + 1 } else {
+    Crashed c => -1
+}
+print(v)
+w = attempt {
+    n = s.Get()
+    if n > 0 {
+        throw "top"
+    }
+
+    return n
+} else {
+    Crashed c => {
+        print("crashed at {c.Place.Line}")
+        -1
+    }
+}
+print(w)
+```
+
+Case: [actors/attempt-deadline.kz](../corpus/actors/attempt-deadline.kz)
+```kurz
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Store {
+    pub int Get() => 1
+
+    pub void Slow() {
+        Hold(150ms)
+    }
+}
+
+// the block's call past the deadline of the `within` block around the `attempt` raises `call-timeout` in the child,
+// which reaches the top-level code as `Crashed`
+s = spawn Store()
+within 100ms {
+    v = attempt {
+        Hold(150ms)
+        return s.Get()
+    } else {
+        Crashed c => {
+            print(c.Reason.Kind)
+            -1
+        }
+    }
+
+    print(v)
+}
+
+// the block's call that waits past the deadline, behind a message that holds its callee, raises `call-timeout` in the
+// child, while the code that waits for the `attempt` waits on past that deadline, with none of its own
+within 100ms {
+    w = attempt {
+        send s.Slow()
+        return s.Get()
+    } else {
+        Crashed c => {
+            print(c.Reason.Kind)
+            -2
+        }
+    }
+
+    print(w)
+}
+
+print("after")
+```
+
+Case: [actors/attempt-dropped.kz](../corpus/actors/attempt-dropped.kz)
+```kurz
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Holder {
+    pub void Busy() {
+        Hold(300ms)
+    }
+}
+
+// `Busy`, queued ahead of the block's message, holds the one thread past the deadline, and the message is dropped
+h = spawn Holder()
+within 100ms {
+    send h.Busy()
+    v = attempt { 1 } else {
+        Crashed c => 0
+    }
+
+    print(v)
+}
+```
+
+Case: [actors/attempt-dropped-queued.kz](../corpus/actors/attempt-dropped-queued.kz)
+```kurz
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+// the deadline of the `within` block passed before the `attempt` queues its message, which is dropped unqueued, and the
+// `attempt` raises `call-timeout` at its line
+within 100ms {
+    Hold(150ms)
+    v = attempt { 1 } else {
+        Crashed c => 0
+    }
+
+    print(v)
+}
+```
+
+### U50 (assumed, §6) The crash an `attempt` holds
+
+A crash of the block writes the one `Error` log line of a crash a supervisor handles (U24) as the case reaches the parent
+*(assumed: T23 of comment 6980152255, built at the default while it waits for the owner)*, `attempt#<n> crashed: ...`,
+the name `attempt` standing for the actor's type *(assumed: a reading of the build, proposed with this record and not put
+to the owner)*. The child has a heap of its own and a pooled stack, both freed at its end and at its crash, the thrown
+value copied into the parent's heap before its own is freed, as a block of `on crash` gets it (U30); an `attempt` inside
+the block of an `attempt` belongs to the inner child, whose crash the inner one holds, and a crash the inner one does not
+hold, a throw of its arms among it, is the outer child's, as under `escalate` (U25) *(assumed: the small defaults of
+comment 6980152255, not asked)*.
+
+Case: [actors/attempt-nested.kz](../corpus/actors/attempt-nested.kz)
+```kurz
+// the inner `attempt` belongs to the outer one's child, and holds the crash of its own
+xs = [1]
+v = attempt {
+    w = attempt { xs[3] } else {
+        Crashed c => {
+            print("inner {c.Place.Line}")
+            5
+        }
+    }
+
+    return w + xs[2]
+} else {
+    Crashed c => {
+        print("outer {c.Place.Line}")
+        -1
+    }
+}
+print(v)
+```
+
+Case: [actors/attempt-log.kz](../corpus/actors/attempt-log.kz)
+```kurz
+// the crash writes its one `Error` line as the case reaches the top-level code, a line the case leaves out
+attempt {
+    throw "no stock"
+} else {
+    Crashed c => print("held")
+}
+```
 
 ### U51 (decided, §11, §13) `per node`
 

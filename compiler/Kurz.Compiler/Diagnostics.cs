@@ -142,6 +142,7 @@ public static class ErrorIds
     public const string Semicolon = "semicolon";
     public const string ReservedWord = "reserved-word";
     public const string CaptureAssign = "capture-assign";
+    public const string CaptureNeedsWord = "capture-needs-word";
     public const string ReversedRange = "reversed-range";
     public const string AmbiguousCall = "ambiguous-call";
     public const string CannotInfer = "cannot-infer";

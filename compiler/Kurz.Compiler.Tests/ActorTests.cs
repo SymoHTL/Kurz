@@ -6541,6 +6541,218 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran((run.Code, run.Output, rest), 0, ["1", "2", "0"], "");
     }
 
+    // ---- the block `attempt { ... }` (U46 to U50; assumed: T18 to T23 of #519, comment 6980152255) --------------------------------
+
+    /// <summary>
+    /// A round of <c>attempt</c>s by <c>i</c>: a <c>Note</c> thrown where <c>i % 3</c> is 0, the runtime's <c>index-out-of-range</c> where it
+    /// is 2, else a string built from a copy of the instance <c>kept</c> the block takes; each <c>Crashed</c> read into a string by its
+    /// <c>Reason</c>; and <c>Resident</c>, the resident memory in KiB.
+    /// </summary>
+    private const string AttemptRounds = """
+        class Note(mut string Why, List<int> Codes) {
+            pub string Text() => Why
+        }
+
+        int Use(Note n) => n.Codes.Count
+
+        string Read(Note | RuntimeError r) {
+            match r {
+                Note n => return "{n.Why} {n.Codes}"
+                RuntimeError e => return "{e.Kind}"
+            }
+        }
+
+        string Round(Note kept, int i) {
+            v = attempt {
+                if i % 3 == 0 {
+                    throw Note("lost {i}", [i, 2])
+                }
+
+                xs = [1]
+                return "{Use(copy kept)} {xs[i % 3 - 1]}"
+            } else {
+                Crashed c => Read(c.Reason)
+            }
+
+            return v
+        }
+
+        long | IoError Resident() {
+            bytes = File.ReadAll("/proc/self/status")
+            text = string.FromUtf8(bytes) else {
+                InvalidUtf8 => ""
+            }
+
+            for line in text.Split('\n') {
+                if line.StartsWith("VmRSS:") {
+                    return long.Parse(line.Replace("VmRSS:", "").Replace("kB", "").Trim()) else {
+                        ParseError => -1
+                    }
+                }
+            }
+
+            return -1
+        }
+
+        held = Note("kept", [1, 2, 3])
+
+        """;
+
+    [Fact]
+    public void An_attempts_child_heap_is_freed_at_its_end_and_at_its_crash()
+    {
+        // U50 (assumed: the small defaults of comment 6980152255): the child of each `attempt` has a heap of its own, freed whole where its
+        // block gives its value, where it throws and where the runtime's error ends it, so that the thread holds as many heaps after three
+        // `attempt`s as before them
+        const string program = AttemptRounds + """
+            before = HttpServer.Heaps()
+            print(Round(held, 1))
+            print(Round(held, 0))
+            print(Round(held, 2))
+            print(HttpServer.Heaps() - before)
+
+            """;
+        var run = BuildAndRun(program, ListTests.Edited(HeapCount), "actor-attempt-heaps");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(2, crashes.Count);
+        Ran((run.Code, run.Output, rest), 0, ["3 1", "lost 0 [0, 2]", "IndexOutOfRange", "0"], "");
+    }
+
+    [Fact]
+    public void Memory_stays_flat_over_ten_thousand_attempts()
+    {
+        // U47, U50: each child's heap and stack, the copy of what its block takes, each crash's message, its thrown copy and its `Crashed`,
+        // and the value that crosses back are let go of, so that 10,000 `attempt`s after 1,000 that warm the pools, two thirds of them
+        // crashes, grow the resident memory by less than 256 KiB
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // no `/proc/self/status` reads the resident memory on Windows
+        }
+
+        const string program = AttemptRounds + """
+            mut total = 0
+            for i in 0..<1000 {
+                total = total + Round(held, i).Bytes.Count
+            }
+
+            before = Resident() else {
+                IoError e => -1
+            }
+
+            for i in 0..<10000 {
+                total = total + Round(held, i).Bytes.Count
+            }
+
+            after = Resident() else {
+                IoError e => -1
+            }
+
+            print(total > 0)
+            print(after - before)
+            print(before)
+
+            """;
+        var run = BuildAndRun(program, toolchain.Runtime, "actor-attempt-memory");
+        Assert.Equal((0, 334 + 333 + 3334 + 3333), (run.Code, Logged(run.Error).Crashes.Count));
+        Assert.Equal("true", run.Output[0]);
+        var grown = long.Parse(run.Output[1], System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(grown < 256, $"10,000 attempts grow the resident memory by {grown} KiB");
+
+        // the bound is read against a reading: `Resident` gives -1 where it reads none, which a growth of 0 would hide
+        Assert.True(long.Parse(run.Output[2], System.Globalization.CultureInfo.InvariantCulture) > 0, $"the resident memory before the run read {run.Output[2]}");
+    }
+
+    [Fact]
+    public void What_crosses_into_and_out_of_the_child_of_an_attempt_is_a_copy_in_the_heap_it_reaches()
+    {
+        // U47 with U12 (assumed: T19 of comment 6980152255): the block's copy of a mutable instance, its list among it, in the child's heap;
+        // the block's value, a list of strings, copied into the heap of the code that waits; and the thrown instance moved there before the
+        // child's heap is freed (U50, the small defaults of that comment), each read after that free, under the allocator that makes every
+        // freed block inaccessible; the crash writes its one log line, named `attempt` (U50; assumed: T23 of that comment)
+        const string text = """
+            class Note(mut string Why, List<int> Codes) {
+                pub string Text() => Why
+            }
+
+            List<string> Words(Note n) => [n.Why, "{n.Codes}"]
+
+            List<string> Fail(int n) {
+                if n > 0 {
+                    throw Note("lost", [n, 4])
+                }
+
+                return []
+            }
+
+            List<string> Read(Note | RuntimeError r) {
+                match r {
+                    Note n => return Words(n)
+                    RuntimeError e => return [e.Detail]
+                }
+            }
+
+            kept = Note("kept", [1, 2])
+            xs = attempt { Words(copy kept) } else {
+                Crashed c => ["crashed"]
+            }
+
+            print(xs)
+            ys = attempt { Fail(3) } else {
+                Crashed c => Read(c.Reason)
+            }
+
+            print(ys)
+            print(kept.Why)
+
+            """;
+        var run = BuildAndRun(text, ListTests.Fenced, "actor-attempt-copies");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["attempt#2 crashed: thrown \"lost\" at program.kz:9"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["[kept, [1, 2]]", "[lost, [3, 4]]", "kept"], "");
+    }
+
+    [Fact]
+    public void An_attempt_of_the_top_level_code_outside_a_within_block_has_no_deadline()
+    {
+        // U49 (assumed: T26 of comment 6982985447): the block's message roots a chain with no deadline, so that a call of the block made past
+        // the default bound of a call, 5 seconds (U36), is bounded on its own and runs
+        if (OperatingSystem.IsWindows())
+        {
+            return; // a build for Windows says `not supported` to the reads of the clock (S11)
+        }
+
+        const string text = """
+            // the thread held for `d`, with no call and no wait
+            void Hold(duration d) {
+                instant start = instant.Now
+                while start.Elapsed < d {
+                }
+            }
+
+            actor Store {
+                pub int Get() => 1
+            }
+
+            s = spawn Store()
+            v = attempt {
+                Hold(5200ms)
+                return s.Get()
+            } else {
+                Crashed c => {
+                    print(c.Reason.Kind)
+                    -1
+                }
+            }
+
+            print(v)
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-attempt-unbounded");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Empty(crashes);
+        Ran((run.Code, run.Output, rest), 0, ["1"], "");
+    }
+
     // ---- the tests of `kurz test` (chapter 20, Y5; issue 586) ---------------------------------------------------------------------
 
     [Fact]
