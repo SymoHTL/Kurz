@@ -195,9 +195,11 @@ public sealed class ThrowSets
     /// overrides and of the methods that implement it, a data type's method taking the value it is called on first (D16), and any other
     /// edge, a lambda's or a construction's among them, passes none, which reads as no callback. A <c>spawn</c> reaches the
     /// construction of the actor it makes, whose code is that actor's, and the code under <c>escalate</c> is the child's: neither is the
-    /// spawner's; a message to the name of a <c>per node</c> actor reaches its construction as a <c>spawn</c> does (U52), but through its own
-    /// name inside its method, which reads as through <c>this</c> (U55), and the block of an <c>attempt</c> is the code of the code that runs
-    /// it, which waits on it as on a call (U49) (the owner, 2026-11-21, #519, comment 7068198309, per node 1 and attempt 1). Each entry holds too the writes of its actor's fields that its code reaches, with the origins each value can have in
+    /// spawner's; a message to the name of a <c>per node</c> actor reaches its construction as a <c>spawn</c> does (U52), and its receiver is
+    /// that actor, named, which passes through every edge as the actor itself does, so that in the code of its own messages, a function's and
+    /// a lambda's they run among it, it reads as through <c>this</c> (U55), and the block of an <c>attempt</c> is the code of the code that
+    /// runs it, which waits on it as on a call (U49) (the owner, 2026-11-21, #519, comment 7068198309, per node 1 and attempt 1, and
+    /// comment 7069702044). Each entry holds too the writes of its actor's fields that its code reaches, with the origins each value can have in
     /// its terms, passed as an argument's are (T49 (c)). The walk reads each unit once over all the actors, from the roots of the sets and
     /// every actor's code, and the reach of each unit is its own sites and writes and those of the units it runs, read again as long as one
     /// grows.
@@ -800,8 +802,7 @@ public sealed class ThrowSets
 
         // U57: the parameters the arguments of a call of the function fill, each by its place, where the checker read it
         var parameters = declaration.Parameters.Select(p => site.Model.Declares(p) ? site.Model.DeclarationOf(p) : null).ToList();
-        // U55: a method of an actor, whose code a call through the actor's own name reaches as through `this`
-        var walk = new Walk(this, site.Model, site.File, unit, parameters, own: f.Owner is { IsActor: true } actor && !f.IsStatic ? actor : null);
+        var walk = new Walk(this, site.Model, site.File, unit, parameters);
         foreach (var parameter in declaration.Parameters)
         {
             walk.Optional(parameter.Default);
@@ -954,7 +955,7 @@ public sealed class ThrowSets
     /// unit, and <paramref name="lambda"/> holds for a lambda's body, whose <c>this</c> and parameters are no origin the loops follow
     /// (U57).
     /// </summary>
-    private sealed class Walk(ThrowSets sets, SemanticModel model, int file, Unit unit, List<VariableSymbol?>? parameters = null, bool lambda = false, ClassSymbol? own = null)
+    private sealed class Walk(ThrowSets sets, SemanticModel model, int file, Unit unit, List<VariableSymbol?>? parameters = null, bool lambda = false)
     {
         // O7: the cases a bare `throw` throws in the arm of `else` being walked, innermost on top
         private readonly Stack<IReadOnlyList<KurzType>> bare = new();
@@ -1454,30 +1455,27 @@ public sealed class ThrowSets
                     break;
                 case CallKind.ActorCall or CallKind.ActorSend:
                     var target = ((ActorType)info.Target!).Symbol;
-                    var self = info.ByName && !lambda && ReferenceEquals(target, own); // U55: its own name inside its method, read as `this`
                     if (info.ByName)
                     {
                         // U52: a message to the name of a `per node` actor starts it where none stands, its constructor run on the caller's
                         // stack, whose throw is the caller's crash, as at a `spawn`; for the loops the construction is the started actor's code,
-                        // which no loop of the caller holds, and the start an edge into it, as a `spawn`'s, but through the actor's own name
-                        // inside its method, read as through `this` (U56, U55; the owner, 2026-11-21, #519, comment 7068198309, per node 1)
+                        // which no loop of the caller holds, and the start an edge into it, as a `spawn`'s (U56; the owner, 2026-11-21, #519,
+                        // comment 7068198309, per node 1), from the actor named, which the code of its own messages is (U55, U57)
                         unit.Edges.Add(new Edge(new Construction(target), null, Crosses: true));
                         if (sets.reach && c.Vouch > 0)
                         {
                             break; // U58: `vouch` before it is `syntax`, the call's own error, which makes no edge
                         }
 
-                        if (!self)
-                        {
-                            unit.Sites.Add(new ActorSite(c, target, null, SiteKind.Start, Origin.Other, [], file, c.Line));
-                        }
+                        unit.Sites.Add(new ActorSite(c, target, null, SiteKind.Start, Origin.Named(target), [], file, c.Line));
                     }
 
                     // U20: the callee's code runs in the callee, whose crash its caller gets as `callee-crashed`; U56: the call's edge, with where
-                    // its receiver comes from, the actor's own for a `send` of its own method (U11) and for a call through its own name inside
-                    // its method (U55), and each argument by its parameter
+                    // its receiver comes from, the actor's own for a `send` of its own method (U11), the actor named for a call through the name
+                    // of a `per node` actor, in a lambda too, which reaches that actor wherever it stands (U55; the owner, 2026-11-21, #519,
+                    // comment 7069702044), and each argument by its parameter
                     unit.Sites.Add(new ActorSite(c, target, info.Function, info.Kind == CallKind.ActorCall ? SiteKind.Wait : SiteKind.Send,
-                        self ? Origin.Self : info.ByName ? Origin.Other : c.Callee is MemberAccess m ? OriginOf(m.Target) : Origin.Self, Slots(c, info), file, c.Line));
+                        info.ByName ? Origin.Named(target) : c.Callee is MemberAccess m ? OriginOf(m.Target) : Origin.Self, Slots(c, info), file, c.Line));
                     break;
                 case CallKind.ListAdd or CallKind.ListInsert:
                     // M9, X11: `Add` and `Insert` keep the function value they take and run none of it, so a lambda there brings what its
@@ -1747,9 +1745,10 @@ public sealed class ThrowSets
 /// <summary>
 /// U57: where the reference a call goes through, or an argument it passes, comes from in the unit of code that holds it: the actor
 /// itself (<see cref="Self"/>), a parameter of the unit's function by its place, a field of the actor or an item of the list
-/// such a field holds (<see cref="Of"/>), or anything else (<see cref="Other"/>).
+/// such a field holds (<see cref="Of"/>), the one actor of a <c>per node</c> type through its name (<see cref="Named"/>), or anything
+/// else (<see cref="Other"/>).
 /// </summary>
-public readonly record struct Origin(int Parameter, FieldSymbol? Field = null, bool Item = false)
+public readonly record struct Origin(int Parameter, FieldSymbol? Field = null, bool Item = false, ClassSymbol? Actor = null)
 {
     /// <summary><c>this</c> as a value inside an actor, its own reference (U10), or a local without <c>mut</c> that holds it.</summary>
     public static readonly Origin Self = new(-1);
@@ -1759,6 +1758,13 @@ public readonly record struct Origin(int Parameter, FieldSymbol? Field = null, b
 
     /// <summary>A field of the actor (T49 (c)), or with <paramref name="item"/> an item of the list it holds.</summary>
     public static Origin Of(FieldSymbol field, bool item = false) => new(-3, field, item);
+
+    /// <summary>
+    /// U55: the one actor of a <c>per node</c> type, named through its name, the same in every unit, so that it passes through every edge
+    /// as <see cref="Self"/> does, a lambda's among them, and is the actor itself in the code of that actor's messages (the owner,
+    /// 2026-11-21, #519, comment 7069702044).
+    /// </summary>
+    public static Origin Named(ClassSymbol actor) => new(-4, Actor: actor);
 }
 
 /// <summary>

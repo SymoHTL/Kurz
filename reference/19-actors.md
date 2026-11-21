@@ -5226,7 +5226,9 @@ Case: [actors/per-node-limit.kz](../corpus/actors/per-node-limit.kz)
 
 Inside a `per node` actor, a call through its name, `Cache.Get(1)`, is a message, as a call through
 `this` is: a call that waits is a call of its own chain, which layer 1 runs (U17), and no edge of layer 2's graph, as a
-call through `this` is none (U57) (the owner, 2026-11-21, #519, comment 7068198309, per node 1), and
+call through `this` is none (U57) (the owner, 2026-11-21, #519, comment 7068198309, per node 1), and so is one through its
+name in a function or a lambda that its own message runs, the actor named passing through the calls as `this` does
+(the owner, 2026-11-21, #519, comment 7069702044), and
 `send Cache.Add(1)` runs after the current message (U11), against a direct call, as `Get(1)` is (U10)
 *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. `this` inside it gives a reference to the running instance, which ends with it, while its name
 reaches the fresh one that a stop or the limit starts (U54) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*.
@@ -5290,8 +5292,8 @@ graph: neither a call its code makes nor a call through a reference to it is an 
 proposed with this record and not put to the owner)*: T46 (a) of comment 7051071630, an edge to every implementer, is not
 built, since that construct is `not supported` on `main`. T47 (a) is built for the actor declared `per node` (U51): its
 methods and its construction are points of the graph, a call through its name is an edge, and `vouch` before it is `syntax`,
-since it always reaches its one actor (U58), a call through its own name inside its method is a call through `this`, which
-makes no edge (U55, U57), and a message to its name, which can start it (U52), is an edge into its construction, whose code
+since it always reaches its one actor (U58), a call through its own name in the code of its own messages, a function's and
+a lambda's they run among it, is a call through `this`, which makes no edge (U55, U57; the owner, 2026-11-21, #519, comment 7069702044), and a message to its name, which can start it (U52), is an edge into its construction, whose code
 is that actor's, as a `spawn`'s is, so that a loop through its start comes back by a call that waits in its construction
 (the owner, 2026-11-21, #519, comment 7068198309, per node 1). The block of an `attempt` is code of the method that runs it, which waits on it as on a call
 (U49), so that a call that waits in the block is an edge of that method, a call back to it through a local that holds
@@ -5643,8 +5645,8 @@ on through a chain of calls that wait is one (T60 (b)), and only a parameter tha
 passing through itself is one, so that a cycle of parameters that no `this` fills is none, and so is a cycle that a `this`
 enters, a recursion through two actor types that hands the reference back and forth among them (the owner, 2026-11-20, #519, comment 7051071630, T62 (a)). Such a call reaches the caller that waits, which takes it as a call of its chain (U17), as layer 1 runs `A.Load`
 inside `A.Save` (§6, "Deadlocks", layer 2, "Exempt without override: a callback through a reference the caller passed in
-that same call"). So is a call through the name of a `per node` actor inside its own method, which U55 reads as a call
-through `this`, and a call in the block of an `attempt` through a local of the method that runs it that holds `this`, a call
+that same call"). So is a call through the name of a `per node` actor in the code of its own messages, inside its own
+method and in a function or a lambda that runs there, which U55 reads as a call through `this` (the owner, 2026-11-21, #519, comment 7069702044), and a call in the block of an `attempt` through a local of the method that runs it that holds `this`, a call
 back into the actor that waits on the block (U49) (the owner, 2026-11-21, #519, comment 7068198309, per node 1, attempt 1).
 
 A field set from a parameter that is a callback is one, and so is a list of them (the owner, 2026-11-20, #519, comment 7051071630, T49 (c)); a field

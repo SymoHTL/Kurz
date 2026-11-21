@@ -803,6 +803,59 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     }
 
     [Fact]
+    public void A_call_through_its_own_name_in_a_function_or_a_lambda_its_own_message_runs_is_no_edge()
+    {
+        // U55, U57: `Counter.Get` through the name, in `Helper` and in a lambda that `Counter.Bump` runs, reaches the actor whose message
+        // runs them, as `this` would, which takes it as a call of its chain: no `call-loop` (the owner, 2026-11-21, #519, comment
+        // 7069702044)
+        const string program = """
+            actor Counter per node {
+                mut int count = 0
+
+                pub int Bump() {
+                    count = Helper() + 1
+                    f = () => Counter.Get()
+                    return f()
+                }
+
+                pub int Get() => count
+            }
+
+            int Helper() => Counter.Get()
+
+            print(Counter.Bump())
+
+            """;
+        Assert.Empty(Diagnostics(program));
+    }
+
+    [Fact]
+    public void A_call_through_the_name_of_another_per_node_actor_in_a_function_is_an_edge()
+    {
+        // U55, U56: `Via` calls `Right.Ask` through its name for `Left.Ask`, a message of `Left`, which is no `Right`: an edge, and the
+        // loop comes back to `Left` at line 8 (the owner, 2026-11-21, #519, comment 7069702044)
+        const string program = """
+            actor Left per node {
+                pub int Ask() => Via() + 1
+
+                pub int Value() => 1
+            }
+
+            actor Right per node {
+                pub int Ask() => Left.Value() + 2
+            }
+
+            int Via() => Right.Ask()
+
+            print(Left.Ask())
+
+            """;
+        var errors = Check(program).Diagnostics.Sorted;
+        Assert.Equal([(ErrorIds.CallLoop, 8)], errors.Select(d => (d.Id, d.Line)));
+        Assert.Equal([11, 8], Named(errors[0]));
+    }
+
+    [Fact]
     public void A_loop_of_a_per_node_actor_through_itself_names_its_one_actor_and_no_vouch()
     {
         // U52, U56: the start of `Cache` runs `Measured`, which waits on `Cache.Size` through its name, outside the actor's method: a
