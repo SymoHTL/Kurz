@@ -202,8 +202,9 @@ public sealed partial class Emitter
     /// would have been. The copies of a call that is no message are temporaries of the region from their copy to their read
     /// (<see cref="CopiedLate"/>), which the region lets go of after this, with its other temporaries, the last made first, a copy a
     /// slot takes among them, as every value a slot took from an argument before the one that left (<see cref="Taken"/>; issue 569).
-    /// A copy a slot of a message takes is not held here: what becomes of it at such an exit is section 6's reading, put to the owner
-    /// as T24 (issue 519, comment 6981296432).
+    /// A copy a slot of a message takes is not held here: a message with an argument that can leave after one that crosses is built in
+    /// a heap of its own, which the region frees after this with the copies in it (<see cref="EndHeaps"/>; section 6, the owner,
+    /// 2026-11-20, #519, comment 7051492844, "T24 (1)").
     /// </summary>
     private void EndSessions(List<(string Value, KurzType Type)> temporaries)
     {

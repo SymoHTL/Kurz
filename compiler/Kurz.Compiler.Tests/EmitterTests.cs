@@ -1122,6 +1122,48 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal(heaps, Regex.Count(program.Ir, @"call ptr @""[^""]+\.MessageHeapNew\.[0-9]+[^""]*""\(\)"));
     }
 
+    [Theory]
+    [InlineData("print(s.Take(items, n))", 0)]
+    [InlineData("print(s.Take(items, (n)))", 0)]
+    [InlineData("print(s.Take(items, 2))", 0)]
+    [InlineData("print(s.Text(items, \"a\"))", 0)]
+    [InlineData("print(s.Letter(items, 'a'))", 0)]
+    [InlineData("print(s.Flag(items, true))", 0)]
+    [InlineData("print(s.Maybe(items, null))", 0)]
+    [InlineData("print(s.Wait(items, -2s))", 0)]
+    [InlineData("print(s.Take(items, -2))", 0)]
+    [InlineData("print(s.Take(items, ns[0]))", 1)]
+    [InlineData("print(s.Take(items, (ns[0])))", 1)]
+    [InlineData("print(s.Take(items, n + 1))", 1)]
+    [InlineData("print(s.Text(items, \"{n}\"))", 1)]
+    [InlineData("send s.Add(items, ns[0])", 1)]
+    [InlineData("print(s.Take(items, ns[0]) within 2s)", 1)]
+    [InlineData("print(s.Take(items, n))\nprint(Cache.Take(items, n))", 0)]
+    [InlineData("print(s.Take(items, n))\nprint(Cache.Take(items, ns[0]))", 1)]
+    [InlineData("print(s.Three(items, ns[0], items))", 1)]
+    [InlineData("print(s.First(ns[0], items))", 0)]
+    [InlineData("print(s.Two(n, ns[0]))", 0)]
+    public void A_message_whose_argument_after_a_crossing_one_can_raise_with_no_call_in_it_is_built_in_a_heap_of_its_own(string statement, int heaps)
+    {
+        // section 6 (the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)"): an argument after one that crosses, `items`, copied
+        // into the callee's heap where it is evaluated, that can raise with no call in it, an index, an operator or a string's hole,
+        // builds the message in a heap of its own (the runtime's `MessageHeapNew`), which the crash of its builder frees
+        // with the copies (ActorTests, `A_message_whose_argument_after_a_crossing_one_crashes_its_builder_leaves_no_block_in_its_callees_heap`),
+        // a `send`'s, a call's with a clause and a `per node` actor's alike; a literal, a number's or a duration's with its sign, and a read of a name,
+        // either in brackets, raise nothing, and neither does a message whose argument that can raise comes before every crossing one, or
+        // none of whose arguments crosses, each built in the callee's heap, as the reading of the product pass has it (comment
+        // 7056985643); the IR is read, since a message whose argument raises nothing answers alike from either heap
+        var compilation = Compile("actor Store {\n    pub int Take(List<int> xs, int k) => k\n\n    pub int First(int k, List<int> xs) => k\n\n"
+            + "    pub int Two(int a, int k) => k\n\n    pub int Three(List<int> xs, int k, List<int> zs) => k\n\n    pub int Text(List<int> xs, string t) => xs.Count\n\n"
+            + "    pub int Letter(List<int> xs, char c) => xs.Count\n\n    pub int Flag(List<int> xs, bool b) => xs.Count\n\n"
+            + "    pub int Maybe(List<int> xs, string? t) => xs.Count\n\n    pub int Wait(List<int> xs, duration d) => xs.Count\n\n"
+            + "    pub void Add(List<int> xs, int k) {\n    }\n}\n\nactor Cache per node {\n    pub int Take(List<int> xs, int k) => k\n}\n\n"
+            + $"s = spawn Store()\nns = [1]\nn = 1\nitems = [1]\nprint(ns.Count + n + items.Count)\n{statement}\n", Builder.CheckRuntime(Builder.HostTarget!.Value));
+        var program = compilation.Program;
+        Assert.True(program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        Assert.Equal(heaps, Regex.Count(program.Ir, @"call ptr @""[^""]+\.MessageHeapNew\.[0-9]+[^""]*""\(\)"));
+    }
+
     [Fact]
     public void Remove_finds_the_slot_of_its_key_once_and_takes_the_slot_of_a_copy_at_its_offset()
     {
