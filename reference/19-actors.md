@@ -3423,7 +3423,7 @@ Case: [actors/restart-reentrant-cap.kz](../corpus/actors/restart-reentrant-cap.k
 ```kurz
 // at their restarts fourteen `A`s' constructors each wait on `B.Ask`, whose call back waits in the inbox for that constructor, from
 // thirteen places of `Ask`, spawned in the reverse of the file's order, the last place twice: the error line names the first place
-// in the file, ten lines `kept out at` the next ten, and one line the two places past those
+// in the file, ten lines `kept out at` the ten after it, and one line the two places past those
 
 actor B {
     mut A? a = null

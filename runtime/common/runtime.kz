@@ -5057,8 +5057,8 @@ string KeptPlace(long reply) {
     return "{file}:{line}"
 }
 
-// The order of the places of two calls an actor's start keeps out, their replies `first` and `second` (`Kept`), below 0, 0 or above
-// 0: by the file, its path as the error line writes it, compared byte for byte as `<` compares two strings (`Order`; T32; assumed in
+// The order of the places of two calls an actor's start keeps out, their replies `first` and `second` (`Kept`), less than 0, 0 or
+// more than 0: by the file, its path as the error line writes it, compared byte for byte as `<` compares two strings (`Order`; T32; assumed in
 // section 6), then by the line (section 6, the owner, 2026-11-21, #599, comment 7067639209, the order 1).
 int KeptOrder(long first, long second) {
     mut string firstFile = ""
