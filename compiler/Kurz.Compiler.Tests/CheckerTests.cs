@@ -41,6 +41,40 @@ public sealed class CheckerTests
         Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
     }
 
+    [Theory]
+    [InlineData("within 0s {\n}", "bound-not-positive")]
+    [InlineData("within -1s {\n}", "bound-not-positive")]
+    [InlineData("within 0ms {\n}", "bound-not-positive")]
+    [InlineData("within (0s) {\n}", "bound-not-positive")]
+    [InlineData("within 0 {\n}", "type-mismatch")]
+    [InlineData("within 0.5ns {\n}", "inexact-literal")]
+    [InlineData("within 1ns {\n}", null)]
+    [InlineData("within 0s + 0s {\n}", null)]
+    [InlineData("duration d = 0s\nwithin d {\n}", null)]
+    public void A_bound_of_zero_or_less_that_a_literal_gives_is_bound_not_positive(string program, string? id)
+    {
+        // U40: a duration literal of 0 ns or less, its unary minus included, in brackets or not, is `bound-not-positive` at its line (the
+        // owner, 2026-11-20, #519, comment 7051492844, "T4 (2)"; assumed: T77 and T79 of comment 7055305138; the brackets a reading of the
+        // build), where 1 ns is a bound (the product pass's default, comment 7055304984); a literal of another type has its
+        // `type-mismatch` and a literal of its own error that error, alone (E1); every other bound, a sum of literals and a variable among
+        // them, is read at run time (ActorTests)
+        var line = program.Split('\n').Length - 1;
+        Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
+    }
+
+    [Fact]
+    public void The_text_of_bound_not_positive_names_the_form_and_the_bound()
+    {
+        // U40, U41: the text names the form, a block's, a call's clause's or a declaration's, and the bound as written (assumed: T77 of
+        // comment 7055305138)
+        string Message(string program) => Assert.Single(Check(program).Diagnostics.Items).Message;
+        Assert.Equal("the bound of `within` is 0s; a bound is positive (U40)", Message("within 0s {\n}"));
+        Assert.Equal("the bound of `within` is (-1s); a bound is positive (U40)", Message("within (-1s) {\n}"));
+        Assert.Equal("the bound of the call's `within` is 0ms; a bound is positive (U41, U40)", Message(Store + "print(s.Get() within 0ms)"));
+        Assert.Equal("the bound of the declaration's `within` is -1s; a bound is positive (U41, U40)",
+            Message("actor Store {\n    pub int Get() within -1s => 1\n}\n\ns = spawn Store()\nprint(s.Get())"));
+    }
+
     /// <summary>An actor of two methods, <c>Get</c>, whose call waits, and <c>Run</c>, which a <c>send</c> takes, made in <c>s</c>: seven lines.</summary>
     private const string Store = "actor Store {\n    pub int Get() => 1\n    pub void Run() {\n    }\n}\n\ns = spawn Store()\n";
 
@@ -54,14 +88,16 @@ public sealed class CheckerTests
     [InlineData(Store + "duration d = 2s\nprint(s.Get() within d)", null)]
     [InlineData(Store + "print(s.Get() within (2s + 1ms))", null)]
     [InlineData(Store + "print(s.Get() within 2s + 1ms)", "type-mismatch")]
-    [InlineData(Store + "print(s.Get() within 0s)", null)]
-    [InlineData(Store + "print(s.Get() within -1s)", null)]
+    [InlineData(Store + "print(s.Get() within 0s)", "bound-not-positive")]
+    [InlineData(Store + "print(s.Get() within -1s)", "bound-not-positive")]
+    [InlineData(Store + "print(s.Get() within 1ns)", null)]
     public void The_bound_of_a_calls_clause_is_a_duration(string program, string? id)
     {
         // U39, U40: the clause's bound is read as a block's is: a value of another type is `type-mismatch` at its line, a nullable one
         // `nullable-unchecked` and a call with a `void` success `syntax` (O10); a call that reports its own error has its bound read with
-        // no diagnostic of its own (E1); a bound of zero or less is a deadline that has passed, no error (U40); the bound is a unary
-        // expression, so that `+ 1ms` adds to the call's `int` (assumed: T12 of comment 6967625156)
+        // no diagnostic of its own (E1); a literal of zero or less is `bound-not-positive` (U41; the owner, 2026-11-20, "T4 (2)"; assumed:
+        // T77, T79 and T80 of comment 7055305138), where 1 ns is a bound; the bound is a unary expression, so that `+ 1ms` adds to the
+        // call's `int` (assumed: T12 of comment 6967625156)
         var line = program.Split('\n').Length;
         Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
     }
@@ -146,13 +182,14 @@ public sealed class CheckerTests
     [InlineData("pub int Get() within 2.5 => 1", "type-mismatch")]
     [InlineData("pub int Get() within 2mb => 1", "type-mismatch")]
     [InlineData("pub int Get() within 2s => 1", null)]
-    [InlineData("pub int Get() within 0s => 1", null)]
-    [InlineData("pub int Get() within -1s => 1", null)]
+    [InlineData("pub int Get() within 0s => 1", "bound-not-positive")]
+    [InlineData("pub int Get() within -1s => 1", "bound-not-positive")]
+    [InlineData("pub int Get() within 0 => 1", "type-mismatch")]
     public void The_literal_of_a_declarations_clause_is_a_duration(string method, string? id)
     {
-        // U39, U40, U41: the literal is read as a block's bound is, of another type `type-mismatch` at its line, zero or less a deadline
-        // that has passed at each call, its sign included (U41; assumed: a reading of the build), the literal standing alone (U41;
-        // assumed: T13 of comment 6967625156)
+        // U39, U40, U41: the literal is read as a block's bound is, of another type `type-mismatch` at its line, zero or less
+        // `bound-not-positive`, its sign included (U41; the owner, 2026-11-20, "T4 (2)"; assumed: T77 and T80 of comment 7055305138), the
+        // literal standing alone (U41; assumed: T13 of comment 6967625156)
         Assert.Equal(id is null ? [] : [(id, 2)], Errors($"actor Store {{\n    {method}\n}}\n\ns = spawn Store()\nprint(s.Get())"));
     }
 
