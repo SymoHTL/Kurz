@@ -2142,7 +2142,8 @@ walk of the throw sets (`ThrowSets.ActorsCode`) and `Semantics/CallLoops.cs` rea
 U65): each wait of an actor follows the wait line from the callee its reply names (`Looped`) before it parks, and the
 waiter whose wait closes a loop raises `deadlock` at its call with the loop's waits below its error line (`LoopText`,
 `Deadlocked`), so that a loop that a crash closes, which layer 3 does not see, ends at U18 where the top-level code
-waits on it, and else stays to the end of the program; a crash in a message is the crash of its actor (U19): the runtime stores it in the
+waits on it, its waits below the error line, which one walk from the top-level code's call finds (`Stuck`; U64), and
+else stays to the end of the program; a crash in a message is the crash of its actor (U19): the runtime stores it in the
 activation's header and switches to the scheduler's stack, frees the actor's heap whole but for its
 first block, the record and the state, copies the messages of its inbox into a new heap, ends the
 open copy sessions of its activations, unhooks the reply each parked activation waits on by the swap
