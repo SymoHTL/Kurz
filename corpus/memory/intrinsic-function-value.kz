@@ -1,0 +1,5 @@
+// expect: error syntax at 5
+// rules: R18
+
+// a function of a type is called, and no value (R18, F11)
+print(Vector128.Create)

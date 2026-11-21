@@ -1,0 +1,17 @@
+// expect: error pointer-crosses at 13
+// allow: raw
+// rules: U47
+
+int Look(long* q) => 1
+
+// the block takes the value of `word`, and the pointer `ptr` is the error, as at a message (U12)
+mut long word = 5
+ptr = &word
+n = attempt { word > 1 } else {
+    Crashed c => false
+}
+m = attempt { Look(ptr) } else {
+    Crashed c => 0
+}
+print(n)
+print(m)

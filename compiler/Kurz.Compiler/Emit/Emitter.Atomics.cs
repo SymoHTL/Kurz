@@ -10,8 +10,9 @@ namespace Kurz.Compiler.Emit;
 /// <c>Store</c> are LLVM's <c>load atomic</c> and <c>store atomic</c>, <c>Swap</c> and the <c>Fetch</c> members its
 /// <c>atomicrmw</c>, <c>CompareExchange</c> and <c>CompareExchangeWeak</c> its <c>cmpxchg</c> and <c>cmpxchg weak</c>, and
 /// <c>Fence</c> its <c>fence</c>, each aligned to its word's size, a <c>bool</c>'s word a byte that holds 0 or 1, as Rust's
-/// <c>AtomicBool</c> holds a <c>u8</c>. An order known when the program is built, a value of <c>MemoryOrder</c> written at the call, is
-/// the instruction's own; any other is read when the call runs, by a choice among the instruction's forms for each order, as Rust's
+/// <c>AtomicBool</c> holds a <c>u8</c>. An order known when the program is built, a value of <c>MemoryOrder</c> written at the call or
+/// held by a copy of a function as its constant (T35), is the instruction's own, a copy's constant that Rust refuses raising
+/// <c>invalid-ordering-at-run-time</c> at the call; any other is read when the call runs, by a choice among the instruction's forms for each order, as Rust's
 /// <c>match</c> on the order chooses among its intrinsics, and an order Rust refuses there ends as Rust's panic does, with the
 /// exception <c>invalid-ordering-at-run-time</c> at the call's line.
 /// </summary>

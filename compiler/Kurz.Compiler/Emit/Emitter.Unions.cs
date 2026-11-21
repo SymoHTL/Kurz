@@ -360,9 +360,20 @@ public sealed partial class Emitter
     /// </summary>
     private string? EmitElse(ElseExpression e, bool asValue)
     {
-        var call = (CallExpression)Unwrap(e.Call);
-        var union = Sub(Model.CallOf(call).Result) as UnionType ?? throw new InvalidOperationException($"`else` after a call whose result is no union at line {e.Line}: the checker reports it (O5)");
-        var value = EmitCall(call) ?? throw new InvalidOperationException($"the call before `else` at line {e.Line} has no value");
+        UnionType union;
+        string value;
+        if (Unwrap(e.Call) is AttemptExpression attempt)
+        {
+            union = (UnionType)Sub(Model.AttemptOf(attempt).Type); // U46: the whole value of the `attempt`, its block's value and `Crashed`
+            value = EmitAttemptValue(attempt);
+        }
+        else
+        {
+            var call = (CallExpression)Unwrap(e.Call);
+            union = Sub(Model.CallOf(call).Result) as UnionType ?? throw new InvalidOperationException($"`else` after a call whose result is no union at line {e.Line}: the checker reports it (O5)");
+            value = EmitCall(call) ?? throw new InvalidOperationException($"the call before `else` at line {e.Line} has no value");
+        }
+
         var success = union.Cases[0];
         var tag = Tag(value, union);
         var slot = asValue && success is not VoidType ? fn.Alloca(Ir(success), "recovered") : null;

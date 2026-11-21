@@ -850,6 +850,13 @@ public sealed partial class Emitter
             case ElseExpression el:
                 EmitElse(el, asValue: false);
                 break;
+            case AttemptExpression a:
+                if (EmitAttempt(a) is { } held)
+                {
+                    Temp(held, TypeOf(a)); // U46: a value nothing holds, as a call's
+                }
+
+                break;
             case MatchExpression m:
                 EmitMatch(m.Subject, m.Arms, null);
                 break;
