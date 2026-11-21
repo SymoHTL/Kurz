@@ -561,7 +561,7 @@ public sealed partial class Emitter
     /// <summary>
     /// U39, U19: whether an expression can raise with no call in it, an index out of range or an operator's <c>overflow</c> or
     /// <c>divide-by-zero</c> (chapter 12), which crashes the actor whose code runs it: anything but a literal, a number, a string with no
-    /// hole, a <c>char</c>, a <c>bool</c>, <c>null</c> or a duration's, a number with its unit (L14), its sign included, or a read of a
+    /// hole, a <c>char</c>, a <c>bool</c>, <c>null</c> or a duration's, a number with its unit (L14), a number's sign and a duration's included, which the checker folds into a constant, or a read of a
     /// name, either in brackets; an expression that runs a call, a name that runs a property's among them, can wait
     /// (<see cref="SemanticModel.CanWait"/>). <see cref="EmitMessage"/> reads it of the bound of a call's clause, where no literal but a
     /// duration's passes the checker, a bound of another type being <c>type-mismatch</c> (U39, U40), and of each argument of a message
@@ -573,7 +573,7 @@ public sealed partial class Emitter
         ParenthesizedExpression p => Raises(p.Inner),
         IntegerLiteral or RealLiteral or UnitLiteral or CharLiteral or BoolLiteral or NullLiteral => false,
         StringLiteral s => !s.IsPlain,
-        UnaryExpression { Operand: UnitLiteral } => false,
+        UnaryExpression { Operand: UnitLiteral or IntegerLiteral or RealLiteral } => false,
         NameExpression => false,
         _ => true,
     };

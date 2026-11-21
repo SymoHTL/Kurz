@@ -1131,7 +1131,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("print(s.Flag(items, true))", 0)]
     [InlineData("print(s.Maybe(items, null))", 0)]
     [InlineData("print(s.Wait(items, -2s))", 0)]
-    [InlineData("print(s.Take(items, -2))", 1)]
+    [InlineData("print(s.Take(items, -2))", 0)]
     [InlineData("print(s.Take(items, ns[0]))", 1)]
     [InlineData("print(s.Take(items, (ns[0])))", 1)]
     [InlineData("print(s.Take(items, n + 1))", 1)]
@@ -1146,10 +1146,10 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_message_whose_argument_after_a_crossing_one_can_raise_with_no_call_in_it_is_built_in_a_heap_of_its_own(string statement, int heaps)
     {
         // section 6 (the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)"): an argument after one that crosses, `items`, copied
-        // into the callee's heap where it is evaluated, that can raise with no call in it, an index, an operator, a string's hole, a
-        // number's sign, builds the message in a heap of its own (the runtime's `MessageHeapNew`), which the crash of its builder frees
+        // into the callee's heap where it is evaluated, that can raise with no call in it, an index, an operator or a string's hole,
+        // builds the message in a heap of its own (the runtime's `MessageHeapNew`), which the crash of its builder frees
         // with the copies (ActorTests, `A_message_whose_argument_after_a_crossing_one_crashes_its_builder_leaves_no_block_in_its_callees_heap`),
-        // a `send`'s, a call's with a clause and a `per node` actor's alike; a literal, a duration's with its sign, and a read of a name,
+        // a `send`'s, a call's with a clause and a `per node` actor's alike; a literal, a number's or a duration's with its sign, and a read of a name,
         // either in brackets, raise nothing, and neither does a message whose argument that can raise comes before every crossing one, or
         // none of whose arguments crosses, each built in the callee's heap, as the reading of the product pass has it (comment
         // 7056985643); the IR is read, since a message whose argument raises nothing answers alike from either heap

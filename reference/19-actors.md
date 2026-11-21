@@ -2633,7 +2633,7 @@ freed where the builder leaves, as Rust's drop order frees the values a function
 message is built in a heap of its own, which the builder's crash frees, and is copied into the
 callee's heap at its queueing (§6, the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)"). An
 argument can raise where it has no call in it and is neither a literal, a number, a string with no hole,
-a `char`, a `bool`, `null` or a duration's, its sign included, nor a read of a name, either in brackets;
+a `char`, a `bool`, `null` or a duration's, a number's sign and a duration's included, nor a read of a name, either in brackets;
 a message whose argument that can raise comes before every argument that crosses, or none of whose
 arguments crosses, takes no heap of its own for it; and a `send`, a message to a `per node` actor and a
 call with a clause take the same path *(assumed: the reading of the product pass, #519, comment
