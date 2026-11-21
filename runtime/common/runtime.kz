@@ -3552,7 +3552,8 @@ pub string ExitErrorText(ExitError e) {
 // actor runs (0), waits for its restart (1), ended (3) (U19, U22), has its constructor run at its `spawn` (4)
 // (U3, U25) or waits for the decision of the block of its policy (5) (U28), an `int`, and beside it the actor's
 // state word, an `int`
-// that only atomic operations read and change, which says whether a thread holds the actor and whether an
+// set once by a plain store before the actor can be reached (`ActorNew`) and read and changed only by atomic
+// operations after that, which says whether a thread holds the actor and whether an
 // entry of it stands in the run queue (`StateWord`), the block of its
 // restart, which its supervisor's heap holds (U22), a block that names no function to run where its policy
 // is `escalate`, null where it does not restart (U25), its supervisor, null for the top-level code (U13), the actor's heap
@@ -4356,7 +4357,8 @@ byte* Taken(byte* list) {
 }
 
 // The state word of the actor whose state is `state`, the `int` at 84 in front of its state, beside its
-// life, read and changed only through this view (R19), as tokio keeps a task's state in one atomic word whose
+// life, set once by a plain store before the actor can be reached (`ActorNew`) and read and changed only
+// through this view after that (R19), as tokio keeps a task's state in one atomic word whose
 // `RUNNING` and `NOTIFIED` bits it sets and clears by compare-exchange (not checked at source); each of its
 // bits set or clear: 1 RUNNING, a thread holds the actor, from its take off the run queue (`Claimed`) or its
 // restart (`Restart`) to the end of that hold (`LetGo`); 2 QUEUED, an entry of the actor stands in the run
@@ -4397,8 +4399,9 @@ int Exchanged(AtomicInt word, int seen, int wanted) {
 
 // The wake of the actor whose state is `state`, whose inbox, side list or awaited reply its waker
 // changed first: one atomic `or` marks it QUEUED, and the waker that found the mark clear puts it at the end
-// of the run queue, whether a thread holds it or not, so that an entry of it stands there once, at the place
-// its first wake gave it (U11); a take that finds it held leaves it to whoever holds it (`Claimed`).
+// of the run queue, whether a thread holds it or not, so that an entry of it stands there once; a take that
+// finds it held drops that entry and leaves it to whoever holds it (`Claimed`), which queues it again at the
+// end as it lets go of it (`LetGo`, `ActorBuilt`).
 void Wake(byte* state) {
     mut int before = 0
     raw {
@@ -4446,9 +4449,12 @@ bool Claimed(byte* state) {
 // which the caller read first (`Ready`), the actor marked QUEUED and put at the end of the queue, as tokio's
 // worker schedules a task again whose word it finds notified after its poll (not checked at source). A
 // compare-exchange that finds the word changed, by a wake or a take after `ready` was read, is made again on
-// what it found, so that no wake is lost. An actor that ended while the thread held it (`EndActor`) has the
-// first page of its heap, which holds its record, freed here where no entry of it stands in the run queue, and
-// else when the scheduler takes it off (`RunOne`).
+// what it found, so that no wake is lost. An actor that ended while the thread held it (`EndActor`) is never
+// queued again, and has the first page of its heap, which holds its record, freed here where no entry of it
+// stands in the run queue, NOTIFIED set or not, and else when the scheduler takes it off (`RunOne`) (design
+// record, section 6, assumed there); an ended actor let go of with NOTIFIED set is a shape the build's one
+// thread does not reach, since a take sets NOTIFIED only on an actor that another thread holds or whose
+// constructor runs, which no thread holds.
 void LetGo(byte* state, bool ready) {
     AtomicInt word = StateWord(state)
     mut int seen = 0
@@ -4461,7 +4467,7 @@ void LetGo(byte* state, bool ready) {
     mut bool queue = false
     mut bool stored = false
     while !stored {
-        queue = (seen & 2) == 0 && ((seen & 4) != 0 || ready)
+        queue = (seen & 2) == 0 && ((seen & 4) != 0 || ready) && !ended
         mut int wanted = seen & ~5
         if queue {
             wanted = wanted | 2
@@ -4555,7 +4561,9 @@ int ReplyState(byte* reply) {
 // beside it, and the actor of the activation that waits on it woken where that activation is its top, as
 // tokio's `oneshot::Sender::send` stores the value and wakes the receiver's task; it never switches. The waiter
 // and its actor are read before the word's release store, since after it the waiter may go on and its frame
-// and its stack be gone, while the actor's record stays. An activation below another goes on once the ones
+// and its stack be gone, while the actor's record stays, which holds on the build's one thread alone, where
+// nothing runs between the store and the wake: on threads of their own the waiter's message could end its
+// actor and free that record before the wake reads it (compiler/README.md). An activation below another goes on once the ones
 // above it end (`Run`); the top-level code reads the word in its loop (`Wait`). A reply is that word, an `int`,
 // the activation that waits on it, null for the top-level code (`ReplyWaiter`), and the result.
 pub void Replied(byte* reply) {
@@ -4583,7 +4591,8 @@ pub void Replied(byte* reply) {
 // holds a crash or an end to the call's deadline by, not the time the waiter reads the word (U43; assumed: T7 of
 // comment 6967625156, "the earlier of the two"); and the activation that waits on it woken as `Replied` wakes it, where its actor
 // neither waits for its restart or for the decision of its block nor ended, as C#'s `TaskCompletionSource` is
-// set faulted.
+// set faulted; its reads of that actor's record after the store hold on the build's one thread alone, as
+// `Replied`'s do.
 void Signal(byte* reply, int kind) {
     raw {
         byte* waiter = *Ptr<byte*>(reply + 8)
@@ -4839,6 +4848,26 @@ void Discard(byte* message) {
 // deadline, whenever the waiter reads it (U43; assumed: T7 of comment 6967625156), as tonic reports a call's own
 // deadline (not checked at source).
 pub void Wait(byte* reply, byte* message, string file, int line) {
+    int kind = Answer(reply, message, file, line)
+    raw {
+        if kind == 0 || kind == 4 || (kind != 1 && *Ptr<long>(reply + 16) <= *Ptr<long>(reply + 40)) {
+            Raise("call-timeout", file, line)
+        }
+
+        if kind == 2 {
+            Raise("callee-crashed", file, line)
+        }
+
+        if kind == 3 {
+            Raise("actor-gone", file, line)
+        }
+    }
+}
+
+// The wait of `Wait` for the reply `reply` of the message `message`, at the line `line` of the file `file`, to an
+// answer or to its deadline, and the reply's word read once after it, which it gives, the header then naming no
+// reply where one stands; the raises are the caller's, a call's (`Wait`) and an `attempt`'s (`Attempted`).
+int Answer(byte* reply, byte* message, string file, int line) {
     sys.Entered()
     raw {
         if running == null {
@@ -4868,24 +4897,14 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
             *Ptr<byte*>(running + 432) = null
         }
 
-        if kind == 0 || kind == 4 || (kind != 1 && *Ptr<long>(reply + 16) <= *Ptr<long>(reply + 40)) {
-            Raise("call-timeout", file, line)
-        }
-
-        if kind == 2 {
-            Raise("callee-crashed", file, line)
-        }
-
-        if kind == 3 {
-            Raise("actor-gone", file, line)
-        }
+        return kind
     }
 }
 
-// The loop of the top-level code's wait for the reply `reply` (`Wait`; U18, U23, U33, U36): at each turn the clock read, the timers
+// The loop of the top-level code's wait for the reply `reply` (`Answer`; U18, U23, U33, U36): at each turn the clock read, the timers
 // fired, then the block of a child the top-level code spawned, a restart whose pause ended, the sleep to the first pause's end, the
 // first timer or the deadline, or the run queue's first actor, as long as the reply is not set and its deadline has not passed; true
-// where one of those ends the loop, false where none of them is left, so that nothing could set the reply, where `Wait` raises
+// where one of those ends the loop, false where none of them is left, so that nothing could set the reply, where `Answer` raises
 // `deadlock` at the call's line and the test runner fails the test at its own (`RunTests`; Y5).
 bool RootWait(byte* reply) {
     raw {
@@ -4932,7 +4951,10 @@ bool RootWait(byte* reply) {
 // reply is set; or, where it is idle, the first message of its inbox; an actor with none of them is
 // passed over, a message sent to it while it waits staying in its inbox, and so is an actor that waits for
 // its restart or for the decision of its block (U22, U34); an actor that ended while it stood there has its
-// record freed here, the first page of its heap (`EndActor`). The thread holds the actor from the take
+// record freed here, the first page of its heap (`EndActor`), before the take where no thread holds it, so
+// that one whose spawner's crash ended it while its constructor waited, BUILDING left in its state word since
+// that constructor never ends, is freed as well, and after the take where a thread let go of it meanwhile.
+// The thread holds the actor from the take
 // of its entry (`Claimed`), which a thread that holds it already, or its constructor, refuses, to the end of
 // its turn (`LetGo`, in `Run` where it runs); a passed-over actor is let go at once and not queued again for
 // its own inbox. A message whose deadline passed at the scheduler's turn is dropped at its take, from the inbox
@@ -4947,6 +4969,11 @@ void RunOne() {
         }
 
         *Ptr<byte*>(state - 16) = null
+        if (StateWord(state).Load(MemoryOrder.Acquire) & 1) == 0 && *Ptr<int>(state - 88) == 3 {
+            std.HeapFree(state - 192)
+            return
+        }
+
         if !Claimed(state) {
             return
         }
@@ -5342,6 +5369,30 @@ void Fell(byte* state, byte* header, bool hasText, byte* id, long idCount, byte*
         }
 
         byte* policy = *Ptr<byte*>(taker - 80)
+        if policy == taker {
+            // U46, U50: the child of an `attempt`, whose policy word names its own state (`AttemptNew`): the crash's
+            // copy, the thrown value's among it, made in the heap of the parent as a block's is (`Pending`), in the
+            // reply of the child's one message before its fall sets that reply `callee crashed`, which wakes the
+            // parent (`Attempted`); the log line written as the crash reaches the parent, and the child ended, its
+            // heap and its stacks freed as a stopped actor's are
+            byte* message = Pending(taker, above, null, header, hasText, id, idCount, file, fileCount, line, from, count, number, slot, copy)
+            byte* reply = *Ptr<byte*>(*Ptr<byte*>(*Ptr<byte*>(taker - 8) + 328) + 16)
+            if reply != null {
+                *Ptr<byte*>(reply + 56) = message
+            }
+
+            Fall(state, header, null)
+            mut byte* up = state
+            while up != taker {
+                up = *Ptr<byte*>(up - 72)
+                Fall(up, *Ptr<byte*>(up - 8), null)
+            }
+
+            BlockLogged(message)
+            EndActor(taker)
+            return
+        }
+
         if life == 0 && policy != null && *Ptr<byte*>(policy + 56) != null {
             byte* message = Pending(taker, above, kept, header, hasText, id, idCount, file, fileCount, line, from, count, number, slot, copy)
             Fall(state, header, kept)
@@ -5674,9 +5725,9 @@ void Emptied(byte* state) {
 // waits there with its
 // child's stack (U34), its children end, its slot of the table is freed, so that a call or a `send` that still
 // names it raises `actor-gone` (U6, U20), and its heap is freed whole, the first page, which holds its record,
-// at once, or, where it stands in the run queue, when the scheduler takes it off (`RunOne`), or, where a thread
-// holds it, when that thread lets go of it (`LetGo`) (design record,
-// section 6, the owner, 2026-11-16, #519, comment 6919351399; assumed there).
+// at once (design record, section 6, the owner, 2026-11-16, #519, comment 6919351399), or, where it stands in
+// the run queue, when the scheduler takes it off (`RunOne`), or, where a thread holds it, when that thread lets
+// go of it (`LetGo`) (section 6, both assumed there).
 void EndActor(byte* state) {
     Moved(state)
     raw {
@@ -6206,17 +6257,7 @@ void Decided(byte* child, byte* message, long word) {
 
         BlockLogged(message)
         BlockLeft(message)
-        long idCount = *Ptr<long>(message + 80)
-        long count = *Ptr<long>(message + 128)
-        if idCount > 0 {
-            std.Free(*Ptr<byte*>(message + 72), idCount)
-        }
-
-        if count > 0 {
-            std.Free(*Ptr<byte*>(message + 120), count)
-        }
-
-        std.Free(message, 184)
+        PendingLeft(message)
         HeldAlone(child)
         if word == 1 {
             *Ptr<int>(child - 88) = 1
@@ -6343,6 +6384,86 @@ pub string TextAt(byte* bytes, long count) {
     }
 
     return text
+}
+
+// The copies of the crash's id and text that the message `message` of a block or of an `attempt` holds, and the
+// message itself, freed (`Pending`), once its block decided or its `Crashed` was read (U30, U46).
+pub void PendingLeft(byte* message) {
+    raw {
+        long idCount = *Ptr<long>(message + 80)
+        long count = *Ptr<long>(message + 128)
+        if idCount > 0 {
+            std.Free(*Ptr<byte*>(message + 72), idCount)
+        }
+
+        if count > 0 {
+            std.Free(*Ptr<byte*>(message + 120), count)
+        }
+
+        std.Free(message, 184)
+    }
+}
+
+// ---- the block `attempt { ... }` (chapter 19, U46 to U50) ----------------------------------------------
+
+// The child actor of an `attempt` (U46), named `name` for the log line of its crash: an actor of its own heap
+// and its pooled stack of 2 MiB, as a `spawn` without a `stack` clause makes one (U1), supervised by the actor
+// that runs the code or by the top-level code (`Supervisor`), whose state of 64 bytes holds no field, and whose
+// policy word names its own state, so that its crash is its own to take (`Taker`, whose test it passes as a
+// `restart` passes it) and is taken as an `attempt` takes it (`Fell`); built at once, and ending after its first
+// message (`Run`), as Erlang's `spawn_monitor` starts a process that ends with its function (not checked at
+// source).
+pub byte* AttemptNew(byte* name) {
+    byte* heap = ActorHeapNew(64)
+    byte* state = ActorNew(heap, 64, 2097152, null, name)
+    raw {
+        mut long word = 0
+        while word < 64 {
+            *Ptr<long>(state + word) = 0
+            word = word + 8
+        }
+
+        *Ptr<long>(state) = 1
+        *Ptr<byte*>(state - 80) = state
+    }
+
+    ActorBuilt(state)
+    raw {
+        StateWord(state).FetchOr(16, MemoryOrder.AcqRel)
+    }
+
+    return state
+}
+
+// The wait of the `attempt` whose child is `child` for the reply `reply` of the block's message `message`, at the
+// line `line` of the file `file`, as a call waits (`Answer`; U49) but with no deadline of its own, the block's
+// calls carrying the chain's (`Enqueue`): null where the block's value stands in the reply, and where the child
+// crashed the message of its crash, which `Fell` set in the reply at 56 and which the emitted code reads `Crashed`
+// from and frees (`PendingLeft`; U46, U50). A message dropped at its deadline, at its queueing (`Enqueue`) or
+// before the child took it (`Dropped`), raises `call-timeout` at the line, a call's (U37), whose crash of the
+// code that waits ends the child, a child of that code, as it ends every child (U13).
+pub byte* Attempted(byte* reply, byte* message, string file, int line) {
+    raw {
+        *Ptr<long>(reply + 16) = Never()
+    }
+
+    int kind = Answer(reply, message, file, line)
+    if kind == 1 {
+        return null
+    }
+
+    if kind == 2 {
+        raw {
+            return *Ptr<byte*>(reply + 56)
+        }
+    }
+
+    if kind == 3 {
+        Raise("actor-gone", file, line)
+    }
+
+    Raise("call-timeout", file, line)
+    return null
 }
 
 // ---- the stacks of actors (design record, section 6) ---------------------------------------------

@@ -1,0 +1,29 @@
+// expect: output
+// | InvalidOrderingAtRunTime at 13
+// | 5
+// | 2
+// allow: raw
+// rules: R19, U30
+
+actor Reader {
+    pub void Show(MemoryOrder order) {
+        mut long word = 5
+        cell = AtomicLong.FromPtr(&word)
+        raw {
+            print(cell.Load(order))
+        }
+    }
+
+    pub int Half(int n) => n / 2
+}
+
+r = spawn Reader() on crash (c) {
+    match c.Reason {
+        RuntimeError e => print("{e.Kind} at {c.Place.Line}")
+    }
+
+    restart
+}
+send r.Show(MemoryOrder.Release)
+send r.Show(MemoryOrder.Acquire)
+print(r.Half(4))

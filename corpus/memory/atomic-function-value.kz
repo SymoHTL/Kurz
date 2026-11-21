@@ -1,0 +1,5 @@
+// expect: error syntax at 5
+// rules: R19
+
+// a function of a type is called, and no value (R19, F11)
+print(AtomicLong.FromPtr)
