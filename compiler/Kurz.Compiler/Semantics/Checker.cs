@@ -2506,25 +2506,27 @@ public sealed partial class Checker
     /// <summary>
     /// U40, U41: a constant bound of <c>within</c> (<see cref="ConstantBound"/>) of 0 ns or less, a block's, a call's clause's or a
     /// declaration's, is <c>bound-not-positive</c> at its line, its text naming the form, <paramref name="of"/>, and the bound as written
-    /// (section 6, the owner, 2026-11-20, #519, comment 7051492844, "T4 (2)"; assumed: T77, T79 and T80 of comment 7055305138); a bound
-    /// that is no <c>duration</c>, or a literal with an error of its own, has that one error (E1; assumed: a reading of the build). Every
-    /// other bound is read at run time, and the emitter refuses one of zero or less there (<c>Emitter.Positive</c>).
+    /// (section 6, the owner, 2026-11-20, #519, comment 7051492844, "T4 (2)"; assumed: T77 and T80 of comment 7055305138, and T79 of it as
+    /// corrected on 2026-11-21); a bound that is no <c>duration</c>, or a constant with an error of its own, <c>constant-overflow</c> among
+    /// them, has that one error (E1; assumed: a reading of the build). Every other bound is read at run time, and the emitter refuses one
+    /// of zero or less there (<c>Emitter.Positive</c>).
     /// </summary>
     private void Positive(Expression bound, string of, string rules)
     {
-        if (ConstantBound(bound) && model.HasType(bound) && model.TypeOf(bound) is { Type: PrimitiveType { Kind: Primitive.Duration }, Constant: IntegerConstant { Value: var ns } }
-            && ns <= 0)
+        if (ConstantBound(model, bound) && ((IntegerConstant)model.TypeOf(bound).Constant!).Value <= 0)
         {
             Report(ErrorIds.BoundNotPositive, bound.Line, $"{of} is {DefaultText(bound)}; a bound is positive ({rules})");
         }
     }
 
     /// <summary>
-    /// U40, U41: whether a bound of <c>within</c> is a constant, a duration literal, its unary minus included, <c>0s</c> and <c>-1s</c>,
-    /// in brackets or not, which the checker refuses where it is 0 ns or less (<see cref="Positive"/>) and the emitter reads with no check
-    /// (assumed: T79 of comment 7055305138; the brackets a reading of the build, as a literal pattern reads them, C9).
+    /// U40, U41: whether a bound of <c>within</c> is a constant as T25 reads one, a <c>duration</c> the checker knows while it compiles, a
+    /// literal or one folded from literals (T6), <c>0s</c>, <c>-1s</c>, <c>(0s)</c> and <c>1s - 1s</c> among them, and no
+    /// variable's name, whatever it was given; the checker refuses one of 0 ns or less (<see cref="Positive"/>) and the emitter reads one
+    /// with no check (assumed: T79 of comment 7055305138, as corrected on 2026-11-21).
     /// </summary>
-    internal static bool ConstantBound(Expression bound) => Unwrap(bound) is UnitLiteral or UnaryExpression { Operator: TokenKind.Minus, Operand: UnitLiteral };
+    internal static bool ConstantBound(SemanticModel model, Expression bound) =>
+        model.HasType(bound) && model.TypeOf(bound) is { Type: PrimitiveType { Kind: Primitive.Duration }, Constant: IntegerConstant };
 
     /// <summary>C3: a condition is a <c>bool</c>.</summary>
     private void CheckCondition(Expression condition)

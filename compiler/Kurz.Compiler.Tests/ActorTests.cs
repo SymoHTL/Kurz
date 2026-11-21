@@ -6354,9 +6354,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("within 1s {\n    print(s.Get(1) within Bound(\"bound\", BOUND))\n}\n", "0s - 1ms", 1, "bound", "-1ms", "1")]
     public void A_bound_of_zero_or_less_read_at_run_time_is_invalid_input_at_its_line_where_it_is_read(string tail, string zero, int below, string notes, string bound, string last)
     {
-        // U40, U41: a bound that is no literal is read where it is read, and one of zero or less is `invalid-input` at the bound's line,
-        // its value on the line below the error line, written as a duration's text is (section 6, the owner, 2026-11-20, #519, comment
-        // 7051492844, "T4 (2)"; assumed: T78, T79 and T81 of comment 7055305138): at a block's entry, before its first statement, so that
+        // U40, U41: a bound that is no constant (T25) is read where it is read, and one of zero or less is `invalid-input` at the bound's
+        // line, its value on the line below the error line, written as a duration's text is (section 6, the owner, 2026-11-20, #519, comment
+        // 7051492844, "T4 (2)"; assumed: T78 and T81 of comment 7055305138, and T79 of it as corrected on 2026-11-21): at a block's entry,
+        // before its first statement, so that
         // no call in it runs and a block with no call in it is refused too, and at a call's clause after the call's arguments, before
         // the call is queued, under a block whose deadline wins over the clause too (U39); `2ns - 1ns`, the smallest positive bound, is
         // a bound (the product pass's default, comment 7055304984), and so is a computed bound of 1 s in the same place, the control

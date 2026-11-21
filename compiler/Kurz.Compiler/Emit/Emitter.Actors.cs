@@ -563,12 +563,13 @@ public sealed partial class Emitter
     /// U40, U41: a bound of <c>within</c> that is no constant (<see cref="Checker.ConstantBound"/>), a block's or a call's clause's, read
     /// where it is read, at the block's entry before its first statement or at the call after its arguments and before its queueing, and
     /// of zero or less the run-time error <c>invalid-input</c> at the bound's line, whose text the runtime's <c>InvalidBound</c> writes,
-    /// the crash of the code that runs it (section 6, the owner, 2026-11-20, #519, comment 7051492844, "T4 (2)"; assumed: T78, T79 and T81
-    /// of comment 7055305138); a constant one the checker refused where it is zero or less, and it takes no compare.
+    /// the crash of the code that runs it (section 6, the owner, 2026-11-20, #519, comment 7051492844, "T4 (2)"; assumed: T78 and T81 of
+    /// comment 7055305138, and T79 of it as corrected on 2026-11-21); a constant one, a literal or one folded from literals, the checker
+    /// refused where it is zero or less, and it takes no compare.
     /// </summary>
     private void Positive(Expression bound, string value)
     {
-        if (Checker.ConstantBound(bound))
+        if (Checker.ConstantBound(Model, bound))
         {
             return;
         }
@@ -585,12 +586,11 @@ public sealed partial class Emitter
     /// <summary>
     /// U39, U19: whether the bound of a call's clause can raise with no call in it, an index out of range or an operator's
     /// <c>overflow</c> or <c>divide-by-zero</c> (chapter 12), and <c>invalid-input</c> for a bound of zero or less (<see cref="Positive"/>),
-    /// which crashes the actor whose code runs it: anything but a constant, a duration's literal, a number with its unit (L14), its sign
-    /// included, in brackets or not (<see cref="Checker.ConstantBound"/>), a read of a name among such bounds, a bound of another type being
-    /// <c>type-mismatch</c> (U39, U40); a bound that runs a call, a name that runs a property's among them, can wait
-    /// (<see cref="SemanticModel.CanWait"/>).
+    /// which crashes the actor whose code runs it: anything but a constant as T25 reads one, a literal or one folded from literals
+    /// (<see cref="Checker.ConstantBound"/>), a read of a name among such bounds, a bound of another type being <c>type-mismatch</c> (U39,
+    /// U40); a bound that runs a call, a name that runs a property's among them, can wait (<see cref="SemanticModel.CanWait"/>).
     /// </summary>
-    private static bool Raises(Expression bound) => !Checker.ConstantBound(bound);
+    private bool Raises(Expression bound) => !Checker.ConstantBound(Model, bound);
 
     /// <summary>
     /// U4, U6, U11: a call of an actor's method as a message: the actor's reference, read first, or, inside it, made from <c>this</c>
@@ -673,7 +673,7 @@ public sealed partial class Emitter
         // winning over the declaration's, which the runtime's `Enqueue` takes where no `within` block runs (assumed in section 6). The
         // callee's reference, its two words read before the arguments as a receiver is (F12, U2), is the call's own while the bound
         // runs; the callee's heap is read before the arguments too only where the message is built in it, its bound none or a
-        // duration's literal, which runs no code and raises nothing, and a message built in a heap of its own reads it at its queueing alone.
+        // constant (T25), which runs no code and raises nothing, and a message built in a heap of its own reads it at its queueing alone.
         // A bound that changes the variable the callee was read from, `s.Get() within Swap(mut s)`, or the list it was read from as an item,
         // `ss[0].Get() within Clear(mut ss)`, is `changed-while-held` (M7), as an argument is; one that gives the field it was read from
         // another actor, through its instance passed as `mut`, `b.s.Get() within Swap(mut b)`, or in a method of the actor the bound

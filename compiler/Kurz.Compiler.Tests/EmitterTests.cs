@@ -1105,6 +1105,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("d", 1)]
     [InlineData("2s", 0)]
     [InlineData("(2s)", 0)]
+    [InlineData("(1s + 1s)", 0)]
     [InlineData("(d)", 1)]
     [InlineData("ds[0]", 1)]
     [InlineData("(ds[0])", 1)]
@@ -1114,9 +1115,10 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // or a read of a name, whose value of zero or less is `invalid-input` (U41; assumed: T78 and T81 of comment 7055305138), either in
         // brackets, builds the message in a heap of its own (the runtime's `MessageHeapNew`), which the crash of its builder frees
         // (ActorTests, `A_message_whose_clauses_bound_crashes_its_builder_leaves_no_block_in_its_callees_heap` and
-        // `A_message_whose_clauses_bound_is_refused_at_run_time_leaves_no_block_in_its_callees_heap`); a duration's literal, in brackets
-        // or not, raises nothing, the checker refusing one of zero or less, and the message is built in the callee's heap; the IR is
-        // read, since a call whose bound raises nothing answers alike from either heap
+        // `A_message_whose_clauses_bound_is_refused_at_run_time_leaves_no_block_in_its_callees_heap`); a constant, a duration's literal
+        // or one folded from literals (T25), in brackets or not, raises nothing, the checker refusing one of zero or less (assumed: T79 of
+        // that comment, as corrected on 2026-11-21), and the message is built in the callee's heap; the IR is read, since a call whose
+        // bound raises nothing answers alike from either heap
         var compilation = Compile("actor Store {\n    pub int Get(List<int> xs) => xs[0]\n}\n\ns = spawn Store()\nds = [1s]\nd = 1s\nitems = [1]\n"
             + $"print([d, ds[0]].Count)\nprint(s.Get(items) within {bound})\n", Builder.CheckRuntime(Builder.HostTarget!.Value));
         var program = compilation.Program;

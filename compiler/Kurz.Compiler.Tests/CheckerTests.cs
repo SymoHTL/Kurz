@@ -48,16 +48,21 @@ public sealed class CheckerTests
     [InlineData("within (0s) {\n}", "bound-not-positive")]
     [InlineData("within 0 {\n}", "type-mismatch")]
     [InlineData("within 0.5ns {\n}", "inexact-literal")]
+    [InlineData("within 0s + 0s {\n}", "bound-not-positive")]
+    [InlineData("within 1s - 1s {\n}", "bound-not-positive")]
+    [InlineData("within 2s * 0 {\n}", "type-mismatch")]
+    [InlineData("within 5000000000s + 5000000000s {\n}", "constant-overflow")]
     [InlineData("within 1ns {\n}", null)]
-    [InlineData("within 0s + 0s {\n}", null)]
+    [InlineData("within 1s + 1s {\n}", null)]
     [InlineData("duration d = 0s\nwithin d {\n}", null)]
-    public void A_bound_of_zero_or_less_that_a_literal_gives_is_bound_not_positive(string program, string? id)
+    public void A_bound_of_zero_or_less_that_the_checker_folds_is_bound_not_positive(string program, string? id)
     {
-        // U40: a duration literal of 0 ns or less, its unary minus included, in brackets or not, is `bound-not-positive` at its line (the
-        // owner, 2026-11-20, #519, comment 7051492844, "T4 (2)"; assumed: T77 and T79 of comment 7055305138; the brackets a reading of the
-        // build), where 1 ns is a bound (the product pass's default, comment 7055304984); a literal of another type has its
-        // `type-mismatch` and a literal of its own error that error, alone (E1); every other bound, a sum of literals and a variable among
-        // them, is read at run time (ActorTests)
+        // U40: a constant bound of 0 ns or less, as T25 reads a constant, a literal or one folded from literals (T6), its unary minus,
+        // brackets, a sum and a difference among them, is `bound-not-positive` at its line (the owner, 2026-11-20, #519, comment
+        // 7051492844, "T4 (2)"; assumed: T77 of comment 7055305138, and T79 of it as corrected on 2026-11-21), where 1 ns and a sum of 2 s
+        // are bounds (the product pass's default, comment 7055304984); a literal of another type, and a product of a time and a number,
+        // which `*` does not take (T18, T13), has its `type-mismatch`, and a literal or a fold with an error of its own that error, alone
+        // (E1); a variable's name, whatever it was given, is read at run time (ActorTests)
         var line = program.Split('\n').Length - 1;
         Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
     }
@@ -70,6 +75,7 @@ public sealed class CheckerTests
         string Message(string program) => Assert.Single(Check(program).Diagnostics.Items).Message;
         Assert.Equal("the bound of `within` is 0s; a bound is positive (U40)", Message("within 0s {\n}"));
         Assert.Equal("the bound of `within` is (-1s); a bound is positive (U40)", Message("within (-1s) {\n}"));
+        Assert.Equal("the bound of `within` is 1s - 1s; a bound is positive (U40)", Message("within 1s - 1s {\n}"));
         Assert.Equal("the bound of the call's `within` is 0ms; a bound is positive (U41, U40)", Message(Store + "print(s.Get() within 0ms)"));
         Assert.Equal("the bound of the declaration's `within` is -1s; a bound is positive (U41, U40)",
             Message("actor Store {\n    pub int Get() within -1s => 1\n}\n\ns = spawn Store()\nprint(s.Get())"));
@@ -90,14 +96,16 @@ public sealed class CheckerTests
     [InlineData(Store + "print(s.Get() within 2s + 1ms)", "type-mismatch")]
     [InlineData(Store + "print(s.Get() within 0s)", "bound-not-positive")]
     [InlineData(Store + "print(s.Get() within -1s)", "bound-not-positive")]
+    [InlineData(Store + "print(s.Get() within (1s - 1s))", "bound-not-positive")]
     [InlineData(Store + "print(s.Get() within 1ns)", null)]
     public void The_bound_of_a_calls_clause_is_a_duration(string program, string? id)
     {
         // U39, U40: the clause's bound is read as a block's is: a value of another type is `type-mismatch` at its line, a nullable one
         // `nullable-unchecked` and a call with a `void` success `syntax` (O10); a call that reports its own error has its bound read with
-        // no diagnostic of its own (E1); a literal of zero or less is `bound-not-positive` (U41; the owner, 2026-11-20, "T4 (2)"; assumed:
-        // T77, T79 and T80 of comment 7055305138), where 1 ns is a bound; the bound is a unary expression, so that `+ 1ms` adds to the
-        // call's `int` (assumed: T12 of comment 6967625156)
+        // no diagnostic of its own (E1); a constant of zero or less, a literal or one folded from literals in brackets, is
+        // `bound-not-positive` (U41; the owner, 2026-11-20, "T4 (2)"; assumed: T77 and T80 of comment 7055305138, and T79 of it as corrected
+        // on 2026-11-21), where 1 ns is a bound; the bound is a unary expression, so that `+ 1ms` adds to the call's `int` (assumed: T12 of
+        // comment 6967625156)
         var line = program.Split('\n').Length;
         Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
     }
