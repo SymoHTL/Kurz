@@ -853,7 +853,8 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
         // beside its `null`: `B.Read`'s call through it reaches the caller that waits, and the program has no error, read and written
         // through `this` as well; a second write from a parameter that a top-level call fills with another `A`, by the field's name or
         // through `this`, a default that spawns another `A`, or a write in a lambda that no code runs, makes the field none, and the loop
-        // of `A.Total` and `B.Read` is one error at line 6; and a field of the primary constructor, which its `spawn` sets, is none
+        // of `A.Total` and `B.Read` is one error at line 6; and a field of the primary constructor that a `spawn` of the top-level code
+        // fills is none (T75 1)
         const string program = """
             actor A(B Other) {
                 pub void Join() {
@@ -912,6 +913,91 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
 
             """;
         Assert.Equal([(ErrorIds.CallLoop, 2)], Diagnostics(primary));
+    }
+
+    [Fact]
+    public void A_field_of_the_primary_constructor_that_every_spawn_fills_with_a_callback_is_one()
+    {
+        // U57, T75 1: `Boss.Run` spawns `Worker` with `this` and waits on `Worker.Work`, whose call through the field `Back` reaches the
+        // caller that waits, and the program has no error, with `this` held in a local without `mut`, the field given by the second
+        // parameter, and a parameter that is a callback handed on to the `spawn` (T60 (b)), as well; a second `spawn` that fills it with
+        // another `Boss`, in the top-level code or in a method whose caller passes another, `this` held in a local with `mut`, and a write
+        // of the field from a parameter that is none make it none, and the loop of `Boss.Run` and `Worker.Work` is one error at line 4,
+        // at line 6 after the local; and a field of an actor that no `spawn` makes is none, as a method that nothing calls has no caller
+        const string program = """
+            actor Boss {
+                pub int Run() {
+                    w = spawn Worker(this)
+                    return w.Work()
+                }
+
+                pub int Report() => 7
+            }
+
+            actor Worker(Boss Back) {
+                pub int Work() => Back.Report() + 1
+            }
+
+            b = spawn Boss()
+            print(b.Run())
+
+            """;
+        const string spawn = "        w = spawn Worker(this)\n";
+        Assert.Empty(Diagnostics(program));
+        Assert.Empty(Diagnostics(program.Replace(spawn, "        me = this\n        w = spawn Worker(me)\n", StringComparison.Ordinal)));
+        Assert.Empty(Diagnostics(program.Replace("spawn Worker(this)", "spawn Worker(1, this)", StringComparison.Ordinal)
+            .Replace("actor Worker(Boss Back)", "actor Worker(int N, Boss Back)", StringComparison.Ordinal)));
+        const string handed = """
+            actor Top {
+                pub int Go(Boss b) => b.Run(this)
+
+                pub int Ping() => 3
+            }
+
+            actor Boss {
+                pub int Run(Top t) {
+                    w = spawn Worker(t)
+                    return w.Work()
+                }
+            }
+
+            actor Worker(Top Back) {
+                pub int Work() => Back.Ping() + 1
+            }
+
+            top = spawn Top()
+            print(top.Go(spawn Boss()))
+
+            """;
+        Assert.Empty(Diagnostics(handed));
+        foreach (var other in new[]
+        {
+            program + "v = spawn Worker(b)\nprint(v.Work())\n",
+            program.Replace("    pub int Report() => 7\n", "    pub int Other(Boss x) {\n        w = spawn Worker(x)\n        return w.Work()\n    }\n\n    pub int Report() => 7\n", StringComparison.Ordinal)
+                + "print(b.Other(spawn Boss()))\n",
+            program.Replace("actor Worker(Boss Back) {\n", "actor Worker(mut Boss Back) {\n    pub void Set(Boss x) {\n        Back = x\n    }\n\n", StringComparison.Ordinal),
+        })
+        {
+            Assert.Equal([(ErrorIds.CallLoop, 4)], Diagnostics(other));
+        }
+
+        Assert.Equal([(ErrorIds.CallLoop, 6)], Diagnostics(program.Replace(spawn, "        mut me = this\n        me = this\n        w = spawn Worker(me)\n", StringComparison.Ordinal)));
+        const string unspawned = """
+            actor Boss {
+                pub int Run(Worker x) => x.Work()
+
+                pub int Report() => 7
+            }
+
+            actor Worker(Boss Back) {
+                pub int Work() => Back.Report() + 1
+            }
+
+            b = spawn Boss()
+            print(b.Report())
+
+            """;
+        Assert.Equal([(ErrorIds.CallLoop, 2)], Diagnostics(unspawned));
     }
 
     [Fact]

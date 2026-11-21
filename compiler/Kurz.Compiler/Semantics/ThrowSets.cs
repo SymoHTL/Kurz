@@ -1023,7 +1023,8 @@ public sealed class ThrowSets
                         break; // in the reach mode, a spawn that reported its own error
                     }
 
-                    unit.Sites.Add(new ActorSite(s.Call, actor, null, SiteKind.Spawn, Origin.Other, [], file, s.Line)); // U56: the spawn's edge
+                    // U56: the spawn's edge; T75 1: each argument by the parameter of the primary constructor it fills, which gives its field
+                    unit.Sites.Add(new ActorSite(s.Call, actor, null, SiteKind.Spawn, Origin.Other, Slots(s.Call, model.CallOf(s.Call)), file, s.Line));
                     if (Policy(s, actor) is { Word: "escalate" or "block" } policy)
                     {
                         unit.Edges.Add(new Edge(new Root(actor), null, Crosses: true)); // U25, U28: the child's crash passes up whole, as a block can pass it up
@@ -1682,8 +1683,9 @@ public enum SiteKind
 
 /// <summary>
 /// A call through an actor's reference, or a <c>spawn</c>, as the walk met it in a unit of code (U56): the call, the actor it reaches or
-/// makes, the method it calls (null for a <c>spawn</c>), where its receiver and each of its arguments, by the parameter it fills, come
-/// from in that unit (U57), the file it stands in, 0 for the program's and 1 for <c>std/</c>, and its line.
+/// makes, the method it calls (null for a <c>spawn</c>), where its receiver and each of its arguments, by the parameter it fills, of the
+/// primary constructor for a <c>spawn</c> (T75 1), come from in that unit (U57), the file it stands in, 0 for the program's and 1 for
+/// <c>std/</c>, and its line.
 /// </summary>
 public sealed record ActorSite(CallExpression Call, ClassSymbol Actor, FunctionSymbol? Method, SiteKind Kind, Origin Receiver, IReadOnlyList<Origin> Arguments, int File, int Line)
 {
