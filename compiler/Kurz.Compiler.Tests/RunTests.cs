@@ -423,12 +423,19 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             Assert.True(program is null && notSupported == construct, $"{relativePath}: listed as `{construct}`, and the emitter {(program is null ? notSupported is null ? "is never asked: the checker does not read the case" : $"says `{notSupported}`" : "lays it out")}");
         }
 
-        // a case listed with a trace of its own is a `throws` case the run runs
+        // a case listed with a trace of its own is a `throws` case the run runs, but on a system whose build says
+        // `not supported` to it, as the list of cases not emitted holds it (the loop of that list checks the refusal)
         Assert.NotEmpty(OwnTraces);
         foreach (var (relativePath, _) in OwnTraces)
         {
             var header = Header(relativePath);
-            Assert.True(header.Expectation == Expectation.Throws && !NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with a trace of its own, and the run does not run it as a `throws` case");
+            Assert.True(header.Expectation == Expectation.Throws, $"{relativePath}: listed with a trace of its own, and it is no `throws` case");
+            if (NotEmitted.ContainsKey(relativePath))
+            {
+                continue;
+            }
+
+            Assert.True(!NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with a trace of its own, and the run does not run it as a `throws` case");
         }
 
         // a case listed as run under the plain allocator alone is one the plain run runs
