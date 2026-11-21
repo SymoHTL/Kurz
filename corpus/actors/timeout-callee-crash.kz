@@ -1,0 +1,43 @@
+// expect: output
+// | work starts
+// | 0
+// threads: 1
+// rules: U37, U22
+
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Ticker {
+    pub int Ping() => 1
+}
+
+actor Store(Ticker T) {
+    mut int count = 0
+
+    pub void Work() {
+        count = count + 1
+        print("work starts")
+        Hold(1200ms)
+        print("ping {T.Ping()}")
+    }
+
+    pub int Count() => count
+}
+
+actor Front(Store S) {
+    pub void Start() {
+        send S.Work()
+    }
+}
+
+t = spawn Ticker()
+s = spawn Store(t)
+f = spawn Front(s)
+within 1s {
+    f.Start()
+}
+print(s.Count())

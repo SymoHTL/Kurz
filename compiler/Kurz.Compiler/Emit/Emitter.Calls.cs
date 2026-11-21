@@ -324,7 +324,9 @@ public sealed partial class Emitter
     /// the slot's default; a <c>mut</c> slot gets the address of the caller's variable (M7). The arguments are evaluated in the
     /// order they are written; an argument in the place of a C declaration's <c>...</c> (binding -1) is the caller's to add. A
     /// default is read in the file that declares it, which <paramref name="slotDefault"/> gives with it and which the call may stand
-    /// outside of. With <paramref name="owned"/> the slots hold the values, as a data value's fields do; else the callee borrows
+    /// outside of. With <paramref name="owned"/> the slots hold the values, as a data value's fields do, and so does a slot of a parameter
+    /// written <c>move</c>, each value a temporary of the region until the call has its last argument, so that a jump out of the call a
+    /// later argument takes lets go of it (<see cref="Taken"/>; issue 569); else the callee borrows
     /// them for the call, which no <c>mut</c> slot of the call or of a call inside its arguments changes, since the checker refuses
     /// a read of what a call takes as <c>mut</c> while the expression still holds its value (M7), and the read of a copied type it
     /// takes is a value of its own (<see cref="HeldCopy"/>). With <paramref name="into"/>, the heap of an actor, the arguments cross into
@@ -337,6 +339,7 @@ public sealed partial class Emitter
         var values = new string?[c.Arguments.Count];
         var session = into is null ? null : CallSession(Enumerable.Range(0, c.Arguments.Count).Count(i => info.Binding[i] >= 0 && !slotMut(info.Binding[i]) && Counted(Sub(slotType(info.Binding[i])))), into);
         var late = new List<(int Index, Func<string, string> Read)>(); // U12: the copies read after the call's last copy (Late)
+        var taken = new List<string>(); // the values the slots took, temporaries of the region until the last argument (Taken)
         string? copied = null;
 
         // U12: a function value crosses with the environment of the lambda the checker saw for it, the argument itself or the one an
@@ -387,7 +390,7 @@ public sealed partial class Emitter
                         continue;
                     }
 
-                    values[i] = takes ? moved : Temp(moved, type);
+                    values[i] = takes ? Taken(moved, type, taken) : Temp(moved, type);
                     continue;
                 }
 
@@ -406,17 +409,26 @@ public sealed partial class Emitter
                     var own = TypeOf(a);
                     var line = a.Line;
                     copied = shared;
-                    CopiedLate(a, held: !takes);
+                    CopiedLate(a);
                     late.Add((i, v => Convert(takes ? v : Temp(v, own), own, type, line, takes)));
                     continue;
                 }
 
                 var value = takes ? Owned(a) : EmitExpression(a);
                 values[i] = Convert(value, TypeOf(a), type, a.Line, takes);
+                if (takes)
+                {
+                    Taken(values[i]!, type, taken);
+                }
             }
         }
 
         ReadLate(session ?? copied, (k, v) => values[late[k].Index] = late[k].Read(v));
+        foreach (var name in taken)
+        {
+            Take(name); // the call has its last argument, and its slots hold what they took
+            standIns.Remove((fn, name));
+        }
 
         var arguments = new List<string>();
         for (var j = 0; j < info.SlotCount; j++)

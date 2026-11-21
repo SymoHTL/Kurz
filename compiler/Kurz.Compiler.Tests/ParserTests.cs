@@ -1056,6 +1056,100 @@ public sealed class ParserTests
     }
 
     [Theory]
+    [InlineData("test \"adds two\" {\n    check 1 + 1 == 2\n}", "(test \"adds two\" {(check (== (+ (int 1) (int 1)) (int 2)) \"1 + 1 == 2\")})")]
+    [InlineData("test \"empty\" {\n}", "(test \"empty\" {})")]
+    [InlineData("test \"a \\\"b\\\"\" {\n}", "(test \"a \\\"b\\\"\" {})")]
+    [InlineData("test \"one\" {\n}\ntest \"two\" {\n    print(1)\n}", "(test \"one\" {}) (test \"two\" {(call print (int 1))})")]
+    [InlineData("check x", "(check x \"x\")")]
+    [InlineData("check(x)", "(check (paren x) \"(x)\")")]
+    [InlineData("check !done", "(check (! done) \"!done\")")]
+    [InlineData("mock Clock with FakeClock", "(mock Clock with FakeClock)")]
+    [InlineData("mock Store<int> with MemoryStore<int>", "(mock Store<int> with MemoryStore<int>)")]
+    [InlineData("advance 5s", "(advance (unit 5s))")]
+    [InlineData("advance(d)", "(advance (paren d))")]
+    public void A_test_block_check_mock_and_advance_take_their_forms(string program, string tree)
+    {
+        // Y1: `test "name" { ... }`, the name kept as written (F19); Y6: `check condition`, its text kept; Y9: `mock X with Y`, two types;
+        // Y10: `advance d`, an expression (assumed: Q1, Q8, D2 and D3 of issue 586, comment 6992687784)
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("test = 1", "(assign-or-declare test (int 1))")]
+    [InlineData("test(1)", "(call test (int 1))")]
+    [InlineData("test.Run()", "(call (. test Run))")]
+    [InlineData("test cluster = 1", "(declare test cluster (int 1))")]
+    [InlineData("check = true", "(assign-or-declare check true)")]
+    [InlineData("check.Count = 2", "(assign (. check Count) (int 2))")]
+    [InlineData("check[0] = 2", "(assign (index check (int 0)) (int 2))")]
+    [InlineData("advance = 1", "(assign-or-declare advance (int 1))")]
+    [InlineData("advance[0] = 1", "(assign (index advance (int 0)) (int 1))")]
+    [InlineData("mock = 1", "(assign-or-declare mock (int 1))")]
+    [InlineData("mock x = 1", "(declare mock x (int 1))")]
+    [InlineData("int check = 1", "(declare int check (int 1))")]
+    [InlineData("print(test, check, mock, advance)", "(call print test, check, mock, advance)")]
+    public void Test_check_mock_and_advance_are_names_where_their_form_does_not_stand(string program, string tree)
+    {
+        // L18, Y1: the four words are contextual, as `within` is: a name before `=`, `.`, `[` and `(` (for `test`), in an argument and
+        // as a type or a variable's name (assumed: D2 of issue 586, comment 6992687784)
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("void F() {\n    test \"a\" {\n    }\n}\nint x = 1", 2)]
+    [InlineData("f = () => {\n    test \"a\" {\n    }\n}\nint x = 1", 2)]
+    [InlineData("if true {\n    test \"a\" {\n    }\n}\nint x = 1", 2)]
+    [InlineData("test \"outer\" {\n    test \"inner\" {\n    }\n}\nint x = 1", 2)]
+    [InlineData("class A {\n    test \"a\" {\n    }\n}\nint x = 1", 2)]
+    [InlineData("test \"a {n}\" {\n}\nint x = 1", 1)]
+    public void A_test_below_the_top_level_or_with_a_hole_in_its_name_is_syntax_at_its_line(string program, int line)
+    {
+        // Y1 with E4: a test stands at the top level of a file alone and its name is a plain string; the block is read all the same, so
+        // the parser reads the declaration after it (assumed: D3 of issue 586, comment 6992687784, and F19 of comment 6993110710)
+        var (tree, diagnostics) = Parse(program);
+        Assert.Equal([(ErrorIds.Syntax, line)], diagnostics.Items.Select(d => (d.Id, d.Line)));
+        Assert.IsType<VariableDeclaration>(tree.Statements[^1]);
+    }
+
+    [Fact]
+    public void A_mock_whose_type_no_with_follows_is_no_mock()
+    {
+        // Y9: `mock` is the statement where a type, `with` and a type follow it; `mock Clock FakeClock` declares `Clock` of a type named
+        // `mock`, and the name after it is `syntax`, and so is `mock Clock as FakeClock`, whose `as` is no `with` (L18; assumed: D2 of
+        // issue 586, comment 6992687784)
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("mock Clock FakeClock").Distinct());
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("mock Clock as FakeClock").Distinct());
+        Assert.StartsWith("(mock ", Tree("mock Clock with FakeClock"));
+    }
+
+    [Theory]
+    [InlineData("check a.Count == 2", "a.Count == 2")]
+    [InlineData("check a.Count==2", "a.Count==2")]
+    [InlineData("check   a.Count  ==  2   // the count", "a.Count == 2")]
+    [InlineData("check F(1,\n    2) == 3", "F(1, 2) == 3")]
+    [InlineData("check F(1, // one\n    2) == 3", "F(1, 2) == 3")]
+    [InlineData("check List<List<int>>().Count == 0", "List<List<int>>().Count == 0")]
+    [InlineData("check name == \"a {b}\"", "name == \"a {b}\"")]
+    public void The_text_of_a_check_is_its_condition_as_written_on_one_line(string program, string text)
+    {
+        // Y6: the text of the failure is the condition as the source writes it, each run of spaces, line breaks and comments between two
+        // tokens one space (assumed: Q1 of issue 586, comment 6992687784, and F10 of comment 6993110710)
+        Assert.Equal(text, Assert.IsType<AssertionStatement>(Parse(program).Program.Statements.Single()).Text);
+    }
+
+    [Fact]
+    public void A_cluster_test_is_passed_over_whole()
+    {
+        // Y8 with section 13: `test cluster N seed S { ... }` is read to the end of its block, nothing in it parsed, so that the checker
+        // says `not supported` once at its line (assumed: D7 of issue 586, comment 6992687784)
+        var program = "test cluster 3 seed 42 {\n    a = spawn Store()\n    split 2 | 3\n    if a.Count() > 0 {\n        heal\n    }\n\n    check a.Count() == 1\n}\nint x = 1";
+        var (tree, diagnostics) = Parse(program);
+        Assert.Empty(diagnostics.Items);
+        Assert.Equal("(test-cluster {}) (declare int x (int 1))", SyntaxPrinter.Print(tree));
+        Assert.Equal(9, Assert.IsType<TestDeclaration>(tree.Statements[0]).Body.EndLine);
+    }
+
+    [Theory]
     [InlineData("data User(int Id, string Name)", "(data User(int Id, string Name))")]
     [InlineData("data Admin(int Level) : User", "(data Admin(int Level) : User)")]
     [InlineData("data Empty", "(data Empty)")]
@@ -1634,12 +1728,14 @@ public sealed class ParserTests
     [Theory]
     [InlineData("actor Counter {\n}", "(actor Counter {})")]
     [InlineData("pub actor Account(int Start) {\n    pub int Get() => Start\n}", "(actor pub Account(int Start) {(function pub int Get() => Start)})")]
-    [InlineData("actor Parser stack 8mb per Id inbox drop {\n}", "(actor Parser [stack 1 (unit 8mb)] [per 1] [inbox 1] {})")]
-    [InlineData("actor Parser per Id stack 1.5kb {\n}", "(actor Parser [per 1] [stack 1 (unit 1.5kb)] {})")]
+    [InlineData("actor Parser stack 8mb per Id inbox drop {\n}", "(actor Parser [stack 1 (unit 8mb)] [per 1 Id] [inbox 1] {})")]
+    [InlineData("actor Parser per Id stack 1.5kb {\n}", "(actor Parser [per 1 Id] [stack 1 (unit 1.5kb)] {})")]
     [InlineData("actor Worker on crash restart {\n}", "(actor Worker [on crash 1 restart] {})")]
     [InlineData("actor Worker on crash stop stack 8mb {\n}", "(actor Worker [on crash 1 stop] [stack 1 (unit 8mb)] {})")]
     [InlineData("actor Worker stack 8mb on crash restart max 3 in 1min after 5ms {\n}", "(actor Worker [stack 1 (unit 8mb)] [on crash 1 restart after (unit 5ms) max (int 3) in (unit 1min)] {})")]
-    [InlineData("actor Worker per Id on crash escalate {\n}", "(actor Worker [per 1] [on crash 1 escalate] {})")]
+    [InlineData("actor Worker per Id on crash escalate {\n}", "(actor Worker [per 1 Id] [on crash 1 escalate] {})")]
+    [InlineData("actor Cache per node on crash stop {\n}", "(actor Cache [per 1 node] [on crash 1 stop] {})")]
+    [InlineData("actor Session per int userId yield checks {\n}", "(actor Session [per 1 int userId] [yield 1] {})")]
     [InlineData("actor Worker on crash (c) {\n    restart\n} {\n    pub int Get() => 1\n}", "(actor Worker [on crash 1 block (lambda (c) {(decide restart)})] {(function pub int Get() => (int 1))})")]
     [InlineData("actor Worker yield checks {\n}", "(actor Worker [yield 1] {})")]
     [InlineData("c = spawn Counter(1)", "(assign-or-declare c (spawn (call Counter (int 1))))")]
@@ -1659,7 +1755,7 @@ public sealed class ParserTests
     {
         // U28: the block of a policy, its one parameter and its body, at `spawn` and after an actor's name, its decisions statements (U29)
         // U1: `actor` before a name declares an actor, the clauses after its name kept by their first word and its line, an `on crash` with
-        // the words of a policy among them (U27); U2: `spawn` before a name, its type arguments where it writes them (U14, T19), makes one and
+        // the words of a policy among them (U27), `per` with its words (U51), `yield`'s passed over; U2: `spawn` before a name, its type arguments where it writes them (U14, T19), makes one and
         // binds as C#'s `new`; U25, U26: the words of a policy after it, the knobs in either order, each value a number literal with its sign,
         // which the checker reads, and an `on crash` block after it kept by its line to the end of the expression; U6: `send` before a call
         Assert.Equal(tree, Tree(program));
@@ -1707,12 +1803,25 @@ public sealed class ParserTests
     [InlineData("w = spawn Worker() on crash (c) {\n    f(() => restart)\n    g(() => {\n        stop\n    })\n    restart\n}", "(assign-or-declare w (spawn (call Worker) [on crash 1 block (lambda (c) {(call f (lambda () restart)) (call g (lambda () {stop})) (decide restart)})]))")]
     [InlineData("w = spawn Worker() on crash (c) {\n    v = spawn Worker() on crash (d) {\n        stop\n    }\n    escalate\n}", "(assign-or-declare w (spawn (call Worker) [on crash 1 block (lambda (c) {(assign-or-declare v (spawn (call Worker) [on crash 2 block (lambda (d) {(decide stop)})])) (decide escalate)})]))")]
     [InlineData("w = spawn Worker() on crash (c) { stop }", "(assign-or-declare w (spawn (call Worker) [on crash 1 block (lambda (c) {(decide stop)})]))")]
+    [InlineData("w = spawn Worker() on crash (c) {\n    if ok { stop } else { restart }\n}", "(assign-or-declare w (spawn (call Worker) [on crash 1 block (lambda (c) {(if ok {(decide stop)} else {(decide restart)})})]))")]
     public void A_decision_is_a_statement_of_the_block_alone(string program, string tree)
     {
         // U29: `restart`, `stop` and `escalate` are statements in the block of `on crash` and names elsewhere, a lambda inside the block
-        // among it, and before `=` in the block, as `send` is a name there (U6); a block inside a block holds its own decisions; the `}`
-        // that closes a block written on one line (L5) ends the decision's statement
+        // among it, and before `=` in the block, as `send` is a name there (U6); a block inside a block holds its own decisions; a `}`
+        // that closes a block written on one line (L5), the block itself or one the decision stands in inside it, ends the decision's
+        // statement (assumed: L5 read for a decision)
         Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("w = spawn Worker() on crash (c) {\n    stop; print(1)\n}", "(assign-or-declare w (spawn (call Worker) [on crash 1 block (lambda (c) {(decide stop) (call print (int 1))})]))")]
+    public void A_semicolon_after_a_decision_is_semicolon_and_the_statement_after_it_parses(string program, string tree)
+    {
+        // U29 with L5: a `;` after a decision ends its statement as L5 ends one, so that it is `semicolon` at its line, not `syntax`,
+        // and the statement after it on that line parses on its own (assumed: L5's end of a statement, read for a decision)
+        var (parsed, diagnostics) = Parse(program);
+        Assert.Equal([(ErrorIds.Semicolon, 2)], diagnostics.Items.Select(d => (d.Id, d.Line)));
+        Assert.Equal(tree, SyntaxPrinter.Print(parsed));
     }
 
     [Theory]
@@ -1748,10 +1857,97 @@ public sealed class ParserTests
     {
         // section 6: `attempt { ... }` and `retry { ... }` parse, for the checker to refuse; before the block of an `if`, a `while`, a `for`
         // or a `match` the word is a name, so that a variable of either name stands in a condition, as a struct literal is no condition in
-        // Rust; inside the header's parentheses, brackets, arms and blocks, a lambda's body and the block of `on crash` among them, the
-        // word is the form again, as Rust reads a struct literal there (U28; section 6, the owner, 2026-11-17, #570, comment 6961064167, Q3,
-        // "Block's words"; the name in the header itself assumed: section 6, comment 6847932993, Q10)
+        // Rust; inside the header's brackets, arms and blocks, a lambda's body and the block of `on crash` among them, the word is the
+        // form again, as Rust reads a struct literal there (U28; section 6, the owner, 2026-11-17, #570, comment 6961064167, Q3, "Block's
+        // words"; its parentheses too, assumed: section 6, the answer naming none; the name in the header itself assumed: section 6,
+        // comment 6847932993, Q10)
         Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("within d {\n    f()\n}", "(within d {(call f)})")]
+    [InlineData("within 2s {\n}", "(within (unit 2s) {})")]
+    [InlineData("within (d) {\n}", "(within (paren d) {})")]
+    [InlineData("within a.B {\n    within 1s {\n    }\n}", "(within (. a B) {(within (unit 1s) {})})")]
+    [InlineData("within = 3", "(assign-or-declare within (int 3))")]
+    [InlineData("within(3)", "(call within (int 3))")]
+    [InlineData("within.F()", "(call (. within F))")]
+    [InlineData("x = within + 1", "(assign-or-declare x (+ within (int 1)))")]
+    [InlineData("if within {\n}", "(if within {})")]
+    public void A_within_is_its_block_and_a_name_where_no_block_follows_its_bound(string program, string tree)
+    {
+        // U38, U40: `within d { ... }` is a statement, its bound read as the condition of an `if` is; where no block follows the bound
+        // the word is a name, a variable, a call or a member's target, as `attempt` is a name outside its form (section 6, comment
+        // 6847932993, Q10)
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("s.Get(1) within 2s", "(call (. s Get) (int 1) (within (unit 2s)))")]
+    [InlineData("x = s.Get() within d * 2", "(assign-or-declare x (* (call (. s Get) (within d)) (int 2)))")]
+    [InlineData("x = s.Get() within (d * 2)", "(assign-or-declare x (call (. s Get) (within (paren (* d (int 2))))))")]
+    [InlineData("x = s.Get() within -d", "(assign-or-declare x (call (. s Get) (within (- d))))")]
+    [InlineData("x = s.Get() within b.Bound()", "(assign-or-declare x (call (. s Get) (within (call (. b Bound)))))")]
+    [InlineData("x = s.Get() within 2s else {\n    Gone => 0\n}", "(assign-or-declare x (else (call (. s Get) (within (unit 2s))) [((type Gone) => (int 0))]))")]
+    [InlineData("x = s.Get() within Bound() else {\n    Gone => 0\n}", "(assign-or-declare x (call (. s Get) (within (else (call Bound) [((type Gone) => (int 0))]))))")]
+    [InlineData("send s.Add(1) within 2s", "(send (call (. s Add) (int 1) (within (unit 2s))))")]
+    [InlineData("x = within(1) within 2s", "(assign-or-declare x (call within (int 1) (within (unit 2s))))")]
+    public void A_within_after_a_call_is_its_clause_and_takes_a_unary_expression(string program, string tree)
+    {
+        // U39, U41: `x.M() within d` bounds the one call, its operand a unary expression, as T35's constant operand is, so that `* 2`
+        // applies to the call's result and a computed bound stands in parentheses, and the clause stands before a postfix `else` (O5)
+        // (U41; assumed: T12 of comment 6967625156), the `else` after a call in the operand that call's, as a unary expression takes its
+        // own postfix forms (T35) (U41; assumed: a reading of the build); whether the call is one a clause applies to is the checker's
+        // (U41; T11)
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("s.Get() within 1s within 2s", 1)]
+    [InlineData("x = s.Get() else {\n    Gone => 0\n} within 2s", 3)]
+    [InlineData("x = s.Get() within", 1)]
+    [InlineData("s = spawn Store() within 2s", 1)]
+    public void A_clause_where_a_call_takes_none_is_syntax(string program, int line)
+    {
+        // U41: one clause on a call (assumed: a reading of the build), standing before its postfix `else` (assumed: T12 of comment
+        // 6967625156); a `spawn`, whose call is no call of an actor's method through a reference (U4), takes none, as `tokio::spawn`
+        // and Elixir's `cast` take no timeout (not checked at source) (assumed: T11 of comment 6967625156)
+        Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
+    }
+
+    [Theory]
+    [InlineData("actor Store {\n    pub int Get() within 2s => 1\n}", "(actor Store {(function pub int Get() (within (unit 2s)) => (int 1))})")]
+    [InlineData("actor Store {\n    pub void Put(int x) within 150ms {\n    }\n}", "(actor Store {(function pub void Put(int x) (within (unit 150ms)) {})})")]
+    [InlineData("actor Store {\n    pub int Get() within -1s => 1\n}", "(actor Store {(function pub int Get() (within (- (unit 1s))) => (int 1))})")]
+    [InlineData("actor Store {\n    pub int Get() within 2 => 1\n}", "(actor Store {(function pub int Get() (within (int 2)) => (int 1))})")]
+    [InlineData("int F() within 2s => 1", "(function int F() (within (unit 2s)) => (int 1))")]
+    [InlineData("int within() => 1", "(function int within() => (int 1))")]
+    public void A_within_after_the_parameters_of_a_declaration_is_its_clause(string program, string tree)
+    {
+        // U39, U41: `pub T M(...) within d` bounds every call of the method, its operand a literal alone (U41; assumed: T13 of comment
+        // 6967625156), a number literal of any type, with its sign where it has one, as a knob of a policy takes one (U26), the checker
+        // reading its type (U40) (U41; assumed: a reading of the build, apart from T11 and T13); whether the declaration is one a clause
+        // applies to is the checker's (U41; assumed: T11 of comment 6967625156)
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("actor Store {\n    pub int Get() within d => 1\n}", 2)]
+    [InlineData("actor Store {\n    pub int Get() within 2s * 2 => 1\n}", 2)]
+    [InlineData("actor Store {\n    pub int Get() within (2s) => 1\n}", 2)]
+    [InlineData("actor Store {\n    pub int Get() within Bound() => 1\n}", 2)]
+    public void The_clause_of_a_declaration_takes_a_number_literal_alone(string program, int line)
+    {
+        // U41: anything but a number literal, with its sign where it has one, after the declaration's `within` is `syntax`, as after a
+        // knob of a policy (U26) (assumed: T13 of comment 6967625156)
+        Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
+    }
+
+    [Fact]
+    public void The_block_of_a_within_on_the_next_line_is_braces_required()
+    {
+        // U40, C1: the block opens on the line where the bound ends, as an `if`'s does, and still parses
+        Assert.Equal([(ErrorIds.BracesRequired, 1)], Errors("within d\n{\n    f()\n}"));
     }
 
     [Fact]

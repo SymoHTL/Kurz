@@ -5,9 +5,10 @@ same thing rule by rule, precisely enough to write a compiler and its tests agai
 nothing to the design: where the record is silent, a rule here is marked `proposed` or `open`,
 and it stays that way until the owner has answered.
 
-It covers the sequential core, what a program without actors needs, and the actors of one machine
-(chapter 19). The rest of actors, distribution, keywords, jobs, tests, packages and clients
-(sections 6, 7 and 9 to 13 of the record) are outside it.
+It covers the sequential core, what a program without actors needs, the actors of one machine
+(chapter 19) and a program's tests (chapter 20). The rest of actors, distribution, keywords, jobs,
+`mock` and the test's clock, packages and clients (sections 6, 7 and 9 to 13 of the record) are outside
+it.
 
 ## The status of a rule
 
@@ -48,6 +49,12 @@ carries the `Case:` line alone.
 // rules: T5
 
 // expect: output
+// | test "adds" ... ok
+// | 1 test: 1 passed, 0 failed
+// command: test                      optional: the case runs its program's tests, as `kurz test` does (Y2)
+// rules: Y2
+
+// expect: output
 // | 1
 // allow: raw                         optional: the grants of a `project.kz` the file takes: raw, native or raw native
 // rules: R7
@@ -59,7 +66,7 @@ carries the `Case:` line alone.
 // expect: output
 // | 1
 // threads: 1                         optional: the output follows one thread's order (U35)
-// rules: U34
+// rules: U34, U35
 ```
 
 A case is a single file with no `project.kz`, run with no argument and with nothing on its standard
@@ -70,11 +77,15 @@ corpus takes no grant from it *(assumed: as §3 marks it)*. Its `// system:` lin
 line where it has one and before its `// rules:` line, names the one system it runs on, `linux` or
 `windows`: on every system but the one it names, the runner builds it and does not run it *(assumed, §3:
 the fix of T10 of the reading of issue 39, comment 6926929175)*.
+A case that runs its program's tests under `kurz test` in place of the program carries the line `// command: test`, after
+its `// build:` line where it has one and before its `// allow:` line, and takes no other command (Y2; §2, assumed there: the
+corpus line of issue 586, comment 6993110710).
 A case whose output follows one thread's order carries the line `// threads: 1`, with which the runner
 runs it on one thread (U35; §6, the owner, 2026-11-17, #519, comment 6946657505, Q5, "// threads: 1
 header (Recommended)"), and `compiler/README.md` says whether a runner reads it. The line stands after its `// system:`
 line where it has one and before its `// rules:` line, and takes no other count *(assumed: the line as that answer
-gives it, in the place of the other optional lines, which the answer did not name)*.
+gives it, in the place of the other optional lines, which the answer did not name)*. A header out of the shape this
+chapter gives, a `// threads:` line of another count among it, is refused by the gate `reference`.
 
 The ids of both kinds are listed in chapter 12. The compiler's test suite parses each file and checks the errors of its
 front end, `syntax`, `semicolon`, `reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, or the absence of any diagnostic, against the header,

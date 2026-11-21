@@ -1,0 +1,14 @@
+// expect: throws callee-crashed at 13
+// rules: U43, U20
+
+// `Failing` crashes before the deadline of the call: `callee-crashed`, not `call-timeout`
+actor Failing {
+    pub int Fail() {
+        throw "early"
+    }
+}
+
+f = spawn Failing()
+within 1s {
+    print(f.Fail())
+}

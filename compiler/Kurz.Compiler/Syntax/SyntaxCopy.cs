@@ -62,6 +62,7 @@ public static class SyntaxCopy
             Parameters = d.Parameters.Select(Parameter).ToList(),
             ExpressionBody = Optional(d.ExpressionBody),
             BlockBody = d.BlockBody is null ? null : Block(d.BlockBody),
+            Within = Optional(d.Within),
         };
 
         private Parameter Parameter(Parameter p) => p with { Type = OptionalType(p.Type), Default = Optional(p.Default) };
@@ -110,6 +111,7 @@ public static class SyntaxCopy
                     Callee = Expression(c.Callee),
                     TypeArguments = c.TypeArguments.Select(Type).ToList(),
                     Arguments = c.Arguments.Select(a => a with { Value = Expression(a.Value) }).ToList(),
+                    Within = Optional(c.Within),
                 },
                 ListLiteral l => l with { Items = l.Items.Select(Expression).ToList() },
                 IndexExpression i => i with { Target = Expression(i.Target), Index = Expression(i.Index) },
@@ -160,6 +162,7 @@ public static class SyntaxCopy
             Assignment a => a with { Target = Expression(a.Target), Value = Expression(a.Value) },
             ExpressionStatement e => e with { Expression = Expression(e.Expression) },
             SendStatement e => e with { Call = (CallExpression)Expression(e.Call) },
+            WithinStatement w => w with { Bound = Expression(w.Bound), Body = Block(w.Body) },
             DecisionStatement d => d with { },
             IfStatement i => i with { Condition = Expression(i.Condition), Then = Block(i.Then), Else = i.Else is null ? null : Statement(i.Else) },
             WhileStatement w => w with { Condition = Expression(w.Condition), Body = Block(w.Body) },
@@ -170,11 +173,15 @@ public static class SyntaxCopy
             ThrowStatement t => t with { Value = Optional(t.Value) },
             RawBlock r => r with { Body = Block(r.Body) },
             ConstAssertStatement c => c with { Condition = Expression(c.Condition), Text = (StringLiteral)Expression(c.Text) },
+            AssertionStatement a => a with { Condition = Expression(a.Condition) },
+            AdvanceStatement a => a with { Duration = Expression(a.Duration) },
+            MockStatement m => m with { Target = Type(m.Target), Replacement = Type(m.Replacement) },
             AsmStatement a => a with
             {
                 Operands = a.Operands.Select(o => o with { Value = Optional(o.Value), Output = Optional(o.Output), Body = o.Body is null ? null : Block(o.Body) }).ToList(),
             },
             FunctionDeclaration or TypeDeclaration or ExternBlock or UseStatement or FieldDeclaration or ConstructorDeclaration => s, // not supported in a body (F1)
+            TestDeclaration => s, // `syntax` in a body (Y1)
             _ => throw new InvalidOperationException($"the statement `{s.GetType().Name}` has no copy"),
         };
 

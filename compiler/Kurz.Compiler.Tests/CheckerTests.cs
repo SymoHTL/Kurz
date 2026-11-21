@@ -24,6 +24,146 @@ public sealed class CheckerTests
         return (diagnostics, checker);
     }
 
+    [Theory]
+    [InlineData("within 2 {\n}", "type-mismatch")]
+    [InlineData("long x = 3\nwithin x {\n}", "type-mismatch")]
+    [InlineData("longduration d = 2s\nwithin d {\n}", "type-mismatch")]
+    [InlineData("duration? d = null\nwithin d {\n}", "nullable-unchecked")]
+    [InlineData("duration d = 2s\nwithin d {\n}", null)]
+    [InlineData("within 2s + 1ms {\n}", null)]
+    [InlineData("void Stop() {\n}\n\nwithin Stop() {\n}", "syntax")]
+    public void The_bound_of_a_within_is_a_duration(string program, string? id)
+    {
+        // U40: a bound of another type is `type-mismatch` at its line, a `longduration` among them; a nullable one is N2's
+        // `nullable-unchecked`, and a call with a `void` success O10's `syntax`, as a condition's are (assumed in section 6, U40: the
+        // forms of section 6 write a duration and name no other type)
+        var line = program.Split('\n').Length - 1;
+        Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
+    }
+
+    /// <summary>An actor of two methods, <c>Get</c>, whose call waits, and <c>Run</c>, which a <c>send</c> takes, made in <c>s</c>: seven lines.</summary>
+    private const string Store = "actor Store {\n    pub int Get() => 1\n    pub void Run() {\n    }\n}\n\ns = spawn Store()\n";
+
+    [Theory]
+    [InlineData(Store + "print(s.Get() within 2)", "type-mismatch")]
+    [InlineData(Store + "long x = 3\nprint(s.Get() within x)", "type-mismatch")]
+    [InlineData(Store + "longduration d = 2s\nprint(s.Get() within d)", "type-mismatch")]
+    [InlineData(Store + "duration? d = null\nprint(s.Get() within d)", "nullable-unchecked")]
+    [InlineData(Store + "void Stop() {\n}\n\nprint(s.Get() within Stop())", "syntax")]
+    [InlineData(Store + "print(s.Missing() within 2)", "unknown-name")]
+    [InlineData(Store + "duration d = 2s\nprint(s.Get() within d)", null)]
+    [InlineData(Store + "print(s.Get() within (2s + 1ms))", null)]
+    [InlineData(Store + "print(s.Get() within 2s + 1ms)", "type-mismatch")]
+    [InlineData(Store + "print(s.Get() within 0s)", null)]
+    [InlineData(Store + "print(s.Get() within -1s)", null)]
+    public void The_bound_of_a_calls_clause_is_a_duration(string program, string? id)
+    {
+        // U39, U40: the clause's bound is read as a block's is: a value of another type is `type-mismatch` at its line, a nullable one
+        // `nullable-unchecked` and a call with a `void` success `syntax` (O10); a call that reports its own error has its bound read with
+        // no diagnostic of its own (E1); a bound of zero or less is a deadline that has passed, no error (U40); the bound is a unary
+        // expression, so that `+ 1ms` adds to the call's `int` (assumed: T12 of comment 6967625156)
+        var line = program.Split('\n').Length;
+        Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
+    }
+
+    [Theory]
+    [InlineData("print(s.Take(move xs) within Bound(xs))", "used-after-move")]
+    [InlineData("print(s.Take(copy xs) within Bound(xs))", null)]
+    [InlineData("print(s.Take(move xs) within Bound([3]))\nprint(xs.Count)", "used-after-move")]
+    [InlineData("print(s.Both(move xs, s.Take([3]) within Bound(xs)))", "used-after-move")]
+    public void The_bound_of_a_calls_clause_runs_after_its_arguments_and_reads_no_variable_they_moved(string tail, string? id)
+    {
+        // U39, U12, F12: the bound runs after the call's arguments, as a later argument does, so a read of what an argument moved is
+        // `used-after-move` at the read's line, and so is a read in the clause of a call that a later argument makes
+        var program = "actor Store {\n    pub int Take(List<int> items) => items.Count\n\n    pub int Both(List<int> items, int n) => items.Count + n\n}\n\n" +
+            "duration Bound(List<int> ys) {\n    print(ys.Count)\n    return 1s\n}\n\ns = spawn Store()\nxs = [1, 2]\n" + tail;
+        Assert.Equal(id is null ? [] : [(id, program.Split('\n').Length)], Errors(program));
+    }
+
+    [Theory]
+    [InlineData("print(s.Take(xs, Count(mut xs)))", "changed-while-held")]
+    [InlineData("print(s.Take(xs, 1) within Grow(mut xs))", "changed-while-held")]
+    [InlineData("mut zs = [3]\nprint(s.Take(xs, 1) within Grow(mut zs))", null)]
+    [InlineData("mut zs = [3]\nprint(s.Take(xs, 1) within Pair(zs, Count(mut zs)))", "changed-while-held")]
+    public void The_bound_of_a_calls_clause_changes_nothing_its_arguments_still_hold(string tail, string? id)
+    {
+        // U39, M7, F12: the bound runs after the call's arguments, as a later argument does, so a change it makes of a value an argument
+        // still holds is `changed-while-held` at the bound's line, as one an argument makes is, and the bound's own parts are read as a
+        // call's are
+        var program = "actor Store {\n    pub int Take(List<int> items, int n) => items.Count + n\n}\n\nint Count(mut List<int> ys) {\n    ys.Add(3)\n    return 1\n}\n\n" +
+            "duration Grow(mut List<int> ys) {\n    ys.Add(3)\n    return 1s\n}\n\nduration Pair(List<int> ys, int n) {\n    print(ys.Count + n)\n    return 1s\n}\n\n" +
+            "s = spawn Store()\nmut xs = [1, 2]\n" + tail;
+        Assert.Equal(id is null ? [] : [(id, program.Split('\n').Length)], Errors(program));
+    }
+
+    [Theory]
+    [InlineData("print(s.Get() within Swap(mut s))", "changed-while-held")]
+    [InlineData("mut t = spawn Store()\nprint(s.Get() within Swap(mut t))\nprint(t.Get())", null)]
+    public void The_bound_of_a_calls_clause_changes_nothing_its_callee_was_read_from(string tail, string? id)
+    {
+        // U39, M7: the callee's reference is read before the arguments and the bound, so a bound that changes the variable it was read
+        // from is `changed-while-held` at its line, as an argument that does is; `Swap`'s parameter is named apart from `s`, so that
+        // the row has that one error (F16)
+        var program = "actor Store {\n    pub int Get() => 1\n}\n\nduration Swap(mut Store other) {\n    other = spawn Store()\n    return 1s\n}\n\n" +
+            "mut s = spawn Store()\n" + tail;
+        Assert.Equal(id is null ? [] : [(id, program.Split('\n').Length)], Errors(program));
+    }
+
+    [Theory]
+    [InlineData(Store + "send s.Run() within 2s", 8)]
+    [InlineData(Store + "send s.Run() within 2", 8)]
+    [InlineData(Store + "duration d = 2s\nsend s.Run() within d", 9)]
+    [InlineData("int F() => 1\n\nprint(F() within 2s)", 3)]
+    [InlineData("class Box {\n    pub int Get() => 1\n}\n\nb = Box()\nprint(b.Get() within 2s)", 6)]
+    [InlineData("actor Store {\n    pub int Get() => 1\n    pub int Twice() => Get() within 2s\n}", 3)]
+    [InlineData("actor Store {\n    pub int Get() => 1\n    pub int Twice() => this.Get() within 2s\n}", 3)]
+    public void A_clause_on_a_call_that_is_no_call_of_an_actors_method_that_waits_is_syntax(string program, int line)
+    {
+        // U39, U41: a clause bounds a call of an actor's method through a reference, which waits (U4); after `send` (U6), on a function's
+        // call, a class's method's and an actor's own method called inside it it is `syntax`, as `send` before what is no call of an
+        // actor's method is (U14) (U41; assumed: T11 of comment 6967625156), its bound read with no diagnostic, a variable it reads
+        // counted as read and a bound of another type adding no `type-mismatch` (U41, E1; assumed: a reading of the build)
+        Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
+    }
+
+    [Theory]
+    [InlineData("int F() within 2s => 1\n\nprint(F())", 1)]
+    [InlineData("class Box {\n    pub int Get() within 2s => 1\n}\n\nprint(Box().Get())", 2)]
+    [InlineData("data Point(int X) {\n    pub int Twice() within 2s => X * 2\n}\n\nprint(Point(1).Twice())", 2)]
+    [InlineData("interface Shape {\n    int Area() within 2s\n}", 2)]
+    [InlineData("actor Store {\n    int Get() within 2s => 1\n    pub int Twice() => Get() + Get()\n}", 2)]
+    public void A_clause_on_a_declaration_that_is_no_message_is_syntax(string program, int line)
+    {
+        // U39, U41: a declaration's clause bounds the calls through a reference of a message, a `pub` method of an actor (U4, U9); on a
+        // function, a class's, a data type's or an interface's method and an actor's method without `pub` it is `syntax` (U41; assumed:
+        // T11 of comment 6967625156)
+        Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
+    }
+
+    [Theory]
+    [InlineData("pub int Get() within 2 => 1", "type-mismatch")]
+    [InlineData("pub int Get() within 2.5 => 1", "type-mismatch")]
+    [InlineData("pub int Get() within 2mb => 1", "type-mismatch")]
+    [InlineData("pub int Get() within 2s => 1", null)]
+    [InlineData("pub int Get() within 0s => 1", null)]
+    [InlineData("pub int Get() within -1s => 1", null)]
+    public void The_literal_of_a_declarations_clause_is_a_duration(string method, string? id)
+    {
+        // U39, U40, U41: the literal is read as a block's bound is, of another type `type-mismatch` at its line, zero or less a deadline
+        // that has passed at each call, its sign included (U41; assumed: a reading of the build), the literal standing alone (U41;
+        // assumed: T13 of comment 6967625156)
+        Assert.Equal(id is null ? [] : [(id, 2)], Errors($"actor Store {{\n    {method}\n}}\n\ns = spawn Store()\nprint(s.Get())"));
+    }
+
+    [Fact]
+    public void An_actor_the_checker_does_not_read_has_no_error_of_its_declarations_clauses()
+    {
+        // U41, U2, U1, E1: an actor with a constructor in its body has the one diagnostic of that constructor, and one with a `static`
+        // method that method's `not supported`, its methods unread (U41; assumed: a reading of the build)
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("actor Store {\n    Store() {\n    }\n\n    pub int Get() within 2 => 1\n}"));
+        NotSupportedAt(2, "U1", "actor Store {\n    static int F() => 1\n\n    pub int Get() within 2 => 1\n}");
+    }
+
     /// <summary>The compile errors of a program the checker reads in full, by line.</summary>
     private static List<(string Id, int Line)> Errors(string program, string grants = "")
     {
@@ -6925,7 +7065,7 @@ public sealed class CheckerTests
     [InlineData("void Mark<const char C, const bool B>() {\n    const assert(B || C != 'x', \"{C} {B}\")\n}\n\nMark<'y', false>()\nMark<'x', true>()\nMark<'x', false>()", "10: const-assert-failed: `Mark<'x', false>`: x false (the `const assert` in `Mark`, T37)")]
     [InlineData("void Need<T>(T value) {\n    const assert(T.Kind == TypeKind.Data, \"{T}\")\n}\n\nvoid Outer<T>(T value) {\n    Need(value)\n}\n\nOuter(1)", "12: const-assert-failed: `Outer<int>`: int (the `const assert` in `Need`, T37)")]
     [InlineData("data Bad(int Id)\n\nvoid NoId<T>(T value) {\n    for f in T.Fields {\n        const assert(f.Name != \"Id\", \"{T}.{f.Name}\")\n    }\n}\n\nNoId(Bad(1))", "12: const-assert-failed: `NoId<Bad>`: Bad.Id (the `const assert` in `NoId`, T37)")]
-    [InlineData("void Later<T>(T value) {\n    check = () => {\n        const assert(T.Kind != TypeKind.Int, \"no {T}\")\n    }\n\n    check()\n}\n\nLater(\"a\")\nLater(1)", "13: const-assert-failed: `Later<int>`: no int (the `const assert` in `Later`, T37)")]
+    [InlineData("void Later<T>(T value) {\n    probe = () => {\n        const assert(T.Kind != TypeKind.Int, \"no {T}\")\n    }\n\n    probe()\n}\n\nLater(\"a\")\nLater(1)", "13: const-assert-failed: `Later<int>`: no int (the `const assert` in `Later`, T37)")]
     [InlineData("const assert(1 + 1 == 3, \"{1 + 1} {'x'} {true} {\"s\"} {Mode.Loud}\")", "4: const-assert-failed: 2 x true s Loud (T37)")]
     [InlineData("void Plain() {\n    const assert(false, \"plain\")\n}", "5: const-assert-failed: plain (T37)")]
     [InlineData("n = 2\nconst assert(n > 1, \"{n}\")", "5: const-assert-failed: the value of `n` is not known while the program compiles, in a condition of a `const assert` (T37)|5: const-assert-failed: the value of `n` is not known while the program compiles, in a hole of the text of a `const assert` (T37)")]
@@ -6963,6 +7103,172 @@ public sealed class CheckerTests
         var program = Modes + "bool Check(int x) => true\n\nn = 1\nconst assert(Check(n), \"x\")";
         Assert.Equal(["7: a call in a `const assert`, which the build does not evaluate while the program compiles (T37)"], NotSupported(program));
         Assert.Equal([(ErrorIds.UnusedVariable, 6)], Errors(program.Replace("Check(n)", "true")));
+    }
+
+    // ---- tests (Y1 to Y10; assumed: issue 586, comments 6992687784 and 6993110710) ----------------------------------------------
+
+    [Fact]
+    public void A_second_test_of_one_name_is_syntax_at_its_line_naming_the_first()
+    {
+        // Y1 with E4: a test's name is its own in its file, compared by its value; the text of the second names the line of the first
+        // (assumed: D3 of issue 586, comment 6992687784)
+        Assert.Equal([(ErrorIds.Syntax, 4)], Errors("test \"a\" {\n}\n\ntest \"a\" {\n}"));
+        Assert.Contains("line 3", ErrorText("print(1)\n\ntest \"a\" {\n}\n\ntest \"a\" {\n}"), StringComparison.Ordinal);
+        Assert.Equal([(ErrorIds.Syntax, 6), (ErrorIds.Syntax, 8)], Errors("test \"a\" {\n}\n\ntest \"b\" {\n}\ntest \"a\" {\n}\ntest \"b\" {\n}"));
+        Assert.Empty(Errors("test \"a\" {\n}\n\ntest \"b\" {\n}\n\ntest \"A\" {\n}"));
+        Assert.Equal([(ErrorIds.Syntax, 4)], Errors("test \"A\" {\n}\n\ntest \"\\u0041\" {\n}")); // one name by its value
+    }
+
+    [Fact]
+    public void A_check_narrows_nothing_after_it()
+    {
+        // Y6: after `check n != null` the variable is still nullable (N2), as Rust's `assert!` narrows no type; an `if` is the control
+        // (the reading in compiler/README.md)
+        Assert.Equal([(ErrorIds.NullableUnchecked, 3)], Errors("int? n = null\ncheck n != null\nprint(n + 1)"));
+        Assert.Empty(Errors("int? n = null\nif n != null {\n    print(n + 1)\n}"));
+    }
+
+    [Fact]
+    public void The_body_of_a_test_is_checked_as_a_function_s_body()
+    {
+        // Y5: a test is a function of the file with no parameter and a `void` result: it reads no top-level variable and declares none
+        // (F16), sees no `args` (S13), and a case that can leave it is `unlisted-case` (O3) (assumed: D1 of issue 586, comment
+        // 6992687784, and F17 and F18 of comment 6993110710)
+        Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("x = 1\ntest \"a\" {\n    print(x)\n}\nprint(x)"));
+        Assert.Equal([(ErrorIds.Redeclared, 3)], Errors("x = 1\ntest \"a\" {\n    x = 2\n    print(x)\n}\nprint(x)"));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("test \"a\" {\n    print(args.Count)\n}"));
+        Assert.Equal([(ErrorIds.UnusedVariable, 2)], Errors("test \"a\" {\n    y = 2\n}"));
+        Assert.Equal([(ErrorIds.UnlistedCase, 6)], Errors("data NotFound\n\nint | NotFound Find(int id) => NotFound\n\ntest \"a\" {\n    value = Find(1)\n    print(value)\n}"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("test \"a\" {\n    return 1\n}"));
+        // controls: a function, a type and a constant of the file are read, and a variable of the test's own
+        Assert.Empty(Errors("data Point(int X, int Y)\n\nint Twice(int n) => n * 2\n\ntest \"a\" {\n    y = Twice(2)\n    p = Point(y, 1)\n    print(p.X)\n    return\n}"));
+        Assert.Empty(Errors("data NotFound\n\nint | NotFound Find(int id) => NotFound\n\ntest \"a\" {\n    value = Find(1) else {\n        NotFound => 0\n    }\n\n    print(value)\n}"));
+    }
+
+    [Theory]
+    [InlineData("check 1", "type-mismatch")]
+    [InlineData("check \"a\"", "type-mismatch")]
+    [InlineData("bool? b = null\ncheck b", "nullable-unchecked")]
+    [InlineData("void Stop() {\n}\n\ncheck Stop()", "syntax")]
+    [InlineData("check true", null)]
+    [InlineData("n = 2\ncheck n == 2 && n > 1", null)]
+    [InlineData("bool? b = null\ncheck b != null", null)]
+    public void The_condition_of_a_check_is_a_bool_as_a_condition_is(string program, string? id)
+    {
+        // Y6 with C3: a condition of another type is `type-mismatch` at its line, a nullable one N2's `nullable-unchecked`, and a call
+        // with a `void` success O10's `syntax` (assumed: Q1 of issue 586, comment 6992687784, and F8 of comment 6993110710)
+        var line = program.Split('\n').Length;
+        Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
+    }
+
+    [Fact]
+    public void A_check_stands_in_any_code()
+    {
+        // Y6: in top-level code, a function, a method, a lambda and a test, in every build (assumed: Q1 of issue 586, comment
+        // 6992687784, and F9 of comment 6993110710)
+        Assert.Empty(Errors("int Twice(int n) {\n    check n >= 0\n    return n * 2\n}\n\nclass Box(int N) {\n    pub int Get() {\n        check N > 0\n        return N\n    }\n}\n\nf = (int x) => {\n    check x != 0\n    return x\n}\n\ncheck Twice(1) == 2\nprint(f(Box(1).Get()))\ntest \"a\" {\n    check Twice(2) == 4\n}"));
+    }
+
+    [Fact]
+    public void The_model_keeps_each_test_in_its_order_and_each_check_s_text_and_the_types_its_failure_shows()
+    {
+        // Y5, Y6 with F10: the tests of the file in their order, each its function; a check's text, and for one of the six comparisons
+        // whose two sides have a text (A4) the comparison and each side's type, which its failure line shows in parentheses (assumed:
+        // Q1 of issue 586, comment 6992687784, and F10 of comment 6993110710)
+        var diagnostics = new DiagnosticBag();
+        var tree = Parser.Parse(SourceText.FromString("test.kz", "class Box(int N)\n\nb = Box(1)\nnames = [\"a\"]\ncheck (names.Count == 1)\ncheck b == b\nprint(b.N)\ntest \"second\" {\n    check 1 + 1 == 2\n}\n\ntest \"first\" {\n    check \"a\" != \"b\" && true\n    check 2.5 < 3.0\n}"), diagnostics);
+        var model = Checker.Check(tree, diagnostics, []).Model;
+        Assert.Empty(diagnostics.Items);
+        Assert.Equal(["\"second\"", "\"first\""], model.Tests.Select(t => t.Written));
+        Assert.Equal(["second", "first"], model.Tests.Select(t => t.Name));
+        Assert.All(model.Tests, t => Assert.Equal(Types.Void, model.TestOf(t).ReturnType));
+        Assert.All(model.Tests, t => Assert.Same(t.Body, model.TestOf(t).Declaration!.BlockBody));
+        Assert.All(model.Tests, t => Assert.Same(model.TestOf(t), model.FunctionOf(model.TestOf(t).Declaration!))); // the function a code generator reads
+
+        var topLevel = tree.Statements.OfType<AssertionStatement>().ToList();
+        var paren = model.AssertionOf(topLevel[0]);
+        Assert.Equal("(names.Count == 1)", paren.Text);
+        Assert.Same(((ParenthesizedExpression)topLevel[0].Condition).Inner, paren.Comparison);
+        Assert.Equal(("int", "int"), (paren.Left!.Text, paren.Right!.Text));
+        Assert.Equal(new Assertion("b == b", null, null, null), model.AssertionOf(topLevel[1])); // a class with no `Text()`
+
+        var sum = (AssertionStatement)model.Tests[0].Body.Statements[0];
+        Assert.Equal(new Assertion("1 + 1 == 2", (BinaryExpression)sum.Condition, Types.Int, Types.Int), model.AssertionOf(sum));
+        var first = model.Tests[1].Body.Statements.Cast<AssertionStatement>().ToList();
+        Assert.Equal(new Assertion("\"a\" != \"b\" && true", null, null, null), model.AssertionOf(first[0])); // `&&` is no comparison
+        Assert.Equal(("double", "double"), (model.AssertionOf(first[1]).Left!.Text, model.AssertionOf(first[1]).Right!.Text));
+    }
+
+    [Fact]
+    public void A_side_whose_value_no_print_shows_shows_none_in_the_failure()
+    {
+        // Y6 with F10: a side shows its value as a hole of an interpolation shows it (L6); a `Text()` without `pub` (A9, A15), a raw
+        // pointer (R14) and a vector (R18), whose texts nothing shows, leave the condition its text alone; a `pub` one is the control
+        // (assumed: F10 of issue 586, comment 6993110710)
+        Assert.Null(Assertions("class Secret(int N) {\n    string Text() => \"s\"\n}\n\ns = Secret(1)\ncheck s == s").Single().Comparison);
+        Assert.Null(Assertions("raw {\n    p = Ptr<long>(64)\n    check p == p\n}", "raw").Single().Comparison);
+        Assert.Null(Assertions("v = Vector128.Create(1, 2, 3, 4)\ncheck v == v").Single().Comparison);
+        var shown = Assertions("class Shown(int N) {\n    pub string Text() => \"s\"\n}\n\ns = Shown(1)\ntest \"a\" {\n    check Shown(2) != Shown(3)\n}\n\ncheck s == s").Select(a => a.Left?.Text).ToList();
+        Assert.Equal(["Shown", "Shown"], shown);
+    }
+
+    /// <summary>The model's entry of each check of a program the checker reads with no error, at the top level, in a `raw` block and in a test, in their order.</summary>
+    private static List<Assertion> Assertions(string program, string grants = "")
+    {
+        var diagnostics = new DiagnosticBag();
+        var tree = Parser.Parse(SourceText.FromString("test.kz", program), diagnostics);
+        var model = Checker.Check(tree, diagnostics, grants.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Model;
+        Assert.DoesNotContain(diagnostics.Items, d => d.IsError);
+        return Flatten(tree.Statements).OfType<AssertionStatement>().Select(model.AssertionOf).ToList();
+
+        static IEnumerable<Statement> Flatten(IEnumerable<Statement> statements) =>
+            statements.SelectMany(s => s is RawBlock r ? Flatten(r.Body.Statements) : s is TestDeclaration t ? Flatten(t.Body.Statements) : [s]);
+    }
+
+    [Fact]
+    public void A_change_in_a_check_meets_what_the_expression_around_it_holds()
+    {
+        // Y6 with the walk of `changed-while-held`: a call in a check's condition that takes `mut numbers`, in a statement of an `else`
+        // arm's block, changes what the expression holds, at its line, as such a call in any statement does
+        var program = "data NotFound\n\nint | NotFound Find(int id) => NotFound\n\nint Grow(mut List<int> xs) {\n    xs.Add(5)\n    return xs.Count\n}\n\nint Sum(List<int> xs, int n) => xs.Count + n\n\nmut numbers = List<int>()\nprint(Sum(numbers, Find(2) else {\n    NotFound => {\n        check CHECK\n        5\n    }\n}))";
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 15)], Errors(program.Replace("CHECK", "Grow(mut numbers) == 1", StringComparison.Ordinal)));
+        Assert.Empty(Errors(program.Replace("CHECK", "numbers.Count == 0", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void A_cluster_test_mock_and_advance_are_not_supported()
+    {
+        // Y8: the cluster test of section 13, once at its line, its body unread; Y9 and Y10: `mock` and `advance`, whose questions are
+        // open, once at their line, in a test or not; the duration's variables count as read (E1) (assumed: D7 of issue 586, comment
+        // 6992687784, and F20 of comment 6993110710)
+        NotSupportedAt(1, "Y8", "test cluster 3 seed 42 {\n    a = spawn Store()\n    split 2 | 3\n    check a.Count() == 1\n}");
+        Assert.Empty(Check("test cluster 3 seed 42 {\n}").Checker.Model.Tests); // no test of `kurz test`
+        NotSupportedAt(2, "Y9", "test \"a\" {\n    mock Clock with FakeClock\n}");
+        NotSupportedAt(1, "Y9", "mock Clock with FakeClock");
+        NotSupportedAt(3, "Y10", "test \"a\" {\n    d = 1s\n    advance d\n}");
+        NotSupportedAt(2, "Y10", "d = 1s\nadvance d + 1ms");
+
+        // T8 with Y10: the duration is checked as any expression is, as the bound of `within` is (U40), beside the `not supported`
+        foreach (var (program, id) in new[] { ("advance 1", ErrorIds.TypeMismatch), ("long n = 1\nadvance n", ErrorIds.TypeMismatch), ("duration? d = null\nadvance d", ErrorIds.NullableUnchecked), ("void Stop() {\n}\n\nadvance Stop()", ErrorIds.Syntax) })
+        {
+            var line = program.Split('\n').Length;
+            var (diagnostics, _) = Check(program);
+            Assert.Equal([(id, line)], diagnostics.Items.Where(d => d.IsError).Select(d => (d.Id, d.Line)));
+            var unread = Assert.Single(diagnostics.Items, d => !d.IsError);
+            Assert.Equal((line, "`advance` (Y10)"), (unread.Line, unread.Message));
+        }
+    }
+
+    [Fact]
+    public void An_error_in_a_test_refuses_the_build_of_its_program()
+    {
+        // Y7: every command checks every test, so that an error in one refuses `kurz build` and `kurz run` of its file as an error
+        // elsewhere does; the control has no error (assumed: Q5 of issue 586, comment 6992687784)
+        var refused = Builder.Compile(SourceText.FromString("program.kz", "test \"a\" {\n    check 1\n}\n\nprint(1)"), [], StdRuntime.Value, testBuild: true);
+        Assert.Null(refused.Program);
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], refused.Diagnostics.Items.Where(d => d.IsError).Select(d => (d.Id, d.Line)));
+        var control = Builder.Compile(SourceText.FromString("program.kz", "test \"a\" {\n    check 1 == 1\n}\n\nprint(1)"), [], StdRuntime.Value, testBuild: true);
+        Assert.DoesNotContain(control.Diagnostics.Items, d => d.IsError);
     }
 
     // ---- T.Make (T33) -------------------------------------------------------------------------------
@@ -7259,6 +7565,50 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NotVisible, 15)], Errors(ActorCounter + "actor B(Counter Other) {\n    pub void Go() {\n        send Other.Hidden()\n    }\n}\n"));
     }
 
+    private const string PerCache = "actor Cache per node {\n    mut int hits = 0\n\n    pub int Get() => hits\n\n    pub void Add(int n) {\n        hits = hits + n\n    }\n\n    int Hidden() => hits\n}\n\n";
+
+    [Fact]
+    public void A_per_node_actor_is_called_and_sent_to_by_its_name_from_any_code()
+    {
+        // U51, U52, U55 (assumed: T27, T31 and T33 of issue 519, comment 6983903100): the top-level statements, a function, another actor
+        // and the actor's own methods call and send through the name, inside the actor as through `this`, which still gives a reference
+        // there; its words after the name with `stack` and a policy, and `()` with no parameter, are read
+        Assert.Empty(Errors(PerCache + "send Cache.Add(1)\nprint(Cache.Get())\n"));
+        Assert.Empty(Errors(PerCache + "void Bump() {\n    send Cache.Add(1)\n    Cache.Add(2)\n}\n\nBump()\nprint(Cache.Get())\n"));
+        Assert.Empty(Errors(PerCache + "actor Worker {\n    pub void Work() {\n        Cache.Add(3)\n        send Cache.Add(4)\n    }\n}\n\nw = spawn Worker()\nw.Work()\n"));
+        Assert.Empty(Errors("actor Cache per node {\n    mut int hits = 0\n\n    pub int Get() => hits\n\n    pub void Bump() {\n        send Cache.Add(1)\n        hits = Cache.Get() + 1\n        me = this\n        print(me.Get())\n    }\n\n    pub void Add(int n) {\n        hits = hits + n\n    }\n}\n\nsend Cache.Bump()\n"));
+        Assert.Empty(Errors("actor Cache per node stack 64kb on crash restart max 2 in 1s {\n    pub int Get() => 1\n}\n\nprint(Cache.Get())\n"));
+        Assert.Empty(Errors("actor Cache() per node {\n    pub int Get() => 1\n}\n\nprint(Cache.Get())\n"));
+    }
+
+    [Fact]
+    public void A_per_node_actors_name_stands_only_before_a_call_and_its_refusals_take_the_ids_of_their_forms()
+    {
+        // U51 (assumed: T31 and T32 of issue 519, comment 6983903100): `spawn` of it is `type-mismatch` (U14), a parameter of its
+        // constructor and its name as a value `syntax` (E4), at the line of each, the parameter's on a line of its own, the
+        // name's text naming U51 where a class's names K1; a field through
+        // its name is `not-visible` (U8), and a method without `pub` (U9), as through a reference; `send` of a method with a result is
+        // `send-result` (U6), as through a reference; an actor that is not `per node` keeps K7's `static-mismatch` for its name's call
+        Assert.Equal([(ErrorIds.TypeMismatch, 13)], Errors(PerCache + "c = spawn Cache()\nprint(c.Get())\n"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("actor Cache(\n    int Size\n) per node {\n    pub int Get() => Size\n}\n\nprint(Cache.Get())\n"));
+        Assert.Equal([(ErrorIds.Syntax, 13)], Errors(PerCache + "c = Cache\nprint(c)\n"));
+        Assert.EndsWith("(U51, U10; E4)", ErrorText(PerCache + "c = Cache\nprint(c)\n"), StringComparison.Ordinal);
+        Assert.Equal([(ErrorIds.Syntax, 14)], Errors(PerCache + "print(1)\nprint(Cache)\n"));
+        Assert.Equal([(ErrorIds.NotVisible, 13)], Errors(PerCache + "print(Cache.hits)\n"));
+        Assert.Equal([(ErrorIds.NotVisible, 13)], Errors(PerCache + "print(Cache.Hidden())\n"));
+        Assert.Equal([(ErrorIds.SendResult, 13)], Errors(PerCache + "send Cache.Get()\n"));
+        Assert.Equal([(ErrorIds.StaticMismatch, 13)], Errors(ActorCounter + "print(Counter.Get())\n"));
+    }
+
+    [Fact]
+    public void A_per_node_actors_name_called_as_a_function_or_a_method_named_through_it_without_a_call_is_not_supported()
+    {
+        // U51 (assumed: a reading of the build, proposed with this record and not put to the owner): `Cache()` neither spawns nor calls,
+        // and a method named without a call is a method as a value, as through a reference (U4, F11)
+        Assert.StartsWith("14: ", Assert.Single(NotSupported(PerCache + "print(1)\nCache()\n")));
+        Assert.StartsWith("14: ", Assert.Single(NotSupported(PerCache + "print(1)\nf = Cache.Get\n")));
+    }
+
     [Fact]
     public void A_spawn_of_what_is_no_actor_is_type_mismatch_and_a_send_of_what_is_no_message_is_syntax()
     {
@@ -7282,6 +7632,11 @@ public sealed class CheckerTests
     [InlineData(1, "U1", "actor A stack 8mb per Id {\n}\n")]
     [InlineData(1, "U27, U28", "actor A per Id on crash (c) {\n    restart\n} {\n}\n")]
     [InlineData(1, "U1", "actor A per Id on crash stop {\n}\n")]
+    [InlineData(1, "U1, U51", "actor A per cluster {\n}\n")]
+    [InlineData(1, "U1", "actor A per node per node {\n}\n")]
+    [InlineData(1, "U1", "actor A per node inbox drop {\n}\n")]
+    [InlineData(1, "U27, U28", "actor A per node on crash (c) {\n    restart\n} {\n}\n")]
+    [InlineData(1, "U1, T19", "actor A<T> per node {\n}\n")]
     [InlineData(1, "U1, T19", "actor A<T> {\n}\n")]
     [InlineData(1, "U1, T19", "actor Pair<T>(T First) {\n}\n\np = spawn Pair<int>(1)\nprint(p)\n")]
     [InlineData(4, "U1", "interface I {\n}\n\nactor A : I {\n}\n")]

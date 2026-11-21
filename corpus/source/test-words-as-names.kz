@@ -1,0 +1,9 @@
+// expect: output
+// | 10
+// rules: L18, Y1
+
+test = 1
+check = 2
+mock = 3
+advance = 4
+print(test + check + mock + advance)

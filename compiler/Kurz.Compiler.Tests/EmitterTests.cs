@@ -415,6 +415,140 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void The_lock_word_s_wait_and_wake_call_futex_by_its_number_on_each_architecture_and_windows_waits_on_the_address()
+    {
+        // section 2, round 20, "Dir per arch": `futex` is 202 on x86-64, and 98 on AArch64, where 202 is `accept`, so each Linux
+        // architecture's file gives the lock word's wait and wake with its own number, which every program reaches through the lock of
+        // its streams (`Print`): the wait by `FUTEX_WAIT_PRIVATE` (128) while the word holds the value the lock gives it, 2, with no time
+        // limit, and the wake of one by `FUTEX_WAKE_PRIVATE` (129); Windows waits by `WaitOnAddress` on the 4 bytes of the word with no
+        // time limit (`INFINITE`) and wakes by `WakeByAddressSingle`, as Rust's futex does there
+        const string windowsWait = @"@WaitOnAddress\(ptr %[\w.]+, ptr %[\w.]+, i64 4, i32 -1\)";
+        foreach (var (target, arch, wait, wake) in new[]
+        {
+            (Target.Linux, Arch.X64, @"@syscall\(i64 202, ptr %[\w.]+, i64 128, i64 %[\w.]+, i64 0\)", @"@syscall\(i64 202, ptr %[\w.]+, i64 129, i64 1\)"),
+            (Target.Linux, Arch.Arm64, @"@syscall\(i64 98, ptr %[\w.]+, i64 128, i64 %[\w.]+, i64 0\)", @"@syscall\(i64 98, ptr %[\w.]+, i64 129, i64 1\)"),
+            (Target.Windows, Arch.X64, windowsWait, @"@WakeByAddressSingle\(ptr %"),
+            (Target.Windows, Arch.Arm64, windowsWait, @"@WakeByAddressSingle\(ptr %"),
+        })
+        {
+            var cpu = arch == Arch.X64 ? Cpu.Baseline : Cpu.ArmBaseline;
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", "print(1)\n"), [], Builder.CheckRuntime(target, arch), true, cpu: () => cpu);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var ir = compilation.Program.Ir;
+            foreach (var (function, call) in new[] { ("LockWait", wait), ("LockWake", wake) })
+            {
+                var body = Regex.Match(ir, $@"^define [^\n]*@""?rt\.sys\.{function}\b[^\n]*\n(.*?)\n\}}", RegexOptions.Multiline | RegexOptions.Singleline);
+                Assert.True(body.Success, $"{target} {arch}: no `{function}` in the module");
+                Assert.True(Regex.IsMatch(body.Groups[1].Value, call), $"{target} {arch}: no `{call}` in `{function}`:\n{body.Groups[1].Value}");
+            }
+
+            // the value the wait sleeps on, which the lock gives it: 2, taken with a thread that may sleep (`Lock`)
+            var locked = Regex.Match(ir, @"^define [^\n]*@""rt\.common\.Lock\.[0-9]+""\([^\n]*\n(.*?)\n\}", RegexOptions.Multiline | RegexOptions.Singleline);
+            Assert.True(locked.Success, $"{target} {arch}: no `Lock` in the module");
+            Assert.True(Regex.IsMatch(locked.Groups[1].Value, @"@""?rt\.sys\.LockWait\b[^\n(]*\(ptr %[\w.]+, i32 2\)"), $"{target} {arch}: `Lock` waits on no 2:\n{locked.Groups[1].Value}");
+            Assert.Equal(target == Target.Linux ? 2 : 0, Regex.Count(ir, @"@syscall\(i64 (202|98), ")); // no other number of the two
+        }
+    }
+
+    [Fact]
+    public void A_directory_s_creation_reads_st_mode_at_the_byte_of_its_architecture_s_struct_stat()
+    {
+        // S8, section 2, round 20, "Dir per arch": `Directory.Create` takes a directory that is there by the type in `st_mode`, at byte
+        // 24 of x86-64's `struct stat` and at byte 16 of AArch64's, the kernel's generic one, where 24 is `st_uid`; each Linux
+        // architecture's file gives the byte (`StatModeAt`), the emitted call passes it to `CreateDirectories`, which hands it through
+        // `MakeDirectory` to `IsDirectory`, and `IsDirectory` reads the mode at the byte it was given
+        const string text = "void | IoError Make() {\n    Directory.Create(\"made\")\n}\n\nMake() else {\n    IoError e => print(e)\n}\n";
+        foreach (var (arch, at) in new[] { (Arch.X64, 24), (Arch.Arm64, 16) })
+        {
+            var cpu = arch == Arch.X64 ? Cpu.Baseline : Cpu.ArmBaseline;
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], Builder.CheckRuntime(Target.Linux, arch), true, cpu: () => cpu);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var ir = compilation.Program.Ir.ReplaceLineEndings("\n");
+            string Body(string function)
+            {
+                var defined = Regex.Match(ir, $@"^define [^\n]*@""?{function}\b[^\n]*\n(.*?)\n\}}", RegexOptions.Multiline | RegexOptions.Singleline);
+                Assert.True(defined.Success, $"{arch}: no `{function}` in the module");
+                return defined.Groups[1].Value;
+            }
+
+            var given = Body(@"rt\.sys\.StatModeAt");
+            Assert.True(Regex.IsMatch(given, $@"\bi64 {at}\b") && !Regex.IsMatch(given, $@"\bi64 {40 - at}\b"), $"{arch}: `StatModeAt` gives no {at}:\n{given}");
+            var made = Body(@"f\.Make\.[0-9]+");
+            Assert.True(Regex.IsMatch(made, @"(%[\w.]+) = call i64 @""?rt\.sys\.StatModeAt\b[^\n(]*\(\)[^\n]*\n(?:[^\n]*\n)*?[^\n]*call i64 @""?rt\.sys\.CreateDirectories\b[^\n(]*\(ptr %[\w.]+, i64 %[\w.]+, i64 \1\)"),
+                $"{arch}: `CreateDirectories` is not given what `StatModeAt` gave:\n{made}");
+            // the mode loaded from the pointer the parameter's own load offsets, since a literal offset is a value too (`sext i32 24
+            // to i64`), so that no operand of a pointer's offset is a constant
+            var read = Body(@"rt\.sys\.IsDirectory");
+            Assert.True(Regex.IsMatch(read, @"store i64 %p1, ptr (%[\w.]+)\b[^\n]*\n(?:[^\n]*\n)*?[^\n]*?(%[\w.]+) = load i64, ptr \1\b[^\n]*\n(?:[^\n]*\n)*?[^\n]*?(%[\w.]+) = getelementptr i8, ptr %[\w.]+, i64 \2\b[^\n]*\n(?:[^\n]*\n)*?[^\n]*load i32, ptr \3\b"),
+                $"{arch}: `IsDirectory` reads `st_mode` at no byte its parameter gave:\n{read}");
+            // each function between the emitted call and that read hands on its own parameter: `CreateDirectories`' `modeAt` to its two
+            // calls of `MakeDirectory` and its call of itself, `MakeDirectory`'s to its call of `IsDirectory`, each a load of the slot
+            // the parameter was stored in, so that a byte of a function's own given on turns it red
+            const string chain = @"call [^\n@]*@""?rt\.sys\.(?:IsDirectory|MakeDirectory|CreateDirectories)\b[^\n(]*\(";
+            foreach (var (function, parameter, calls) in new[] { (@"rt\.sys\.CreateDirectories", "%p2", 3), (@"rt\.sys\.MakeDirectory", "%p1", 1) })
+            {
+                var passing = Body(function);
+                var slot = Regex.Match(passing, $@"store i64 {parameter}, ptr (%[\w.]+)\b");
+                Assert.True(slot.Success, $"{arch}: `{function}` stores no `{parameter}`:\n{passing}");
+                var loaded = Regex.Matches(passing, $@"(%[\w.]+) = load i64, ptr {Regex.Escape(slot.Groups[1].Value)}\b").Select(m => m.Groups[1].Value).ToHashSet();
+                var handed = Regex.Matches(passing, chain + @"[^\n]*, i64 ([%\w.-]+)\)").Select(m => m.Groups[1].Value).ToList();
+                Assert.True(handed.Count == calls && handed.All(loaded.Contains), $"{arch}: `{function}` hands on {string.Join(", ", handed)}, not {calls} loads of its `{parameter}`:\n{passing}");
+            }
+
+            Assert.Equal(5, Regex.Count(ir, chain)); // the emitted call and the four above, no other
+        }
+    }
+
+    [Fact]
+    public void A_function_of_sys_that_neither_file_or_both_give_is_named_with_both_files()
+    {
+        // round 20, "Dir per arch": a call on a file finds the runtime's function in the target's file or in the architecture's, which the
+        // folder `sys` reads beside it (`SysFunction`); where neither gives it, the error names both files and the function, and where both
+        // do, which the runtime's check refuses as `redeclared` (V9), it names each declaration by its file and line, where `.Single` named
+        // neither
+        const string linux = "runtime/linux/linux.kz", x64 = "runtime/linux/x86-64/x86-64.kz";
+        var program = SourceText.FromString("program.kz", "print(Environment.Args().Count)\n");
+        CheckedRuntime Edited(string path, Func<string, string> edit, List<string> errors)
+        {
+            var files = Runtime.Files.Select(f => f.Path == path ? new RuntimeFile(f.Path, Encoding.UTF8.GetBytes(edit(Encoding.UTF8.GetString(f.Bytes).ReplaceLineEndings("\n")))) : f).ToList();
+            Assert.NotEqual(Runtime.Files.Select(f => f.Bytes), files.Select(f => f.Bytes)); // the file did change
+            return Runtime.Check(files, Target.Linux, Arch.X64, errors);
+        }
+
+        Assert.NotNull(Builder.Compile(program, [], Builder.CheckRuntime(Target.Linux, Arch.X64), true, cpu: () => Cpu.Baseline).Program); // the positive control
+
+        var errors = new List<string>();
+        var missing = Edited(linux, t => t.Replace("pub int Arguments(", "int Arguments(", StringComparison.Ordinal), errors);
+        Assert.Empty(errors); // only a program's call reaches `Arguments`, so that the check finds nothing missing
+        var none = Assert.Throws<InvalidOperationException>(() => Builder.Compile(program, [], missing, true, cpu: () => Cpu.Baseline));
+        Assert.True(none.Message.Contains(linux, StringComparison.Ordinal) && none.Message.Contains(x64, StringComparison.Ordinal) && none.Message.Contains("`Arguments`", StringComparison.Ordinal), none.Message);
+
+        var declared = Encoding.UTF8.GetString(Runtime.Files.Single(f => f.Path == linux).Bytes).ReplaceLineEndings("\n").Split('\n').ToList().FindIndex(l => l.StartsWith("pub int Arguments(", StringComparison.Ordinal)) + 1;
+        var twice = Edited(x64, t => t + "\npub int Arguments(int skip) => skip\n", errors);
+        var again = Encoding.UTF8.GetString(Runtime.Files.Single(f => f.Path == x64).Bytes).ReplaceLineEndings("\n").Split('\n').Length + 1;
+        Assert.Contains(errors, e => e.StartsWith($"{x64}:{again}: redeclared: ", StringComparison.Ordinal)); // the check refuses it
+        var both = Assert.Throws<InvalidOperationException>(() => Builder.Compile(program, [], twice, true, cpu: () => Cpu.Baseline));
+        Assert.True(declared > 0 && both.Message.Contains($"{linux}:{declared}", StringComparison.Ordinal) && both.Message.Contains($"{x64}:{again}", StringComparison.Ordinal) && both.Message.Contains("`Arguments`", StringComparison.Ordinal), both.Message);
+    }
+
+    [Fact]
+    public void Random_s_words_on_linux_are_each_thread_s_own()
+    {
+        // section 6 (assumed: each thread's own, as the `rand` crate's `ThreadRng` is one per thread, not checked at source): the two flags and the descriptor `Random` keeps
+        // on Linux are the thread's local storage, since an atomic view takes the address of its word (R19) and no `static` gives one
+        foreach (var arch in new[] { Arch.X64, Arch.Arm64 })
+        {
+            var cpu = arch == Arch.X64 ? Cpu.Baseline : Cpu.ArmBaseline;
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", "print(1)\n"), [], Builder.CheckRuntime(Target.Linux, arch), true, cpu: () => cpu);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            foreach (var name in new[] { "insecureTaken", "getrandomRefused", "urandom" })
+            {
+                Assert.Matches($@"@""s\.[\w.]+\.{name}"" = internal thread_local global ", compilation.Program.Ir);
+            }
+        }
+    }
+
+    [Fact]
     public void A_build_refuses_a_runtime_of_another_architecture_than_its_cpus()
     {
         // round 20, "Dir per arch": a program for one architecture calls that architecture's switch, so a runtime checked for the other
@@ -967,6 +1101,27 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.DoesNotMatch(@"(%[\w.]+) = extractvalue %kz\.actor %[\w.]+, 0(, !dbg ![0-9]+)?\r?\n\s+store i64 \1, ptr %v\.key\.", compiled.Ir);
     }
 
+    [Theory]
+    [InlineData("d", 0)]
+    [InlineData("2s", 0)]
+    [InlineData("-2s", 0)]
+    [InlineData("(d)", 0)]
+    [InlineData("ds[0]", 1)]
+    [InlineData("(ds[0])", 1)]
+    public void A_message_whose_clauses_bound_can_raise_with_no_call_in_it_is_built_in_a_heap_of_its_own(string bound, int heaps)
+    {
+        // U39, U12: the bound of a call's clause runs after the message is built, so a bound that can raise with no call in it, an index,
+        // builds the message in a heap of its own (the runtime's `MessageHeapNew`), which the crash of its builder frees (ActorTests,
+        // `A_message_whose_clauses_bound_crashes_its_builder_leaves_no_block_in_its_callees_heap`); a duration's literal, its sign
+        // included, and a read of a name, either in brackets, raise nothing, and the message is built in the callee's heap; the IR is
+        // read, since a call whose bound raises nothing answers alike from either heap
+        var compilation = Compile("actor Store {\n    pub int Get(List<int> xs) => xs[0]\n}\n\ns = spawn Store()\nds = [1s]\nd = 1s\nitems = [1]\n"
+            + $"print([d, ds[0]].Count)\nprint(s.Get(items) within {bound})\n", Builder.CheckRuntime(Builder.HostTarget!.Value));
+        var program = compilation.Program;
+        Assert.True(program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        Assert.Equal(heaps, Regex.Count(program.Ir, @"call ptr @""[^""]+\.MessageHeapNew\.[0-9]+[^""]*""\(\)"));
+    }
+
     [Fact]
     public void Remove_finds_the_slot_of_its_key_once_and_takes_the_slot_of_a_copy_at_its_offset()
     {
@@ -1430,7 +1585,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // takes the reply off the message after the method returned by one swap (`ReplyTaken`), as the crash's unhook does, so that one
         // of them owns it, as tokio's `oneshot` decides by one word (not checked at source); the owner reads the waiter, then stores the
         // reply's word with release, then wakes (`Replied`, `Signal`), the waiter loads it with acquire (`ReplyState`), which the
-        // waits, the readiness, the take and the crash call (`Wait`, its loop in the top-level code, its loop in an activation and its
+        // waits, the readiness, the take and the crash call (`Wait`, its loop in the top-level code in `RootWait`, its loop in an activation and its
         // kind, `Ready`, `RunOne`, `Fall`), as the crash and the end take a reply by the swap (`Fall`, `EndActor`); a wake sets QUEUED by
         // one `or` (`Wake`), a take, a hold's end, a constructor's end and a restart's hold change the state word by one compare-exchange
         // (`Exchanged`) after a load with acquire, the restart's hold loading it with acquire again while a take holds the actor
@@ -1460,7 +1615,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         InOrder(Body(@"kz\.main"), @"store i32 0, ptr %v\.reply\.\d+", @"call void @""rt\.common\.ReplyWaiter\.\d+""\(ptr %v\.reply\.\d+\)",
             @"store ptr %v\.reply\.\d+, ptr %t\d+", @"call void @""rt\.common\.Enqueue\.\d+""", @"call void @""rt\.common\.Wait\.\d+""");
-        Assert.Contains("getelementptr { i32, ptr, ptr, i64 }, ptr %v.reply.", ir, StringComparison.Ordinal);
+        Assert.Contains("getelementptr { i32, ptr, i64, ptr, ptr, i64, ptr, i64 }, ptr %v.reply.", ir, StringComparison.Ordinal); // U36, U43: the deadline, the timers' links and the time of a crash or an end before the heap
         InOrder(Body(@"""message\.Counter\.Get\.\d+"""), @"call i64 @""f\.Counter\.Get\.\d+""", @"call ptr @""rt\.common\.ReplyTaken\.\d+""\(ptr %a1\)",
             @"call void @""rt\.common\.Replied\.\d+""");
         InOrder(Runtime("ReplyTaken"), @"atomicrmw xchg ptr %t\d+, ptr null acq_rel, align 8");
@@ -1476,13 +1631,70 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         InOrder(Runtime("HeldAlone"), @"call i32 @""rt\.common\.Exchanged\.\d+""", @"load atomic i32, ptr %t\d+ acquire, align 4");
         const string state = @"call i32 @""rt\.common\.ReplyState\.\d+""", taken = @"call ptr @""rt\.common\.ReplyTaken\.\d+""";
-        InOrder(Runtime("Wait"), state, state, state);
+        InOrder(Runtime("Wait"), state, state);
+        InOrder(Runtime("RootWait"), state);
         InOrder(Runtime("Ready"), state);
         InOrder(Runtime("RunOne"), state);
         InOrder(Runtime("Fall"), state, taken, state, taken);
         InOrder(Runtime("EndActor"), taken);
 
         Ran(Toolchain.Run(toolchain.Build(program, "reply-orders")), 0, ["2"], string.Empty);
+    }
+
+    [Fact]
+    public void The_queues_the_locks_and_the_slots_the_threads_share_are_taken_and_set_by_atomic_operations_of_their_orders()
+    {
+        // section 6, R19: a sender puts its message on the actor's queue by one swap of its end with acquire and release, after a
+        // relaxed store of the message's link, and stores the link of the end it found with release, which the holder loads with
+        // acquire (`Pushed`, `Popped`, an intrusive queue of many producers and one consumer, not checked at source); the lock of the shared words is of the shape of Rust's futex mutex (not checked at source), a compare-exchange from 0
+        // to 1 with acquire, relaxed where it fails, relaxed loads in its spin, a swap of 2 with acquire, and its end a swap of 0 with
+        // release before the wake (`LockTried`, `LockSpun`, `Lock`, `Unlock`); the count of the actors is one relaxed add (`ActorNew`); a
+        // slot is set with release, its state before its number, cleared with release, its number before its link, and looked up with
+        // no lock by three loads with acquire, the number, the state and the number again (`SlotTake`, `SlotFree`, `Lookup`); the orders
+        // are what a thread of its own needs and one thread does not show; the end of a supervisor sets its child's ENDING bit by one `or`
+        // with acquire and release before it holds the child, and the child's holder loads it with acquire (`EndChildren`, `Ending`)
+        const string text = "actor Counter {\n    mut long count = 0\n\n    pub void Add(long n) {\n        count = count + n\n    }\n\n    pub long Get() => count\n}\n\n"
+            + "c = spawn Counter()\nsend c.Add(2)\nprint(c.Get())\n";
+        var program = Emit(text);
+        var ir = program.Ir.ReplaceLineEndings("\n");
+        string Runtime(string name)
+        {
+            var defined = Regex.Match(ir, $@"^define [^\n]*@""rt\.common\.{name}\.[0-9]+""\([^\n]*\n(.*?)\n\}}\n", RegexOptions.Multiline | RegexOptions.Singleline);
+            Assert.True(defined.Success, $"no function {name}");
+            return defined.Groups[1].Value;
+        }
+
+        void InOrder(string body, params string[] patterns)
+        {
+            var at = 0;
+            foreach (var pattern in patterns)
+            {
+                var found = new Regex(pattern).Match(body, at);
+                Assert.True(found.Success, $"no `{pattern}` after the place {at} of:\n{body}");
+                at = found.Index + found.Length;
+            }
+        }
+
+        InOrder(Runtime("Pushed"), @"store atomic ptr null, ptr %[\w.]+ monotonic, align 8", @"atomicrmw xchg ptr %[\w.]+, ptr %[\w.]+ acq_rel, align 8",
+            @"store atomic ptr %[\w.]+, ptr %[\w.]+ release, align 8");
+        InOrder(Runtime("Popped"), @"load atomic ptr, ptr %[\w.]+ acquire, align 8", @"load atomic ptr, ptr %[\w.]+ acquire, align 8",
+            @"load atomic ptr, ptr %[\w.]+ acquire, align 8", @"call void @""rt\.common\.Pushed\.\d+""", @"load atomic ptr, ptr %[\w.]+ acquire, align 8");
+        InOrder(Runtime("LockTried"), @"cmpxchg ptr %[\w.]+, i32 0, i32 1 acquire monotonic, align 4");
+        InOrder(Runtime("LockSpun"), @"load atomic i32, ptr %[\w.]+ monotonic, align 4", @"load atomic i32, ptr %[\w.]+ monotonic, align 4");
+        InOrder(Runtime("Lock"), @"call i32 @""rt\.common\.LockTried\.\d+""", @"call i32 @""rt\.common\.LockSpun\.\d+""",
+            @"atomicrmw xchg ptr %[\w.]+, i32 2 acquire, align 4", @"call i64 @""?rt\.sys\.LockWait");
+        InOrder(Runtime("Unlock"), @"atomicrmw xchg ptr %[\w.]+, i32 0 release, align 4", @"call i64 @""?rt\.sys\.LockWake");
+        InOrder(Runtime("ActorNew"), @"atomicrmw add ptr %[\w.]+, i64 1 monotonic, align 8", @"call i64 @""rt\.common\.SlotTake\.\d+""");
+        InOrder(Runtime("SlotTake"), @"call void @""rt\.common\.Lock\.\d+""", @"store atomic ptr %[\w.]+, ptr %[\w.]+ release, align 8",
+            @"store atomic i64 %[\w.]+, ptr %[\w.]+ release, align 8", @"call void @""rt\.common\.Unlock\.\d+""");
+        InOrder(Runtime("SlotFree"), @"call void @""rt\.common\.Lock\.\d+""", @"store atomic i64 0, ptr %[\w.]+ release, align 8",
+            @"store atomic i64 %[\w.]+, ptr %[\w.]+ release, align 8", @"call void @""rt\.common\.Unlock\.\d+""");
+        InOrder(Runtime("Lookup"), @"load atomic i64, ptr %[\w.]+ acquire, align 8", @"load atomic ptr, ptr %[\w.]+ acquire, align 8",
+            @"load atomic i64, ptr %[\w.]+ acquire, align 8");
+        InOrder(Runtime("EndChildren"), @"atomicrmw or ptr %[\w.]+, i32 16 acq_rel, align 4", @"call void @""rt\.common\.HeldAlone\.\d+""",
+            @"call void @""rt\.common\.LetGo\.\d+""");
+        InOrder(Runtime("Ending"), @"load atomic i32, ptr %[\w.]+ acquire, align 4");
+        Ran(Toolchain.Run(toolchain.Build(program, "shared-orders")), 0, ["2"], string.Empty);
     }
 
     [Fact]

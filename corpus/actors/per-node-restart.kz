@@ -1,0 +1,22 @@
+// expect: output
+// | 5
+// rules: U54, U22
+
+actor Counter per node {
+    mut int count = 0
+
+    pub void Fail() {
+        throw "counter fails"
+    }
+
+    pub void Add(int n) {
+        count = count + n
+    }
+
+    pub int Get() => count
+}
+
+send Counter.Add(1)
+send Counter.Fail()
+send Counter.Add(5)
+print(Counter.Get())

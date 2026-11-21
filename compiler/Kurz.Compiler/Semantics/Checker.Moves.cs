@@ -533,7 +533,7 @@ public sealed partial class Checker
             }
         }
 
-        var parts = e is CallExpression c ? c.Arguments.Select(x => x.Value).Prepend(c.Callee) : Parts(e);
+        var parts = e is CallExpression c ? c.Arguments.Select(x => x.Value).Prepend(c.Callee).Concat(c.Clause()) : Parts(e);
         foreach (var part in parts)
         {
             foreach (var read in ReadsOf(part))
