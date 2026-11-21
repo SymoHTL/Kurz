@@ -160,7 +160,8 @@ starting on the line below it, before the trace (§6, decided there), written as
 breaks kept, and an empty text as an empty line (§6, an assumption there), the text made by the
 crash path from the value's `Text()`, from that of the instance's own class, found when the program
 runs, where the type the value has at the `throw` has none (O7; §5, the owner, 2026-11-21, issue 598,
-comment 7060156252, Q9 of comment 7055578588), or, for an instance of a class that neither declares
+comment 7060156252, Q9 of comment 7055578588), an interface that declares none among them (O7; §5,
+the owner, 2026-11-21, issue 621, comment 7067091007), or, for an instance of a class that neither declares
 nor inherits one, the bare name of the instance's own class (O7; §5, the owner, 2026-11-20, issue
 598, comment 7051500939, and 2026-11-21, comment 7060156252, Q2 and Q3 of comment 7055011193), while the actor
 that threw still exists, a `throw` crashing its

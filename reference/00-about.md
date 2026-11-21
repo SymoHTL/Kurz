@@ -412,7 +412,10 @@ print(Counter(1))
 `print(x)` with a value whose static type is an interface (K6) compiles when the interface declares
 `string Text()`, and is `no-text` otherwise; with a type parameter (T19) it compiles when the
 parameter is limited to an interface that declares it, and is `no-text` otherwise, whatever the call
-passes. A type meets such a limit when it has a text: every value with a derived text (A3, A4, A8,
+passes. A throw is the one place where a value of an interface that declares no `Text()` has a text,
+that of a thrown class instance: what the `Text()` of the instance's own class gives, found when the
+program runs, else that class's name (O7; §5, the owner, 2026-11-21, issue 621, comment 7067091007).
+A type meets such a limit when it has a text: every value with a derived text (A3, A4, A8,
 A11 to A14), a class that declares or inherits a `pub Text()` (A5, A9), and a value whose interface
 or type parameter has a text by the sentence before, without naming the interface (the owner,
 2026-10-04, against an interface a class has to name). The match holds only for an interface whose

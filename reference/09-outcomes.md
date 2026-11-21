@@ -1198,7 +1198,12 @@ found when the program runs from the instance's class, as C#'s virtual `ToString
 `print` of a value of that base stays `no-text` (A4) (§5, the owner, 2026-11-21, comment 7060156252,
 Q9 of comment 7055578588). An instance that a thrown `data` value or list holds as such a base takes
 its text by the same rule (§5, the owner, 2026-11-21, comment 7063693020, F1), and a `Text()` declared
-without `pub` is called there as one with it (§5, the owner, 2026-11-21, comment 7063693020, F2).
+without `pub` is called there as one with it (§5, the owner, 2026-11-21, comment 7063693020, F2). A
+value thrown as an interface that declares no `Text()` (A10) takes the text of a thrown class instance,
+what the `Text()` of the instance's own class gives, found when the program runs, else that class's
+name, while a `print` of it stays `no-text` (A10) (§5, the owner, 2026-11-21, issue 621, comment
+7067091007). One that a thrown `data` value or list holds takes its text by the same rule, and a
+`Text()` declared without `pub` is called there *(assumed, §5: F1 and F2 read for such a value)*.
 
 Case: [outcomes/else-throw-after-move.kz](../corpus/outcomes/else-throw-after-move.kz)
 ```kurz
@@ -1387,6 +1392,23 @@ void Fail(Animal a) {
 
 print("before")
 Fail(Dog("rex", 4))
+```
+
+Case: [outcomes/throw-interface-without-text.kz](../corpus/outcomes/throw-interface-without-text.kz)
+```kurz
+interface Sized {
+    int Size()
+}
+
+class Dot : Sized {
+    pub int Size() => 1
+}
+
+void Fail(Sized s) {
+    throw s
+}
+
+Fail(Dot())
 ```
 
 Case: [outcomes/bare-throw.kz](../corpus/outcomes/bare-throw.kz)
