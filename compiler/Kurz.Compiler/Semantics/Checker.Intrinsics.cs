@@ -138,7 +138,12 @@ public sealed partial class Checker
         return true;
     }
 
-    /// <summary>R18: a member read as a value from a class, <c>X86.Sse41.IsSupported</c>, a <c>bool</c>; null where the target names no class.</summary>
+    /// <summary>
+    /// R18: a member read as a value from a class, <c>X86.Sse41.IsSupported</c>, a <c>bool</c>; an intrinsic or <c>Vector128.Create</c> read
+    /// so, a function of a type, <c>syntax</c>, as a function's name where a value stands is (F11) (the owner, 2026-11-17, #572, comment
+    /// 6961064484, Q3, "syntax for all (Recommended)"; assumed for an intrinsic), and a member that is neither <c>unknown-name</c>; null
+    /// where the target names no class.
+    /// </summary>
     private Typed? CheckIntrinsicMember(MemberAccess m)
     {
         if (NamesClass(m.Target, out var path, out var named))
@@ -150,9 +155,13 @@ public sealed partial class Checker
 
             if (m.Member != "IsSupported")
             {
-                Report(ErrorIds.UnknownName, m.Line, Intrinsics.Functions.ContainsKey((c.Name, m.Member))
-                    ? $"`{c.Name}.{m.Member}` is a function, which is called (R18, V10)"
-                    : $"`{c.Name}` has no value `{m.Member}`: its test is `IsSupported` (R18, V10)");
+                if (Intrinsics.Functions.ContainsKey((c.Name, m.Member)))
+                {
+                    Report(ErrorIds.Syntax, m.Line, $"`{c.Name}.{m.Member}` is a function, and no value stands here: it is called (R18, F11)");
+                    return Typed.Error;
+                }
+
+                Report(ErrorIds.UnknownName, m.Line, $"`{c.Name}` has no value `{m.Member}`: its test is `IsSupported` (R18, V10)");
                 return Typed.Error;
             }
 
@@ -163,9 +172,15 @@ public sealed partial class Checker
 
         if (m.Target is NameExpression n && IsIntrinsicName(n.Name))
         {
+            if (Intrinsics.Functions.ContainsKey((n.Name, m.Member)))
+            {
+                Report(ErrorIds.Syntax, m.Line, $"`{n.Name}.{m.Member}` is a function, and no value stands here: it is called (R18, F11)");
+                return Typed.Error;
+            }
+
             Report(ErrorIds.UnknownName, m.Line, n.Name is "X86" or "Arm"
                 ? $"`{n.Name}.{m.Member}` is a class of intrinsics and no value (R18, V10)"
-                : $"`{n.Name}.{m.Member}` is a function, which is called (R18, V10)");
+                : $"`{n.Name}` has no function `{m.Member}`: a vector is made by `{n.Name}.Create` (R18, V10)");
             return Typed.Error;
         }
 

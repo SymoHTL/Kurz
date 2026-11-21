@@ -1,0 +1,8 @@
+// expect: error cannot-infer at 4
+// rules: R19
+
+void Take(AtomicPtr cell) {
+    print(1)
+}
+
+print(2)
