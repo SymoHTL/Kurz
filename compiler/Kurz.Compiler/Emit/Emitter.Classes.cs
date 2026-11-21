@@ -758,6 +758,36 @@ public sealed partial class Emitter
         return fn.Value($"load %kz.str, ptr {made}");
     }
 
+    /// <summary>
+    /// O7: the text a thrown value gives an instance held as an interface that declares no <c>Text()</c>, that of a thrown class instance:
+    /// what the <c>Text()</c> of the instance's own class gives, its own or the nearest base's, found when the program runs, and where that
+    /// class's chain declares none, the bare name of the class, a literal, which no count holds (the owner, 2026-11-21, issue 621, comment
+    /// 7067091007). The table a value of the interface carries is its instance's class's own for the interface, so the class is found as
+    /// <see cref="FaceArm"/> finds it: the table is compared with the one for the interface of each class of the program that implements it.
+    /// </summary>
+    private string FaceText(string value, InterfaceSymbol face)
+    {
+        var address = fn.Value($"extractvalue %kz.obj {value}, 0");
+        var table = fn.Value($"extractvalue %kz.obj {value}, 1");
+        var made = fn.Alloca("%kz.str", "thrown");
+        var done = fn.Label("thrown");
+        foreach (var symbol in Model.Classes.Where(c => c.Implements(face)))
+        {
+            var own = fn.Label("own");
+            var next = fn.Label("next");
+            fn.CondBranch(fn.Value($"icmp eq ptr {table}, {InterfaceTable(symbol, face)}"), own, next);
+            fn.Block(own);
+            var text = symbol.TextMethod is { } method ? CallOn(method, Layout.Fat(symbol) ? Pair(address, Table(symbol)) : address, new ClassType(symbol), []) : StringValue(symbol.Name);
+            fn.Emit($"store %kz.str {text}, ptr {made}");
+            fn.Branch(done);
+            fn.Block(next);
+        }
+
+        fn.Unreachable(); // the table is the one of a class of the program that implements the interface
+        fn.Block(done);
+        return fn.Value($"load %kz.str, ptr {made}");
+    }
+
     /// <summary>One more strong count of an instance.</summary>
     private string RetainInstance() => Helper("retain.instance", "void", ["ptr"], () =>
     {

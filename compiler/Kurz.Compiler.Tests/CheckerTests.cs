@@ -7950,6 +7950,18 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_print_of_an_interface_value_without_a_text_is_no_text_where_a_throw_of_it_builds()
+    {
+        // A10: whether a value of an interface has a text at a `print` or in an interpolation is decided by its interface, so that one whose
+        // interface declares no `Text()` is `no-text` there whatever its instance's class declares, while a `throw` of it builds and shows
+        // the text of the instance's class (O7, the owner, 2026-11-21, issue 621, comment 7067091007)
+        const string Sized = "interface Sized {\n    int Size()\n}\n\nclass Dot : Sized {\n    pub int Size() => 1\n    pub string Text() => \"dot\"\n}\n\nSized s = Dot()\n";
+        Assert.Equal([(ErrorIds.NoText, 11)], Errors(Sized + "print(s)\n"));
+        Assert.Equal([(ErrorIds.NoText, 11)], Errors(Sized + "print(\"got {s}\")\n"));
+        Clean(Sized + "print(Dot())\nthrow s\n");
+    }
+
+    [Fact]
     public void A_move_on_the_right_side_of_and_or_or_may_have_ended_its_variable_after_it()
     {
         // U12, section 6: the right side of `&&` runs where the left is true and of `||` where it is false (N3), so that a `move` there may

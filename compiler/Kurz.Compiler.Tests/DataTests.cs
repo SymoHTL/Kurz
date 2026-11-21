@@ -362,6 +362,22 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_thrown_value_of_an_interface_without_a_text_writes_the_text_of_its_instance_s_class()
+    {
+        // O7: a value thrown as an interface that declares no `Text()` takes the text of a thrown class instance: what the `Text()` of the
+        // instance's own class gives, found when the program runs, its own or a base's, else that class's name (the owner, 2026-11-21, issue
+        // 621, comment 7067091007); one that a thrown `data` value holds takes it by the same rule, and a `Text()` without `pub` is called
+        // as one with it (assumed: F1 and F2 of issue 598, comment 7063693020, read for such a value)
+        const string Sized = "interface Sized {\n    int Size()\n}\n\nclass Dot : Sized {\n    pub int Size() => 1\n}\n\nclass Ring(int Width) : Sized {\n    pub int Size() => Width\n    pub string Text() => \"ring {Width}\"\n}\n\nvoid Fail(Sized s) {\n    throw s\n}\n\n";
+        Ran(BuildAndRun(Sized + "Fail(Ring(2))\n", "throw-face-text"), 1, [], "error: thrown at program.kz:15:\nring 2\n");
+        Ran(BuildAndRun(Sized + "Fail(Dot())\n", "throw-face-name"), 1, [], "error: thrown at program.kz:15:\nDot\n");
+        Ran(BuildAndRun(Sized + "class Band(int More) : Ring\n\nclass Spot : Dot\n\nFail(Band(3, 4))\n", "throw-face-inherited-text"), 1, [], "error: thrown at program.kz:15:\nring 3\n");
+        Ran(BuildAndRun(Sized + "class Band(int More) : Ring\n\nclass Spot : Dot\n\nFail(Spot())\n", "throw-face-derived-name"), 1, [], "error: thrown at program.kz:15:\nSpot\n");
+        Ran(BuildAndRun(Sized + "data Pen(Sized Item)\n\nthrow Pen(Ring(2))\n", "throw-face-held"), 1, [], "error: thrown at program.kz:20:\nPen { Item = ring 2 }\n");
+        Ran(BuildAndRun(Sized.Replace("pub string", "string") + "Fail(Ring(2))\n", "throw-face-private-text"), 1, [], "error: thrown at program.kz:15:\nring 2\n");
+    }
+
+    [Fact]
     public void A_data_type_the_emitter_does_not_lay_out_builds_where_no_code_needs_it()
     {
         // the owner, 2026-10-23, "At first use"; the theory below has the same type where code needs it

@@ -666,7 +666,7 @@ the units read off with `BigInteger`, and that of 4000 timestamps and the edges 
 The error lines are the record's (section 6): `error: <id> at <file>:<n>` for an exception of the
 run-time table, the file named as the command line gave it, and `error: thrown at <file>:<n>:` for
 a `throw`, with the thrown value's text on the line below it, the text of the instance's own class for an
-instance thrown as a class with no `Text()`, or the name of the instance's own class where that class's chain declares none (O7). A `print` passes its file and its line
+instance thrown as a class or an interface with no `Text()`, or the name of the instance's own class where that class's chain declares none (O7). A `print` passes its file and its line
 to `Print`, which raises `print-failed` there where the system refuses the write or a write takes
 no byte, as Rust's `write_all` fails on a write of zero bytes, in every build (the owner,
 2026-10-23, "Caller passes it"), but for error 9 on Linux: there a write the system fails with error
@@ -978,7 +978,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a derived class a function that makes the pair `this` is from the address; an instance given where an
   interface is expected takes that table, a constant where its static type is a class nothing derives
   from, and else read from the table the reference holds, in the slot of the interface; a call through an interface calls its slot with the address,
-  the text of such a value is its `Text()` through its slot (A10), and `==` and a key compare and hash it
+  the text of such a value is its `Text()` through its slot (A10), or at a `throw` where the interface declares
+  none the text of the instance's own class, or its name where that class's chain declares none, the class
+  found by comparing the table with each implementing class's table for the interface (O7), and `==` and a key compare and hash it
   as through a reference that holds a table (K13); an arm of a class over a value of an interface or of a
   class some class derives from tests the class of the instance (C4, O5, K6): a comparison of the table
   for the interface with the arm's class's where that class has no base and no derived class, else of the
