@@ -1468,7 +1468,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.True(program is not null, "no program");
         string Body(string copy)
         {
-            var lines = program.Ir.Split('\n');
+            var lines = program.Ir.ReplaceLineEndings("\n").Split('\n'); // the module's lines end as the system's do
             var start = Array.FindIndex(lines, l => l.StartsWith("define ", StringComparison.Ordinal) && l.Contains($".AreaOf<{copy}>.", StringComparison.Ordinal));
             Assert.True(start >= 0, $"no copy `AreaOf<{copy}>` in the IR");
             return string.Join("\n", lines.Skip(start).TakeWhile(l => l != "}"));
