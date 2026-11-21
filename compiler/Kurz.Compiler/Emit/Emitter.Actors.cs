@@ -254,7 +254,9 @@ public sealed partial class Emitter
     /// (<see cref="PerStart"/>): a copy of each kept argument in the actor's heap, the one the allocation
     /// entry serves, the state's counts at one, and the constructor run on them as at the <c>spawn</c>, a constructor of the body
     /// borrowing them, since <c>move</c> before a parameter of a constructor is <c>not supported</c> (<c>Semantics/Checker.Constructors.cs</c>),
-    /// so that the copies are released after it, the primary one owning them, then the defaults of the body (K7); then the message freed. A
+    /// so that the copies are released after it, the primary one owning them, then the defaults of the body (K7); then the end of the
+    /// constructor given to the runtime (<c>Rebuilt</c>), since a call of the restart's chain that reaches the actor while the constructor
+    /// runs waits in its inbox (U22; section 6, the owner, 2026-11-20, #599, comment 7051501153, "Option 1"); then the message freed. A
     /// throw there is the actor's own crash (U3).
     /// </summary>
     private string Restarted(ClassSymbol symbol, ConstructorSymbol? constructor, List<KurzType> types, List<string?> copiesInto) =>
@@ -316,6 +318,7 @@ public sealed partial class Emitter
                 }
             }
 
+            fn.Emit($"call void {RuntimeFunction("Rebuilt")}(ptr %a0)"); // U22: the calls of its chain get in again (the runtime's `Moved`)
             fn.Emit($"call void {StdFunction("Free")}(ptr %a1, i64 56)"); // the restart's message (the runtime's `Restart`)
             fn.Return(null);
         });

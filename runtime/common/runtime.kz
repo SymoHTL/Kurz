@@ -4256,7 +4256,10 @@ byte* Popped(byte* queue) {
 // `EndActor`): each block at the front of the inbox, after the blocks there, in the order of its posts, so that
 // it runs after the current message and before the queued ones (U28, U34); then each message, a call that waits
 // of the chain the actor's top activation waits in to the end of that activation's side list (layer 1; section
-// 6, "One-shot reply slot"), every other message to the end of the inbox, as tokio's `mpsc` channel pushes a
+// 6, "One-shot reply slot"), except while its constructor runs at a restart (`Rebuilding`), when such a call
+// waits in the inbox for that constructor's end, so that a constructor that waits for it is `deadlock` at the
+// top-level code's wait (U22; section 6, the owner, 2026-11-20, #599, comment 7051501153, "Option 1"), and every
+// other message to the end of the inbox, as tokio's `mpsc` channel pushes a
 // value at the tail of its list (not checked at source), so that an inbox keeps the order in which its messages were sent (U5, U15).
 // `Fall` and `EndActor` move them on a supervisor that the thread does not hold too, where a child's crash
 // escalates through it or ends it as the crash's taker (`Fell`): that holds while one thread runs every program
@@ -4286,10 +4289,11 @@ void Moved(byte* state) {
             block = Popped(state - 120)
         }
 
+        bool rebuilding = Rebuilding(state)
         mut byte* message = Popped(state - 144)
         while message != null {
             byte* top = *Ptr<byte*>(state - 8)
-            if top != null && *Ptr<byte*>(message + 16) != null && *Ptr<long>(message + 24) == *Ptr<long>(top + 344) && *Ptr<long>(message + 32) == *Ptr<long>(top + 352) {
+            if top != null && !rebuilding && *Ptr<byte*>(message + 16) != null && *Ptr<long>(message + 24) == *Ptr<long>(top + 344) && *Ptr<long>(message + 32) == *Ptr<long>(top + 352) {
                 Append(top + 376, message)
             } else {
                 Append(state - 32, message)
@@ -4336,7 +4340,10 @@ byte* Taken(byte* list) {
 // queue; 4 NOTIFIED, a take found the actor held and dropped its entry, so that whoever holds it queues it
 // again as it lets go of it (`LetGo`, `ActorBuilt`); 8 BUILDING, its constructor runs at its `spawn` (U3); 16
 // ENDING, the actor ends after its current message, which the end of its supervisor sets by one atomic `or` and
-// no thread clears (`EndChildren`, `Ending`). With none of the first four set the actor is idle.
+// no thread clears (`EndChildren`, `Ending`); 32 REBUILDING, its constructor runs at a restart (U22), set by one
+// atomic `or` where the thread that holds it starts the restart (`Restart`) and cleared by one atomic `and` at the
+// end of that constructor (`Rebuilt`), so that a call of its chain waits in its inbox (`Moved`, `Rebuilding`). With
+// none of the first four set the actor is idle.
 AtomicInt StateWord(byte* state) {
     raw {
         return AtomicInt.FromPtr(Ptr<int>(state - 84))
@@ -4351,6 +4358,17 @@ bool Ending(byte* state) {
     }
 
     return (word & 16) != 0
+}
+
+// Whether the constructor of the actor runs at its restart, its REBUILDING bit set (`Restart`, `Rebuilt`), loaded with
+// acquire.
+bool Rebuilding(byte* state) {
+    mut int word = 0
+    raw {
+        word = StateWord(state).Load(MemoryOrder.Acquire)
+    }
+
+    return (word & 32) != 0
 }
 
 // The value the compare-exchange of the state word `word` from `seen` to `wanted` found there, `seen` where
@@ -5841,9 +5859,15 @@ void HeldAlone(byte* state) {
 // runs again. A crash there is the actor's own (U3). The take off the queue of the pauses lets go of that
 // queue's lock before this hold, and the life is not read again under it, which holds while one thread runs
 // every program (U35): on more than one, the end of the actor's supervisor could end and free it in that gap.
+// Its state word says REBUILDING from before the activation starts to the end of the constructor (`Rebuilt`), so
+// that a call of the restart's chain that reaches the actor meanwhile waits in its inbox (`Moved`; U22; section
+// 6, the owner, 2026-11-20, #599, comment 7051501153, "Option 1"); a crash of the constructor leaves the bit set,
+// which `Moved` reads only while the actor has an activation, and a crashed actor has none: it waits for a restart,
+// which sets the bit again, or it ends.
 void Restart(byte* state) {
     HeldAlone(state)
     raw {
+        StateWord(state).FetchOr(32, MemoryOrder.AcqRel)
         byte* side = *Ptr<byte*>(state - 80)
         *Ptr<int>(state - 88) = 0
         *Ptr<long>(side + 24) = PauseClock()
@@ -5855,6 +5879,15 @@ void Restart(byte* state) {
         *Ptr<long>(message + 40) = Never()
         *Ptr<long>(message + 48) = 0
         Start(state, message, null)
+    }
+}
+
+// The end of the constructor of the actor whose state is `state` at its restart, which the function of its restart
+// calls once the constructor and the defaults of its body ran (U22): its state word clears REBUILDING by one atomic
+// `and`, so that a call of its chain gets in again where layer 1 lets it in (`Moved`; U17).
+pub void Rebuilt(byte* state) {
+    raw {
+        StateWord(state).FetchAnd(~32, MemoryOrder.AcqRel)
     }
 }
 
