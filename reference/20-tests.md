@@ -147,7 +147,10 @@ a `throw`, a failed `check` (Y6), an overflow or a deadline, or where the runner
 `deadlock` (U18), which then names the test's line, `deadlock at users.kz:4`, since a parked wait keeps no
 place of its own; the run goes on with the test after it *(assumed: Q2 of issue 586, comment 6992687784,
 built at the default while it waits for the owner, and F5 of comment 6993110710, a reading of the build
-said back there)*. An error that ends the process wherever it happens (U19), `allocation-failed` among
+said back there)*. A `deadlock` that a call an actor's start keeps out closes (U22, U52) names that
+call's line in place of the test's, the line the top-level code's error names for that loop (U18) (§11,
+the owner, 2026-11-21, #599, comment 7063693195, Y5's line 1). An error that ends the process wherever
+it happens (U19), `allocation-failed` among
 them, ends the run inside a test too: its error line stands on standard error, and neither that test's
 line, nor the tests after it, nor the counts are written, and the exit code is 1 *(assumed: a reading of
 the build, proposed with this record and not put to the owner)*. The crash of a test's own actor writes no
@@ -198,6 +201,51 @@ test "waits on its own block" {
 
 test "after" {
     print("after")
+}
+```
+
+Case: [tests/test-restart-reentrant.kz](../corpus/tests/test-restart-reentrant.kz)
+```kurz
+// at its restart `A`'s constructor waits on `B.Ask`, whose call of `Peek` waits in `A`'s inbox for that constructor, so that the
+// runner's wait for the test finds nothing left to run, and the words under its `FAILED` line name that call of `Peek`, not the test
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+test "restarts into a call it keeps out" {
+    b = spawn B()
+    a = spawn A(b)
+    print(a.Get())
+    b.Set(a)
+    send a.Fail()
+    print(a.Get())
 }
 ```
 

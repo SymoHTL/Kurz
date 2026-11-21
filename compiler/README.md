@@ -2129,7 +2129,9 @@ table of the tests, each test's function, its name as written and its line, and 
 `stop`, by one message with no deadline (D6), and waits for it as the top-level code waits for a call
 (`RootWait`, the loop `Wait` runs). The test passes where the actor answered, and fails where it crashed,
 the words of its crash kept for the line under `FAILED` and no log line written for it (F1, F3), or where
-the wait found nothing left to run, `deadlock at <file>:<the test's line>` (F5). Then every actor the
+the wait found nothing left to run, `deadlock at <file>:<the test's line>` (F5), or the place of the
+call an actor's start keeps out where that call closes the loop, which `TestRan` looks for as `Wait`
+does (`Kept`, U22, U52) and `RunTests` names (Y5). Then every actor the
 test made ends at once, parked ones too (F6): the records of the run queue, each activation's stack back
 in the pool with its open copy sessions ended, the stack a pending block keeps, every heap, the heaps of
 messages, the timers, the pauses and the deadline of the top-level code's `within`, so that no timer and

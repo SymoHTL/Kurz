@@ -4913,7 +4913,8 @@ pub void Wait(byte* reply, byte* message, string file, int line) {
 // fired, then the block of a child the top-level code spawned, a restart whose pause ended, the sleep to the first pause's end, the
 // first timer or the deadline, or the run queue's first actor, as long as the reply is not set and its deadline has not passed; true
 // where one of those ends the loop, false where none of them is left, so that nothing could set the reply, where `Wait` raises
-// `deadlock` at the call's line and the test runner fails the test at its own (`RunTests`; Y5).
+// `deadlock` at the call's line and the test runner fails the test at its own (`RunTests`; Y5), or each at the line of a call an
+// actor's start keeps out where that call closes the loop (`Kept`).
 bool RootWait(byte* reply) {
     raw {
         long deadline = *Ptr<long>(reply + 16)
@@ -4957,7 +4958,9 @@ bool RootWait(byte* reply) {
 // The reply of a call that an actor's start keeps out, which the top-level code's wait that found nothing left to run names in place
 // of its own call, since that call closes the loop: a call that waits in the actor's lists, made in the chain of the code that runs the
 // constructor, which that chain would let in were the actor not starting (U17), so that the error names the call a developer changes
-// (`Wait`; U18, U22, U52; section 6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1). The code that runs the constructor is the
+// (`Wait`; U18, U22, U52; section 6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and so the words under a test's `FAILED`
+// line where the runner's wait for it finds nothing left to run (`TestRan`; Y5; section 11, the owner, 2026-11-21, #599, comment
+// 7063693195, Y5's line 1). The code that runs the constructor is the
 // actor's own top activation at a restart (REBUILDING); at a first start (BUILDING) it is the top-level code, whose chain is that of its
 // call that waits, `high` and `low`, where the top-level code runs it, else the activation whose header names the actor at 424
 // (`Building`), each walked from the actor its stack builds up the supervisors that stack builds too (`KeptBuilt`). Null where none
@@ -6619,13 +6622,20 @@ thread static mut byte* testWords = null
 thread static mut long testWordsCount = 0
 thread static mut long testWordsRoom = 0
 
+// The reply of the call an actor's start keeps out where the running test's wait found nothing left to run and that call closes the
+// loop, null where none does (`Kept`, `TestRan`), whose place the line under the test's `FAILED` names in place of the test's (Y5;
+// section 11, the owner, 2026-11-21, #599, comment 7063693195, Y5's line 1).
+thread static mut byte* testKept = null
+
 // The run of the tests of a program under `kurz test`, which the emitted top-level code calls in place of the program's statements,
 // which do not run (Y2, D1): the `count` tests of the table `table` in its order, the order of the file, each entry 32 bytes, the
 // test's function, its name as written, a `string`'s two words, and its line in the file `file`. Each test runs in an actor of its
 // own, a child of the top-level code with the policy `stop`, named `test` (Q2, F2), as Rust's harness runs each test on a thread of
 // its own and catches its panic (`TestRan`). It passes where its actor answered, and fails where that actor crashed, the words of the
 // crash under its `FAILED` line (`TestCrashKept`), or where the wait found nothing left that could answer it, `deadlock at
-// <file>:<the test's line>` under it, since a parked wait keeps no place of its own (F5); then every actor the test made ends at once
+// <file>:<the test's line>` under it, since a parked wait keeps no place of its own (F5), or the place of the call an actor's start
+// keeps out where that call closes the loop, as the top-level code's wait names it (`testKept`; Y5; section 11, the owner,
+// 2026-11-21, #599, comment 7063693195, Y5's line 1); then every actor the test made ends at once
 // (`TestEnded`; F6). The line of its result is written on standard output after the lines the test printed (F4), `test "name" ...
 // ok` or `test "name" ... FAILED`, the words indented by four spaces under a failed one, and after the last test the counts, `2 tests:
 // 1 passed, 1 failed`, `1 test:` for one (Q3, F21); the process then ends with the exit code 0 where every test passed, else 1 (Q4).
@@ -6668,6 +6678,19 @@ pub void RunTests(byte* table, long count, string file) {
                 raw {
                     words = TextAt(testWords, testWordsCount)
                 }
+            } else {
+                mut string keptFile = ""
+                mut long keptLine = -1
+                raw {
+                    if testKept != null {
+                        keptFile = TextAt(*Ptr<byte*>(testKept + 48), *Ptr<long>(testKept + 56))
+                        keptLine = *Ptr<long>(testKept + 64)
+                    }
+                }
+
+                if keptLine >= 0 {
+                    words = "deadlock at {keptFile}:{keptLine}"
+                }
             }
 
             Print(1, "test {written} ... FAILED", file, line)
@@ -6697,11 +6720,14 @@ pub void RunTests(byte* table, long count, string file) {
 // table `run` names the runtime's `TestRun` and whose function stands at 56, queued as a call of the top-level code is, its reply
 // `reply` in the thread's own heap, with no deadline (D6), and the top-level code's wait for it (`RootWait`), which runs the messages
 // of the test's actors meanwhile; the reply's word once the wait ended, 1 where the test answered and 2 where its actor crashed (U20),
-// and 0 where nothing was left that could answer it.
+// and 0 where nothing was left that could answer it, the reply of a call an actor's start keeps out then in `testKept`, null where
+// none closes the loop, looked for with the chain of the test's message read before the wait, as `Wait` reads its call's (`Kept`).
 int TestRan(byte* test, byte* name, byte* run, byte* reply, string file, int line) {
     byte* heap = ActorHeapNew(0)
     byte* state = ActorNew(heap, 0, 2097152, null, name)
     ActorBuilt(state)
+    mut long high = 0
+    mut long low = 0
     raw {
         byte* message = AllocateIn(heap, 64)
         *Ptr<byte*>(message + 8) = run
@@ -6712,10 +6738,18 @@ int TestRan(byte* test, byte* name, byte* run, byte* reply, string file, int lin
         testActor = state
         ReplyWaiter(reply)
         Enqueue(*Ptr<long>(state - 56), *Ptr<long>(state - 40), message, true, Never(), file, line)
+        high = *Ptr<long>(message + 24)
+        low = *Ptr<long>(message + 32)
     }
 
     sys.Entered()
     bool answered = RootWait(reply)
+    if !answered {
+        raw {
+            testKept = Kept(high, low)
+        }
+    }
+
     sys.Left()
     raw {
         testActor = null

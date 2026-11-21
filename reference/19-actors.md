@@ -2887,8 +2887,8 @@ loops on it, and a `send` of that chain to the actor waits in its inbox behind t
 `deadlock` *(assumed: the reading of "as T29 option 1 reads", #599, comment 7056452417)*. The error
 names the line of the call the inbox holds, the call that closes the loop, not the line of the
 top-level code's call that waits (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and the
-trace below it is the top-level code's where it waits *(assumed: a reading of the build, the stack
-that raises)*.
+trace below it is the top-level code's where it waits, the stack that raises (§6, the owner,
+2026-11-21, #599, comment 7063693195, the trace 1).
 
 Case: [actors/crash-in-constructor-at-restart.kz](../corpus/actors/crash-in-constructor-at-restart.kz)
 ```kurz
@@ -3097,6 +3097,51 @@ print(a.Get())
 b.Set(a)
 send a.Fail()
 print(a.Get())
+```
+
+Case: [tests/test-restart-reentrant.kz](../corpus/tests/test-restart-reentrant.kz)
+```kurz
+// at its restart `A`'s constructor waits on `B.Ask`, whose call of `Peek` waits in `A`'s inbox for that constructor, so that the
+// runner's wait for the test finds nothing left to run, and the words under its `FAILED` line name that call of `Peek`, not the test
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+test "restarts into a call it keeps out" {
+    b = spawn B()
+    a = spawn A(b)
+    print(a.Get())
+    b.Set(a)
+    send a.Fail()
+    print(a.Get())
+}
 ```
 
 Case: [actors/restart-no-call-back.kz](../corpus/actors/restart-no-call-back.kz)
