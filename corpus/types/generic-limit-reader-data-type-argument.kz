@@ -11,12 +11,12 @@ class Square(int Side) : Shape {
 
 int AreaOf<T: Shape>(T item) => item.Area()
 
-data Held<U: Shape>(U Item)
+data Tag<U: Shape>(int Count)
 
 int Measure<T>(T item) {
     print(T.Kind)
-    h = Held<T>(item)
-    return h.Item.Area()
+    t = Tag<T>(1)
+    return t.Count
 }
 
 print(Measure(Square(3)))

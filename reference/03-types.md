@@ -2391,12 +2391,12 @@ class Square(int Side) : Shape {
 
 int AreaOf<T: Shape>(T item) => item.Area()
 
-data Held<U: Shape>(U Item)
+data Tag<U: Shape>(int Count)
 
 int Measure<T>(T item) {
     print(T.Kind)
-    h = Held<T>(item)
-    return h.Item.Area()
+    t = Tag<T>(1)
+    return t.Count
 }
 
 print(Measure(Square(3)))
@@ -2440,7 +2440,7 @@ int Apply<U>(U v, (U) => int f) => f(v)
 
 int Count<U: Shape>() => 1
 
-data Held<U: Shape>(U Item)
+data Tag<U: Shape>(int Count)
 
 int ByResult<T: Shape>(T item) {
     print(T.Kind)
@@ -2589,8 +2589,8 @@ int ByTypeArgument<T: Shape>(T item) {
 
 int ByDataTypeArgument<T: Shape>(T item) {
     print(T.Kind)
-    h = Held<T>(item)
-    return h.Item.Area()
+    t = Tag<T>(1)
+    return t.Count
 }
 
 mut squares = Map<string, Square>()
