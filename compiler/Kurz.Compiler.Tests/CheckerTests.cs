@@ -7851,6 +7851,26 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "cart = Cart(1)\nshop.Add(move cart)\nf = () => cart.Items\nprint(f())\n"));
     }
 
+    private const string MovedArm = "data Missing\n\nclass Cart(mut int Items)\n\nint | List<int> | Cart | Missing Plain(int id) {\n    if id == 1 {\n        return [id]\n    }\n\n    if id == 2 {\n        return Cart(id)\n    }\n\n    return Missing\n}\n\nint Use(move List<int> l) => l.Count\n\nint Take(move Cart c) => c.Items\n\nint Run(int id) {\n    v = Plain(id) else {\n";
+    [Fact]
+    public void A_bare_throw_after_a_move_of_its_arms_name_is_used_after_move_at_the_throw()
+    {
+        // O7, U12: a bare `throw` throws the case its arm took, a use of the arm's name, so that one after a `move` that may have ended the
+        // name is `used-after-move` at the `throw`, naming the line of the `move` (the owner, 2026-11-20, issue 596, comment 7051500690): for
+        // a list and for a class, whose region a `move` of another name ends, on a path the `move` reaches and in a guarded block (R18), while a `throw` on a path with
+        // no `move`, one after a read and the bare `throw` of an arm inside it that binds no name rethrow, and the arm's own name holds again
+        // after an `else` inside it (section 5, assumed: the readings of comment 7055001448)
+        const string End = "        else => 0\n    }\n\n    return v\n}\n\nprint(Run(1))\n";
+        Assert.Equal([(ErrorIds.UsedAfterMove, 25)], Errors(MovedArm + "        List<int> n => {\n            print(Use(move n))\n            throw\n        }\n" + End));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 26)], Errors(MovedArm + "        Cart n => {\n            m = n\n            print(Take(move m))\n            throw\n        }\n" + End));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 27)], Errors(MovedArm + "        List<int> n => {\n            if id > 0 {\n                print(Use(move n))\n            }\n            throw\n        }\n" + End));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 26)], Errors(MovedArm + "        List<int> n => {\n            print(Use(move n))\n            if X86.Sse41.IsSupported {\n                throw\n            } else {\n                throw\n            }\n        }\n" + End));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 29)], Errors(MovedArm + "        List<int> n => {\n            print(Use(move n))\n            w = Plain(id) else {\n                else => 0\n            }\n            print(w)\n            throw\n        }\n" + End));
+        Clean(MovedArm + "        List<int> n => {\n            if id > 0 {\n                return Use(move n)\n            } else {\n                throw\n            }\n        }\n" + End);
+        Clean(MovedArm + "        List<int> n => {\n            print(n.Count)\n            throw\n        }\n" + End);
+        Clean(MovedArm + "        List<int> n => {\n            print(Use(move n))\n            w = Plain(id) else {\n                Missing => throw\n                else => 0\n            }\n            w\n        }\n" + End);
+    }
+
     [Fact]
     public void A_move_on_the_right_side_of_and_or_or_may_have_ended_its_variable_after_it()
     {

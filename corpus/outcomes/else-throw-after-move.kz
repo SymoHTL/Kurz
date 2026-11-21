@@ -1,0 +1,34 @@
+// expect: error used-after-move at 25
+// rules: O7, U12
+
+data Missing
+
+int | List<int> | Missing Plain(int id) {
+    if id == 1 {
+        return [id, 7, 9]
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Use(move List<int> l) => l.Count
+
+int Rethrown(int id) {
+    v = Plain(id) else {
+        List<int> n => {
+            c = Use(move n)
+            print("used {c}")
+            throw
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3))
+print(Rethrown(1))

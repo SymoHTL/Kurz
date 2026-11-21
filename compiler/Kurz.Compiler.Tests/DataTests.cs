@@ -329,6 +329,29 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_thrown_instance_of_a_class_without_a_text_writes_its_class_s_name_below_the_error_line()
+    {
+        // O7: an instance of a class that neither declares nor inherits a `Text()`, thrown by `throw` or by a bare `throw`, has its class's
+        // name below the error line (the owner, 2026-11-20, issue 598, comment 7051500939): the name of the instance's own class, a derived
+        // one thrown as its base, and that name where the instance stands in a `data` value or a list that is thrown (section 5, assumed: Q2
+        // and Q3 of comment 7055011193, and the reading of a value that holds one)
+        const string Note = "data Missing\n\nclass Note(string Body)\n\nint | Note | Missing Find(int id) {\n    if id == 1 {\n        return Note(\"a\")\n    }\n\n    return Missing\n}\n\nv = Find(1) else {\n";
+        Ran(BuildAndRun(Note + "    Note n => throw n\n    Missing => 0\n}\nprint(v)\n", "throw-class"), 1, [], "error: thrown at program.kz:14:\nNote\n");
+        Ran(BuildAndRun(Note + "    Note => throw\n    Missing => 0\n}\nprint(v)\n", "throw-class-bare"), 1, [], "error: thrown at program.kz:14:\nNote\n");
+        Ran(BuildAndRun(Note + "    else => throw\n}\nprint(v)\n", "throw-class-union"), 1, [], "error: thrown at program.kz:14:\nNote\n");
+        const string Animals = "class Animal(string Name)\n\nclass Dog(int Legs) : Animal\n\nvoid Fail(Animal a) {\n    throw a\n}\n\n";
+        Ran(BuildAndRun(Animals + "Fail(Dog(\"rex\", 4))\n", "throw-class-derived"), 1, [], "error: thrown at program.kz:6:\nDog\n");
+        Ran(BuildAndRun(Animals + "Fail(Animal(\"tom\"))\n", "throw-class-base"), 1, [], "error: thrown at program.kz:6:\nAnimal\n");
+
+        // a derived class that declares its own `Text()`, thrown as a base that has none, is named too: the type the value has at the
+        // `throw` decides whether it has a text, as at a `print` (A4, A7; assumed: the build's reading, Q9 of comment 7055578588)
+        const string Texted = "class Animal(string Name)\n\nclass Dog(int Legs) : Animal {\n    pub string Text() => \"dog {Name}\"\n}\n\nvoid Fail(Animal a) {\n    throw a\n}\n\n";
+        Ran(BuildAndRun(Texted + "print(Dog(\"rex\", 4))\nFail(Dog(\"rex\", 4))\n", "throw-class-derived-text"), 1, ["dog rex"], "error: thrown at program.kz:8:\nDog\n");
+        Ran(BuildAndRun("class Counter(mut int Count)\ndata Box(Counter Item)\n\nthrow Box(Counter(1))\n", "throw-class-held"), 1, [], "error: thrown at program.kz:4:\nBox { Item = Counter }\n");
+        Ran(BuildAndRun("class Counter(mut int Count)\n\nthrow [Counter(1), Counter(2)]\n", "throw-class-list"), 1, [], "error: thrown at program.kz:3:\n[Counter, Counter]\n");
+    }
+
+    [Fact]
     public void A_data_type_the_emitter_does_not_lay_out_builds_where_no_code_needs_it()
     {
         // the owner, 2026-10-23, "At first use"; the theory below has the same type where code needs it

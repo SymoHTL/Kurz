@@ -1,0 +1,39 @@
+// expect: throws thrown at 28
+// | 3
+// | 3
+// rules: O7, U12
+
+data Missing
+
+int | List<int> | Missing Plain(int id) {
+    if id == 1 {
+        return [id, 7, 9]
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Use(move List<int> l) => l.Count
+
+int Rethrown(int id, bool give) {
+    v = Plain(id) else {
+        List<int> n => {
+            if give {
+                return Use(move n)
+            } else {
+                throw
+            }
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3, true))
+print(Rethrown(1, true))
+print(Rethrown(1, false))
