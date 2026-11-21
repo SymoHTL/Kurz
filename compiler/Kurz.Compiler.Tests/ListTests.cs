@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using Kurz.Compiler.Build;
+using Kurz.Compiler.Emit;
 using Kurz.Compiler.Text;
 using Xunit;
 
@@ -7751,6 +7752,65 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var optimised = File.ReadAllLines(output);
         Assert.Equal(0, Calls(optimised, "Same"));
         Assert.True(Calls(optimised, "SameBytes") >= 2, string.Join('\n', optimised.Where(l => l.Contains("rt.common.Same", StringComparison.Ordinal))));
+    }
+
+    [Fact]
+    public void A_piece_of_a_string_whose_count_is_a_constant_is_made_in_its_caller()
+    {
+        // X2, X4: the emitter passes the helper that makes a part of a string the part's count, not its end, so that LLVM puts the
+        // helper into a caller that passes the count as a constant (`Piece`; the owner, 2026-11-20, issue 157, comment 7051500158,
+        // S1). The top-level code of a program takes parts of 8 and of 4 bytes of a string it built, in a loop: its IR calls the
+        // helper in both places, two calls, so that LLVM's bonus for the sole call of a function puts nothing in
+        // (knowledge/a-helper-of-several-callers-stays-a-call.md), and once optimised as a release build is optimised that code calls
+        // the helper nowhere (LLVM writes a name without its quotes where it needs none)
+        const string text = """
+            mut string text = ""
+            for i in 0..<64 {
+                text = "{text}{i % 10}"
+            }
+
+            mut long total = 0
+            for i in 0..<40 {
+                total = total + text.Substring(i, 8).Bytes[0] + text.Substring(i + 2, 4).Bytes[3]
+            }
+
+            print(total)
+
+            """;
+        var program = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: false).Program!;
+        Assert.Equal(2, program.Ir.Split('\n').Count(l => l.Contains(" call ", StringComparison.Ordinal) && l.Contains("@\"piece.string\"(", StringComparison.Ordinal)));
+        var main = OptimisedMain(program, "piece-count-inlined");
+        Assert.DoesNotContain(main, l => l.Contains("piece.string", StringComparison.Ordinal));
+        // the parts are made in it: the blocks of 8 and of 4 bytes behind their 16 bytes of counts, each size a constant at its call
+        foreach (var size in new[] { 24, 20 })
+        {
+            Assert.Contains(main, l => l.Contains(" call ", StringComparison.Ordinal) && l.Contains("std.Allocate.", StringComparison.Ordinal) && l.Contains($"(i64 {size})", StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// The lines of the top-level code, <c>kz.main</c>, in the IR of <paramref name="program"/> as clang optimises it at <c>-O2</c>, the level of a
+    /// release build (<c>Clang.Arguments</c>), written under the toolchain's directory as <paramref name="name"/>.
+    /// </summary>
+    private string[] OptimisedMain(EmittedProgram program, string name)
+    {
+        var directory = Path.Combine(toolchain.Directory, name);
+        Directory.CreateDirectory(directory);
+        var input = Path.Combine(directory, "program.ll");
+        var output = Path.Combine(directory, "optimised.ll");
+        File.WriteAllText(input, program.Ir);
+        List<string> arguments = ["-O2", "-S", "-emit-llvm", input, "-o", output];
+        if (program.CpuFlag is { } cpu)
+        {
+            arguments.Add(cpu);
+        }
+
+        var (code, _, error) = Processes.Capture(toolchain.Clang.Path, arguments, null, TimeSpan.FromMinutes(2));
+        Assert.True(code == 0, error);
+        var optimised = File.ReadAllLines(output);
+        var start = Array.FindIndex(optimised, l => l.StartsWith("define ", StringComparison.Ordinal) && l.Contains(" @kz.main(", StringComparison.Ordinal));
+        Assert.True(start >= 0, "the optimised IR holds the program's top-level code");
+        return optimised[start..Array.IndexOf(optimised, "}", start)];
     }
 
     /// <summary>The sign of the order of the UTF-8 bytes of two strings (T32), as the program's <c>Sign</c> writes it.</summary>
