@@ -1,0 +1,8 @@
+// expect: error invalid-ordering at 7
+// allow: raw
+// rules: R19
+
+raw {
+    Fence(MemoryOrder.SeqCst)
+    Fence(MemoryOrder.Relaxed)
+}

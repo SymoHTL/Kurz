@@ -1,0 +1,14 @@
+// expect: output
+// | 3
+// | hello kurz
+// rules: U46
+
+v = attempt { 1 + 2 } else {
+    Crashed c => 0
+}
+print(v)
+name = "kurz"
+s = attempt { "hello {name}" } else {
+    Crashed c => "crashed"
+}
+print(s)
