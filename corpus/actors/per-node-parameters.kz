@@ -1,0 +1,8 @@
+// expect: error syntax at 4
+// rules: U51
+
+actor Cache(int Size) per node {
+    pub int Get() => Size
+}
+
+print(Cache.Get())

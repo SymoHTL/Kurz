@@ -3925,6 +3925,83 @@ pub void ActorBuilt(byte* state) {
     }
 }
 
+// The cell of a `per node` actor type (U51, U52), a global of the emitted program, 24 bytes: a lock word, then
+// the index of the slot of its one actor and that actor's number, which a reference holds (`Lookup`), 0 before
+// its first start, the slot stored before the number and the number with release (`PerStarted`). The actor of
+// the cell `cell` where one stands, ended or not, its state found by its slot and its number as a reference finds
+// its actor, with no lock, as Rust's `OnceLock` reads its value after one acquire load of its state (not
+// checked at source); else the cell's lock taken and the cell read again under it, and null, the lock still held,
+// where no actor stands there either, so that the code that called starts one (the emitter's `PerStart`) and
+// `PerStarted` lets go of the lock once that actor stands in the cell: the lock is held around the check and the
+// publication alone, never around the constructor or a wait (assumed: T27 to T33 of issue 519, comment
+// 6983903100, the defaults said back, a lock of the type on the threads of section 6). A number of 0 is no actor's,
+// and is read before the slot, since `Slot` reads the directory of the table, which no take made before the first
+// actor's.
+pub byte* PerFind(byte* cell) {
+    raw {
+        long number = AtomicLong.FromPtr(Ptr<long>(cell + 16)).Load(MemoryOrder.Acquire)
+        if number != 0 {
+            byte* state = Lookup(AtomicLong.FromPtr(Ptr<long>(cell + 8)).Load(MemoryOrder.Relaxed), number)
+            if state != null {
+                return state
+            }
+        }
+    }
+
+    raw {
+        Lock(Ptr<int>(cell))
+        long again = AtomicLong.FromPtr(Ptr<long>(cell + 16)).Load(MemoryOrder.Acquire)
+        if again != 0 {
+            byte* state = Lookup(AtomicLong.FromPtr(Ptr<long>(cell + 8)).Load(MemoryOrder.Relaxed), again)
+            if state != null {
+                Unlock(Ptr<int>(cell))
+                return state
+            }
+        }
+    }
+
+    return null
+}
+
+// The actor whose state is `state`, which `ActorNew` made for the cell `cell`, whose lock `PerFind` holds, the
+// one actor of its type from now on (U52): the pause of its block of a restart and the count of the ring of its
+// knobs set to 0, since that block and those knobs are the type's own, globals of the emitted program, which the
+// actor that ended past its limit left as they were, so that a fresh one pauses first as `Pause` does after no
+// crash and counts its window from its start (assumed: a reading of the build, proposed with this record and not
+// put to the owner); a pause writes the other words of the block before it reads them, and the ring's first,
+// with a count of 0, names a slot the ring has (`Limited`). Then its slot and its number stored in the cell, the number with
+// release, and the lock let go of, before its constructor runs, so that a message that reaches it while it builds
+// waits for it (BUILDING, `Claimed`, `ActorBuilt`).
+pub void PerStarted(byte* cell, byte* state) {
+    raw {
+        byte* side = *Ptr<byte*>(state - 80)
+        if side != null {
+            *Ptr<long>(side + 16) = 0
+            byte* knobs = *Ptr<byte*>(side + 48)
+            if knobs != null {
+                *Ptr<long>(knobs + 48) = 0
+            }
+        }
+
+        AtomicLong.FromPtr(Ptr<long>(cell + 8)).Store(*Ptr<long>(state - 56), MemoryOrder.Relaxed)
+        AtomicLong.FromPtr(Ptr<long>(cell + 16)).Store(*Ptr<long>(state - 40), MemoryOrder.Release)
+        Unlock(Ptr<int>(cell))
+    }
+}
+
+// The end of the constructor of the one actor of a `per node` type, whose state is `state`, at its start (U52,
+// U53): its supervisor, the code that sent its first message while its constructor ran, so that a crash of that
+// code ended it, half built, becomes the top-level code, the root, so that it outlives that code and ends with
+// the process; then the end of its constructor as at a `spawn` (`ActorBuilt`). The store is a plain one, which
+// holds while one thread runs every program (U35), as `EndChildren` reads the supervisor by a plain load.
+pub void PerBuilt(byte* state) {
+    raw {
+        *Ptr<byte*>(state - 72) = null
+    }
+
+    ActorBuilt(state)
+}
+
 // The actor whose constructor runs in the code of the thread, which the emitted `spawn` sets around the
 // constructor it runs, so that an actor that constructor spawns is a child of the actor it constructs (U13):
 // the top-level code's here, and each activation's at 424 of its header.
@@ -5202,7 +5279,9 @@ void Crashed(byte* state, byte* header) {
 // end after its current message or where its supervisor crashed (U25); where its crash passes the limit of
 // its `max N in`, its supervisor crashes with `restart-limit` at the line of its `spawn` (U26), and it ends in
 // that fall, as a child with no activation, its own fall having cleared it, which `EndChildren` ends at once,
-// a call queued to it set `gone`; at the top level the process ends.
+// a call queued to it set `gone`; at the top level the process ends; but the one actor of a `per node` type,
+// whose knobs hold 1 at 80, which ends there as at a `stop`, with no `restart-limit`, so that the first message
+// to its name after that starts a fresh one (U54; section 6, the owner, 2026-11-17, #561, comment 6945857315, Q2).
 // Where the actor that takes the crash runs and its policy is a block, the crash, the thrown value among it,
 // is copied into that heap, the actor waits for the block's decision, its stack that raised kept, and the
 // block runs as a message of its supervisor, or in the wait of the top-level code (`Pending`; U28, U33).
@@ -5289,6 +5368,11 @@ void Fell(byte* state, byte* header, bool hasText, byte* id, long idCount, byte*
 
         byte* knobs = *Ptr<byte*>(side + 48)
         if knobs != null && Limited(knobs, above, PauseClock()) {
+            if *Ptr<long>(knobs + 80) == 1 {
+                EndActor(taker)
+                return
+            }
+
             if parent == null {
                 Ends(false, "restart-limit".Pointer, 13, *Ptr<byte*>(knobs + 56), *Ptr<long>(knobs + 64), *Ptr<long>(knobs + 72), null, 0)
             }

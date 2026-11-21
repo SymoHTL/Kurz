@@ -1,0 +1,17 @@
+// expect: throws actor-gone at 17
+// rules: U54, U25
+
+actor Counter per node on crash stop {
+    mut int count = 0
+
+    pub void Fail() {
+        throw "counter fails"
+    }
+
+    pub int Get() => count
+}
+
+send Counter.Fail()
+// the call waits in the inbox behind `Fail`, as one sender's messages run in the order it sent them (U5), and the stop at
+// `Fail`'s crash gives it `actor-gone`
+print(Counter.Get())

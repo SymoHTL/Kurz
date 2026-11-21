@@ -1113,6 +1113,8 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                 case CallKind.ListAdd or CallKind.ListWhere:
                     Expression(((MemberAccess)c.Callee).Target);
                     break;
+                case CallKind.ActorCall or CallKind.ActorSend when model.CallOf(c).ByName:
+                    break; // U51: the name of a `per node` actor, whose one actor the emitter finds or starts, and reads no value of it
                 case CallKind.Method or CallKind.ActorCall or CallKind.ActorSend when c.Callee is MemberAccess m:
                     Expression(m.Target); // K7: the instance; U4, U6: the actor's reference, or `this` (U11)
                     break;

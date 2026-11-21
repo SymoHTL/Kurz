@@ -7551,6 +7551,50 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NotVisible, 15)], Errors(ActorCounter + "actor B(Counter Other) {\n    pub void Go() {\n        send Other.Hidden()\n    }\n}\n"));
     }
 
+    private const string PerCache = "actor Cache per node {\n    mut int hits = 0\n\n    pub int Get() => hits\n\n    pub void Add(int n) {\n        hits = hits + n\n    }\n\n    int Hidden() => hits\n}\n\n";
+
+    [Fact]
+    public void A_per_node_actor_is_called_and_sent_to_by_its_name_from_any_code()
+    {
+        // U51, U52, U55 (assumed: T27, T31 and T33 of issue 519, comment 6983903100): the top-level statements, a function, another actor
+        // and the actor's own methods call and send through the name, inside the actor as through `this`, which still gives a reference
+        // there; its words after the name with `stack` and a policy, and `()` with no parameter, are read
+        Assert.Empty(Errors(PerCache + "send Cache.Add(1)\nprint(Cache.Get())\n"));
+        Assert.Empty(Errors(PerCache + "void Bump() {\n    send Cache.Add(1)\n    Cache.Add(2)\n}\n\nBump()\nprint(Cache.Get())\n"));
+        Assert.Empty(Errors(PerCache + "actor Worker {\n    pub void Work() {\n        Cache.Add(3)\n        send Cache.Add(4)\n    }\n}\n\nw = spawn Worker()\nw.Work()\n"));
+        Assert.Empty(Errors("actor Cache per node {\n    mut int hits = 0\n\n    pub int Get() => hits\n\n    pub void Bump() {\n        send Cache.Add(1)\n        hits = Cache.Get() + 1\n        me = this\n        print(me.Get())\n    }\n\n    pub void Add(int n) {\n        hits = hits + n\n    }\n}\n\nsend Cache.Bump()\n"));
+        Assert.Empty(Errors("actor Cache per node stack 64kb on crash restart max 2 in 1s {\n    pub int Get() => 1\n}\n\nprint(Cache.Get())\n"));
+        Assert.Empty(Errors("actor Cache() per node {\n    pub int Get() => 1\n}\n\nprint(Cache.Get())\n"));
+    }
+
+    [Fact]
+    public void A_per_node_actors_name_stands_only_before_a_call_and_its_refusals_take_the_ids_of_their_forms()
+    {
+        // U51 (assumed: T31 and T32 of issue 519, comment 6983903100): `spawn` of it is `type-mismatch` (U14), a parameter of its
+        // constructor and its name as a value `syntax` (E4), at the line of each, the parameter's on a line of its own, the
+        // name's text naming U51 where a class's names K1; a field through
+        // its name is `not-visible` (U8), and a method without `pub` (U9), as through a reference; `send` of a method with a result is
+        // `send-result` (U6), as through a reference; an actor that is not `per node` keeps K7's `static-mismatch` for its name's call
+        Assert.Equal([(ErrorIds.TypeMismatch, 13)], Errors(PerCache + "c = spawn Cache()\nprint(c.Get())\n"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("actor Cache(\n    int Size\n) per node {\n    pub int Get() => Size\n}\n\nprint(Cache.Get())\n"));
+        Assert.Equal([(ErrorIds.Syntax, 13)], Errors(PerCache + "c = Cache\nprint(c)\n"));
+        Assert.EndsWith("(U51, U10; E4)", ErrorText(PerCache + "c = Cache\nprint(c)\n"), StringComparison.Ordinal);
+        Assert.Equal([(ErrorIds.Syntax, 14)], Errors(PerCache + "print(1)\nprint(Cache)\n"));
+        Assert.Equal([(ErrorIds.NotVisible, 13)], Errors(PerCache + "print(Cache.hits)\n"));
+        Assert.Equal([(ErrorIds.NotVisible, 13)], Errors(PerCache + "print(Cache.Hidden())\n"));
+        Assert.Equal([(ErrorIds.SendResult, 13)], Errors(PerCache + "send Cache.Get()\n"));
+        Assert.Equal([(ErrorIds.StaticMismatch, 13)], Errors(ActorCounter + "print(Counter.Get())\n"));
+    }
+
+    [Fact]
+    public void A_per_node_actors_name_called_as_a_function_or_a_method_named_through_it_without_a_call_is_not_supported()
+    {
+        // U51 (assumed: a reading of the build, proposed with this record and not put to the owner): `Cache()` neither spawns nor calls,
+        // and a method named without a call is a method as a value, as through a reference (U4, F11)
+        Assert.StartsWith("14: ", Assert.Single(NotSupported(PerCache + "print(1)\nCache()\n")));
+        Assert.StartsWith("14: ", Assert.Single(NotSupported(PerCache + "print(1)\nf = Cache.Get\n")));
+    }
+
     [Fact]
     public void A_spawn_of_what_is_no_actor_is_type_mismatch_and_a_send_of_what_is_no_message_is_syntax()
     {
@@ -7574,6 +7618,11 @@ public sealed class CheckerTests
     [InlineData(1, "U1", "actor A stack 8mb per Id {\n}\n")]
     [InlineData(1, "U27, U28", "actor A per Id on crash (c) {\n    restart\n} {\n}\n")]
     [InlineData(1, "U1", "actor A per Id on crash stop {\n}\n")]
+    [InlineData(1, "U1, U51", "actor A per cluster {\n}\n")]
+    [InlineData(1, "U1", "actor A per node per node {\n}\n")]
+    [InlineData(1, "U1", "actor A per node inbox drop {\n}\n")]
+    [InlineData(1, "U27, U28", "actor A per node on crash (c) {\n    restart\n} {\n}\n")]
+    [InlineData(1, "U1, T19", "actor A<T> per node {\n}\n")]
     [InlineData(1, "U1, T19", "actor A<T> {\n}\n")]
     [InlineData(1, "U1, T19", "actor Pair<T>(T First) {\n}\n\np = spawn Pair<int>(1)\nprint(p)\n")]
     [InlineData(4, "U1", "interface I {\n}\n\nactor A : I {\n}\n")]
