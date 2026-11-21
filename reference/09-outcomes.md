@@ -1189,11 +1189,15 @@ its class's name where a thrown value's text stands (chapter 12), for a `throw` 
 for a bare `throw` of such a case alike (§5, the owner, 2026-11-20, issue 598, comment 7051500939).
 The name is the bare name of the instance's own class, a derived instance thrown as its base giving
 its own, and a `print` of a `Reason` whose union holds such a class stays `no-text`, as A7 has it
-*(assumed, §5: Q2 and Q3 of comment 7055011193, at their defaults)*. A thrown value that holds such an
-instance, a `data` value or a list, has the text A3 and A4 derive from what it holds, the instance's
-part of it being its class's name, and the name stands where the type the thrown value has at the
-`throw` has no `Text()`, a derived class that declares its own among them *(assumed, §5: the build's
-reading, which the answer did not give)*.
+(§5, the owner, 2026-11-21, issue 598, comment 7060156252, Q2 and Q3 of comment 7055011193). A thrown
+value that holds such an instance, a `data` value or a list, is allowed and has the text A3 and A4
+derive from what it holds, the instance's part of it being its class's name (§5, the owner,
+2026-11-21, comment 7060156252, Q8 of comment 7055578588). An instance thrown as a base that has no
+`Text()`, whose own class or a base between the two declares one (A9), shows what that `Text()` gives,
+found when the program runs from the instance's class, as C#'s virtual `ToString()` is, while a
+`print` of a value of that base stays `no-text` (A4) (§5, the owner, 2026-11-21, comment 7060156252,
+Q9 of comment 7055578588). An instance that a thrown `data` value or list holds as such a base takes
+its text by the same rule *(assumed, §5: the build's reading, which no answer named)*.
 
 Case: [outcomes/else-throw-after-move.kz](../corpus/outcomes/else-throw-after-move.kz)
 ```kurz

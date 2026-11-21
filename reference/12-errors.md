@@ -155,9 +155,11 @@ The error line names the file and the line where a line is known (§6, decided t
 error line of a `throw` ends with a colon, and the text of the thrown value stands below it,
 starting on the line below it, before the trace (§6, decided there), written as it is, its own line
 breaks kept, and an empty text as an empty line (§6, an assumption there), the text made by the
-crash path from the value's `Text()`, or, for an instance of a class that neither declares nor
-inherits one, the bare name of the instance's own class (O7; §5, the owner, 2026-11-20, issue 598,
-comment 7051500939, the bare name of the instance's own class an assumption there), while the actor
+crash path from the value's `Text()`, from that of the instance's own class, found when the program
+runs, where the type the value has at the `throw` has none (O7; §5, the owner, 2026-11-21, issue 598,
+comment 7060156252, Q9 of comment 7055578588), or, for an instance of a class that neither declares
+nor inherits one, the bare name of the instance's own class (O7; §5, the owner, 2026-11-20, issue
+598, comment 7051500939, and 2026-11-21, comment 7060156252, Q2 and Q3 of comment 7055011193), while the actor
 that threw still exists, a `throw` crashing its
 actor as no exception is caught (§5), and kept with its stack for that write (§6, decided there),
 the first raising actor's text where one crash leads to another, and a raise while the value's

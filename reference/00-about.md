@@ -483,8 +483,9 @@ such a field: printing one, or putting it into an interpolated string (L6), is t
 `no-text`, as for the instance itself. The type of what is held is known where it is printed. A throw
 is the one place where such a value has a text: a thrown `data` value or list that holds such an
 instance has the text A3 and A4 derive from what it holds, the instance's part of it being its
-class's name (O7) *(assumed, §5: the build's reading of the owner's answer of 2026-11-20, issue 598,
-comment 7051500939, which named the thrown instance)*.
+class's name (O7; §5, the owner, 2026-11-21, issue 598, comment 7060156252, Q8 of comment
+7055578588), or what the `Text()` of the instance's own class gives where that class's chain declares
+one, as for a thrown instance (O7) *(assumed, §5: the build's reading, which no answer named)*.
 
 Case: [classes/print-list-without-text.kz](../corpus/classes/print-list-without-text.kz)
 ```kurz
