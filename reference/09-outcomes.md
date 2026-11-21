@@ -1230,6 +1230,27 @@ Show(Sub<Loud>(1, Loud(2)))
 print("after")
 ```
 
+Case: [outcomes/else-throw-void.kz](../corpus/outcomes/else-throw-void.kz)
+```kurz
+data NotFound
+
+void | NotFound Find(int id) {
+    if id == 1 {
+        return NotFound
+    }
+}
+
+void Run(int id) {
+    Find(id) else {
+        else => throw
+    }
+}
+
+Run(2)
+print("ok")
+Run(1)
+```
+
 ### O8 (decided, §5) `match` covers every case
 
 A `match` on a union lists every case of the union, or ends in an `else` arm (C9). A missing case
