@@ -264,17 +264,38 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         ["actors/per-node-reentrant-in-message.kz"] = (23, "main"),
         ["actors/per-node-reentrant-nested.kz"] = (26, "main"),
         ["actors/restart-reentrant-two.kz"] = (79, "main"),
+        ["actors/restart-reentrant-places.kz"] = (58, "main"),
+        ["actors/restart-reentrant-one-place.kz"] = (47, "main"),
+        ["actors/restart-reentrant-cap.kz"] = (68, "main"),
     };
 
     /// <summary>
-    /// U22, U52: the <c>deadlock</c> cases that more than one call an actor's start keeps out closes, each with the lines of the calls
-    /// after the first found, which the error line names and ends with a colon: one line <c>kept out at</c> each, in the order the
-    /// runtime finds them, between the error line and the trace, each call on a line nothing else of the case stands on (section 6, the
-    /// owner, 2026-11-21, #599, comment 7067131310, several 2, and comment 7067139953, the form 1).
+    /// U22, U52: the <c>deadlock</c> cases that more than one call an actor's start keeps out closes, each with the words of its error
+    /// line after the place it names, the first in source order, before the colon that ends it, the count of the calls at that place
+    /// where more than one, and the lines between the error line and the trace as the runtime writes them: one line <c>kept out at</c>
+    /// each further place, in source order, with its count where more than one, at most 10, then <c>... and K more</c>, each call on a
+    /// line nothing else of the case stands on (section 6, the owner, 2026-11-21, #599, comment 7067131310, several 2, and comment
+    /// 7067139953, the form 1; comment 7067639209, the order 1, the same place 1 and the cap 1).
     /// </summary>
-    private static readonly Dictionary<string, int[]> KeptOut = new(StringComparer.Ordinal)
+    private static readonly Dictionary<string, (string Calls, string[] Under)> KeptOut = new(StringComparer.Ordinal)
     {
-        ["actors/restart-reentrant-two.kz"] = [38],
+        ["actors/restart-reentrant-two.kz"] = ("", ["kept out at actors/restart-reentrant-two.kz:38"]),
+        ["actors/restart-reentrant-places.kz"] = (" (2 calls)", ["kept out at actors/restart-reentrant-places.kz:25 (2 calls)", "kept out at actors/restart-reentrant-places.kz:26"]),
+        ["actors/restart-reentrant-one-place.kz"] = (" (2 calls)", []),
+        ["actors/restart-reentrant-cap.kz"] = ("",
+        [
+            "kept out at actors/restart-reentrant-cap.kz:25",
+            "kept out at actors/restart-reentrant-cap.kz:26",
+            "kept out at actors/restart-reentrant-cap.kz:27",
+            "kept out at actors/restart-reentrant-cap.kz:28",
+            "kept out at actors/restart-reentrant-cap.kz:29",
+            "kept out at actors/restart-reentrant-cap.kz:30",
+            "kept out at actors/restart-reentrant-cap.kz:31",
+            "kept out at actors/restart-reentrant-cap.kz:32",
+            "kept out at actors/restart-reentrant-cap.kz:33",
+            "kept out at actors/restart-reentrant-cap.kz:34",
+            "... and 2 more",
+        ]),
     };
 
     public static TheoryData<string> RunnableCases()
@@ -402,7 +423,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         }
         else if (KeptOut.TryGetValue(relativePath, out var kept))
         {
-            Assert.Equal(line + ":\n" + string.Concat(kept.Select(n => $"kept out at {relativePath}:{n}\n")), error);
+            Assert.Equal(line + kept.Calls + ":\n" + string.Concat(kept.Under.Select(u => u + "\n")), error);
         }
         else
         {

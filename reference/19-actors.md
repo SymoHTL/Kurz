@@ -2375,9 +2375,11 @@ call each other from different chains and wait for each other, on one thread, do
 wait"). A call that waits in a function the top-level code called is the top-level code's, at its
 own line. Where a call that an actor's start keeps out closes the loop, the error names that call's
 line (U22, U52) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and where more than one
-such call closes it, the error line names the first found and ends with a colon, and each further call
-stands under it on a line `kept out at <file>:<n>`, before the trace (U22) (§6, the owner,
-2026-11-21, #599, comment 7067131310, several 2; comment 7067139953, the form 1). A deadline of a call that waits in a message is nothing left to run (U42) *(assumed: T6 of comment 6967625156)*. A loop of actors the top-level code never waits on stays until the end of the program,
+such call closes it, the error line names the first place in source order and ends with a colon, and
+each further place stands under it on a line `kept out at <file>:<n>`, before the trace (U22) (§6, the
+owner, 2026-11-21, #599, comment 7067131310, several 2; comment 7067139953, the form 1), a place with
+the count of its calls where more than one, at most 10 such lines and then `... and K more` (U22)
+(§6, the owner, 2026-11-21, #599, comment 7067639209, the order 1, the same place 1, the cap 1). A deadline of a call that waits in a message is nothing left to run (U42) *(assumed: T6 of comment 6967625156)*. A loop of actors the top-level code never waits on stays until the end of the program,
 where U13 drops it.
 
 Case: [actors/deadlock.kz](../corpus/actors/deadlock.kz)
@@ -2892,13 +2894,18 @@ names the line of the call the inbox holds, the call that closes the loop, not t
 top-level code's call that waits (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and the
 trace below it is the top-level code's where it waits, the stack that raises (§6, the owner,
 2026-11-21, #599, comment 7063693195, the trace 1). Where more than one call is kept out, one by each
-of several actors' starts, the error names every one: its line names the first found and ends with a
-colon, and one line `kept out at <file>:<n>` for each further call stands under it, before the trace,
-while one kept-out call keeps the error line of U18 (§6, the owner, 2026-11-21, #599, comment
-7067131310, several 2; comment 7067139953, the form 1). The first found is the first in the runtime's
-walk: the starts the top-level code runs, then the actors in the order of their slots, the order of
-their spawns where no actor ended, an actor's restart before the starts its activations run
-*(assumed in §6: a reading of the build)*.
+of several actors' starts, the error names every one: its line names the first place in source order
+and ends with a colon, and one line `kept out at <file>:<n>` for each further place stands under it,
+before the trace, while one kept-out call keeps the error line of U18 (§6, the owner,
+2026-11-21, #599, comment 7067131310, several 2; comment 7067139953, the form 1). The places stand
+in source order, by file and then line, not in the order the runtime meets the actors; a place that
+keeps out more than one call, as two actors that run the same code do, takes one line with the count
+of its calls, `kept out at kept-same.kz:12 (2 calls)`, and on the error line
+`deadlock at kept-same.kz:12 (2 calls):`, so also where it is the one place kept out, while a place
+kept out once keeps its text with no count; at most 10 `kept out at` lines stand under the error
+line, then one line `... and K more` (§6, the owner, 2026-11-21, #599, comment 7067639209, the
+order 1, the same place 1, the cap 1). A path sorts as the error line writes it, byte for byte as
+`<` compares two strings (T32), and K counts places, not calls *(assumed in §6)*.
 
 Case: [actors/crash-in-constructor-at-restart.kz](../corpus/actors/crash-in-constructor-at-restart.kz)
 ```kurz
@@ -3306,6 +3313,258 @@ test "restarts two actors into calls they keep out" {
     send a.Fail()
     send c.Fail()
     print(a.Get())
+}
+```
+
+Case: [actors/restart-reentrant-places.kz](../corpus/actors/restart-reentrant-places.kz)
+```kurz
+// at their restarts five `A`s' constructors each wait on `B.Ask`, whose call back waits in the inbox for that constructor, from
+// three places of `Ask`, spawned so that the runtime's walk of the actors meets the places in another order than the file's: the
+// error names them in the file's order, the first on its line, and each place that keeps out two calls with their count
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask(int k) {
+        x = a
+        if x == null {
+            return 0
+        }
+
+        return match k {
+            0 => x.Peek()
+            1 => x.Peek()
+            else => x.Peek()
+        }
+    }
+}
+
+actor A(B Other, int K) {
+    int first = Other.Ask(K)
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+mut sum = 0
+mut all = List<A>()
+for k in [2, 1, 0, 1, 0] {
+    b = spawn B()
+    a = spawn A(b, k)
+    sum = sum + a.Get()
+    b.Set(a)
+    all.Add(a)
+}
+
+print(sum)
+for target in all {
+    send target.Fail()
+}
+
+print(all[0].Get())
+```
+
+Case: [actors/restart-reentrant-one-place.kz](../corpus/actors/restart-reentrant-one-place.kz)
+```kurz
+// at their restarts two `A`s' constructors each wait on `B.Ask`, whose call back waits in the inbox for that constructor, both from
+// one place of `Ask`: the error line names that place with the count of its calls and ends with a colon, and no line stands under it
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+d = spawn B()
+c = spawn A(d)
+print(a.Get() + c.Get())
+b.Set(a)
+d.Set(c)
+send a.Fail()
+send c.Fail()
+print(a.Get())
+```
+
+Case: [actors/restart-reentrant-cap.kz](../corpus/actors/restart-reentrant-cap.kz)
+```kurz
+// at their restarts fourteen `A`s' constructors each wait on `B.Ask`, whose call back waits in the inbox for that constructor, from
+// thirteen places of `Ask`, spawned in the reverse of the file's order, the last place twice: the error line names the first place
+// in the file, ten lines `kept out at` the next ten, and one line the two places past those
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask(int k) {
+        x = a
+        if x == null {
+            return 0
+        }
+
+        return match k {
+            0 => x.Peek()
+            1 => x.Peek()
+            2 => x.Peek()
+            3 => x.Peek()
+            4 => x.Peek()
+            5 => x.Peek()
+            6 => x.Peek()
+            7 => x.Peek()
+            8 => x.Peek()
+            9 => x.Peek()
+            10 => x.Peek()
+            11 => x.Peek()
+            else => x.Peek()
+        }
+    }
+}
+
+actor A(B Other, int K) {
+    int first = Other.Ask(K)
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+mut sum = 0
+mut all = List<A>()
+for k in [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 12] {
+    b = spawn B()
+    a = spawn A(b, k)
+    sum = sum + a.Get()
+    b.Set(a)
+    all.Add(a)
+}
+
+print(sum)
+for target in all {
+    send target.Fail()
+}
+
+print(all[0].Get())
+```
+
+Case: [tests/test-restart-reentrant-places.kz](../corpus/tests/test-restart-reentrant-places.kz)
+```kurz
+// each test restarts `A`s whose constructors wait on `B.Ask`, whose call back waits in the inbox for that constructor, from places
+// of `Ask` in the order the list gives, so that the runner's wait for the test finds nothing left to run; the words under its
+// `FAILED` line name the places in the file's order, each place that keeps out two calls with their count, at most ten lines
+// `kept out at` and then one line for the places past those
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask(int k) {
+        x = a
+        if x == null {
+            return 0
+        }
+
+        return match k {
+            0 => x.Peek()
+            1 => x.Peek()
+            2 => x.Peek()
+            3 => x.Peek()
+            4 => x.Peek()
+            5 => x.Peek()
+            6 => x.Peek()
+            7 => x.Peek()
+            8 => x.Peek()
+            9 => x.Peek()
+            10 => x.Peek()
+            11 => x.Peek()
+            else => x.Peek()
+        }
+    }
+}
+
+actor A(B Other, int K) {
+    int first = Other.Ask(K)
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+int KeepOut(List<int> places) {
+    mut sum = 0
+    mut all = List<A>()
+    for k in places {
+        b = spawn B()
+        a = spawn A(b, k)
+        sum = sum + a.Get()
+        b.Set(a)
+        all.Add(a)
+    }
+
+    print(sum)
+    for target in all {
+        send target.Fail()
+    }
+
+    return all[0].Get()
+}
+
+test "keeps out calls of thirteen places" {
+    print(KeepOut([12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 12]))
+}
+
+test "keeps out calls of three places, two of them twice" {
+    print(KeepOut([12, 1, 0, 1, 0]))
+}
+
+test "keeps out two calls of one place" {
+    print(KeepOut([0, 0]))
 }
 ```
 
@@ -4921,8 +5180,10 @@ wait on one thread reads as `deadlock` (U18) *(assumed: T27 to T33 of comment 69
 wherever the code that runs the start stands, the top-level code, an actor's message or another
 actor's constructor, as at a restart (U22) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1).
 Where more than one call is kept out, a `per node` actor's start among the starts that keep them, the
-error names every one, the first found on its line and each further one under it, as at a restart
-(U22) (§6, the owner, 2026-11-21, #599, comment 7067131310, several 2; comment 7067139953, the form 1).
+error names every one, the first place in source order on its line and each further place under it,
+with the counts and the cap of U22, as at a restart (U22) (§6, the owner, 2026-11-21, #599, comment
+7067131310, several 2; comment 7067139953, the form 1; comment 7067639209, the order 1, the same
+place 1, the cap 1).
 
 Case: [actors/per-node-first-message.kz](../corpus/actors/per-node-first-message.kz)
 ```kurz

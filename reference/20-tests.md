@@ -151,10 +151,12 @@ said back there)*. A `deadlock` that a call an actor's start keeps out closes (U
 call's line in place of the test's, the line the top-level code's error names for that loop (U18) (§11,
 the owner, 2026-11-21, #599, comment 7063693195, Y5's line 1), in any file, the test's or a file the
 test's file `use`s or the standard library (§11, the owner, 2026-11-21, #599, comment 7067131310, the
-file 1); where more than one call is kept out, the words name every one, the first found as
-`deadlock at <file>:<n>` and each further one on a line `kept out at <file>:<n>` under it, as the
-top-level code's error does (U22) (§11, the owner, 2026-11-21, #599, comment 7067131310, several 2;
-comment 7067139953, the form 1). An error that ends the process wherever
+file 1); where more than one call is kept out, the words name every one, the first place in source
+order as `deadlock at <file>:<n>` and each further place on a line `kept out at <file>:<n>` under it,
+as the top-level code's error does (U22) (§11, the owner, 2026-11-21, #599, comment 7067131310,
+several 2; comment 7067139953, the form 1), in the order, with the counts and with the cap of U22,
+each line indented by four spaces as every word under a `FAILED` line (Y3) (§11, the owner,
+2026-11-21, #599, comment 7067639209, the order 1, the same place 1, the cap 1, the indent 1). An error that ends the process wherever
 it happens (U19), `allocation-failed` among
 them, ends the run inside a test too: its error line stands on standard error, and neither that test's
 line, nor the tests after it, nor the counts are written, and the exit code is 1 *(assumed: a reading of
@@ -329,6 +331,88 @@ test "restarts two actors into calls they keep out" {
     send a.Fail()
     send c.Fail()
     print(a.Get())
+}
+```
+
+Case: [tests/test-restart-reentrant-places.kz](../corpus/tests/test-restart-reentrant-places.kz)
+```kurz
+// each test restarts `A`s whose constructors wait on `B.Ask`, whose call back waits in the inbox for that constructor, from places
+// of `Ask` in the order the list gives, so that the runner's wait for the test finds nothing left to run; the words under its
+// `FAILED` line name the places in the file's order, each place that keeps out two calls with their count, at most ten lines
+// `kept out at` and then one line for the places past those
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask(int k) {
+        x = a
+        if x == null {
+            return 0
+        }
+
+        return match k {
+            0 => x.Peek()
+            1 => x.Peek()
+            2 => x.Peek()
+            3 => x.Peek()
+            4 => x.Peek()
+            5 => x.Peek()
+            6 => x.Peek()
+            7 => x.Peek()
+            8 => x.Peek()
+            9 => x.Peek()
+            10 => x.Peek()
+            11 => x.Peek()
+            else => x.Peek()
+        }
+    }
+}
+
+actor A(B Other, int K) {
+    int first = Other.Ask(K)
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+int KeepOut(List<int> places) {
+    mut sum = 0
+    mut all = List<A>()
+    for k in places {
+        b = spawn B()
+        a = spawn A(b, k)
+        sum = sum + a.Get()
+        b.Set(a)
+        all.Add(a)
+    }
+
+    print(sum)
+    for target in all {
+        send target.Fail()
+    }
+
+    return all[0].Get()
+}
+
+test "keeps out calls of thirteen places" {
+    print(KeepOut([12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 12]))
+}
+
+test "keeps out calls of three places, two of them twice" {
+    print(KeepOut([12, 1, 0, 1, 0]))
+}
+
+test "keeps out two calls of one place" {
+    print(KeepOut([0, 0]))
 }
 ```
 

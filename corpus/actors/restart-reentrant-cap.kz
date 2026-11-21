@@ -1,0 +1,68 @@
+// expect: throws deadlock at 24
+// | 0
+// threads: 1
+// rules: U22
+
+// at their restarts fourteen `A`s' constructors each wait on `B.Ask`, whose call back waits in the inbox for that constructor, from
+// thirteen places of `Ask`, spawned in the reverse of the file's order, the last place twice: the error line names the first place
+// in the file, ten lines `kept out at` the next ten, and one line the two places past those
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask(int k) {
+        x = a
+        if x == null {
+            return 0
+        }
+
+        return match k {
+            0 => x.Peek()
+            1 => x.Peek()
+            2 => x.Peek()
+            3 => x.Peek()
+            4 => x.Peek()
+            5 => x.Peek()
+            6 => x.Peek()
+            7 => x.Peek()
+            8 => x.Peek()
+            9 => x.Peek()
+            10 => x.Peek()
+            11 => x.Peek()
+            else => x.Peek()
+        }
+    }
+}
+
+actor A(B Other, int K) {
+    int first = Other.Ask(K)
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+mut sum = 0
+mut all = List<A>()
+for k in [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 12] {
+    b = spawn B()
+    a = spawn A(b, k)
+    sum = sum + a.Get()
+    b.Set(a)
+    all.Add(a)
+}
+
+print(sum)
+for target in all {
+    send target.Fail()
+}
+
+print(all[0].Get())
