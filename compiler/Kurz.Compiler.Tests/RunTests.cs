@@ -263,6 +263,18 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         ["actors/restart-reentrant.kz"] = (44, "main"),
         ["actors/per-node-reentrant-in-message.kz"] = (23, "main"),
         ["actors/per-node-reentrant-nested.kz"] = (26, "main"),
+        ["actors/restart-reentrant-two.kz"] = (79, "main"),
+    };
+
+    /// <summary>
+    /// U22, U52: the <c>deadlock</c> cases that more than one call an actor's start keeps out closes, each with the lines of the calls
+    /// after the first found, which the error line names and ends with a colon: one line <c>kept out at</c> each, in the order the
+    /// runtime finds them, between the error line and the trace, each call on a line nothing else of the case stands on (section 6, the
+    /// owner, 2026-11-21, #599, comment 7067131310, several 2, and comment 7067139953, the form 1).
+    /// </summary>
+    private static readonly Dictionary<string, int[]> KeptOut = new(StringComparer.Ordinal)
+    {
+        ["actors/restart-reentrant-two.kz"] = [38],
     };
 
     public static TheoryData<string> RunnableCases()
@@ -388,6 +400,10 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             // the error lines alone: the trace was split off above and is held below
             Assert.Matches($"^{Regex.Escape(line)}:\nbyte [0-9]+ is inside a code point\n$", error);
         }
+        else if (KeptOut.TryGetValue(relativePath, out var kept))
+        {
+            Assert.Equal(line + ":\n" + string.Concat(kept.Select(n => $"kept out at {relativePath}:{n}\n")), error);
+        }
         else
         {
             Assert.Equal(line + "\n", error);
@@ -434,6 +450,14 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         {
             var header = Header(relativePath);
             Assert.True(header.Expectation == Expectation.Throws && !NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with a trace of its own, and the run does not run it as a `throws` case");
+        }
+
+        // a case listed with calls kept out is a `throws` case of `deadlock` the run runs
+        Assert.NotEmpty(KeptOut);
+        foreach (var (relativePath, _) in KeptOut)
+        {
+            var header = Header(relativePath);
+            Assert.True(header.Expectation == Expectation.Throws && header.ErrorId == "deadlock" && !NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with calls kept out, and the run does not run it as a `throws` case of `deadlock`");
         }
 
         // a case listed as run under the plain allocator alone is one the plain run runs

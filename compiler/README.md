@@ -1179,7 +1179,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   that a call behind any count of messages takes the stack of one, and ends the process with
   `deadlock` at the call's line where the queue is empty, no restart's pause runs and the word is not set
   (U18, U42), or at the line of a call that an actor's start keeps out where one closes the loop, a place
-  `Enqueue` stores in that call's reply (U22, U52), and with `call-timeout` there once its deadline passes (U36); inside a
+  `Enqueue` stores in that call's reply (U22, U52), the first found's where more than one closes it, with a line
+  `kept out at <file>:<n>` for each further one under the error line (`DeadlockKept`), and with `call-timeout` there once its deadline passes (U36); inside a
   message it parks the activation, switching to the thread's side until the word is set or a timer of the
   thread, the timers kept in the order of their deadlines, wakes it at its deadline (U37, U38), and the scheduler drops
   a message whose deadline passed before it starts it, its reply's word set to 4 (`ActorTests`).
@@ -2131,7 +2132,8 @@ table of the tests, each test's function, its name as written and its line, and 
 the words of its crash kept for the line under `FAILED` and no log line written for it (F1, F3), or where
 the wait found nothing left to run, `deadlock at <file>:<the test's line>` (F5), or the place of the
 call an actor's start keeps out where that call closes the loop, which `TestRan` looks for as `Wait`
-does (`Kept`, U22, U52) and `RunTests` names (Y5). Then every actor the
+does (`Kept`, U22, U52) and `RunTests` names (Y5), the first found's where more than one closes it, with a
+line `kept out at <file>:<n>` under it for each further one. Then every actor the
 test made ends at once, parked ones too (F6): the records of the run queue, each activation's stack back
 in the pool with its open copy sessions ended, the stack a pending block keeps, every heap, the heaps of
 messages, the timers, the pauses and the deadline of the top-level code's `within`, so that no timer and

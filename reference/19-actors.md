@@ -2374,7 +2374,10 @@ call each other from different chains and wait for each other, on one thread, do
 (§6, "Deadlocks"; the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level
 wait"). A call that waits in a function the top-level code called is the top-level code's, at its
 own line. Where a call that an actor's start keeps out closes the loop, the error names that call's
-line (U22, U52) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1). A deadline of a call that waits in a message is nothing left to run (U42) *(assumed: T6 of comment 6967625156)*. A loop of actors the top-level code never waits on stays until the end of the program,
+line (U22, U52) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and where more than one
+such call closes it, the error line names the first found and ends with a colon, and each further call
+stands under it on a line `kept out at <file>:<n>`, before the trace (U22) (§6, the owner,
+2026-11-21, #599, comment 7067131310, several 2; comment 7067139953, the form 1). A deadline of a call that waits in a message is nothing left to run (U42) *(assumed: T6 of comment 6967625156)*. A loop of actors the top-level code never waits on stays until the end of the program,
 where U13 drops it.
 
 Case: [actors/deadlock.kz](../corpus/actors/deadlock.kz)
@@ -2888,7 +2891,14 @@ loops on it, and a `send` of that chain to the actor waits in its inbox behind t
 names the line of the call the inbox holds, the call that closes the loop, not the line of the
 top-level code's call that waits (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and the
 trace below it is the top-level code's where it waits, the stack that raises (§6, the owner,
-2026-11-21, #599, comment 7063693195, the trace 1).
+2026-11-21, #599, comment 7063693195, the trace 1). Where more than one call is kept out, one by each
+of several actors' starts, the error names every one: its line names the first found and ends with a
+colon, and one line `kept out at <file>:<n>` for each further call stands under it, before the trace,
+while one kept-out call keeps the error line of U18 (§6, the owner, 2026-11-21, #599, comment
+7067131310, several 2; comment 7067139953, the form 1). The first found is the first in the runtime's
+walk: the starts the top-level code runs, then the actors in the order of their slots, the order of
+their spawns where no actor ended, an actor's restart before the starts its activations run
+*(assumed in §6: a reading of the build)*.
 
 Case: [actors/crash-in-constructor-at-restart.kz](../corpus/actors/crash-in-constructor-at-restart.kz)
 ```kurz
@@ -3140,6 +3150,161 @@ test "restarts into a call it keeps out" {
     print(a.Get())
     b.Set(a)
     send a.Fail()
+    print(a.Get())
+}
+```
+
+Case: [actors/restart-reentrant-two.kz](../corpus/actors/restart-reentrant-two.kz)
+```kurz
+// at their restarts `A`'s and `C`'s constructors each wait on a call whose call back waits in the inbox for that constructor, so
+// that the top-level code's wait on `Get` finds nothing left to run, and the error names both calls kept out, `A`'s on its line and
+// `C`'s on a line of its own under it
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor D {
+    mut C? c = null
+
+    pub void Set(C x) {
+        c = x
+    }
+
+    pub int Ask() {
+        x = c
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+actor C(D Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "c fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+d = spawn D()
+c = spawn C(d)
+print(a.Get())
+print(c.Get())
+b.Set(a)
+d.Set(c)
+send a.Fail()
+send c.Fail()
+print(a.Get())
+```
+
+Case: [tests/test-restart-reentrant-two.kz](../corpus/tests/test-restart-reentrant-two.kz)
+```kurz
+// at their restarts `A`'s and `C`'s constructors each wait on a call whose call back waits in the inbox for that constructor, so
+// that the runner's wait for the test finds nothing left to run, and the words under its `FAILED` line name both calls, `A`'s first
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor D {
+    mut C? c = null
+
+    pub void Set(C x) {
+        c = x
+    }
+
+    pub int Ask() {
+        x = c
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+actor C(D Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "c fails"
+    }
+
+    pub int Get() => first
+}
+
+test "restarts two actors into calls they keep out" {
+    b = spawn B()
+    a = spawn A(b)
+    d = spawn D()
+    c = spawn C(d)
+    print(a.Get())
+    print(c.Get())
+    b.Set(a)
+    d.Set(c)
+    send a.Fail()
+    send c.Fail()
     print(a.Get())
 }
 ```
@@ -4755,6 +4920,9 @@ function that calls `Cache.Get()`, waits for a start that waits for it, which th
 wait on one thread reads as `deadlock` (U18) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*, at that message's line, the call that closes the loop,
 wherever the code that runs the start stands, the top-level code, an actor's message or another
 actor's constructor, as at a restart (U22) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1).
+Where more than one call is kept out, a `per node` actor's start among the starts that keep them, the
+error names every one, the first found on its line and each further one under it, as at a restart
+(U22) (§6, the owner, 2026-11-21, #599, comment 7067131310, several 2; comment 7067139953, the form 1).
 
 Case: [actors/per-node-first-message.kz](../corpus/actors/per-node-first-message.kz)
 ```kurz

@@ -1,0 +1,85 @@
+// expect: throws deadlock at 25
+// | 0
+// | 0
+// | test "restarts two actors into calls they keep out" ... FAILED
+// |     deadlock at tests/test-restart-reentrant-two.kz:25
+// |     kept out at tests/test-restart-reentrant-two.kz:42
+// | 1 test: 0 passed, 1 failed
+// command: test
+// threads: 1
+// rules: Y5, U22
+
+// at their restarts `A`'s and `C`'s constructors each wait on a call whose call back waits in the inbox for that constructor, so
+// that the runner's wait for the test finds nothing left to run, and the words under its `FAILED` line name both calls, `A`'s first
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor D {
+    mut C? c = null
+
+    pub void Set(C x) {
+        c = x
+    }
+
+    pub int Ask() {
+        x = c
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+actor C(D Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "c fails"
+    }
+
+    pub int Get() => first
+}
+
+test "restarts two actors into calls they keep out" {
+    b = spawn B()
+    a = spawn A(b)
+    d = spawn D()
+    c = spawn C(d)
+    print(a.Get())
+    print(c.Get())
+    b.Set(a)
+    d.Set(c)
+    send a.Fail()
+    send c.Fail()
+    print(a.Get())
+}

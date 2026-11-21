@@ -149,7 +149,12 @@ place of its own; the run goes on with the test after it *(assumed: Q2 of issue 
 built at the default while it waits for the owner, and F5 of comment 6993110710, a reading of the build
 said back there)*. A `deadlock` that a call an actor's start keeps out closes (U22, U52) names that
 call's line in place of the test's, the line the top-level code's error names for that loop (U18) (§11,
-the owner, 2026-11-21, #599, comment 7063693195, Y5's line 1). An error that ends the process wherever
+the owner, 2026-11-21, #599, comment 7063693195, Y5's line 1), in any file, the test's or a file the
+test's file `use`s or the standard library (§11, the owner, 2026-11-21, #599, comment 7067131310, the
+file 1); where more than one call is kept out, the words name every one, the first found as
+`deadlock at <file>:<n>` and each further one on a line `kept out at <file>:<n>` under it, as the
+top-level code's error does (U22) (§11, the owner, 2026-11-21, #599, comment 7067131310, several 2;
+comment 7067139953, the form 1). An error that ends the process wherever
 it happens (U19), `allocation-failed` among
 them, ends the run inside a test too: its error line stands on standard error, and neither that test's
 line, nor the tests after it, nor the counts are written, and the exit code is 1 *(assumed: a reading of
@@ -245,6 +250,84 @@ test "restarts into a call it keeps out" {
     print(a.Get())
     b.Set(a)
     send a.Fail()
+    print(a.Get())
+}
+```
+
+Case: [tests/test-restart-reentrant-two.kz](../corpus/tests/test-restart-reentrant-two.kz)
+```kurz
+// at their restarts `A`'s and `C`'s constructors each wait on a call whose call back waits in the inbox for that constructor, so
+// that the runner's wait for the test finds nothing left to run, and the words under its `FAILED` line name both calls, `A`'s first
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor D {
+    mut C? c = null
+
+    pub void Set(C x) {
+        c = x
+    }
+
+    pub int Ask() {
+        x = c
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+actor C(D Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "c fails"
+    }
+
+    pub int Get() => first
+}
+
+test "restarts two actors into calls they keep out" {
+    b = spawn B()
+    a = spawn A(b)
+    d = spawn D()
+    c = spawn C(d)
+    print(a.Get())
+    print(c.Get())
+    b.Set(a)
+    d.Set(c)
+    send a.Fail()
+    send c.Fail()
     print(a.Get())
 }
 ```
