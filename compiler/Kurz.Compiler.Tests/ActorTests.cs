@@ -2202,7 +2202,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // what layer 3 does not see (U64; the owner, 2026-11-20, #519, comment 7051071630, T70 1): `Boss`'s `Go` waits on `Get`, queued
         // behind `Fail` in `Worker`'s inbox, and `Fail`'s crash queues the block of `Worker`'s policy behind `Go`, so that a crash closes
         // the loop and no wait does; the top-level code's wait, in a function it called, finds nothing left to run: the process ends at
-        // that call's line, not at a line of the loop, with the exit code 1
+        // that call's line, not at a line of the loop, with the exit code 1, and the loop's waits below the error line, which one walk
+        // from the call finds (U64; the owner, 2026-11-21, #519, comment 7060155980, T85 2)
         const string text = """
             actor Worker {
                 pub void Fail() {
@@ -2234,7 +2235,9 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(Start(boss))
 
             """;
-        Ran(BuildAndRun(text, toolchain.Runtime, "actor-deadlock"), 1, ["boss goes"], "error: deadlock at program.kz:23\n");
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-deadlock");
+        Ran((run.Code, run.Output, RunTests.Chains(run.Error)), 1, ["boss goes"], "error: deadlock at program.kz:23:\n" +
+            "Boss#1 waits at program.kz:18 on Worker#2 in chain <chain>\nWorker#2 waits for the decision of Boss#1 on its crash in chain <chain>\n");
     }
 
     [Fact]
@@ -5093,7 +5096,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void The_log_line_of_a_deadlock_names_its_loop_with_the_chain_of_each_wait()
     {
-        // U63 (the owner, 2026-11-20, #519, comment 7051071630, T68 3; assumed: T84 of comment 7058660596, at its default): `Boss`'s `Go`,
+        // U63 (the owner, 2026-11-20, #519, comment 7051071630, T68 3; 2026-11-21, comment 7060155980, T84 1): `Boss`'s `Go`,
         // sent in a chain of its own, calls `Get` of its child once the child's block waits behind `Go`, the child having crashed in
         // `Fail`, sent in another chain; `Boss`'s wait closes the loop and gets `deadlock`, and its log line holds the loop's text in
         // double quotes, a line for each wait, each ending with a chain's ID: the call's line that of `Go`, which waits, the child's that
@@ -5144,6 +5147,65 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.True(loop.Success, string.Join("\n", crashes));
         Assert.NotEqual(loop.Groups["call"].Value, loop.Groups["crash"].Value);
         Ran((run.Code, run.Output, rest), 0, ["now 7", "1"], "");
+    }
+
+    [Fact]
+    public void The_wait_line_goes_on_through_the_activation_that_runs_a_call_that_got_in_by_its_chain()
+    {
+        // U60 (the owner, 2026-11-21, #519, comment 7060155980, T86 2): `C`'s `H` waits on `B`'s `K`, which got in by the chain of
+        // `B`'s `G` and runs above it, newer in the chain than `H`; `K`'s wait on `D`, busy in `Y`, which waits on `C`, busy in `H`,
+        // closes the loop through `K`, so `B` gets `deadlock` at `K`'s call, its text one line for each wait, `K`'s and `H`'s in
+        // one chain and `Y`'s in another (U63); under the default policy `C`'s `H`, `A`'s `F` and the top-level code's call get
+        // `callee-crashed` (U20)
+        const string text = """
+            actor E {
+                pub int Delay() => 1
+            }
+
+            actor C {
+                pub int H(B b) => b.K()
+
+                pub int Z() => 3
+            }
+
+            actor B(D Last, C Mid) {
+                pub int G() => Mid.H(this)
+
+                pub int K() => Last.X()
+            }
+
+            actor D(E Slow) {
+                pub void Y(C c) {
+                    t = Slow.Delay()
+                    print("y got {c.Z() + t}")
+                }
+
+                pub int X() => 4
+            }
+
+            actor A {
+                pub int F(B b) => b.G()
+            }
+
+            ae = spawn E()
+            ad = spawn D(ae)
+            ac = spawn C()
+            ab = spawn B(ad, ac)
+            aa = spawn A()
+            send ad.Y(ac)
+            print(aa.F(ab))
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-deadlock-got-in");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(3, crashes.Count);
+        var loop = Regex.Match(crashes[0],
+            @"^B#4 crashed: deadlock ""B#4 waits at program\.kz:14 on D#2 in chain (?<k>[0-9a-f]{32})\\nD#2 waits at program\.kz:20 on C#3 in chain (?<y>[0-9a-f]{32})\\nC#3 waits at program\.kz:6 on B#4 in chain (?<h>[0-9a-f]{32})"" at program\.kz:14$");
+        Assert.True(loop.Success, crashes[0]);
+        Assert.Equal(loop.Groups["k"].Value, loop.Groups["h"].Value);
+        Assert.NotEqual(loop.Groups["k"].Value, loop.Groups["y"].Value);
+        Assert.Equal(["C#3 crashed: callee-crashed at program.kz:6", "A#5 crashed: callee-crashed at program.kz:27"], crashes.Skip(1).ToList());
+        Ran((run.Code, run.Output, rest), 1, [], "error: callee-crashed at program.kz:36\n");
     }
 
     [Fact]

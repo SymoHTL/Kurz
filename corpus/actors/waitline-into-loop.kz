@@ -4,8 +4,8 @@
 // rules: U18, U34, U61, U64
 
 // `Worker`'s crash closes a loop of `Boss` and `Worker` that no wait closes (U64); `Asker`'s call of `Ping`, made after it,
-// leads into that loop, which `Asker` is not in, so its wait parks and raises nothing (U61), and the top-level code's wait on
-// `Ask` finds nothing left to run (U18)
+// leads into that loop, which `Asker` is not in, so its wait parks and raises nothing (U61); the top-level code's wait on `Ask`
+// finds nothing left to run (U18), and its walk meets the loop at `Boss`, whose wait starts the text below the error line (U64)
 
 actor Clock {
     pub int Now() => 7

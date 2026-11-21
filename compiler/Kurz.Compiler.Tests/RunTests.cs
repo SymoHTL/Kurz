@@ -119,9 +119,9 @@ public sealed class Toolchain : IDisposable
 /// <c>throws</c> case exits with 1, and its error stream
 /// is the one line <c>error: &lt;id&gt; at &lt;file&gt;:&lt;n&gt;</c> of the design record's section 6, with the header's id and line and
 /// the case's path under <c>corpus/</c> as the file, or for <c>thrown</c> that line ending in a colon with the thrown text below it,
-/// for <c>not-char-boundary</c> that line ending in a colon with the position of the cut below it (X10), and for layer 3's
-/// <c>deadlock</c> in a case whose <c>rules:</c> line names U63 that line ending in a colon with the loop's text below it, each
-/// line's chain ID read as one placeholder (<see cref="LoopTexts"/>, <see cref="Chains"/>). A case that expects an error the
+/// for <c>not-char-boundary</c> that line ending in a colon with the position of the cut below it (X10), and for a <c>deadlock</c>
+/// that names its loop, layer 3's or U18's, in a case whose <c>rules:</c> line names U63 or U64, that line ending in a colon with
+/// the loop's text below it, each line's chain ID read as one placeholder (<see cref="LoopTexts"/>, <see cref="Chains"/>). A case that expects an error the
 /// build raises once clang refuses the program (<see cref="CorpusTests.BuildIds"/>) is built, and its build ends with that error alone, at the
 /// header's line; it is no case run.
 /// A case the checker says <c>not supported</c> to is held by the checker's theory in <see cref="CorpusTests"/> and is not built here; a
@@ -272,8 +272,9 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     };
 
     /// <summary>
-    /// U63, U25: the cases of layer 3's <c>deadlock</c> that a policy escalates to the top-level code, each with the loop's text below
-    /// its error line, each line's chain ID as the placeholder of <see cref="Chains"/>.
+    /// U63, U25, U64: the cases whose process ends with a <c>deadlock</c> that names its loop, layer 3's that a policy escalates to the
+    /// top-level code and U18's whose walk finds a loop, each with the loop's text below its error line, each line's chain ID as the
+    /// placeholder of <see cref="Chains"/>.
     /// </summary>
     private static readonly Dictionary<string, string> LoopTexts = new(StringComparer.Ordinal)
     {
@@ -281,7 +282,15 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             "Left#1 waits at actors/waitline-escalate.kz:10 on Right#2 in chain <chain>",
         ["actors/waitline-vouch.kz"] = "Right#2 waits at actors/waitline-vouch.kz:20 on Left#1 in chain <chain>\n" +
             "Left#1 waits at actors/waitline-vouch.kz:12 on Right#2 in chain <chain>",
+        ["actors/deadlock-pending-crash.kz"] = "Boss#1 waits at actors/deadlock-pending-crash.kz:25 on Worker#2 in chain <chain>\n" +
+            "Worker#2 waits for the decision of Boss#1 on its crash in chain <chain>",
+        ["actors/waitline-into-loop.kz"] = "Boss#1 waits at actors/waitline-into-loop.kz:30 on Worker#4 in chain <chain>\n" +
+            "Worker#4 waits for the decision of Boss#1 on its crash in chain <chain>",
     };
+
+    /// <summary>U63, U64: a case whose <c>deadlock</c> names its loop below its error line, by its <c>rules:</c> line.</summary>
+    private static bool NamesALoop(CaseHeader header) =>
+        header.ErrorId == "deadlock" && (header.Rules.Contains("U63") || header.Rules.Contains("U64"));
 
     public static TheoryData<string> RunnableCases()
     {
@@ -389,10 +398,10 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             // the error lines alone: the trace was split off above and is held below
             Assert.Matches($"^{Regex.Escape(line)}:\nbyte [0-9]+ is inside a code point\n$", error);
         }
-        else if (header.ErrorId == "deadlock" && header.Rules.Contains("U63"))
+        else if (NamesALoop(header))
         {
-            // U63: the loop's text below the error line, each line's chain ID as one placeholder
-            Assert.True(LoopTexts.TryGetValue(relativePath, out var loop), $"{relativePath}: a `deadlock` of U63 with no text of its loop listed");
+            // U63, U64: the loop's text below the error line, each line's chain ID as one placeholder
+            Assert.True(LoopTexts.TryGetValue(relativePath, out var loop), $"{relativePath}: a `deadlock` of U63 or U64 with no text of its loop listed");
             Assert.Equal($"{line}:\n{loop}\n", Chains(error));
         }
         else
@@ -443,12 +452,12 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             Assert.True(header.Expectation == Expectation.Throws && !NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with a trace of its own, and the run does not run it as a `throws` case");
         }
 
-        // a case listed with the text of its loop is a `throws deadlock` case of U63 the run runs
+        // a case listed with the text of its loop is a `throws deadlock` case of U63 or U64 the run runs
         Assert.NotEmpty(LoopTexts);
         foreach (var (relativePath, _) in LoopTexts)
         {
             var header = Header(relativePath);
-            Assert.True(header.Expectation == Expectation.Throws && header.ErrorId == "deadlock" && header.Rules.Contains("U63") && !NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with the text of its loop, and the run does not run it as a `throws deadlock` case of U63");
+            Assert.True(header.Expectation == Expectation.Throws && NamesALoop(header) && !NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with the text of its loop, and the run does not run it as a `throws deadlock` case of U63 or U64");
         }
 
         // a case listed as run under the plain allocator alone is one the plain run runs

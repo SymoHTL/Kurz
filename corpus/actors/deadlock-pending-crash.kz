@@ -3,8 +3,8 @@
 // rules: U18, U34, U42, U60, U64
 
 // `Boss`'s `Go` waits on `Get`, queued behind `Fail` in `Worker`'s inbox; `Fail` crashes, and the block of `Worker`'s policy
-// waits behind `Go`, so that a crash closes the loop and no wait does: layer 3 does not see it (U60, U64), and the top-level
-// code's wait on `Go`, under its bound, finds nothing left to run (U18, U42)
+// waits behind `Go`, so that a crash closes the loop and no wait does: layer 3 does not see it (U60), the top-level code's wait
+// on `Go`, under its bound, finds nothing left to run (U18, U42), and its walk names the loop below the error line (U64)
 
 actor Worker {
     pub void Fail() {
