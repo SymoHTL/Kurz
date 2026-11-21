@@ -1565,7 +1565,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   what it gathered of each pipe, the bytes its `File` read ahead first, back to that `File`'s buffer, which is made again with
   more room than its 8 KiB where they need it, so that a later read takes them before the rest of the pipe. The wait never
   waits on a reader's lock: at each wake of its poll `Drive` tries each lock it does not hold yet through the emitter's
-  `try.reader`, which it gets as a C function (R17), since the runtime's code tries no lock through an atomic type (R19), and which reads the bytes ahead only once it
+  `try.reader`, which it gets as a C function (R17), the runtime's code reaching the lock through none of R19's types, and which reads the bytes ahead only once it
   took the lock; a pipe is polled from the wake that took its lock, the next wake comes within 4 ms while another holder holds
   one, and the emitter lets go of each lock the runtime took once the bytes are taken or given back, so that `Timeout(d)`
   bounds the whole call and a read through the `File` on another thread waits for the call only while the call holds its lock
@@ -1641,7 +1641,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the line together in a buffer of its thread and hands it to one write call on standard error, the
   line of the lines dropped before it in the same write; a refused write counts the line as dropped,
   and after a line the system took in part, the next write starts with a line feed. The count of the
-  lines dropped and the flag of a line cut short are plain `static mut`s, the runtime's code using no atomic type for them (R19),
+  lines dropped and the flag of a line cut short are plain `static mut`s,
   and the runtime starts no thread: two threads a program starts through C (R16) that log at once race on
   them, as the runtime's comment on them says. The corpus's runner
   takes `KURZ_LOG` away from every case it runs. `LogTests` pins what no case can: the layout of a line
@@ -2106,15 +2106,16 @@ The atomic types of R19 (section 6), on every target: a view is the pointer `Fro
 each member is one LLVM instruction on the word it points to, aligned to the word's size, as Rust's
 `core::sync::atomic` lowers them: `Load` a `load atomic`, `Store` a `store atomic`, `Swap` an
 `atomicrmw xchg`, `FetchAdd`, `FetchSub`, `FetchAnd`, `FetchOr` and `FetchXor` an `atomicrmw` of
-`add`, `sub`, `and`, `or` and `xor`, an `AtomicPtr<T>`'s on the address as an `i64`,
+`add`, `sub`, `and`, `or` and `xor`, an `AtomicPtr<T>`'s `FetchAnd`, `FetchOr` and `FetchXor` on the address as an `i64`,
 `CompareExchange` and `CompareExchangeWeak` a `cmpxchg` and a `cmpxchg weak`, whose pair gives the
 union's case, and `Fence` a `fence`; a `bool`'s word is a byte that holds 0 or 1, as Rust's
-`AtomicBool` holds a `u8`. An order written at the call is the instruction's own, `Relaxed` LLVM's
-`monotonic`; any other is read when the call runs, by a `switch` over the five values of `MemoryOrder`
+`AtomicBool` holds a `u8`. An order written at the call, or held by a copy of a function as its constant
+(T35), is the instruction's own, `Relaxed` LLVM's `monotonic`, and a copy's constant that Rust refuses
+raises `invalid-ordering-at-run-time` at the call's line with no `switch`; any other is read when the call runs, by a `switch` over the five values of `MemoryOrder`
 to the instruction for each, as Rust's `match` on the order chooses among its intrinsics, and a
 choice Rust refuses raises `invalid-ordering-at-run-time` at the call's line (`Emit/Emitter.Atomics.cs`;
-`EmitterTests` pins the instructions and the choice). A view crossing into an actor is
-`not supported`, as a pointer's crossing is (U12).
+`EmitterTests` pins the instructions and the choice). A view crossing into an actor, or out of one as
+a waiting call's result, is the checker's `pointer-crosses`, as a pointer's crossing is (U12, R19).
 
 ### The tests and `check`
 
@@ -2187,8 +2188,10 @@ runs, each message on a stack of its own ("The runtime"), its state word, and th
 each reply of its calls by a swap, changed by atomic operations that hold on any number of threads ("What the
 emitter emits"), while the lifetimes of the message a crash's swap reads and of the record of the waiter's actor,
 which the owner of a reply reads after its store, hold on one thread alone, with no worker thread, no line `threads`
-and no `KURZ_THREADS` read (U35), and the top-level code's wait runs the scheduler in place on the
-main thread's stack (U18), and messages run only while the top-level
+and no `KURZ_THREADS` read (U35), so that a program started with a `KURZ_THREADS` that U35 refuses, `0`
+among them, runs on the one thread with no error line, and the compiler reads no `project.kz`, so no line
+of one reaches it, and the top-level code's wait runs the scheduler in place on the
+main thread's stack, where U18 has the main thread sleep beside the worker threads, and messages run only while the top-level
 code waits for a call's result, one message of each actor in turn, so that a `send` made after the
 last call that waits does not run, and a message parked in a wait when the top-level code ends does
 not go on (U13); of section 6's deadlocks the build makes layer 1 (U17) and the `deadlock` of a wait
@@ -2837,7 +2840,8 @@ of P3 and its category of P6), 19 (actors of one machine: U1, U2, U4, U6 to U12,
 others the run's, an actor's body read as a class's, its reference a type of its own, the calls
 through it recorded as messages that wait or not, `CallKind.ActorCall` and `CallKind.ActorSend`, and
 a `send` of its own method inside it recorded as `CallKind.ActorSend`, and of U12 what crosses, by
-the type of the parameter, with `send-needs-word` at an argument and at a waiting call's result, a
+the type of the parameter, with `send-needs-word` at an argument and at a waiting call's result, and
+`pointer-crosses` there where a value reaches a pointer or a view of an atomic type, with any word, a
 function value by the lambda its function shows, and `copy` at any call recorded for the emitter,
 `SemanticModel.IsCopied`, and `move` before an argument, before a parameter's type and in a function
 type, a lambda's parameter whose type is not written taking it from the type the lambda is given for:
@@ -2895,7 +2899,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`, `named-asm-label`, `binary-asm-label`,
 `naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `static-cycle`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, `lane-out-of-range`,
 `equal-by-unknown`, `equals-method`, `mutable-key`, `spawn-required`, `send-result`, `actor-field-public`,
-`mut-in-message`, `send-needs-word`, `used-after-move`, `move-reachable`, `move-at-call`, and
+`mut-in-message`, `send-needs-word`, `used-after-move`, `move-reachable`, `move-at-call`, `pointer-crosses`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
 Over a program the checker read without a diagnostic and the model of `std/`, `Semantics/ThrowSets.cs` computes what code can
@@ -3085,7 +3089,9 @@ function, a `move` of the variable of a loop over anything but a list, and a `mo
 region the checker does not keep (U12); an argument
 or a result of a message or of an actor's constructor, and a value after `copy` at any call, that
 reaches a value of a type parameter, an instance of a class of `std/`, `HttpRequest` and
-`HttpHeaders` among them, a handle of section 12 or a pointer, an argument written `move` only where it
+`HttpHeaders` among them, or a handle of section 12, a value after `copy` at a call that is no message
+that reaches a pointer or a view of an atomic type, which crosses into no actor (`pointer-crosses`,
+U12), an argument written `move` only where it
 reaches a handle, a hasher, a command or a child process, whose copy would share the sender's block by its count, by any
 path the copy follows, a lambda's capture and a field of any class among them, or a value of a type parameter, since the
 copy of its function for a type argument that is one of them would share that block (U12); `copy` at a call that is no message before a value that

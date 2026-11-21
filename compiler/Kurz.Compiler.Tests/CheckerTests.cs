@@ -4148,7 +4148,11 @@ public sealed class CheckerTests
     [InlineData("List<Vector128<string>> xs = []\nprint(xs.Count)", ErrorIds.TypeMismatch, 3)]
     [InlineData("print(X86.Nope.IsSupported)", ErrorIds.UnknownName, 3)]
     [InlineData("print(X86.Sse41.IsSupported())", ErrorIds.TypeMismatch, 3)]
-    [InlineData("print(X86.Sse41.Extract)", ErrorIds.UnknownName, 3)]
+    [InlineData("print(X86.Sse41.Extract)", ErrorIds.Syntax, 3)] // a function of a type read as a value (F11; section 6, 2026-11-17, comment 6961064484, Q3; assumed for an intrinsic)
+    [InlineData("print(Vector128.Create)", ErrorIds.Syntax, 3)] // the same (Q3)
+    [InlineData("f = Vector256.Create\nprint(1)", ErrorIds.Syntax, 3)]
+    [InlineData("print(X86.Sse41.Nope)", ErrorIds.UnknownName, 3)] // a member that is no function, the control of `print(X86.Sse41.Extract)` (V10)
+    [InlineData("print(Vector128.Nope)", ErrorIds.UnknownName, 3)] // the control of `print(Vector128.Create)` (V10)
     [InlineData("print(X86)", ErrorIds.UnknownName, 3)]
     [InlineData("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, 300))\n}", ErrorIds.ConstantOverflow, 4)]
     [InlineData("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, -1))\n}", ErrorIds.ConstantOverflow, 4)]
@@ -4247,14 +4251,32 @@ public sealed class CheckerTests
         Clean(Atomics("raw {\n    print(AtomicLong.FromPtr(&w).Load(MemoryOrder.SeqCst))\n    print(*AtomicPtr<long>.FromPtr(&slot).Load(MemoryOrder.SeqCst))\n}"), "raw");
     }
 
+    [Fact]
+    public void The_t_atomic_ptrs_from_ptr_does_not_write_is_inferred_from_its_argument()
+    {
+        // R19 with T27 (the fix of T2 of the reading of issue 39, comment 6957856856): `&slot`, a `long**`, gives the `T` of a `T**`
+        // its `long`, so the view is an `AtomicPtr<long>`, which no `AtomicPtr<int>` takes
+        Clean(Atomics("raw {\n    print(*AtomicPtr.FromPtr(&slot).Load(MemoryOrder.SeqCst))\n}\n\nKeep(a, c, n, AtomicPtr.FromPtr(&slot))"), "raw");
+        Assert.Equal([(ErrorIds.TypeMismatch, 14)], Errors(Atomics("void Take(AtomicPtr<int> x) {\n    print(1)\n}\n\nTake(AtomicPtr.FromPtr(&slot))"), "raw"));
+    }
+
     [Theory]
     [InlineData("enum MemoryOrder { Weak, Strong }\nprint(1)")]
     [InlineData("data NotExchanged(int X)\nprint(1)")]
     [InlineData("void Fence() {\n    print(1)\n}\n\nprint(2)")]
     [InlineData("data AtomicPtr(int X)\nprint(1)")]
     [InlineData("class AtomicLong {\n}\n\nprint(1)")]
+    [InlineData("Fence = 1\nprint(Fence)")] // a variable (V9; the fix of T8 of the reading of issue 39, comment 6957856856)
+    [InlineData("MemoryOrder = 2\nprint(MemoryOrder)")]
+    [InlineData("void Take(int AtomicLong) {\n    print(AtomicLong)\n}\n\nTake(1)")] // a parameter
     public void A_files_own_declaration_of_a_name_of_the_atomic_types_is_redeclared(string program) =>
         Assert.Equal([(ErrorIds.Redeclared, 1)], Errors(program));
+
+    [Fact]
+    public void A_field_may_take_a_name_of_the_atomic_types() =>
+        // R19, as R18's names (chapter 12, `redeclared`): a field so named, a parameter of a primary constructor among them, is no
+        // declaration the names refuse, the control of `A_files_own_declaration_of_a_name_of_the_atomic_types_is_redeclared`
+        Clean("class Box(int Fence)\n\ndata Pair(int AtomicLong, int NotExchanged)\n\nb = Box(3)\np = Pair(1, 2)\nprint(b.Fence + p.AtomicLong + p.NotExchanged)");
 
     [Fact]
     public void A_program_may_declare_its_own_ordering_beside_the_atomic_types_memory_order()
@@ -4264,21 +4286,64 @@ public sealed class CheckerTests
         Clean("enum Ordering { Less, Equal, Greater }\nmut long w = 1\na = AtomicLong.FromPtr(&w)\nraw {\n    print(a.Load(MemoryOrder.SeqCst))\n}\n\nprint(Ordering.Less == Ordering.Equal)", "raw");
     }
 
+    // R19 (assumed in section 6, the fix of T2 and T3 of the reading of issue 39, comment 6957856856), each row by the rule it follows
     [Theory]
-    [InlineData("void Take(AtomicPtr x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.CannotInfer, 1)]
-    [InlineData("void Take(AtomicLong<int> x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.Syntax, 1)]
-    [InlineData("void Take(AtomicPtr<long, int> x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.Syntax, 1)]
-    [InlineData("void Take(AtomicPtr<string> x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.CountedPointee, 1)]
-    [InlineData("mut long w = 1\nmut long* s = &w\nraw {\n    print(*AtomicPtr.FromPtr(&s).Load(MemoryOrder.SeqCst))\n}", ErrorIds.CannotInfer, 4)]
-    [InlineData("print(AtomicLong.FromPtr)", ErrorIds.UnknownName, 1)]
-    [InlineData("print(AtomicLong)", ErrorIds.Syntax, 1)]
-    [InlineData("print(Fence)", ErrorIds.Syntax, 1)]
+    [InlineData("void Take(AtomicPtr x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.CannotInfer, 1)] // a type with no type argument, as `List` is (M9, T17)
+    [InlineData("void Take(AtomicLong<int> x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.Syntax, 1)] // a count of type arguments the type has not, as `List`'s (T17, E4)
+    [InlineData("void Take(AtomicPtr<long, int> x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.Syntax, 1)] // the same (T17, E4)
+    [InlineData("raw {\n    Fence<long>(MemoryOrder.SeqCst)\n}", ErrorIds.Syntax, 2)] // a type argument to a function that has no type parameter (T19, E4)
+    [InlineData("void Take(AtomicPtr<string> x) {\n    print(1)\n}\n\nprint(2)", ErrorIds.CountedPointee, 1)] // `T`, a type a pointer points to (R10)
+    [InlineData("mut long w = 1\nraw {\n    print(long(AtomicPtr.FromPtr(&w).Load(MemoryOrder.SeqCst)))\n}", ErrorIds.CannotInfer, 3)] // a `long*` gives the `T` of a `T**` nothing (T27)
+    [InlineData("raw {\n    print(long(AtomicPtr.FromPtr(&nowhere).Load(MemoryOrder.SeqCst)))\n}", ErrorIds.UnknownName, 2)] // the argument's own error alone (T27, E1)
+    [InlineData("print(AtomicLong.FromPtr)", ErrorIds.Syntax, 1)] // a function of the type read as a value, as every function of a type (F11; section 6, 2026-11-17, comment 6961064484, Q3)
+    [InlineData("f = AtomicBool.FromPtr\nprint(1)", ErrorIds.Syntax, 1)]
+    [InlineData("print(AtomicLong.Nope)", ErrorIds.UnknownName, 1)] // a member the type has not, the control of `print(AtomicLong.FromPtr)` (V10)
+    [InlineData("print(AtomicLong)", ErrorIds.Syntax, 1)] // a type where a value stands (T10, E4)
+    [InlineData("print(Fence)", ErrorIds.Syntax, 1)] // a function where a value stands (F11)
     public void An_atomic_type_or_fence_written_as_no_atomic_type_takes_it_is_its_error(string program, string id, int line) =>
         Assert.Equal([(id, line)], Errors(program, "raw"));
 
+    [Theory]
+    [InlineData("print(a == a)")]
+    [InlineData("print(a != a)")]
+    public void Two_views_of_an_atomic_type_take_neither_equality_operator(string program) =>
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors(Atomics(program), "raw")); // R19, as Rust's atomic types implement no `PartialEq`
+
+    private const string PointerKeeper = "class Cart(mut int Items)\n\ndata Slot(long* P)\n\ndata Pair(Cart C, long* P)\n\nclass Counter(AtomicLong Word)\n\nint Look(long* q) => 1\n\n"
+        + "actor Keeper {\n    pub void Keep(long* q) {\n        print(1)\n    }\n\n    pub void Put(AtomicLong a) {\n        print(1)\n    }\n\n"
+        + "    pub void Take(move long* q) {\n        print(1)\n    }\n\n    pub void Hold(Slot s) {\n        print(1)\n    }\n\n"
+        + "    pub void Views(List<AtomicLong> xs) {\n        print(xs.Count)\n    }\n\n    pub void Count(Counter c) {\n        print(1)\n    }\n\n"
+        + "    pub void Run(() => int f) {\n        print(f())\n    }\n\n    pub void Both(long* q, Cart c) {\n        print(1)\n    }\n\n"
+        + "    pub void Other(Cart c, long* q) {\n        print(1)\n    }\n\n    pub void Pairs(Pair p) {\n        print(1)\n    }\n\n"
+        + "    pub long* Give() => null\n}\n\nmut long word = 5\nk = spawn Keeper()\n"; // the program's next line is 57
+
+    // U12, R19 (section 6, the owner, 2026-11-17, #572, comment 6961064484, Q1, "Refuse with an id (Recommended)"): a pointer or a view
+    // of an atomic type crosses into no actor, through each path the walk of a crossing takes; the id, the words, what a value reaches,
+    // the result and the stage assumed there
+    [Theory]
+    [InlineData("k.Keep(&word)", 57)] // a message's argument
+    [InlineData("send k.Put(AtomicLong.FromPtr(&word))", 57)] // a view, after `send`
+    [InlineData("ptr = &word\nk.Take(move ptr)", 58)] // with `move`, which made the pointer cross before
+    [InlineData("ptr = &word\nk.Keep(copy ptr)", 58)] // with `copy`
+    [InlineData("ptr = &word\nk.Run(() => Look(ptr))", 58)] // a lambda's capture
+    [InlineData("k.Hold(Slot(&word))", 57)] // a value that holds one: a `data` value
+    [InlineData("k.Views([AtomicLong.FromPtr(&word)])", 57)] // a list
+    [InlineData("k.Count(Counter(AtomicLong.FromPtr(&word)))", 57)] // a class instance
+    [InlineData("k.Pairs(Pair(Cart(1), &word))", 57)] // one that reaches a mutable class instance too: no word makes it cross (assumed)
+    [InlineData("k.Both(&word,\n    Cart(1))", 57)] // the first argument that does not cross (U16)
+    [InlineData("got = k.Give()\nprint(got == null)\nprint(word)", 57)] // a message's result (assumed)
+    public void A_pointer_or_a_view_of_an_atomic_type_crosses_into_no_actor_by_any_path(string program, int line) =>
+        Assert.Equal([(ErrorIds.PointerCrosses, line)], Errors(PointerKeeper + program, "raw"));
+
     [Fact]
-    public void A_view_of_an_atomic_type_does_not_cross_into_an_actor_in_the_build() =>
-        NotSupportedAt(9, "U12", "actor Box {\n    pub void Put(AtomicLong a) {\n        print(1)\n    }\n}\n\nmut long w = 1\nbox = spawn Box()\nsend box.Put(AtomicLong.FromPtr(&w))");
+    public void A_pointer_crosses_into_no_actor_through_a_send_of_its_own_method() =>
+        // U11: `send` of the actor's own method is a message, whose arguments cross (U12)
+        Assert.Equal([(ErrorIds.PointerCrosses, 4)], Errors("actor Keeper {\n    pub void Start() {\n        mut long own = 5\n        send Keep(&own)\n    }\n\n    void Keep(long* q) {\n        print(1)\n    }\n}\n\nk = spawn Keeper()\nk.Start()", "raw"));
+
+    [Fact]
+    public void An_argument_before_a_pointer_that_does_not_cross_has_its_own_error() =>
+        // the control of the row of `k.Both(&word, Cart(1))`: the first argument that does not cross is the one reported (U16)
+        Assert.Equal([(ErrorIds.SendNeedsWord, 57)], Errors(PointerKeeper + "k.Other(Cart(1),\n    &word)", "raw"));
 
     [Theory]
     [InlineData("print(X86.Avx2.IsSupported)", "3: `X86.Avx2`, a class of C#'s whose intrinsics the compiler does not build (R18)")]

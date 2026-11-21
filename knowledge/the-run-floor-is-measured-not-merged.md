@@ -35,9 +35,17 @@ reads the floor against that bound whether or not its line conflicted.
 
 ## How to apply
 
-- **Linux.** Set the system's number to 999 and run the one test in `compiler/`, in the image:
+- **Linux.** Set the system's number to 999 and run the one test in `compiler/`, in an image built
+  from `ci/Dockerfile`:
   `dotnet test Kurz.Compiler.Tests/Kurz.Compiler.Tests.csproj -c Release -p:RestoreLockedMode=true --disable-build-servers --filter 'FullyQualifiedName~At_least_the_floor_of_cases_are_built_and_run'`.
-  Read `<N>` from the failure and set it. `judgment step`
+  Read `<N>` from the failure and set it. An image built locally, as
+  [the gates job runs in its image](the-gates-job-runs-in-its-image.md) builds one, holds the point
+  release of LLVM of the day it was built, which is not always the one of the image the `gates` job
+  pulls by its digest: a count made there is that image's, and a green `gates` run then shows only
+  that the job's image counts at least the number. The count of the job's own image is one run of the
+  job on a pushed head with the number at 999. Say in the description where the number was counted;
+  the comment above `RunFloor` says it of the Linux number (the reading of issue 39, comment
+  6957856856, on pull request 565's 719, counted in such a local image). `judgment step`
 - **Windows.** Only the `compiler-windows` job builds there. Until a run measures it, keep the
   higher of the two sides' numbers where neither side took a case out of the Windows run: the
   merged tree runs the cases of both, so its count is at least each. Pull request 301's take kept

@@ -3,6 +3,8 @@
 // | true
 // | 2147483647
 // | -2147483648
+// | -9223372036854775808
+// | 9223372036854775807
 // | 0
 // | 1
 // | 7
@@ -11,16 +13,20 @@
 
 mut bool flag = false
 mut int count = 2147483647
+mut long least = -9223372036854775808
 mut long cell = 7
 mut long* slot = &cell
 done = AtomicBool.FromPtr(&flag)
 total = AtomicInt.FromPtr(&count)
+bottom = AtomicLong.FromPtr(&least)
 head = AtomicPtr<long>.FromPtr(&slot)
 raw {
     print(done.Swap(true, MemoryOrder.AcqRel))
     print(done.Load(MemoryOrder.Acquire))
     print(total.FetchAdd(1, MemoryOrder.Relaxed))
     print(total.Load(MemoryOrder.Relaxed))
+    print(bottom.FetchSub(1, MemoryOrder.Relaxed))
+    print(bottom.Load(MemoryOrder.Relaxed))
     print(long(head.FetchOr(1, MemoryOrder.SeqCst)) - long(&cell))
     print(long(head.FetchAnd(-2, MemoryOrder.SeqCst)) - long(&cell))
     print(*head.Load(MemoryOrder.SeqCst))

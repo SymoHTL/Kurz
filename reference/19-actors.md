@@ -1176,6 +1176,20 @@ copy (U22) *(assumed, §6: on comment 6902210646, Q5, "Copy all, share big unbui
 after comment 6895076937, which gave the moved count to "the message's or the parameter's" place and
 which Q5 narrows to a parameter)*.
 
+A pointer (R10) and a view of an atomic type (R19) cross into no actor: each is the compile error
+`pointer-crosses`, as Rust refuses a raw pointer, `*mut T` being no `Send` (§6, the owner,
+2026-11-17, #572, comment 6961064484, Q1, "Refuse with an id (Recommended)"), so that a program that
+shares a word between actors passes its address as a `long` and makes the view again on the other
+side, in a `raw` block (§6, the cost of that answer). The error stands at its argument, with `copy`,
+with `move` or with no word, as no clone or move of a `*mut T` makes it `Send`, and so it does for a
+value that reaches one, a collection, a `data` value or a class instance among them, as rustc reads
+`Send` through a struct's fields, and for a lambda the sending function shows that captures one; a
+message's result that reaches one is that error at the line of the call, as rustc asks `Send` of a
+task's output; and of a message's or a constructor's arguments the first that does not cross is
+reported, `pointer-crosses` standing in the stage of `send-needs-word` (U16), and before it in an
+argument that reaches both a pointer and a mutable class instance, since no word makes it cross
+*(assumed in §6: the id, the words, what a value reaches, the result and the stage)*.
+
 Case: [actors/relay.kz](../corpus/actors/relay.kz)
 
 Case: [actors/union-result.kz](../corpus/actors/union-result.kz)
@@ -1309,6 +1323,20 @@ actor Shop {
 s = spawn Shop()
 c = s.Open()
 print(c.Items)
+```
+
+Case: [actors/pointer-crosses.kz](../corpus/actors/pointer-crosses.kz)
+```kurz
+actor Keeper {
+    pub void Keep(long* p) {
+        print(1)
+    }
+}
+
+mut long word = 5
+k = spawn Keeper()
+// a pointer crosses into no actor, with a word or with none (U12)
+k.Keep(&word)
 ```
 
 Case: [actors/copy-mutable.kz](../corpus/actors/copy-mutable.kz)
@@ -2316,10 +2344,11 @@ print(b.Get(2))
 The top-level code's call that waits sleeps on the main thread until its reply is set, while the
 worker threads run the actors' messages, each on a stack of its own (U1, U17, U35), as tokio's
 `block_on` waits on the thread that calls it beside its runtime's workers (§6, the owner,
-2026-11-17, #519, comment 6946657505, Q3, "tokio block_on (Recommended)"). A wait of it that finds nothing
-left to run, on any thread *(assumed in §6)*, ends the process with
+2026-11-17, #519, comment 6946657505, Q3, "tokio block_on (Recommended)"). A wait of it that finds no
+actor left to run on any thread, no timer pending and nothing registered with the poller *(assumed in
+§6)*, ends the process with
 `error: deadlock at <file>:<n>`, the line of that call, and the exit code 1, so that two actors that
-call each other from different chains and wait for each other, on one thread, do not hang silently
+call each other from different chains and wait for each other do not hang silently
 (§6, "Deadlocks"; the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level
 wait"). A call that waits in a function the top-level code called is the top-level code's, at its
 own line. A deadline of a call that waits in a message is nothing left to run (U42) *(assumed: T6 of comment 6967625156)*. A loop of actors the top-level code never waits on stays until the end of the program,
@@ -3826,6 +3855,32 @@ Case: [actors/block-type.kz](../corpus/actors/block-type.kz)
 
 Case: [actors/timeout-crashed-early.kz](../corpus/actors/timeout-crashed-early.kz)
 
+Case: [actors/block-reason-atomic-order.kz](../corpus/actors/block-reason-atomic-order.kz)
+```kurz
+actor Reader {
+    pub void Show(MemoryOrder order) {
+        mut long word = 5
+        cell = AtomicLong.FromPtr(&word)
+        raw {
+            print(cell.Load(order))
+        }
+    }
+
+    pub int Half(int n) => n / 2
+}
+
+r = spawn Reader() on crash (c) {
+    match c.Reason {
+        RuntimeError e => print("{e.Kind} at {c.Place.Line}")
+    }
+
+    restart
+}
+send r.Show(MemoryOrder.Release)
+send r.Show(MemoryOrder.Acquire)
+print(r.Half(4))
+```
+
 ### U31 (assumed, §6) What the block reads
 
 A block at a `spawn` in an actor's code reads and assigns the fields of that actor, the supervisor,
@@ -3933,7 +3988,21 @@ a container's CPU quota counted, where neither the line `threads = 4` of a `depl
 "Both" and "threads = N line (Recommended)"), the line standing in a `deploy` block *(assumed in
 §6)*. A value of the line that is not a whole number above 0 is the compile error `threads-line`,
 and one of `KURZ_THREADS` ends the start with an error line and the id `threads-variable` *(assumed
-in §6: both ids, and the end of the start)*. The main thread runs the top-level code alone, and
+in §6: both ids, and the end of the start)*. A whole number is written in digits alone and is no
+greater than 2147483647, the greatest `int`, so that an empty `KURZ_THREADS` is a bad value, as tokio
+reads `TOKIO_WORKER_THREADS` as a whole number and refuses an empty one; a container's CPU quota counts
+its whole cores, rounded down and at least 1, as Rust's `available_parallelism` counts it; and a bad
+`KURZ_THREADS` ends the process before its first statement with the line `error: threads-variable
+(<the value>)` on standard error and the exit code 1, as a bad `KURZ_LOG` ends it with `log-filter`
+(P5) *(assumed in §6)*. A worker thread that the system refuses at its start ends the program with an
+error line and an id of its own and the exit code 1, as tokio's `Builder::build` returns an
+`io::Error` (§6, the owner, 2026-11-17, #572, comment 6961064484, Q2, "Error line + exit 1
+(Recommended)"), so that a program on a machine at its thread limit does not start, where it could
+have run on fewer (§6, the cost of that answer). The id is `thread-refused`, its start is the moment
+the scheduler starts its worker threads, at the program's first `spawn` or first form that splits its
+work, the threads that did start ending with the process, and its line is `error: thread-refused
+(<the count of worker threads asked>)` on standard error, with no place and no trace *(assumed in
+§6)*. The main thread runs the top-level code alone, and
 sleeps while it waits (U18; §6, Q3), except in a case marked `// threads: 1`, where its wait runs the ready actors and
 no worker thread runs (§6, the owner, 2026-11-17, #570, comment 6961064167, Q1). A message parked in a wait goes on on the thread that parked it,
 and an actor between messages moves to any thread (§6, the owner, 2026-11-17, #519, comment
@@ -3945,8 +4014,11 @@ actors that are ready first in, first out, the top-level code's wait running the
 2026-11-17, #570, comment 6961064167, Q1, "FIFO, as the build (Recommended)").
 
 No case: for the count of the threads, since a case is a single file with no `project.kz` (chapter 0) and
-gives its program no environment, as `log-filter`'s place in chapter 12 says, and the thread that runs a
-message shows in no output; the order of one thread has the cases below.
+gives its program no environment, as `log-filter`'s place in chapter 12 says, and cannot make its system
+refuse a worker thread, as `thread-refused`'s place there says, the thread that runs a message shows in no
+output, and the two outcomes a program can see, a message that runs on another thread when the top-level
+code ends and the moment a running supervisor acts on a crash, depend on the timing between threads, which
+a case's output cannot fix; the order of one thread has the cases below.
 
 Case: [actors/block-escalate.kz](../corpus/actors/block-escalate.kz)
 
