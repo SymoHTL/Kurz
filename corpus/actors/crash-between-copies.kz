@@ -3,8 +3,8 @@
 // | 8
 // rules: U21
 
-// the first `Go` crashes `Caller` at the index, after the first list crossed into the message and before the second: the copy is
-// freed where the builder leaves, and `Keeper` runs on with its total unchanged
+// the first `Go` crashes `Caller` at the index, between the two lists that cross into the message: both are copied after the last
+// argument, so that no copy was made, and `Keeper` runs on with its total unchanged
 
 actor Keeper {
     mut int total = 0

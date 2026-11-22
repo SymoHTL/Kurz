@@ -45,10 +45,11 @@ after the first copy among them; so each copy goes after the end of its call's m
 references of the call's copies (U12) *(assumed: a reading of the build, proposed with `kurz-design.md`
 section 3, the bullet "Lifetimes", and not put to the owner)*. The copies a message's
 arguments made before a jump out of it are freed where the builder leaves, with the heap of the message's
-own they were built in, which a message takes wherever an argument after one that crosses can leave it, one
-that can wait or one that can raise (U21; §6, the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)"),
-the memo of those copies ending before that heap is freed *(assumed: a reading of the build, as for a call
-that is no message)*. No case shows
+own they were built in, which a message takes wherever an argument after one that crosses can wait (U21;
+§6, the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)"), the memo of those copies ending before
+that heap is freed *(assumed: a reading of the build, as for a call that is no message)*; where such an
+argument can raise with no call in it, the crossing arguments are copied after the last, so that none is
+made before the raise (U21; §6, the owner, 2026-11-21, #519, comment 7060155980, "T83 1"). No case shows
 that order either: nothing of the program runs at a release, nor between the end of a memo and the release
 of the copies.
 

@@ -2627,17 +2627,23 @@ pool, the messages of
 its inbox copied into the new instance's heap first, as a crossing copies them (U12), and the
 actor's reference names the same actor after the restart (U2) (§6; the taken points of comment
 6899225864). A crash ends the actors the crashed instance spawned as an end does, after their
-current message, their queued messages dropped (U13), and none of them restarts. The copies of the
-arguments of a message whose builder crashes at an argument that can raise after one that crosses are
-freed where the builder leaves, as Rust's drop order frees the values a function had built: such a
-message is built in a heap of its own, which the builder's crash frees, and is copied into the
-callee's heap at its queueing (§6, the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)"). An
+current message, their queued messages dropped (U13), and none of them restarts. A message whose
+builder crashes at an argument that can raise after one that crosses leaves no copy of its arguments:
+its crossing arguments are copied into the callee's heap after its last argument is evaluated, a value
+read from a name held with no copy across the arguments after it, which M7's `changed-while-held`
+guards and none of which runs a call, and an argument made in place, a list literal, built in the
+caller's heap and copied once (§6, the owner, 2026-11-21, #519, comment 7060155980, "T83 1", which
+retired the heap of the message's own that T24 (1), comment 7051492844, built such a message in). An
 argument can raise where it has no call in it and is neither a literal, a number, a string with no hole,
 a `char`, a `bool`, `null` or a duration's, a number's sign and a duration's included, nor a read of a name, either in brackets;
 a message whose argument that can raise comes before every argument that crosses, or none of whose
-arguments crosses, takes no heap of its own for it; and a `send`, a message to a `per node` actor and a
-call with a clause take the same path *(assumed: the reading of the product pass, #519, comment
-7056985643)*.
+arguments crosses, copies each crossing argument where it is evaluated; and a `send`, a message to a
+`per node` actor and a call with a clause take the same path *(assumed: the reading of the product
+pass, #519, comment 7056985643, and a reading of T83 1, which names the copies after the last argument
+for the messages T24 (1) built in a heap of their own and no other)*. A message with an argument that
+can wait after one that crosses is built in a heap of its own, as any message with an argument that
+can wait is, and its crossing arguments are copied into that heap where they are evaluated *(assumed:
+a reading of T83 1, whose words keep that heap and do not say where its copies are made)*.
 
 Case: [actors/crash-inbox-kept.kz](../corpus/actors/crash-inbox-kept.kz)
 ```kurz
@@ -2699,8 +2705,8 @@ print(b.Sum([10, 20, 30], s.Get()))
 
 Case: [actors/crash-after-copy.kz](../corpus/actors/crash-after-copy.kz)
 ```kurz
-// the first `Go` crashes `Caller` at the index, after the list crossed into the message: the copy is freed where the builder
-// leaves, and `Keeper` runs on with its total unchanged
+// the first `Go` crashes `Caller` at the index, after the list that crosses into the message: the list is copied after the last
+// argument, so that no copy was made, and `Keeper` runs on with its total unchanged
 
 actor Keeper {
     mut int total = 0
@@ -2729,8 +2735,8 @@ print(k.Total())
 
 Case: [actors/crash-after-copy-send.kz](../corpus/actors/crash-after-copy-send.kz)
 ```kurz
-// the first `Go` crashes `Caller` at the index, after the list crossed into the message it sends: the copy is freed where the
-// builder leaves, and `Keeper` runs on with its total unchanged
+// the first `Go` crashes `Caller` at the index, after the list that crosses into the message it sends: the list is copied after
+// the last argument, so that no copy was made, and `Keeper` runs on with its total unchanged
 
 actor Keeper {
     mut int total = 0
@@ -2788,8 +2794,8 @@ print(k.Total())
 
 Case: [actors/crash-between-copies.kz](../corpus/actors/crash-between-copies.kz)
 ```kurz
-// the first `Go` crashes `Caller` at the index, after the first list crossed into the message and before the second: the copy is
-// freed where the builder leaves, and `Keeper` runs on with its total unchanged
+// the first `Go` crashes `Caller` at the index, between the two lists that cross into the message: both are copied after the last
+// argument, so that no copy was made, and `Keeper` runs on with its total unchanged
 
 actor Keeper {
     mut int total = 0
