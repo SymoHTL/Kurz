@@ -566,7 +566,7 @@ public sealed partial class Emitter
     /// (<see cref="SemanticModel.CanWait"/>). <see cref="EmitMessage"/> reads it of the bound of a call's clause, where no literal but a
     /// duration's passes the checker, a bound of another type being <c>type-mismatch</c> (U39, U40), and of each argument of a message
     /// after one that crosses (<see cref="RaisesAfterCrossing"/>; section 6, the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)",
-    /// the arguments read as a bound is, assumed there).
+    /// and 2026-11-21, comment 7060155980, "T83 1", the arguments read as a bound is, assumed there).
     /// </summary>
     private static bool Raises(Expression e) => e switch
     {
@@ -580,11 +580,12 @@ public sealed partial class Emitter
 
     /// <summary>
     /// Section 6: whether an argument of the message <paramref name="c"/> of the method <paramref name="f"/> after one that crosses
-    /// into the callee's heap, a value that holds a block, copied where it is evaluated (U12, <see cref="Arguments"/>), can raise with
-    /// no call in it (<see cref="Raises"/>), whose raise would crash the builder with the copies made before it unqueued: the message is
-    /// then built in a heap of its own, so that the copies are freed where the builder leaves (the owner, 2026-11-20, #519, comment
-    /// 7051492844, "T24 (1)"). An argument that raises before every crossing one leaves no copy, and one that runs a call can wait
-    /// (<see cref="SemanticModel.CanWait"/>).
+    /// into the callee's heap, a value that holds a block (U12), can raise with no call in it (<see cref="Raises"/>), whose raise would
+    /// crash the builder with the copies made before it unqueued, were they made where they are evaluated: the crossing arguments of such
+    /// a message are then copied after its last argument, so that a raise leaves no copy (<see cref="Arguments"/>; the owner, 2026-11-20,
+    /// #519, comment 7051492844, "T24 (1)", and 2026-11-21, comment 7060155980, "T83 1", which copies them so in place of the heap of
+    /// the message's own of T24 (1)). An argument that raises before every crossing one leaves no copy, and one that runs a call can
+    /// wait and builds the message in a heap of its own (<see cref="SemanticModel.CanWait"/>).
     /// </summary>
     private bool RaisesAfterCrossing(CallExpression c, CallInfo info, FunctionSymbol f)
     {
@@ -614,11 +615,10 @@ public sealed partial class Emitter
     /// send. So is a message whose clause's bound can raise with no call in it (<see cref="Raises"/>), which runs after the message is
     /// built: its raise crashes the actor whose code builds the message before its queueing, and that crash frees the heap of its own with
     /// the message and the copies of its arguments (the runtime's <c>Fall</c>), which the actor's heap would keep unqueued to the actor's
-    /// end; and so is a message with an argument that can raise after one that crosses (<see cref="RaisesAfterCrossing"/>), whose copies
-    /// made before the raise are freed where the builder leaves, at its crash or at the end of the region a case propagated out of an
-    /// argument left (section 6, the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)"). Where no argument can wait, nor raise after
-    /// one that crosses, the message is built in the actor's heap, and nothing runs between the read of that heap and the
-    /// queueing that could end the actor. Where the actor ended, the message is built or copied in the heap the caller allocates in (the
+    /// end. Where no argument can wait, the message is built in the actor's heap, and nothing runs between the read of that heap and the
+    /// queueing that could end the actor; where an argument can raise after one that crosses (<see cref="RaisesAfterCrossing"/>), the
+    /// crossing arguments are copied into that heap after the last, so that a raise leaves no copy there (<see cref="Arguments"/>;
+    /// section 6, the owner, 2026-11-21, #519, comment 7060155980, "T83 1"). Where the actor ended, the message is built or copied in the heap the caller allocates in (the
     /// runtime's <c>ActorHeap</c>), and its queueing raises <c>actor-gone</c> at the call's line, a <c>send</c>'s too (the runtime's
     /// <c>Enqueue</c>; U6, U20; section 6, the owner, 2026-11-16, #519, comments 6919351399 and 6923513534).
     /// </summary>
@@ -633,10 +633,10 @@ public sealed partial class Emitter
             NameExpression n => Reference(This(n, n.Line)),
             _ => throw new InvalidOperationException($"a message through `{c.Callee.GetType().Name}` at line {c.Line}"),
         };
-        var own = c.Arguments.Select(a => a.Value).Concat(c.Clause()).Any(Model.CanWait) || c.Clause().Any(Raises) || RaisesAfterCrossing(c, info, f) ? fn.Value($"call ptr {RuntimeFunction("MessageHeapNew")}()") : null;
+        var own = c.Arguments.Select(a => a.Value).Concat(c.Clause()).Any(Model.CanWait) || c.Clause().Any(Raises) ? fn.Value($"call ptr {RuntimeFunction("MessageHeapNew")}()") : null;
         var left = own is null ? null : HeapBegun(own, "MessageHeapFree");
         var heap = own ?? fn.Value($"call ptr {RuntimeFunction("ActorHeap")}({ReferenceWords(actor)})");
-        var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => Default(f.Declaration!.Parameters[j].Default, owners[f]), cConvention: false, owned: true, into: heap);
+        var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => Default(f.Declaration!.Parameters[j].Default, owners[f]), cConvention: false, owned: true, into: heap, after: own is null && RaisesAfterCrossing(c, info, f));
         var message = MessageType(f);
         var block = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr {heap}, i64 {IrSize(message)})");
         var run = MessageRun(f);

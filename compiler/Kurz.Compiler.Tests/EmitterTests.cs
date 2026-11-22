@@ -1123,45 +1123,62 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Theory]
-    [InlineData("print(s.Take(items, n))", 0)]
-    [InlineData("print(s.Take(items, (n)))", 0)]
-    [InlineData("print(s.Take(items, 2))", 0)]
-    [InlineData("print(s.Text(items, \"a\"))", 0)]
-    [InlineData("print(s.Letter(items, 'a'))", 0)]
-    [InlineData("print(s.Flag(items, true))", 0)]
-    [InlineData("print(s.Maybe(items, null))", 0)]
-    [InlineData("print(s.Wait(items, -2s))", 0)]
-    [InlineData("print(s.Take(items, -2))", 0)]
-    [InlineData("print(s.Take(items, ns[0]))", 1)]
-    [InlineData("print(s.Take(items, (ns[0])))", 1)]
-    [InlineData("print(s.Take(items, n + 1))", 1)]
-    [InlineData("print(s.Text(items, \"{n}\"))", 1)]
-    [InlineData("send s.Add(items, ns[0])", 1)]
-    [InlineData("print(s.Take(items, ns[0]) within 2s)", 1)]
-    [InlineData("print(s.Take(items, n))\nprint(Cache.Take(items, n))", 0)]
-    [InlineData("print(s.Take(items, n))\nprint(Cache.Take(items, ns[0]))", 1)]
-    [InlineData("print(s.Three(items, ns[0], items))", 1)]
-    [InlineData("print(s.First(ns[0], items))", 0)]
-    [InlineData("print(s.Two(n, ns[0]))", 0)]
-    public void A_message_whose_argument_after_a_crossing_one_can_raise_with_no_call_in_it_is_built_in_a_heap_of_its_own(string statement, int heaps)
+    [InlineData("print(s.Take(items, n))", 0, "")]
+    [InlineData("print(s.Take(items, (n)))", 0, "")]
+    [InlineData("print(s.Take(items, 2))", 0, "")]
+    [InlineData("print(s.Text(items, \"a\"))", 0, "")]
+    [InlineData("print(s.Letter(items, 'a'))", 0, "")]
+    [InlineData("print(s.Flag(items, true))", 0, "")]
+    [InlineData("print(s.Maybe(items, null))", 0, "")]
+    [InlineData("print(s.Wait(items, -2s))", 0, "")]
+    [InlineData("print(s.Take(items, -2))", 0, "")]
+    [InlineData("print(s.Take(items, ns[0]))", 0, "after")]
+    [InlineData("print(s.Take(items, (ns[0])))", 0, "after")]
+    [InlineData("print(s.Take(items, n + 1))", 0, "after")]
+    [InlineData("print(s.Text(items, \"{n}\"))", 0, "")]
+    [InlineData("send s.Add(items, ns[0])", 0, "after")]
+    [InlineData("print(s.Take(items, ns[0]) within 2s)", 0, "after")]
+    [InlineData("print(s.Take(items, n))\nprint(Cache.Take(items, n))", 0, "")]
+    [InlineData("print(s.Take(items, n))\nprint(Cache.Take(items, ns[0]))", 0, "after")]
+    [InlineData("print(s.Three(items, ns[0], items))", 0, "after")]
+    [InlineData("print(s.First(ns[0], items))", 0, "")]
+    [InlineData("print(s.Two(n, ns[0]))", 0, "")]
+    [InlineData("print(s.Take(items, ns[s.Two(n, n)]))", 1, "before")]
+    [InlineData("print(s.Take(move items, ns[0]))", 0, "after")]
+    public void A_message_whose_argument_after_a_crossing_one_can_raise_with_no_call_in_it_copies_its_crossing_arguments_after_its_last(string statement, int heaps, string copies)
     {
-        // section 6 (the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)"): an argument after one that crosses, `items`, copied
-        // into the callee's heap where it is evaluated, that can raise with no call in it, an index, an operator or a string's hole,
-        // builds the message in a heap of its own (the runtime's `MessageHeapNew`), which the crash of its builder frees
-        // with the copies (ActorTests, `A_message_whose_argument_after_a_crossing_one_crashes_its_builder_leaves_no_block_in_its_callees_heap`),
-        // a `send`'s, a call's with a clause and a `per node` actor's alike; a literal, a number's or a duration's with its sign, and a read of a name,
-        // either in brackets, raise nothing, and neither does a message whose argument that can raise comes before every crossing one, or
-        // none of whose arguments crosses, each built in the callee's heap, as the reading of the product pass has it (comment
-        // 7056985643); the IR is read, since a message whose argument raises nothing answers alike from either heap
-        var compilation = Compile("actor Store {\n    pub int Take(List<int> xs, int k) => k\n\n    pub int First(int k, List<int> xs) => k\n\n"
+        // section 6 (the owner, 2026-11-21, #519, comment 7060155980, "T83 1"): where an argument after one that crosses, `items`, can
+        // raise with no call in it, an index, an operator or a string's hole, the crossing arguments are copied into the callee's heap
+        // after the last argument, `items` held as it was read from its name, or as it was moved, so that the raise comes before the last copy and leaves
+        // no copy (ActorTests, `A_message_whose_argument_after_a_crossing_one_crashes_its_builder_leaves_no_block_in_its_callees_heap`),
+        // and no heap of its own is made (the runtime's `MessageHeapNew`, which T24 (1), comment 7051492844, made there), a `send`'s, a
+        // call's with a clause and a `per node` actor's alike; a message with an argument that runs a call, which can wait, is built in
+        // a heap of its own, `items` copied into it where it is evaluated, before the raise that follows; a literal, a number's or a
+        // duration's with its sign, and a read of a name, either in brackets, raise nothing, and neither does a message whose argument
+        // that can raise comes before every crossing one, or none of whose arguments crosses, as the reading of the product pass has it
+        // (comment 7056985643), each copied where it is evaluated, which no program tells from a copy after the last; the IR is read,
+        // since the copy of a message whose builder does not crash answers alike wherever it is made
+        var text = "actor Store {\n    pub int Take(List<int> xs, int k) => k\n\n    pub int First(int k, List<int> xs) => k\n\n"
             + "    pub int Two(int a, int k) => k\n\n    pub int Three(List<int> xs, int k, List<int> zs) => k\n\n    pub int Text(List<int> xs, string t) => xs.Count\n\n"
             + "    pub int Letter(List<int> xs, char c) => xs.Count\n\n    pub int Flag(List<int> xs, bool b) => xs.Count\n\n"
             + "    pub int Maybe(List<int> xs, string? t) => xs.Count\n\n    pub int Wait(List<int> xs, duration d) => xs.Count\n\n"
             + "    pub void Add(List<int> xs, int k) {\n    }\n}\n\nactor Cache per node {\n    pub int Take(List<int> xs, int k) => k\n}\n\n"
-            + $"s = spawn Store()\nns = [1]\nn = 1\nitems = [1]\nprint(ns.Count + n + items.Count)\n{statement}\n", Builder.CheckRuntime(Builder.HostTarget!.Value));
+            + $"s = spawn Store()\nns = [1]\nn = 1\nitems = [1]\nprint(ns.Count + n + items.Count)\n{statement}\n";
+        var compilation = Compile(text, Builder.CheckRuntime(Builder.HostTarget!.Value));
         var program = compilation.Program;
         Assert.True(program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         Assert.Equal(heaps, Regex.Count(program.Ir, @"call ptr @""[^""]+\.MessageHeapNew\.[0-9]+[^""]*""\(\)"));
+        if (copies.Length > 0)
+        {
+            // the raise at the statement's last line, and the last copy of the function that holds it and builds the message, after or
+            // before it
+            var line = text.Split('\n').Length - 1;
+            var raise = new Regex($@"call void @""[^""]+\.Raise\.[0-9]+[^""]*""\([^\n]*, i32 {line}\)");
+            var function = Assert.Single(program.Ir.Split("\ndefine "), f => raise.IsMatch(f) && f.Contains("@\"message.table.", StringComparison.Ordinal));
+            var copy = function.LastIndexOf("call void @\"copy.run\"(", StringComparison.Ordinal);
+            Assert.True(copy >= 0, $"no copy in the function that raises at line {line}");
+            Assert.Equal(copies, copy > raise.Match(function).Index ? "after" : "before");
+        }
     }
 
     [Fact]

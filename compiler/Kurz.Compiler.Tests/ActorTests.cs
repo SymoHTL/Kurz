@@ -6429,12 +6429,12 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_message_whose_argument_after_a_crossing_one_crashes_its_builder_leaves_no_block_in_its_callees_heap()
     {
-        // section 6 (the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)"): the index `ks[i]` stands after the list `xs`, which
-        // crosses into the callee's heap where it is evaluated, and its `index-out-of-range` crashes `Front`, the actor whose code builds
-        // the message, after the list's copy was made and before the message's queueing; the message is built in a heap of its own,
-        // which that crash frees with the copy, so that `Store`'s heap holds no more blocks than it held before, where a message built
-        // in `Store`'s heap would leave the copy there, unqueued, to `Store`'s end; `Held` is the control that the count sees that copy in
-        // `Store`'s heap while its message runs; under the allocator that makes every freed block inaccessible
+        // section 6 (the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)", and 2026-11-21, comment 7060155980, "T83 1"): the index
+        // `ks[i]` stands after the list `xs`, which crosses into the callee's heap, and its `index-out-of-range` crashes `Front`, the
+        // actor whose code builds the message, before the message's queueing; the list is copied after the last argument, so that the
+        // crash comes before its copy and `Store`'s heap holds no more blocks than it held before, where a copy made where the list is
+        // evaluated would stay there, unqueued, to `Store`'s end; `Held` is the control that the count sees that copy in `Store`'s heap
+        // while its message runs; under the allocator that makes every freed block inaccessible
         const string text = """
             actor Store {
                 pub long Held(List<int> xs, int k) => HttpServer.Big()

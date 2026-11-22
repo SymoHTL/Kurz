@@ -20,6 +20,7 @@ namespace Kurz.Compiler.Emit;
 /// <c>CopyWhole</c> reads. The copies one call makes, of its
 /// arguments, share one memo, the call's session in the caller's frame, so that two paths that reach one block, in one argument or
 /// in two, reach one copy (Q2, "Sharing kept"), and a result has a session of its own; each argument is copied where it is evaluated,
+/// or, of a message with an argument that can raise after one that crosses, after its last (T83 1, <see cref="Arguments"/>),
 /// left to right, and the memo holds a count of each block it maps until the call's last copy (section 6). A <c>weak</c> reference
 /// points at the copy of its target where the call's copies hold the target, else null, set at the call's last copy (Q3, "Points at
 /// the copy"), so that each copy of a call of more than one is read after its last, or made in the place its callee reads (CrossInto),
@@ -202,9 +203,11 @@ public sealed partial class Emitter
     /// would have been. The copies of a call that is no message are temporaries of the region from their copy to their read
     /// (<see cref="CopiedLate"/>), which the region lets go of after this, with its other temporaries, the last made first, a copy a
     /// slot takes among them, as every value a slot took from an argument before the one that left (<see cref="Taken"/>; issue 569).
-    /// A copy a slot of a message takes is not held here: a message with an argument that can leave after one that crosses is built in
-    /// a heap of its own, which the region frees after this with the copies in it (<see cref="EndHeaps"/>; section 6, the owner,
-    /// 2026-11-20, #519, comment 7051492844, "T24 (1)").
+    /// A copy a slot of a message takes is not held here: a message with an argument that can wait after one that crosses is built in
+    /// a heap of its own, which the region frees after this with the copies in it (<see cref="EndHeaps"/>), and one with an argument
+    /// that can raise with no call in it after one that crosses copies its crossing arguments after its last, so that no copy is made
+    /// before the raise (<see cref="Arguments"/>; section 6, the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)", and
+    /// 2026-11-21, comment 7060155980, "T83 1").
     /// </summary>
     private void EndSessions(List<(string Value, KurzType Type)> temporaries)
     {
