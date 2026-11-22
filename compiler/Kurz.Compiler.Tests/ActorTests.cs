@@ -3984,8 +3984,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     /// <summary>
     /// The edits of the runtime that make a stack fault in the list of the heaps that messages are built in, the place <paramref name="at"/>
-    /// of <c>MessageHeapNew</c> or <c>MessageHeapFree</c>, between two of its writes: <c>Burn</c> put in before <c>MessageHeapNew</c>, its
-    /// armed call before that place, and <c>Print</c> armed.
+    /// of <c>Listed</c> or <c>Unlisted</c>, which <c>MessageHeapNew</c> and <c>MessageHeapFree</c> call, between two of its writes:
+    /// <c>Burn</c> put in before <c>MessageHeapNew</c>, its armed call before that place, and <c>Print</c> armed.
     /// </summary>
     private static (string Path, string Old, string New)[] HeapListBurn(string at) =>
     [
@@ -3996,7 +3996,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     [Theory]
     [InlineData("            *Ptr<byte*>(first + 16) = *Ptr<byte*>(running + 320)\n")]
-    [InlineData("            if after != null {\n                *Ptr<byte*>(std.HeapFirst(after) + 8) = before\n            }\n        }\n    }\n\n    sys.Left()\n    std.HeapFree(heap)\n")]
+    [InlineData("            if after != null {\n                *Ptr<byte*>(std.HeapFirst(after) + 8) = before\n            }\n        }\n    }\n\n    sys.Left()\n}\n")]
     public void A_stack_fault_inside_the_list_of_the_heaps_of_messages_on_an_actor_s_stack_ends_the_process(string at)
     {
         // O11: `MessageHeapNew` and `MessageHeapFree` link and unlink the heap of a message whose argument waits among the heaps being
