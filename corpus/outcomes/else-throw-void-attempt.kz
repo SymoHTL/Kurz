@@ -1,0 +1,36 @@
+// expect: output
+// | worked 1
+// | inner Big { N = 2 } at 10, outer at 19
+// rules: O7, U46
+
+data Big(int N)
+
+void Work(int n) {
+    if n > 1 {
+        throw Big(n)
+    }
+
+    print("worked {n}")
+}
+
+// a bare `throw` in the arm `else` over a block whose value is `void` throws the case `Crashed` that reached the arm
+void Run(int n) {
+    attempt { Work(n) } else {
+        else => throw
+    }
+}
+
+// the throw is a crash of the outer child, whose `Reason` holds that case
+void Read(int n) {
+    attempt { Run(n) } else {
+        Crashed c => {
+            match c.Reason {
+                Crashed<Big | RuntimeError> d => print("inner {d.Reason} at {d.Place.Line}, outer at {c.Place.Line}")
+                else => print("other {c.Reason}")
+            }
+        }
+    }
+}
+
+Read(1)
+Read(2)

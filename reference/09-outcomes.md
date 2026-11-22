@@ -1251,6 +1251,41 @@ print("ok")
 Run(1)
 ```
 
+Case: [outcomes/else-throw-void-attempt.kz](../corpus/outcomes/else-throw-void-attempt.kz)
+```kurz
+data Big(int N)
+
+void Work(int n) {
+    if n > 1 {
+        throw Big(n)
+    }
+
+    print("worked {n}")
+}
+
+// a bare `throw` in the arm `else` over a block whose value is `void` throws the case `Crashed` that reached the arm
+void Run(int n) {
+    attempt { Work(n) } else {
+        else => throw
+    }
+}
+
+// the throw is a crash of the outer child, whose `Reason` holds that case
+void Read(int n) {
+    attempt { Run(n) } else {
+        Crashed c => {
+            match c.Reason {
+                Crashed<Big | RuntimeError> d => print("inner {d.Reason} at {d.Place.Line}, outer at {c.Place.Line}")
+                else => print("other {c.Reason}")
+            }
+        }
+    }
+}
+
+Read(1)
+Read(2)
+```
+
 ### O8 (decided, §5) `match` covers every case
 
 A `match` on a union lists every case of the union, or ends in an `else` arm (C9). A missing case
