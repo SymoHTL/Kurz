@@ -1,0 +1,12 @@
+// expect: error capture-assign at 7
+// rules: U47
+
+// the block takes `tries` by value, as a lambda does, and cannot assign it
+mut tries = 0
+v = attempt {
+    tries = tries + 1
+    return tries
+} else {
+    Crashed c => 0
+}
+print(v + tries)

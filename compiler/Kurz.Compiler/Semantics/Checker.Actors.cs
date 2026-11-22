@@ -7,7 +7,8 @@ namespace Kurz.Compiler.Semantics;
 /// reference, an <see cref="ActorType"/>, takes calls of its <c>pub</c> methods as messages: a call waits for its result (U4) and one
 /// after <c>send</c> does not (U6), and a method with a result after <c>send</c> is <c>send-result</c> (U6, U7). Inside the actor its
 /// own methods and fields are direct, as a class's are (U10), and <c>send</c> of its own method is a message (U11). What crosses into a
-/// message and back out of it is read by its type, <c>send-needs-word</c> where it does not cross (U12, <see cref="CrossingOf"/>). What
+/// message and back out of it is read by its type, <c>send-needs-word</c> where it does not cross, <c>pointer-crosses</c> where it reaches
+/// a pointer or a view of an atomic type (U12, <see cref="CrossingOf"/>). What
 /// else an actor can write, and what the build does not make of it, is <c>not supported</c>, each naming its rule
 /// (<c>compiler/README.md</c>).
 /// </summary>
@@ -35,6 +36,15 @@ public sealed partial class Checker
     private readonly HashSet<Diagnostic> blockErrors = new(ReferenceEqualityComparer.Instance);
 
     private readonly HashSet<CrashPolicy> erringBlocks = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>U46: each <c>attempt</c> the checker read, with the <c>Reason</c> of its <c>Crashed</c> it read.</summary>
+    private readonly List<(AttemptExpression Attempt, IReadOnlyList<KurzType> Read)> attemptReads = [];
+
+    /// <summary>U46: the <c>attempt</c>s whose arms of <c>else</c> reported the errors of <see cref="blockErrors"/> at a reading after the first.</summary>
+    private readonly HashSet<AttemptExpression> erringAttempts = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>U46: the lambda of no parameter that the block of each <c>attempt</c> is read as, made once for its node.</summary>
+    private readonly Dictionary<AttemptExpression, LambdaExpression> attemptBlocks = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
     /// U1: an actor the checker reads is declared as a class is, its body read by the class's code; an actor with a part the build does
@@ -334,20 +344,22 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// U12: how a value of the type crosses, with why where it does not cross with no word, and the build's limit it reaches, null where
-    /// it reaches none. A type is read through the items of a list, the keys and values of a map, the cases of a union, the fields of a
-    /// data value and of a class, a class derived from it among them (K6), a class's fields as declared, since no class takes type arguments
+    /// U12: how a value of the type crosses, with why where it does not cross with no word, the build's limit it reaches, null where
+    /// it reaches none, and the first pointer or view of an atomic type it reaches, null where it reaches none, which no word makes cross,
+    /// <c>pointer-crosses</c> (the owner, 2026-11-17, #572, comment 6961064484, Q1, "Refuse with an id (Recommended)"). A type is read
+    /// through the items of a list, the keys and values of a map, the cases of a union, the fields of a data value and of a class, a class derived from it among them (K6), a class's fields as declared, since no class takes type arguments
     /// (a generic class is <c>not supported</c>, T19), and the target of a <c>weak</c> reference, which crosses where
     /// its target does (the owner, 2026-11-15, #519, comment 6896192351, Q3, "Points at the copy"), as Rust's <c>Send</c> is structural:
     /// a <c>mut</c> field needs a word, and an interface's type and a function type are read by their written type and never cross
     /// (comment 6892275110, item 2; comment 6896192351, Q5, "By written type"). A value of a type parameter, a handle of section 12, a
-    /// pointer and a class of <c>std/</c>, which is no class of the file (W1), <c>HttpRequest</c> among them, are the build's limits; a map
+    /// pointer, a view and a class of <c>std/</c>, which is no class of the file (W1), <c>HttpRequest</c> among them, are the build's limits,
+    /// a pointer's and a view's standing where a call that is no message copies them or a block of <c>on crash</c> reads them; a map
     /// whose keys reach a class instance is none, since its copy hashes each key again (the owner, 2026-11-16, #519, comment 6923513534,
     /// "Rehash each key (Recommended)").
     /// </summary>
-    private (ActorCrossing Kind, string? Why, string? Limit) CrossingOf(KurzType type)
+    private (ActorCrossing Kind, string? Why, string? Limit, string? Raw) CrossingOf(KurzType type)
     {
-        var (kind, why, limit) = (ActorCrossing.Crosses, (string?)null, (string?)null);
+        var (kind, why, limit, raw) = (ActorCrossing.Crosses, (string?)null, (string?)null, (string?)null);
         var classes = new HashSet<ClassSymbol>();
         var data = new HashSet<DataSymbol>();
         void Meet(ActorCrossing k, string reason)
@@ -420,7 +432,11 @@ public sealed partial class Checker
                 case TypeParameterType:
                     limit ??= $"a value of the type parameter `{t}`";
                     break;
-                case HandleType or HasherType or CommandType or ChildProcessType or PointerType or AtomicType or CFunctionType: // R19: a view, as the pointer it holds
+                case PointerType or AtomicType: // R19: a view, as the pointer it holds
+                    raw ??= $"{Types.A(t)}";
+                    limit ??= $"{Types.A(t)}";
+                    break;
+                case HandleType or HasherType or CommandType or ChildProcessType or CFunctionType:
                     limit ??= $"{Types.A(t)}";
                     break;
                 default:
@@ -429,7 +445,7 @@ public sealed partial class Checker
         }
 
         Walk(type);
-        return (kind, why, limit);
+        return (kind, why, limit, raw);
     }
 
     /// <summary>
@@ -438,19 +454,19 @@ public sealed partial class Checker
     /// never crosses (a named function is no value, F11) (the owner, 2026-11-15, #519, comment 6896192351, Q5, "By written type"); every other
     /// argument by the slot's type, which a message holds (<see cref="CrossingOf"/>). What a lambda captures crosses with no word or it
     /// does not cross, since no word at the argument makes a function value cross (§6, Q24). Beside the build's limit, the limit that
-    /// stands after <c>move</c> too (<see cref="SharedByCount"/>).
+    /// stands after <c>move</c> too (<see cref="SharedByCount"/>), and the pointer or view it reaches, a capture's among them.
     /// </summary>
-    private (ActorCrossing Kind, string? Why, string? Limit, string? Shared) ArgumentCrossing(Argument a, KurzType slot)
+    private (ActorCrossing Kind, string? Why, string? Limit, string? Shared, string? Raw) ArgumentCrossing(Argument a, KurzType slot)
     {
         if ((Types.NonNull(slot) ?? slot) is FunctionType)
         {
             if (SeenLambda(a.Value) is { } l)
             {
                 model.RecordCrossingLambda(a.Value, l); // whose environment the crossing copies (comment 6902210646, Q5)
-                var (kind, why, limit, shared) = (ActorCrossing.Crosses, (string?)null, (string?)null, (string?)null);
+                var (kind, why, limit, shared, raw) = (ActorCrossing.Crosses, (string?)null, (string?)null, (string?)null, (string?)null);
                 foreach (var captured in model.LambdaOf(l).Captures)
                 {
-                    var (k, w, s) = CrossingOf(captured.Type);
+                    var (k, w, s, r) = CrossingOf(captured.Type);
                     if (k != ActorCrossing.Crosses && kind == ActorCrossing.Crosses)
                     {
                         (kind, why) = (ActorCrossing.Never, $"a lambda that captures `{captured.Name}`, {w}");
@@ -458,14 +474,15 @@ public sealed partial class Checker
 
                     limit ??= s;
                     shared ??= SharedByCount(captured.Type);
+                    raw ??= r is null ? null : $"a lambda that captures `{captured.Name}`, which reaches {r}";
                 }
 
-                return (kind, why, limit, shared);
+                return (kind, why, limit, shared, raw);
             }
         }
 
-        var (crossing, reason, limited) = CrossingOf(slot);
-        return (crossing, reason, limited, SharedByCount(slot));
+        var (crossing, reason, limited, pointer) = CrossingOf(slot);
+        return (crossing, reason, limited, SharedByCount(slot), pointer);
     }
 
     /// <summary>
@@ -516,7 +533,9 @@ public sealed partial class Checker
 
     /// <summary>
     /// U12, U16: the stage of the arguments of a message or of an actor's constructor, after the own error of each argument (E1), in the
-    /// order of U16: <c>send-needs-word</c> of the first argument that does not cross, at its argument, then in the order the arguments are
+    /// order of U16: of the first argument that does not cross, at its argument, <c>pointer-crosses</c> where it reaches a pointer or a view,
+    /// with a word or with none, before its <c>send-needs-word</c>, since no word makes it cross (U12, assumed), else <c>send-needs-word</c>,
+    /// then in the order the arguments are
     /// written, the words of <c>move</c> (<see cref="MessageMove"/>: <c>move-at-call</c>, <c>move-reachable</c> and a later argument's
     /// <c>used-after-move</c>) and <c>mut-in-message</c> of a <c>mut</c> parameter, which <paramref name="mutInMessage"/> reports (the owner,
     /// 2026-11-15, issue 519, comment 6891937666, item 4), and after every argument the build's <c>not supported</c> of the first value it
@@ -543,8 +562,14 @@ public sealed partial class Checker
             }
 
             var a = c.Arguments[i];
-            var (kind, why, limit, shared) = ArgumentCrossing(a, slotType(slot));
+            var (kind, why, limit, shared, raw) = ArgumentCrossing(a, slotType(slot));
             limits[i] = a.Word == ArgumentWord.Move ? shared : limit;
+            if (raw is not null)
+            {
+                Report(ErrorIds.PointerCrosses, a.Line, $"{ArgumentText(a, i)} of `{callee}` reaches {raw}, which crosses into no actor, with a word or with none: a pointer and a view stand on memory the language does not follow (U12, R19)");
+                return true;
+            }
+
             if (kind == ActorCrossing.Never || (kind == ActorCrossing.NeedsWord && a.Word is not (ArgumentWord.Copy or ArgumentWord.Move)))
             {
                 Report(ErrorIds.SendNeedsWord, a.Line, kind == ActorCrossing.NeedsWord
@@ -971,7 +996,13 @@ public sealed partial class Checker
 
         if (!send) // U6: a `send` drops the result, so nothing of it crosses, and its result is `send-result`
         {
-            var (kind, why, limit) = CrossingOf(picked.ReturnType);
+            var (kind, why, limit, raw) = CrossingOf(picked.ReturnType);
+            if (raw is not null)
+            {
+                Report(ErrorIds.PointerCrosses, m.Line, $"`{symbol.Name}.{picked.Name}` gives {Types.A(picked.ReturnType)}, which reaches {raw}, and no pointer or view crosses back to the caller (U12, R19)");
+                return Typed.Error;
+            }
+
             if (kind != ActorCrossing.Crosses)
             {
                 Report(ErrorIds.SendNeedsWord, m.Line, $"`{symbol.Name}.{picked.Name}` gives {Types.A(picked.ReturnType)}, which reaches {why}, and no word can stand at a result to make it cross back to the caller: give a value, a `data` value or an immutable class instance (U12)");
@@ -1125,4 +1156,250 @@ public sealed partial class Checker
 
     /// <summary>U10: <c>this</c> as a value inside an actor, not before a member, is the actor's own reference (Q7 of comment 6866132292).</summary>
     private bool ActorThisAsValue(ThisExpression t) => CurrentClass() is { IsActor: true } && !actorMemberThis.Contains(t);
+
+    /// <summary>
+    /// U46: <c>attempt { ... }</c> where it stands as a value or a statement: the union of its value (<see cref="AttemptResult"/>), read by
+    /// section 5's rules as a call's union is, the block's value its success, which stands where the <c>attempt</c> stands, and its
+    /// <c>Crashed</c> a case after it, which leaves the function, its return type listing it, or is kept where a written union type or
+    /// a <c>match</c> keeps the cases (O2, O3, O9; assumed: T18 of comment 6980152255).
+    /// </summary>
+    private Typed CheckAttempt(AttemptExpression a, KurzType? expected, bool keepCases)
+    {
+        var result = AttemptResult(a, expected);
+        if (result.IsError || result.Type is not UnionType u || keepCases && (expected is null || Types.KeepsCases(expected, u)))
+        {
+            return result;
+        }
+
+        Propagate(u.Cases.Skip(1), a.Line);
+        return new Typed(u.Cases[0]);
+    }
+
+    /// <summary>
+    /// U46 to U48: the whole value of <c>attempt { ... }</c>, the union of the value its block gives and <c>Crashed</c> of std, whose
+    /// <c>Reason</c> is every type the block's code can throw with the runtime's error type, as a block of <c>on crash</c> reads its child's
+    /// (U30; assumed: the small defaults of comment 6980152255), the one the reading before found (<see cref="Check(ProgramSyntax,
+    /// DiagnosticBag)"/>): at the first reading it is the <c>Reason</c> of a <c>Crashed</c> that the type expected of it or the return type of
+    /// the function around it names, else the runtime's error type alone, so that a program whose <c>Reason</c> settles there reports
+    /// nothing at that reading. The block is read as the body of a lambda of no parameter (U47, U48; assumed: T19 and T20 of that
+    /// comment): its one expression, where it is one, gives its value, else its <c>return</c>; it takes the variables around it by value
+    /// where it starts, and each field of the class whose method runs it that it names through a variable of its own, which the field's
+    /// value is taken into at its start, so that an assignment of either is <c>capture-assign</c> (F11); and what it takes crosses into the
+    /// child as a message's arguments do (U12): a value whose type needs a word only after <c>copy</c>, as the argument of a call, else
+    /// <c>capture-needs-word</c> at the name (<see cref="AttemptCaptures"/>); a pointer or a view of an atomic type that it takes, or that
+    /// its value reaches, is <c>pointer-crosses</c>, as for a message (U12; the owner, 2026-11-21, #582, comment 7062996932, Q25 1).
+    /// <c>retry { ... }</c> is <c>not supported</c>, its call's
+    /// id being open (section 14).
+    /// </summary>
+    private Typed AttemptResult(AttemptExpression a, KurzType? expected)
+    {
+        if (a.Word != "attempt")
+        {
+            NotSupported(a.Line, $"`{a.Word} {{ ... }}`, the block that keeps a crash to a piece of code (section 6, U28)");
+            return Typed.Error;
+        }
+
+        var crashed = std?.Model.DataTypes.FirstOrDefault(d => d.Name == "Crashed");
+        var error = std?.Model.DataTypes.FirstOrDefault(d => d.Name == "RuntimeError");
+        if (crashed is null || error is null)
+        {
+            NotSupported(a.Line, "`attempt { ... }` in a file read without `std/`, which declares `Crashed` (U46)");
+            return Typed.Error;
+        }
+
+        IReadOnlyList<KurzType> reason = reasons is not null && reasons.TryGetValue(a, out var found)
+            ? Translated(found)
+            : ProvisionalReason(expected, crashed) ?? [new DataType(error, [])];
+        if (reasons is not null && reason.FirstOrDefault(t => t is TypeParameterType || CrossingOf(t) is { Kind: ActorCrossing.Never } or { Limit: not null }) is { } uncopied)
+        {
+            NotSupported(a.Line, $"an `attempt` whose block can throw {Types.A(uncopied)}, which the crossing copy does not bring into the heap of the code that waits (U50, U12)");
+            return Typed.Error;
+        }
+
+        if (AttemptMove(a.Body) is { } moved)
+        {
+            NotSupported(moved.Line, $"`move {moved.Name}` in the block of an `attempt`, of a variable or a field around it, which this build does not end where the block starts (U47)");
+            return Typed.Error;
+        }
+
+        if (!attemptBlocks.TryGetValue(a, out var block))
+        {
+            attemptBlocks[a] = block = a.Body.Statements is [ExpressionStatement only]
+                ? new LambdaExpression(a.Line, [], only.Expression, null)
+                : new LambdaExpression(a.Line, [], null, a.Body);
+        }
+
+        model.RecordAttemptLambda(block);
+        var names = new List<NameExpression>();
+        SyntaxCopy.Walk(a.Body, e =>
+        {
+            if (e is NameExpression n)
+            {
+                names.Add(n);
+            }
+        });
+        var fields = new List<(VariableSymbol Variable, FieldSymbol Field)>();
+        var scope = frame.Scope;
+        frame.Scope = new Scope { Parent = scope };
+        foreach (var n in names)
+        {
+            if (fields.All(f => f.Variable.Name != n.Name) && Lookup(n.Name, capture: false).Variable is null && ImplicitField(n.Name) is { } field)
+            {
+                var taken = new VariableSymbol(n.Name, Types.Read(field.Type), false, VariableKind.Parameter, a.Line);
+                frame.Scope.Variables[n.Name] = taken; // U47: the field by value at the block's start, through a variable the block captures
+                fields.Add((taken, field));
+            }
+        }
+
+        var typed = CheckLambda(block, null);
+        frame.Scope = scope;
+        if (typed.IsError)
+        {
+            return Typed.Error;
+        }
+
+        var info = model.LambdaOf(block);
+        if (CurrentClass() is { } owner && info.Captures.Any(v => v.Name == "this"))
+        {
+            NotSupported(a.Line, $"an `attempt` whose block names `this`, a method or a property of `{owner.Name}`, which this build does not take into the child (U47)");
+            return Typed.Error;
+        }
+
+        if (AttemptCaptures(a, info, names))
+        {
+            return Typed.Error;
+        }
+
+        var value = info.Type.Result;
+        if (value is UnionType || Types.NonNull(value) is not null)
+        {
+            NotSupported(a.Line, $"an `attempt` whose block gives {Types.A(value)}, a union, which the union of its value does not keep apart from `Crashed` (U46)");
+            return Typed.Error;
+        }
+
+        if (!Types.IsVoid(value) && CrossingOf(value) is { Raw: { } pointer })
+        {
+            Report(ErrorIds.PointerCrosses, a.Line, $"the block of `attempt` gives {Types.A(value)}, which reaches {pointer}, and no pointer or view crosses back to the code that waits (U47, U12, R19)");
+            return Typed.Error;
+        }
+
+        if (!Types.IsVoid(value) && CrossingOf(value) is { Kind: ActorCrossing.Never } or { Limit: not null })
+        {
+            NotSupported(a.Line, $"an `attempt` whose block gives {Types.A(value)}, which this build does not bring back into the heap of the code that waits (U47, U12)");
+            return Typed.Error;
+        }
+
+        attemptReads.Add((a, reason));
+        var crash = new DataType(crashed, [Types.Union(reason)]);
+        var union = (UnionType)Types.Union([value, crash]);
+        model.RecordAttempt(a, new AttemptInfo(block, union, fields, fields.Count > 0 ? ThisVariable() : null)); // `this`, read where the block starts, by the lambdas around it too
+        model.RecordCrashReason(crash.TypeArguments[0]);
+        return new Typed(union);
+    }
+
+    /// <summary>
+    /// U46: the <c>Reason</c> an <c>attempt</c> is read with at the first reading, the start of the readings' fixed point and no rule of
+    /// the language: the cases of the <c>Reason</c> of a <c>Crashed</c> that the type <paramref name="expected"/> of it names, else the
+    /// return type of the function around it, which a <c>Crashed</c> that propagates goes to; null where neither names one.
+    /// </summary>
+    private IReadOnlyList<KurzType>? ProvisionalReason(KurzType? expected, DataSymbol crashed)
+    {
+        foreach (var type in new[] { expected, frame.IsTopLevel ? null : frame.ReturnType })
+        {
+            var cases = type is UnionType u ? u.Cases : type is null ? [] : [type];
+            if (cases.OfType<DataType>().FirstOrDefault(d => ReferenceEquals(d.Symbol, crashed)) is { } named)
+            {
+                return named.TypeArguments[0] is UnionType r ? r.Cases : [named.TypeArguments[0]];
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// U47: the first <c>move</c> in the block before a name that a variable or a field around the block holds, null for none; where it
+    /// finds one, each variable around the block that the block names counts as read, so that the block left unread reports no
+    /// <c>unused-variable</c> (V5) beside the build's limit.
+    /// </summary>
+    private NameExpression? AttemptMove(Block body)
+    {
+        NameExpression? moved = null;
+        var named = new List<VariableSymbol>();
+        SyntaxCopy.Walk(body, e =>
+        {
+            if (e is NameExpression name && Lookup(name.Name, capture: false).Variable is { } variable)
+            {
+                named.Add(variable);
+            }
+
+            if (moved is null && e is CallExpression c && c.Arguments.FirstOrDefault(x => x.Word == ArgumentWord.Move && Unwrap(x.Value) is NameExpression n
+                && (Lookup(n.Name, capture: false).Variable is not null || ImplicitField(n.Name) is not null)) is { } argument)
+            {
+                moved = (NameExpression)Unwrap(argument.Value);
+            }
+        });
+        if (moved is not null)
+        {
+            named.ForEach(v => v.Read = true);
+        }
+
+        return moved;
+    }
+
+    /// <summary>
+    /// U47, U12: what the block of the <c>attempt</c> <paramref name="a"/> takes crosses into its child as a message's arguments do: a
+    /// value, an immutable class instance and an actor's reference with no word, and a value that needs a word only where each read of
+    /// it in the block, its <paramref name="names"/>, is the argument of a call after <c>copy</c>, else <c>capture-needs-word</c> at
+    /// the first such name, a read inside an <c>attempt</c> in the block reported by that block alone, whose error leaves this block
+    /// unread (section 6, "What a body may change";
+    /// assumed: T19 of comment 6980152255); a value that reaches a pointer or a view of an atomic type is <c>pointer-crosses</c> at its
+    /// first read, with a word or with none, as a message's argument (U12; the owner, 2026-11-21, #582, comment 7062996932, Q25 1); a
+    /// value no word makes cross, and one the build does not copy, is <c>not supported</c>, after the language's error. Whether it
+    /// reported one.
+    /// </summary>
+    private bool AttemptCaptures(AttemptExpression a, LambdaInfo info, List<NameExpression> names)
+    {
+        var worded = new HashSet<NameExpression>(ReferenceEqualityComparer.Instance);
+        SyntaxCopy.Walk(a.Body, e =>
+        {
+            if (e is CallExpression c)
+            {
+                foreach (var x in c.Arguments.Where(x => x.Word == ArgumentWord.Copy && Unwrap(x.Value) is NameExpression))
+                {
+                    worded.Add((NameExpression)Unwrap(x.Value));
+                }
+            }
+        });
+        string? limit = null;
+        var line = a.Line;
+        foreach (var v in info.Captures)
+        {
+            var reads = names.Where(n => model.IsVariable(n) && ReferenceEquals(model.VariableOf(n), v)).OrderBy(n => n.Line).ToList();
+            var (kind, why, limited, raw) = CrossingOf(v.Type);
+            if (raw is not null)
+            {
+                Report(ErrorIds.PointerCrosses, reads.FirstOrDefault()?.Line ?? a.Line, $"the block of `attempt` takes `{v.Name}`, which reaches {raw}, and no pointer or view crosses into an actor, with a word or with none: a pointer and a view stand on memory the language does not follow (U47, U12, R19)");
+                return true;
+            }
+
+            if (kind == ActorCrossing.NeedsWord && reads.FirstOrDefault(n => !worded.Contains(n)) is { } bare)
+            {
+                Report(ErrorIds.CaptureNeedsWord, bare.Line, $"the block of `attempt` takes `{v.Name}`, which reaches {why}, only with `copy` before it, for a deep copy, or `move` (U47, U12)");
+                return true;
+            }
+
+            if (limit is null && (kind == ActorCrossing.Never || limited is not null))
+            {
+                (limit, line) = (limited ?? why, reads.FirstOrDefault()?.Line ?? a.Line);
+            }
+        }
+
+        if (limit is not null)
+        {
+            NotSupported(line, $"{limit}, taken by the block of an `attempt` into its child (U47, U12)");
+            return true;
+        }
+
+        return false;
+    }
 }

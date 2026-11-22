@@ -1,0 +1,16 @@
+// expect: error capture-needs-word at 13
+// rules: U47
+
+class Cart(mut int Items)
+
+int Count(Cart c) => c.Items
+
+// the block takes the mutable instance `cart` with `copy` before it, and bare it is the error
+cart = Cart(2)
+n = attempt { Count(copy cart) } else {
+    Crashed c => 0
+}
+m = attempt { cart.Items } else {
+    Crashed c => 0
+}
+print(n + m)

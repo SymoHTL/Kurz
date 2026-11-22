@@ -1,0 +1,34 @@
+// expect: output
+// | crashed
+// | 2
+// | 0
+// rules: U48
+
+data Bad(string Why)
+
+int F(int n) {
+    if n > 0 {
+        throw Bad("big")
+    }
+
+    return n
+}
+
+// `return` in the block gives the block's value, an `int`, and in the arm leaves `Read` with its `string`
+string Read(int n) {
+    v = attempt {
+        if n > 1 {
+            return 2
+        }
+
+        return F(n)
+    } else {
+        Crashed c => return "crashed"
+    }
+
+    return "{v}"
+}
+
+print(Read(1))
+print(Read(2))
+print(Read(0))
