@@ -5,7 +5,7 @@ of its method through its reference is a message (§6, "Actors"). This chapter h
 one machine and what a program writes of them: an actor's declaration, `spawn`, the call that waits
 for its result, `send`, and what crosses into a message, the crash of an actor, its restart by
 the default policy and its log line (U19 to U24), the words of a policy (U25 to U27), the block of a policy (U28
-to U34), the threads that run the actors (U35), the bounds of the calls that wait (U36 to U45) and the actors declared `per node` (U51 to U55, no rule numbered U46 to U50). The scheduler but its threads, the stacks, deadlocks but the
+to U34), the threads that run the actors (U35), the bounds of the calls that wait (U36 to U45), the block of an `attempt` (U46 to U50) and the actors declared `per node` (U51 to U55). The scheduler but its threads, the stacks, deadlocks but the
 calls a waiting actor lets in (U17),
 the wait of the top-level code that nothing can end (U18) and the deadline of a call that waits in a message, which is nothing
 left to run (U42), the clauses after an actor's name but
