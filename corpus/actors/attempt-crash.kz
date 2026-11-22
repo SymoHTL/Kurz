@@ -1,0 +1,38 @@
+// expect: output
+// | lost 7
+// | -1
+// | IndexOutOfRange
+// | -1
+// | 1
+// rules: U46
+
+data Lost(int Code)
+
+int Take(int n) {
+    if n == 7 {
+        throw Lost(n)
+    }
+
+    xs = [1, 2]
+    return xs[n]
+}
+
+// the crash of the block is held as the case `Crashed`, whose `Reason` is what `Take` throws or the runtime's error
+int Read(int n) {
+    v = attempt { Take(n) } else {
+        Crashed c => {
+            match c.Reason {
+                Lost l => print("lost {l.Code}")
+                RuntimeError e => print(e.Kind)
+            }
+
+            -1
+        }
+    }
+
+    return v
+}
+
+print(Read(7))
+print(Read(5))
+print(Read(0))

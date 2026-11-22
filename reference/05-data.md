@@ -1630,7 +1630,10 @@ A declaration writes the number of a value after `=`: `enum Plan { Free = 1, Pro
 directions are members of the type. `Plan.Pro.Number` is the number of a value, an `int`, and
 `Plan.From(2)` is the value of a number, which it takes as an `int`, since a number is an `int`
 (D20). Its result is `Plan | Invalid`: a number that no value has is an outcome (O1), not an
-exception. `Plan(2)`, the form §4 sets aside, is `syntax` *(assumed: as §4 marks it)*. `Invalid` is a `data` type without fields that every file sees,
+exception. `Plan(2)`, the form §4 sets aside, is `syntax` *(assumed: as §4 marks it)*. `Plan.From`
+read as a value, `f = Plan.From`, is `syntax`, as every function of a type read so is, a name that
+cannot stand as a value (F11) (§6, the owner, 2026-11-17, #572, comment 6961064484, Q3, "syntax for
+all (Recommended)"). `Invalid` is a `data` type without fields that every file sees,
 declared before the file's own types, so that a file's own `data Invalid` is `redeclared` (V9);
 an arm names it as it names any case type (C4) (§4, the owner, 2026-10-29). Two values of an enum
 compare with `<`, `<=`, `>` and `>=` by their numbers, as C# compares them: with `Free = 2` and

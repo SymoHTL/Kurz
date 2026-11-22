@@ -1,0 +1,33 @@
+// expect: output
+// | 15
+// | 11
+// | 0
+// rules: U46
+
+data Bad(string Why)
+
+int Check(int n) {
+    if n > 9 {
+        throw Bad("too big")
+    }
+
+    return n
+}
+
+// with no `else`, the case `Crashed` leaves `Read` through its signature, as a call's case does
+int | Crashed<Bad | RuntimeError> Read(int n) {
+    v = attempt { Check(n) }
+    return v + 6
+}
+
+r = Read(9) else {
+    Crashed<Bad | RuntimeError> c => 0
+}
+print(r)
+q = Read(10) else {
+    Crashed<Bad | RuntimeError> c => {
+        print(c.Place.Line)
+        0
+    }
+}
+print(q)

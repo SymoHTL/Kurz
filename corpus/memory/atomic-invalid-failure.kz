@@ -1,0 +1,13 @@
+// expect: error invalid-ordering at 9
+// allow: raw
+// rules: R19
+
+mut long word = 8
+cell = AtomicLong.FromPtr(&word)
+raw {
+    match cell.CompareExchange(8, 9, MemoryOrder.AcqRel,
+        MemoryOrder.Release) {
+        long found => print(found)
+        NotExchanged<long> missed => print(missed.Value)
+    }
+}
