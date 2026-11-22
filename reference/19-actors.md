@@ -2674,7 +2674,15 @@ pass, #519, comment 7056985643, and a reading of T83 1, which names the copies a
 for the messages T24 (1) built in a heap of their own and no other)*. A message with an argument that
 can wait after one that crosses is built in a heap of its own, as any message with an argument that
 can wait is, and its crossing arguments are copied into that heap where they are evaluated *(assumed:
-a reading of T83 1, whose words keep that heap and do not say where its copies are made)*.
+a reading of T83 1, whose words keep that heap and do not say where its copies are made)*. A `spawn`
+whose argument can raise after one that crosses takes the same rule: the heap it made before its
+arguments, which they cross into, is freed with their copies where its spawner crashes at that raise,
+and so is the heap of a `spawn` any of whose arguments can wait; its actor takes its number, its slot
+and its place under its supervisor once its last argument is evaluated, so that such a raise takes
+none of them (§6, the owner, 2026-11-21, #519, comment 7060155980, "T82 1") *(assumed: a reading of
+T82 1, the heap freed whole, and the readings of the product pass, #519, comment 7071789394, Q2 and
+Q3)*. A `spawn` whose argument that can raise comes before every argument that crosses, or none of
+whose arguments crosses, leaves its heap at such a raise, and no copy (§6).
 
 Case: [actors/crash-inbox-kept.kz](../corpus/actors/crash-inbox-kept.kz)
 ```kurz
@@ -2851,6 +2859,34 @@ c = spawn Caller(k)
 send c.Go([10, 20, 30], 5)
 c.Go([10, 20, 30], 1)
 print(k.Total())
+```
+
+Case: [actors/crash-spawn-after-copy.kz](../corpus/actors/crash-spawn-after-copy.kz)
+```kurz
+// the first `Go` crashes `Spawner` at the index, after the list crossed into the heap of the actor its `spawn` was making: that
+// heap is freed with the list's copy at the crash, and no actor was made, so that the restarted `Spawner`'s `spawn` makes `Holder#2`
+
+actor Holder(List<int> Items, int N) {
+    pub int Count() => Items.Count + N
+}
+
+actor Spawner {
+    mut int made = 0
+
+    pub void Go(List<int> xs, int at) {
+        ys = [1, 2]
+        h = spawn Holder(xs, ys[at])
+        made = made + 1
+        print("{h} {h.Count()}")
+    }
+
+    pub int Made() => made
+}
+
+s = spawn Spawner()
+send s.Go([10, 20, 30], 5)
+s.Go([10, 20, 30], 1)
+print(s.Made())
 ```
 
 Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
