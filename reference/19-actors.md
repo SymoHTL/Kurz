@@ -2682,7 +2682,8 @@ and its place under its supervisor once its last argument is evaluated, so that 
 none of them (§6, the owner, 2026-11-21, #519, comment 7060155980, "T82 1") *(assumed: a reading of
 T82 1, the heap freed whole, and the readings of the product pass, #519, comment 7071789394, Q2 and
 Q3)*. A `spawn` whose argument that can raise comes before every argument that crosses, or none of
-whose arguments crosses, leaves its heap at such a raise, and no copy (§6).
+whose arguments crosses, leaves its heap at such a raise, and no copy (§6) *(assumed: a reading of T82 1,
+whose words name the copies a raise leaves behind and not the heap they cross into)*.
 
 Case: [actors/crash-inbox-kept.kz](../corpus/actors/crash-inbox-kept.kz)
 ```kurz
