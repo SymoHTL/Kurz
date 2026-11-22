@@ -6586,6 +6586,152 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran((run.Code, run.Output, rest), 0, ["1", "2", "0"], "");
     }
 
+    [Fact]
+    public void A_spawn_whose_argument_after_a_crossing_one_crashes_its_spawner_leaves_no_heap_of_the_actor_it_was_making()
+    {
+        // section 6 (the owner, 2026-11-21, #519, comment 7060155980, "T82 1"): the index `ks[i]` stands after the list `xs`, which
+        // crosses into the heap the `spawn` made before its arguments, and its `index-out-of-range` crashes `Front`, the actor whose code
+        // spawns; that heap is listed with `Front`, whose crash frees it with the list's copy, so that the count of the heaps of the
+        // thread moves at that crash as it moves at a crash in `Before`, which raises before its `spawn` makes a heap, where a heap
+        // listed with nothing stays, one heap more; both after a first crash, whose restart moved the count by one where the later ones
+        // move it by none; `Make` with `ks[0]` is the control that the count sees the heap of the actor a `spawn` made; under the
+        // allocator that makes every freed block inaccessible
+        const string text = """
+            actor Holder(List<int> Items, int N) {
+                pub int Count() => Items.Count + N
+            }
+
+            actor Front {
+                pub void Make(List<int> ks, int i) {
+                    mut xs = List<int>()
+                    for n in 0..<1000 {
+                        xs.Add(n)
+                    }
+
+                    h = spawn Holder(xs, ks[i]) on crash stop
+                    print(h.Count())
+                }
+
+                pub void Before(List<int> ks, int i) {
+                    k = ks[i]
+                    mut xs = List<int>()
+                    for n in 0..<1000 {
+                        xs.Add(n)
+                    }
+
+                    h = spawn Holder(xs, k) on crash stop
+                    print(h.Count())
+                }
+
+                pub int Ping() => 2
+            }
+
+            f = spawn Front()
+            send f.Before([1], 1)
+            print(f.Ping())
+            start = HttpServer.Heaps()
+            send f.Before([1], 1)
+            print(f.Ping())
+            middle = HttpServer.Heaps()
+            send f.Make([1], 1)
+            print(f.Ping())
+            end = HttpServer.Heaps()
+            print("{middle - start} {end - middle}")
+            f.Make([1], 0)
+            print(HttpServer.Heaps() - end)
+
+            """;
+        var run = BuildAndRun(text, ListTests.Edited([.. ListTests.Fence, .. HeapCount]), "actor-spawn-raises-after-crossing");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Front#1 crashed: index-out-of-range at program.kz:17", "Front#1 crashed: index-out-of-range at program.kz:17", "Front#1 crashed: index-out-of-range at program.kz:12"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["2", "2", "2", "0 0", "1001", "1"], "");
+    }
+
+    /// <summary>
+    /// The runtime with a check that the heap the runtime's <c>ActorNew</c> gives an actor, and the one <c>HeapLeft</c> frees, stands on no
+    /// list of the heaps being built (<c>Listed</c>), which ends the process with the line <c>listed</c> and the exit code 3 where it does,
+    /// and with the links of a heap of that list written 16 before <c>MessageHeapFree</c> frees it, so that a walk of the list that reached
+    /// it after its free would end the run on the system's signal, where the pool keeps a freed heap's page readable under the fence
+    /// (<c>knowledge/a-freed-heap-page-stays-readable-under-the-fence.md</c>).
+    /// </summary>
+    private static (string Path, string Old, string New)[] UnlistedHeaps =>
+    [
+        ("runtime/common/runtime.kz", "pub byte* ActorNew(byte* heap, long size, long stack, byte* side, byte* name) {\n",
+            "pub byte* ActorNew(byte* heap, long size, long stack, byte* side, byte* name) {\n    Unbuilt(heap)\n"),
+        ("runtime/common/runtime.kz", "pub void HeapLeft(byte* heap) {\n", """
+            void Unbuilt(byte* heap) {
+                raw {
+                    mut byte* at = messageHeaps
+                    while at != null {
+                        if at == heap {
+                            WriteError("listed\n")
+                            sys.Exit(3)
+                        }
+
+                        at = *Ptr<byte*>(std.HeapFirst(at))
+                    }
+                }
+            }
+
+            pub void HeapLeft(byte* heap) {
+                Unbuilt(heap)
+
+            """),
+        ("runtime/common/runtime.kz", "    Unlisted(heap)\n    std.HeapFree(heap)\n", """
+                Unlisted(heap)
+                raw {
+                    *Ptr<long>(std.HeapFirst(heap)) = 16
+                    *Ptr<long>(std.HeapFirst(heap) + 8) = 16
+                }
+
+                std.HeapFree(heap)
+
+            """),
+    ];
+
+    [Fact]
+    public void A_spawns_heap_leaves_the_list_of_heaps_being_built_before_its_actor_takes_it_or_a_case_frees_it()
+    {
+        // section 6 (the owner, 2026-11-21, #519, comment 7060155980, "T82 1"): inside `Front`'s message, the heap of each `spawn` with
+        // an index after the crossing list, or with an argument that can wait, is listed with `Front`; it leaves that list before
+        // `ActorNew` writes the actor's record over the words that list it, and before the end of the region of `Made` frees it, where
+        // the case `int.Parse` propagates out of the argument after the list leaves the `spawn` without its actor; a heap left on the
+        // list would name an actor's record, or a freed heap, to the next walk of the list; under the allocator that makes every freed
+        // block inaccessible
+        const string text = """
+            actor Holder(List<int> Items, int N) {
+                pub int Count() => Items.Count + N
+            }
+
+            int | ParseError Made(List<int> xs, string s) {
+                h = spawn Holder(xs, int.Parse(s)) on crash stop
+                return h.Count()
+            }
+
+            actor Front {
+                pub int Run(List<int> ks) {
+                    xs = [1, 2, 3]
+                    h = spawn Holder(xs, ks[0]) on crash stop
+                    w = spawn Holder(xs, h.Count()) on crash stop
+                    n = Made(xs, "x") else {
+                        ParseError => -1
+                    }
+
+                    m = Made(xs, "4") else {
+                        ParseError => -1
+                    }
+
+                    return h.Count() + w.Count() + n + m
+                }
+            }
+
+            f = spawn Front()
+            print(f.Run([1]))
+
+            """;
+        Ran(BuildAndRun(text, ListTests.Edited([.. ListTests.Fence, .. UnlistedHeaps]), "actor-spawn-heap-unlisted"), 0, ["17"], "");
+    }
+
     // ---- the block `attempt { ... }` (U46 to U50; assumed: T18 to T23 of #519, comment 6980152255) --------------------------------
 
     /// <summary>

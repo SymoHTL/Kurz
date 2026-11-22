@@ -2218,7 +2218,11 @@ then, its own heap freed, as Erlang builds a message in the sender's heap and co
 receiver's at its send: the wait lets the actor crash, which frees or empties the heap taken before it,
 that the arguments and the message would have gone into (U21), or end (U13), and where it ended the copy
 goes into its caller's heap and its queueing raises `actor-gone` (`ActorHeap`; U6, U20); the crash of the actor whose code builds it frees that heap
-with its own. Where no argument can wait, the message is built in its actor's heap. The words of a policy after
+with its own. Where no argument can wait, the message is built in its actor's heap. The heap a `spawn` makes before its
+arguments, which cross into it, is listed so with the actor whose code spawns where an argument after one that crosses can
+raise, or any argument can wait (`SpawnHeapNew`), so that the crash of that actor at such a raise frees it with the copies made
+into it, and it leaves that list once the last argument is evaluated, before `ActorNew` takes the actor's number and slot
+(section 6, T82 1). The words of a policy after
 `spawn` and after a type's name, the type's default, which a `spawn`'s own wins over (U25 to U27), are
 built: the emitted `spawn` gives the runtime its policy in the block of its restart, which a `stop`
 leaves out and whose function an `escalate` leaves null, and a block of the knobs in the supervisor's
@@ -2284,7 +2288,7 @@ that actor (`Replied`, `Signal`), so that on threads of their own that record ha
 takes before the store and drops after the wake, the record freed by its last holder, which is not built
 either, where on the one thread nothing runs between the store and the wake; and the copies a crashed message made of the
 arguments of a call it had not sent yet, in the callee's heap where no argument could wait, and the heap of a `spawn` whose arguments it was still
-evaluating, stay in their heaps until those are freed. A message has 2 MiB of
+evaluating, where no argument after one that crosses could raise and none could wait, stay in their heaps until those are freed. A message has 2 MiB of
 stack where its clause sets no other size, where a message on Linux had the main thread's 8 MiB
 while messages ran on it, and a server whose actors hold many stacks at once, two mappings each, needs Linux's limit
 of mappings, `vm.max_map_count`, raised past its default of 65,530, as section 6 says; a recursion

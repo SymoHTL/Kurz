@@ -1181,6 +1181,37 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
     }
 
+    [Theory]
+    [InlineData("h = spawn Holder(items, n)", 0)]
+    [InlineData("h = spawn Holder(items, 2)", 0)]
+    [InlineData("h = spawn Holder(items, ns[0])", 1)]
+    [InlineData("h = spawn Holder(items, n + 1)", 1)]
+    [InlineData("h = spawn Holder(items, Twice(n))", 1)]
+    [InlineData("h = spawn First(ns[0], items)", 0)]
+    [InlineData("h = spawn Two(n, ns[0])", 0)]
+    [InlineData("h = spawn Two(n, s.Get())", 1)]
+    [InlineData("h = spawn First(s.Get(), items)", 1)]
+    public void A_spawn_whose_argument_after_a_crossing_one_can_raise_or_any_argument_can_wait_lists_its_heap_with_its_builder(string statement, int listed)
+    {
+        // section 6 (the owner, 2026-11-21, #519, comment 7060155980, "T82 1"): where an argument of a `spawn` after one that crosses
+        // into the new actor's heap, `items`, can raise, an index, an operator or a call, or any argument can wait, a call of another
+        // actor's method, the heap the `spawn` makes before its arguments is listed with the actor whose code spawns (the runtime's
+        // `SpawnHeapNew`), whose crash frees it (ActorTests,
+        // `A_spawn_whose_argument_after_a_crossing_one_crashes_its_spawner_leaves_no_heap_of_the_actor_it_was_making`), and taken off
+        // that list before the actor takes it (`SpawnHeapTaken`); a literal and a read of a name raise nothing, and a `spawn` whose
+        // argument that can raise comes before every crossing one, or none of whose arguments crosses, with no argument that can wait,
+        // makes its heap as it did before (`ActorHeapNew`); the IR is read, since a `spawn` whose spawner does not crash answers alike
+        // with its heap listed or not
+        var text = "actor Holder(List<int> Items, int K) {\n    pub int Get() => K\n}\n\nactor First(int K, List<int> Items) {\n    pub int Get() => K\n}\n\n"
+            + "actor Two(int A, int K) {\n    pub int Get() => K\n}\n\nactor Store {\n    pub int Get() => 1\n}\n\nint Twice(int k) => k * 2\n\n"
+            + $"s = spawn Store()\nns = [1]\nn = 1\nitems = [1]\nprint(ns.Count + n + items.Count + s.Get() + Twice(n))\n{statement}\nprint(h.Get())\n";
+        var compilation = Compile(text, Builder.CheckRuntime(Builder.HostTarget!.Value));
+        var program = compilation.Program;
+        Assert.True(program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        Assert.Equal(listed, Regex.Count(program.Ir, @"call ptr @""[^""]+\.SpawnHeapNew\.[0-9]+[^""]*""\(i64 "));
+        Assert.Equal(listed, Regex.Count(program.Ir, @"call void @""[^""]+\.SpawnHeapTaken\.[0-9]+[^""]*""\(ptr "));
+    }
+
     [Fact]
     public void Remove_finds_the_slot_of_its_key_once_and_takes_the_slot_of_a_copy_at_its_offset()
     {
