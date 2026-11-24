@@ -1144,6 +1144,32 @@ match Run() {
 }
 ```
 
+Case: [types/generic-limit-overload.kz](../corpus/types/generic-limit-overload.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+string F<T: Shape>(T x) => "generic"
+
+string F(long n) => "long"
+
+print(F(5))
+```
+
+Case: [types/generic-limit-overload-none.kz](../corpus/types/generic-limit-overload-none.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+string F<T: Shape>(T x) => "generic"
+
+string F(bool b) => "bool"
+
+print(F(5))
+```
+
 ### F14 (decided, §8) A literal as an argument of an overloaded function
 
 For the pick of an overload (F13), a literal argument has the type it has on its own (L10, L11):

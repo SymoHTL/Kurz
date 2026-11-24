@@ -3930,13 +3930,15 @@ pub void ActorBuilt(byte* state) {
 // The cell of a `per node` actor type (U51, U52), a global of the emitted program, 24 bytes: a lock word, then
 // the index of the slot of its one actor and that actor's number, which a reference holds (`Lookup`), 0 before
 // its first start, the slot stored before the number and the number with release (`PerStarted`). The actor of
-// the cell `cell` where one stands, ended or not, its state found by its slot and its number as a reference finds
-// its actor, with no lock, as Rust's `OnceLock` reads its value after one acquire load of its state (not
-// checked at source); else the cell's lock taken and the cell read again under it, and null, the lock still held,
-// where no actor stands there either, so that the code that called starts one (the emitter's `PerStart`) and
-// `PerStarted` lets go of the lock once that actor stands in the cell: the lock is held around the check and the
-// publication alone, never around the constructor or a wait (assumed: T27 to T33 of issue 519, comment
-// 6983903100, the defaults said back, a lock of the type on the threads of section 6). A number of 0 is no actor's,
+// the cell `cell` where one stands and has not ended, its state found by its slot and its number as a reference finds
+// its actor, null where it ended and `EndActor` freed its slot (`Lookup`), with no lock, as Rust's `OnceLock`
+// reads its value after one acquire load of its state (not checked at source); else the cell's lock taken and
+// the cell read again under it, and null, the lock still held, where no actor stands there either, so that the
+// code that called starts one (the emitter's `PerStart`) and `PerStarted` lets go of the lock once that actor
+// stands in the cell: the lock is held around the check, the making of the actor's heap and record and the
+// publication, never around the constructor or a wait (assumed: T27 to T33 of issue 519, comment 6983903100, the
+// defaults said back, a lock of the type on the threads of section 6 "around the check and the publication alone",
+// the making of the heap and the record under it a reading of the build beyond those words). A number of 0 is no actor's,
 // and is read before the slot, since `Slot` reads the directory of the table, which no take made before the first
 // actor's.
 pub byte* PerFind(byte* cell) {
@@ -5587,14 +5589,15 @@ void Crashed(byte* state, byte* header) {
 // falls (`Fall`), and after it each supervisor its policy crashes on the way up, `escalate` passing the
 // crash up whole, and an actor whose constructor runs at its `spawn` passing it to its spawner, whose fall
 // ends it (U3, U25). The actor that takes the crash writes the log line (U24), the supervisor that escalated
-// writing none, and a test's own actor none either, whose crash's words the test runner keeps (`TestCrashKept`; Y5), and
+// writing none (nor does a test's own actor, whose crash's words the test runner keeps, `TestCrashKept`; Y5), and
 // restarts after its pause (U22, U23), or ends where its policy is `stop`, where it was to
 // end after its current message or where its supervisor crashed (U25); where its crash passes the limit of
 // its `max N in`, its supervisor crashes with `restart-limit` at the line of its `spawn` (U26), and it ends in
 // that fall, as a child with no activation, its own fall having cleared it, which `EndChildren` ends at once,
 // a call queued to it set `gone`; at the top level the process ends; but the one actor of a `per node` type,
 // whose knobs hold 1 at 80, which ends there as at a `stop`, with no `restart-limit`, so that the first message
-// to its name after that starts a fresh one (U54; section 6, the owner, 2026-11-17, #561, comment 6945857315, Q2).
+// to its name after that starts a fresh one (U54; section 6, the owner, 2026-11-17, #561, comment 6945857315, Q2;
+// assumed: the one actor of a `per node` type read as the key of that answer, the product pass, comment 6983506072).
 // Where the actor that takes the crash runs and its policy is a block, the crash, the thrown value among it,
 // is copied into that heap, the actor waits for the block's decision, its stack that raised kept, and the
 // block runs as a message of its supervisor, or in the wait of the top-level code (`Pending`; U28, U33).

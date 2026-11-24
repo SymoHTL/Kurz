@@ -899,7 +899,8 @@ public sealed class Parser
     }
 
     /// <summary>
-    /// Y1: <c>test "name" { ... }</c>, its name a plain string literal, a hole in it <c>syntax</c>, its block opening on the line of its name
+    /// Y1: <c>test "name" { ... }</c>, its name a string literal of one line, plain or raw, with at least one character, a hole in it, a
+    /// <c>"""</c> block and the empty name <c>syntax</c>, its block opening on the line of its name
     /// as C1 has an <c>if</c>'s; it stands at the top level of a file alone, and inside a block it is <c>syntax</c> (E4), read all the same, as R16's
     /// block is, so that the rest of the file is read. Y8: <c>test cluster N seed S { ... }</c> of section 13, whose words and body are
     /// passed over, as an actor's <c>per</c> is (U1), and kept for the checker's <c>not supported</c>.
@@ -923,6 +924,15 @@ public sealed class Parser
         if (text is null && statementDepth == 1)
         {
             ReportSyntax(name.Line, "the name of a test is a plain string, with no interpolation (Y1)");
+        }
+        else if (name.Text.Contains('\n') && statementDepth == 1)
+        {
+            // Y1: a literal of one line, plain or raw, so that a name fits its result line; a `"""` block, raw or not, is none (L13, L20)
+            ReportSyntax(name.Line, "the name of a test is a string literal of one line, not a `\"\"\"` block (Y1)");
+        }
+        else if (text is "" && statementDepth == 1)
+        {
+            ReportSyntax(name.Line, "the name of a test has at least one character (Y1)");
         }
 
         return new TestDeclaration(word.Line, text, name.Text, ParseBlockAfter(name.Line, "a `test`"));
@@ -1638,7 +1648,7 @@ public sealed class Parser
             // literal alone, its sign included, as a knob of a policy takes one (U26), anything else there being `syntax` (U41;
             // assumed: T13 of comment 6967625156, the literal alone), its type read as U40 reads a bound by the checker (U41; assumed:
             // a reading of the build, any number literal and its sign); whether the declaration is one a clause applies to is the
-            // checker's (U41; T11)
+            // checker's (U41; assumed: T11 of comment 6967625156)
             Advance();
             within = PolicyValue("a number literal after `within`, `within 2s` (U41)");
             if (!At(TokenKind.Arrow) && !At(TokenKind.LeftBrace) && !EndsStatement())
@@ -1691,25 +1701,25 @@ public sealed class Parser
                 var constant = ParseCoreType();
                 var named = ExpectName("a type parameter");
                 var value = Match(TokenKind.Assign) ? ParseUnary() : null;
-                result.Add(new TypeParameter(line, named.Text, null, constant, value));
+                result.Add(new TypeParameter(line, named.Text, [], constant, value));
                 continue;
             }
 
             var name = ExpectName("a type parameter");
-            TypeSyntax? limit = null;
+            var limits = new List<TypeSyntax>();
             if (Match(TokenKind.Colon))
             {
-                // T19: a limit names an interface, so it is one type by name; a union, a function type or a type in parentheses there
-                // is text no rule gives a meaning (E4), whatever the parentheses
-                var limitToken = Current;
-                limit = ParseCoreType();
-                if (limit is not NamedType)
+                // T19: several limits are joined by `+` (Q4 of issue 605, comment 7051071380), and `&` there is text no rule gives a
+                // meaning (E4) as any other token; a limit is read as a type, so that one that names no interface and no class, a union
+                // and a function type among them, is the checker's `limit-not-interface` (Q6)
+                do
                 {
-                    throw new ParseError(limitToken.Line, "a type parameter's limit names an interface (T19)");
+                    limits.Add(ParseType());
                 }
+                while (Match(TokenKind.Plus));
             }
 
-            result.Add(new TypeParameter(name.Line, name.Text, limit));
+            result.Add(new TypeParameter(name.Line, name.Text, limits));
         }
         while (Match(TokenKind.Comma));
         suppressNewlines--;
@@ -2603,7 +2613,8 @@ public sealed class Parser
                 // U39, U41: the call clause `x.M() within d` bounds the one call (U39); its operand is a unary expression, as T35's
                 // constant operand is, and the clause stands before a postfix `else` (U41; assumed: T12 of comment 6967625156); a call
                 // takes one clause, the token right after the call, so that outside brackets it stands on the line where the call
-                // ends (U41; assumed: a reading of the build); whether the call is one a clause applies to is the checker's (U41; T11)
+                // ends (U41; assumed: a reading of the build); whether the call is one a clause applies to is the checker's (U41;
+                // assumed: T11 of comment 6967625156)
                 Advance();
                 expression = bounded with { Within = ParseUnary() };
                 continue;

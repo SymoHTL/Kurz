@@ -576,7 +576,7 @@ public sealed partial class Checker
                     throw new InvalidOperationException(arm.Pattern.GetType().Name);
             }
 
-            if (CheckElseArmBody(arm.Body, success) == Flow.Completes)
+            if (CheckElseArm(arm, success) == Flow.Completes)
             {
                 reaching.Add(frame.Known); // an arm that returns or throws reaches nothing after the call (N3)
             }
@@ -625,9 +625,19 @@ public sealed partial class Checker
                     break;
             }
 
-            CheckElseArmBody(arm.Body, Types.Error);
+            CheckElseArm(arm, Types.Error);
             PopScope();
         }
+    }
+
+    /// <summary>O5: what the arm does (<see cref="CheckElseArmBody"/>), with the name its pattern binds as the one its bare <c>throw</c> reads (O7, U12).</summary>
+    private Flow CheckElseArm(MatchArm arm, KurzType success)
+    {
+        var outer = elseArmName;
+        elseArmName = arm.Pattern is TypePattern { Binding: not null } named ? model.DeclarationOf(named) : null;
+        var flow = CheckElseArmBody(arm.Body, success);
+        elseArmName = outer;
+        return flow;
     }
 
     /// <summary>

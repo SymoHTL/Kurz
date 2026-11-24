@@ -1,10 +1,10 @@
 // expect: throws call-timeout at 30
 // threads: 1
-// rules: U37, U43, U20
+// rules: U43, U20
 
-// `Ask` holds the thread past the 100 ms of the chain's root, so its call `S.Get()`, which takes the time its chain has left,
-// raises `call-timeout` in `Front`, its crash, and the top-level code's call, whose callee crashed once its deadline had
-// passed, raises `call-timeout` too
+// `Ask` holds the thread past the 100 ms of the chain's root before it calls `S.Get()`: the top-level code's call raises
+// `call-timeout`, its callee's crash set once its deadline had passed (U43), where a crash set before it is `callee-crashed`
+// (U20); the time the nested call takes from its chain is shown by `timeout-chain-left.kz` (U37)
 
 // the thread held for `d`, with no call and no wait
 void Hold(duration d) {

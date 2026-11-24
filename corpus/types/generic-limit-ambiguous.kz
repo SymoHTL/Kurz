@@ -1,0 +1,14 @@
+// expect: error ambiguous-call at 12
+// rules: T19
+
+interface A {
+    int M()
+}
+
+interface B {
+    int M()
+}
+
+int Both<T: A + B>(T x) => x.M()
+
+print(1)

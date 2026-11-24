@@ -1,4 +1,5 @@
-// expect: throws actor-gone at 17
+// expect: throws actor-gone at 18
+// threads: 1
 // rules: U54, U25
 
 actor Counter per node on crash stop {
@@ -12,6 +13,6 @@ actor Counter per node on crash stop {
 }
 
 send Counter.Fail()
-// the call waits in the inbox behind `Fail`, as one sender's messages run in the order it sent them (U5), and the stop at
-// `Fail`'s crash gives it `actor-gone`
+// the call waits in the inbox behind `Fail`, as one sender's messages run in the order it sent them (U5) and no worker thread
+// runs `Fail` before the top-level code waits (U35), and the stop at `Fail`'s crash gives it `actor-gone`
 print(Counter.Get())
