@@ -433,7 +433,7 @@ print(p.Count())
 Case: [actors/constructor-this-refused.kz](../corpus/actors/constructor-this-refused.kz)
 ```kurz
 actor B {
-    pub int Ask(A x) => x.Peek()
+    pub int Ask(A x) => 0
 }
 
 actor A(B Other) {
@@ -2537,7 +2537,7 @@ call each other from different chains and wait for each other do not hang silent
 (§6, "Deadlocks"; the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level
 wait"). A call that waits in a function the top-level code called is the top-level code's, at its
 own line. Where a call that an actor's start keeps out closes the loop, the error names that call's
-line (U22, U52) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and where more than one
+line (U22) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and where more than one
 such call closes it, the error line names the first place in source order and ends with a colon, and
 each further place stands under it on a line `kept out at <file>:<n>`, before the trace (U22) (§6, the
 owner, 2026-11-21, #599, comment 7067131310, several 2; comment 7067139953, the form 1), a place with
@@ -3388,7 +3388,7 @@ actor B {
     pub int Ask() {
         x = a
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -3431,7 +3431,7 @@ actor B {
     pub int Ask() {
         x = a
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -3477,7 +3477,7 @@ actor B {
     pub int Ask() {
         x = a
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -3494,7 +3494,7 @@ actor D {
     pub int Ask() {
         x = c
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -3553,7 +3553,7 @@ actor B {
     pub int Ask() {
         x = a
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -3570,7 +3570,7 @@ actor D {
     pub int Ask() {
         x = c
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -3636,9 +3636,9 @@ actor B {
         }
 
         return match k {
-            0 => x.Peek()
-            1 => x.Peek()
-            else => x.Peek()
+            0 => vouch x.Peek()
+            1 => vouch x.Peek()
+            else => vouch x.Peek()
         }
     }
 }
@@ -3688,7 +3688,7 @@ actor B {
     pub int Ask() {
         x = a
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -3739,19 +3739,19 @@ actor B {
         }
 
         return match k {
-            0 => x.Peek()
-            1 => x.Peek()
-            2 => x.Peek()
-            3 => x.Peek()
-            4 => x.Peek()
-            5 => x.Peek()
-            6 => x.Peek()
-            7 => x.Peek()
-            8 => x.Peek()
-            9 => x.Peek()
-            10 => x.Peek()
-            11 => x.Peek()
-            else => x.Peek()
+            0 => vouch x.Peek()
+            1 => vouch x.Peek()
+            2 => vouch x.Peek()
+            3 => vouch x.Peek()
+            4 => vouch x.Peek()
+            5 => vouch x.Peek()
+            6 => vouch x.Peek()
+            7 => vouch x.Peek()
+            8 => vouch x.Peek()
+            9 => vouch x.Peek()
+            10 => vouch x.Peek()
+            11 => vouch x.Peek()
+            else => vouch x.Peek()
         }
     }
 }
@@ -3807,19 +3807,19 @@ actor B {
         }
 
         return match k {
-            0 => x.Peek()
-            1 => x.Peek()
-            2 => x.Peek()
-            3 => x.Peek()
-            4 => x.Peek()
-            5 => x.Peek()
-            6 => x.Peek()
-            7 => x.Peek()
-            8 => x.Peek()
-            9 => x.Peek()
-            10 => x.Peek()
-            11 => x.Peek()
-            else => x.Peek()
+            0 => vouch x.Peek()
+            1 => vouch x.Peek()
+            2 => vouch x.Peek()
+            3 => vouch x.Peek()
+            4 => vouch x.Peek()
+            5 => vouch x.Peek()
+            6 => vouch x.Peek()
+            7 => vouch x.Peek()
+            8 => vouch x.Peek()
+            9 => vouch x.Peek()
+            10 => vouch x.Peek()
+            11 => vouch x.Peek()
+            else => vouch x.Peek()
         }
     }
 }
@@ -3883,7 +3883,7 @@ actor B {
     pub int Ask() {
         x = a
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -6076,19 +6076,9 @@ inbox for its start, and the first caller's own message joins that inbox after t
 *(assumed: a reading of the build, proposed with this record and not put to the owner)*, and a call that waits on it from the code its own start runs, a default that calls a
 function that calls `Cache.Get()`, waits for a start that waits for it: a loop of calls that wait through its type, which
 layer 2 refuses at compile time as `call-loop` at that call's line (U56), where U18's `deadlock` at run time read it before
-(the owner, 2026-11-21, #519, comment 7068198309, per node 1). A call that waits from the code its own start runs, a default that calls a
-function that calls `Cache.Get()`, waits for a start that waits for it, which the top-level code's
-wait that finds nothing left to run reads as `deadlock` (U18) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*, at that message's line, the call that closes the loop,
-wherever the code that runs the start stands, the top-level code, an actor's message or another
-actor's constructor, as at a restart (U22) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1): at that call's line where the top-level
-code ran the start, a call in a function it called being its own (U18), and, where an actor's message runs the start,
-where the top-level code waits on nothing, the end of the program
-drops the loop (U13) *(assumed: a reading of the build, proposed with this record and not put to the owner)*; a `send` from that code waits in the inbox behind the start *(assumed: a reading of the build, proposed with this record and not put to the owner)*.
-Where more than one call is kept out, a `per node` actor's start among the starts that keep them, the
-error names every one, the first place in source order on its line and each further place under it,
-with the counts and the cap of U22, as at a restart (U22) (§6, the owner, 2026-11-21, #599, comment
-7067131310, several 2; comment 7067139953, the form 1; comment 7067639209, the order 1, the same
-place 1, the cap 1).
+(the owner, 2026-11-21, #519, comment 7068198309, per node 1), and not the `deadlock` at run time at the line of the call
+that the start keeps out, which holds for a restart (U22) (the owner, 2026-11-24, #610, comment 7140840988, "per node 1:
+call-loop (Recommended)"). A `send` from the code its own start runs waits in the inbox behind the start *(assumed: a reading of the build, proposed with this record and not put to the owner)*.
 
 Case: [actors/per-node-first-message.kz](../corpus/actors/per-node-first-message.kz)
 ```kurz
@@ -6196,8 +6186,8 @@ print(Cache.Size())
 
 Case: [actors/per-node-reentrant-in-message.kz](../corpus/actors/per-node-reentrant-in-message.kz)
 ```kurz
-// `User`'s `Use` starts `Cache`, whose default calls `Cache.Size` in the chain of `Use`, so that the call waits in `Cache`'s inbox
-// for the start that waits on it, and the error names that call, not the top-level code's call that waits
+// `User`'s `Use` starts `Cache`, whose default calls `Cache.Size` in the chain of `Use`, a call that would wait in `Cache`'s inbox
+// for the start that waits on it: a loop through `Cache`'s type, which layer 2 refuses at that call
 
 actor Cache per node {
     int size = Measured()
@@ -6220,7 +6210,7 @@ print(u.Use())
 Case: [actors/per-node-reentrant-nested.kz](../corpus/actors/per-node-reentrant-nested.kz)
 ```kurz
 // `Outer`'s start, which the top-level code runs, starts `Inner`, whose default waits on `Helper.Ask`, whose call of `Outer.Size`
-// waits in `Outer`'s inbox for the start that waits on it, and the error names that call, not the top-level code's call that waits
+// would wait in `Outer`'s inbox for the start that waits on it: a loop through `Outer`'s type, which layer 2 refuses at that call
 
 actor Helper {
     pub int Ask() => Outer.Size()
@@ -6692,6 +6682,10 @@ print(c.Start())
 ```
 
 Case: [actors/per-node-reentrant.kz](../corpus/actors/per-node-reentrant.kz)
+
+Case: [actors/per-node-reentrant-in-message.kz](../corpus/actors/per-node-reentrant-in-message.kz)
+
+Case: [actors/per-node-reentrant-nested.kz](../corpus/actors/per-node-reentrant-nested.kz)
 
 ### U57 (decided, §6) A call back to the caller that waits
 

@@ -18,7 +18,7 @@ actor B {
     pub int Ask() {
         x = a
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -35,7 +35,7 @@ actor D {
     pub int Ask() {
         x = c
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0

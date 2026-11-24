@@ -253,7 +253,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     /// and the root's <c>restart-limit</c>, whose trace is the top-level code's where it waits, and
     /// not at the line of the <c>spawn</c> that its error line names (assumed readings of section 6, "Policy at <c>spawn</c>"), and a
     /// <c>deadlock</c> that names the call an actor's start keeps out, whose trace is the top-level code's where it waits, on a line that
-    /// call does not stand on, so that the error line is held to be the call's and not the wait's (U22, U52; section 6, the owner,
+    /// call does not stand on, so that the error line is held to be the call's and not the wait's (U22; section 6, the owner,
     /// 2026-11-21, #599, comment 7060156109, Q6 1, and comment 7063693195, the trace 1).
     /// </summary>
     private static readonly Dictionary<string, (int First, string Last)> OwnTraces = new(StringComparer.Ordinal)
@@ -263,8 +263,6 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         ["actors/per-node-escalate.kz"] = (7, "Cache.Fail"), // U53: a `per node` actor's, whose supervisor is the root
         ["actors/crash-restart-limit.kz"] = (18, "main"),
         ["actors/restart-reentrant.kz"] = (44, "main"),
-        ["actors/per-node-reentrant-in-message.kz"] = (23, "main"),
-        ["actors/per-node-reentrant-nested.kz"] = (26, "main"),
         ["actors/restart-reentrant-two.kz"] = (79, "main"),
         ["actors/restart-reentrant-places.kz"] = (58, "main"),
         ["actors/restart-reentrant-one-place.kz"] = (47, "main"),
@@ -273,7 +271,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     };
 
     /// <summary>
-    /// U22, U52: the <c>deadlock</c> cases that more than one call an actor's start keeps out closes, each with the words of its error
+    /// U22: the <c>deadlock</c> cases that more than one call an actor's start keeps out closes, each with the words of its error
     /// line after the place it names, the first in source order, before the colon that ends it, the count of the calls at that place
     /// where more than one, and the lines between the error line and the trace as the runtime writes them: one line <c>kept out at</c>
     /// each further place, in source order, with its count where more than one, at most 10, then <c>... and K more</c>, each call on a
