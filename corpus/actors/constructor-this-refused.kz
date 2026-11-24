@@ -2,7 +2,7 @@
 // rules: U3, K7
 
 actor B {
-    pub int Ask(A x) => x.Peek()
+    pub int Ask(A x) => 0
 }
 
 actor A(B Other) {

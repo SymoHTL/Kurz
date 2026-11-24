@@ -5,7 +5,7 @@
 // | load
 // | 4
 // | 40
-// rules: U17, U15
+// rules: U17, U15, U57
 
 actor Store(Checker Check) {
     mut int saved = 0

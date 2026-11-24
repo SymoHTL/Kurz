@@ -648,7 +648,7 @@ print(Box(3).Area())
 Case: [actors/constructor-this-refused.kz](../corpus/actors/constructor-this-refused.kz)
 ```kurz
 actor B {
-    pub int Ask(A x) => x.Peek()
+    pub int Ask(A x) => 0
 }
 
 actor A(B Other) {

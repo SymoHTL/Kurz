@@ -45,19 +45,19 @@ actor B {
         }
 
         return match k {
-            0 => x.Peek()
-            1 => x.Peek()
-            2 => x.Peek()
-            3 => x.Peek()
-            4 => x.Peek()
-            5 => x.Peek()
-            6 => x.Peek()
-            7 => x.Peek()
-            8 => x.Peek()
-            9 => x.Peek()
-            10 => x.Peek()
-            11 => x.Peek()
-            else => x.Peek()
+            0 => vouch x.Peek()
+            1 => vouch x.Peek()
+            2 => vouch x.Peek()
+            3 => vouch x.Peek()
+            4 => vouch x.Peek()
+            5 => vouch x.Peek()
+            6 => vouch x.Peek()
+            7 => vouch x.Peek()
+            8 => vouch x.Peek()
+            9 => vouch x.Peek()
+            10 => vouch x.Peek()
+            11 => vouch x.Peek()
+            else => vouch x.Peek()
         }
     }
 }

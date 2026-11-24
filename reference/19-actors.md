@@ -6,7 +6,7 @@ one machine and what a program writes of them: an actor's declaration, `spawn`, 
 for its result, `send`, and what crosses into a message, the crash of an actor, its restart by
 the default policy and its log line (U19 to U24), the words of a policy (U25 to U27), the block of a policy (U28
 to U34), the threads that run the actors (U35), the bounds of the calls that wait (U36 to U45), the block of an `attempt` (U46 to U50) and the actors declared `per node` (U51 to U55). The scheduler but its threads, the stacks, deadlocks but the
-calls a waiting actor lets in (U17),
+calls a waiting actor lets in (U17), the loops of calls that wait between actor types (U56 to U59),
 the wait of the top-level code that nothing can end (U18) and the deadline of a call that waits in a message, which is nothing
 left to run (U42), the clauses after an actor's name but
 the stack's, the policy's and `per node` (U1, U27, U51) and the actors of other machines (§6, §7) have no rule here, and `compiler/README.md` says what the compiler builds of the rules here.
@@ -433,7 +433,7 @@ print(p.Count())
 Case: [actors/constructor-this-refused.kz](../corpus/actors/constructor-this-refused.kz)
 ```kurz
 actor B {
-    pub int Ask(A x) => x.Peek()
+    pub int Ask(A x) => 0
 }
 
 actor A(B Other) {
@@ -897,6 +897,18 @@ w = spawn Worker()
 r = spawn Registry(w)
 w.Join(r)
 print(r.Matched())
+```
+
+Case: [actors/vouch-own-method.kz](../corpus/actors/vouch-own-method.kz)
+```kurz
+actor A {
+    pub int Size() => 1
+
+    pub int Twice() => vouch this.Size() + 1
+}
+
+a = spawn A()
+print(a.Twice())
 ```
 
 ### U11 (decided, §6) `send` of its own method
@@ -2345,7 +2357,8 @@ starts, and the parked message resumes once the calls above it end (§6, the own
 2026-11-15, #519, comment 6892835500, Q6, "Own pooled stack"). A call that waits gets in where, as
 it is queued, the newest message its target has started and not ended, running or parked in a wait,
 carries its chain, so that a call that a message makes through a reference to its own actor gets in
-too *(assumed in §6)*. An actor under construction takes no
+too *(assumed in §6)*. A path of calls that wait that comes back to an actor type on it, which two chains can enter at once, is
+U56's compile error, and a call back to the caller that waits makes no edge of it (U57) (§6, the owner, 2026-11-20, #519, comment 7051071630, T40 (c)). An actor under construction takes no
 message until its `spawn` returns, one of its chain neither *(assumed in §6)*, and an actor whose
 restart runs its constructor takes no call of the restart's chain, which waits in its inbox for the
 constructor's end (U22; §6, the owner, 2026-11-20, #599, comment 7051501153, "Option 1"). The chain ID is 16 bytes,
@@ -2375,6 +2388,33 @@ actor B {
 b = spawn B()
 a = spawn A(b)
 print(a.Save(4))
+```
+
+Case: [actors/callback-chain.kz](../corpus/actors/callback-chain.kz)
+```kurz
+actor Store(Checker Check) {
+    mut int saved = 0
+
+    pub int Save(int n) {
+        saved = n
+        return Check.Valid(this) + 1
+    }
+
+    pub int Load() => saved
+}
+
+actor Checker(Verifier V) {
+    pub int Valid(Store store) => V.Verify(store) * 10
+}
+
+actor Verifier {
+    pub int Verify(Store store) => store.Load() * 10
+}
+
+v = spawn Verifier()
+c = spawn Checker(v)
+s = spawn Store(c)
+print(s.Save(4))
 ```
 
 Case: [actors/waits-one-message.kz](../corpus/actors/waits-one-message.kz)
@@ -2467,6 +2507,23 @@ send a.Fail()
 print(a.Save(5))
 ```
 
+Case: [actors/vouch-same-chain.kz](../corpus/actors/vouch-same-chain.kz)
+```kurz
+// `vouch` says that the call reaches another `Node`, and it reaches the one that waits, in the same chain: it gets in (U17)
+actor Node {
+    pub int Size(Node other, int n) {
+        if n == 0 {
+            return 1
+        }
+
+        return vouch other.Size(other, n - 1) + 1
+    }
+}
+
+root = spawn Node()
+print(root.Size(root, 2))
+```
+
 ### U18 (decided, §6) A wait of the top-level code that nothing can end
 
 The top-level code's call that waits sleeps on the main thread until its reply is set, while the
@@ -2480,12 +2537,14 @@ call each other from different chains and wait for each other do not hang silent
 (§6, "Deadlocks"; the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level
 wait"). A call that waits in a function the top-level code called is the top-level code's, at its
 own line. Where a call that an actor's start keeps out closes the loop, the error names that call's
-line (U22, U52) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and where more than one
+line (U22) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and where more than one
 such call closes it, the error line names the first place in source order and ends with a colon, and
 each further place stands under it on a line `kept out at <file>:<n>`, before the trace (U22) (§6, the
 owner, 2026-11-21, #599, comment 7067131310, several 2; comment 7067139953, the form 1), a place with
 the count of its calls where more than one, at most 10 such lines and then `... and K more` (U22)
-(§6, the owner, 2026-11-21, #599, comment 7067639209, the order 1, the same place 1, the cap 1). A deadline of a call that waits in a message is nothing left to run (U42) *(assumed: T6 of comment 6967625156)*. A loop of actors the top-level code never waits on stays until the end of the program,
+(§6, the owner, 2026-11-21, #599, comment 7067639209, the order 1, the same place 1, the cap 1). Two chains that cross through two different methods, as `deadlock.kz`'s do, `Left.Ask` waiting on `Right.Value` and
+`Right.Ask` on `Left.Value`, are no loop of U56, whose loop comes back to a type on it (§6, the owner, 2026-11-20, #519, comment 7051071630, T40 (c)), so
+that the case reaches its run with no `vouch` (the owner, 2026-11-21, #519, comment 7060155980, T76 1). A deadline of a call that waits in a message is nothing left to run (U42) *(assumed: T6 of comment 6967625156)*. A loop of actors the top-level code never waits on stays until the end of the program,
 where U13 drops it.
 
 Case: [actors/deadlock.kz](../corpus/actors/deadlock.kz)
@@ -3126,10 +3185,9 @@ crash, which restarts it again (U3).
 
 A call that reaches the actor while its restart runs its constructor, a call of the chain the restart
 starts, waits in its inbox and is not let in by that chain (U17), so that a constructor that waits on
-it waits on a call that waits for that constructor, as a message to a `per node` actor from its own
-start does (U52), which the top-level code's wait on one thread reads as `deadlock` (U18) (§6, the
-owner, 2026-11-20, #599, comment 7051501153, "Option 1"). No actor crashes on it, so that no restart
-loops on it, and a `send` of that chain to the actor waits in its inbox behind the restart and is no
+it waits on a call that waits for that constructor, which the top-level code's wait on one thread
+reads as `deadlock` (U18) (§6, the owner, 2026-11-20, #599, comment 7051501153, "Option 1"). No
+actor crashes on it, so that no restart loops on it, and a `send` of that chain to the actor waits in its inbox behind the restart and is no
 `deadlock` *(assumed: the reading of "as T29 option 1 reads", #599, comment 7056452417)*. The error
 names the line of the call the inbox holds, the call that closes the loop, not the line of the
 top-level code's call that waits (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and the
@@ -3329,7 +3387,7 @@ actor B {
     pub int Ask() {
         x = a
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -3372,7 +3430,7 @@ actor B {
     pub int Ask() {
         x = a
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -3418,7 +3476,7 @@ actor B {
     pub int Ask() {
         x = a
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -3435,7 +3493,7 @@ actor D {
     pub int Ask() {
         x = c
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -3494,7 +3552,7 @@ actor B {
     pub int Ask() {
         x = a
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -3511,7 +3569,7 @@ actor D {
     pub int Ask() {
         x = c
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -3577,9 +3635,9 @@ actor B {
         }
 
         return match k {
-            0 => x.Peek()
-            1 => x.Peek()
-            else => x.Peek()
+            0 => vouch x.Peek()
+            1 => vouch x.Peek()
+            else => vouch x.Peek()
         }
     }
 }
@@ -3629,7 +3687,7 @@ actor B {
     pub int Ask() {
         x = a
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -3680,19 +3738,19 @@ actor B {
         }
 
         return match k {
-            0 => x.Peek()
-            1 => x.Peek()
-            2 => x.Peek()
-            3 => x.Peek()
-            4 => x.Peek()
-            5 => x.Peek()
-            6 => x.Peek()
-            7 => x.Peek()
-            8 => x.Peek()
-            9 => x.Peek()
-            10 => x.Peek()
-            11 => x.Peek()
-            else => x.Peek()
+            0 => vouch x.Peek()
+            1 => vouch x.Peek()
+            2 => vouch x.Peek()
+            3 => vouch x.Peek()
+            4 => vouch x.Peek()
+            5 => vouch x.Peek()
+            6 => vouch x.Peek()
+            7 => vouch x.Peek()
+            8 => vouch x.Peek()
+            9 => vouch x.Peek()
+            10 => vouch x.Peek()
+            11 => vouch x.Peek()
+            else => vouch x.Peek()
         }
     }
 }
@@ -3748,19 +3806,19 @@ actor B {
         }
 
         return match k {
-            0 => x.Peek()
-            1 => x.Peek()
-            2 => x.Peek()
-            3 => x.Peek()
-            4 => x.Peek()
-            5 => x.Peek()
-            6 => x.Peek()
-            7 => x.Peek()
-            8 => x.Peek()
-            9 => x.Peek()
-            10 => x.Peek()
-            11 => x.Peek()
-            else => x.Peek()
+            0 => vouch x.Peek()
+            1 => vouch x.Peek()
+            2 => vouch x.Peek()
+            3 => vouch x.Peek()
+            4 => vouch x.Peek()
+            5 => vouch x.Peek()
+            6 => vouch x.Peek()
+            7 => vouch x.Peek()
+            8 => vouch x.Peek()
+            9 => vouch x.Peek()
+            10 => vouch x.Peek()
+            11 => vouch x.Peek()
+            else => vouch x.Peek()
         }
     }
 }
@@ -3824,7 +3882,7 @@ actor B {
     pub int Ask() {
         x = a
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -5679,7 +5737,8 @@ passed at its queueing, or before the child takes it, is dropped (U37), and the 
 line in the parent, as a call does, the crash of the parent ending the child (U13) *(assumed: T25 of comment
 6982985447, built at the default while it waits for the owner)*. An `attempt` of the top-level code outside a `within`
 roots a chain with no deadline, each call of its block bounded on its own (U36) *(assumed: T26 of comment 6982985447,
-built at the default while it waits for the owner)*.
+built at the default while it waits for the owner)*. For layer 2 the block is code of the method that runs the `attempt`, so
+that its calls that wait are edges of that method (U56) (the owner, 2026-11-21, #519, comment 7068198309, attempt 1).
 
 Case: [actors/attempt-callback.kz](../corpus/actors/attempt-callback.kz)
 ```kurz
@@ -6013,19 +6072,12 @@ throw in a constructor at `spawn` does (U3) and as U24 gives a crash's place, wh
 6983903100 words it "its throw is the caller's crash at the call's line": the build departs from T29's words, as the
 reading said back in comment 6986934971 states *(assumed: a reading of the build, said back in comment 6986934971 and put to the owner as T37 of comment 6991862214)*. Messages that reach it while it is built wait in its
 inbox for its start, and the first caller's own message joins that inbox after the call's arguments, behind them
-*(assumed: a reading of the build, proposed with this record and not put to the owner)*. A call that waits from the code its own start runs, a default that calls a
-function that calls `Cache.Get()`, waits for a start that waits for it, which the top-level code's
-wait that finds nothing left to run reads as `deadlock` (U18) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*, at that message's line, the call that closes the loop,
-wherever the code that runs the start stands, the top-level code, an actor's message or another
-actor's constructor, as at a restart (U22) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1): at that call's line where the top-level
-code ran the start, a call in a function it called being its own (U18), and, where an actor's message runs the start,
-where the top-level code waits on nothing, the end of the program
-drops the loop (U13) *(assumed: a reading of the build, proposed with this record and not put to the owner)*; a `send` from that code waits in the inbox behind the start *(assumed: a reading of the build, proposed with this record and not put to the owner)*.
-Where more than one call is kept out, a `per node` actor's start among the starts that keep them, the
-error names every one, the first place in source order on its line and each further place under it,
-with the counts and the cap of U22, as at a restart (U22) (§6, the owner, 2026-11-21, #599, comment
-7067131310, several 2; comment 7067139953, the form 1; comment 7067639209, the order 1, the same
-place 1, the cap 1).
+*(assumed: a reading of the build, proposed with this record and not put to the owner)*, and a call that waits on it from the code its own start runs, a default that calls a
+function that calls `Cache.Get()`, waits for a start that waits for it: a loop of calls that wait through its type, which
+layer 2 refuses at compile time as `call-loop` at that call's line (U56), where U18's `deadlock` at run time read it before
+(the owner, 2026-11-21, #519, comment 7068198309, per node 1), and not the `deadlock` at run time at the line of the call
+that the start keeps out, which holds for a restart (U22) (the owner, 2026-11-24, #610, comment 7140840988, "per node 1:
+call-loop (Recommended)"). A `send` from the code its own start runs waits in the inbox behind the start *(assumed: a reading of the build, proposed with this record and not put to the owner)*.
 
 Case: [actors/per-node-first-message.kz](../corpus/actors/per-node-first-message.kz)
 ```kurz
@@ -6133,8 +6185,8 @@ print(Cache.Size())
 
 Case: [actors/per-node-reentrant-in-message.kz](../corpus/actors/per-node-reentrant-in-message.kz)
 ```kurz
-// `User`'s `Use` starts `Cache`, whose default calls `Cache.Size` in the chain of `Use`, so that the call waits in `Cache`'s inbox
-// for the start that waits on it, and the error names that call, not the top-level code's call that waits
+// `User`'s `Use` starts `Cache`, whose default calls `Cache.Size` in the chain of `Use`, a call that would wait in `Cache`'s inbox
+// for the start that waits on it: a loop through `Cache`'s type, which layer 2 refuses at that call
 
 actor Cache per node {
     int size = Measured()
@@ -6157,7 +6209,7 @@ print(u.Use())
 Case: [actors/per-node-reentrant-nested.kz](../corpus/actors/per-node-reentrant-nested.kz)
 ```kurz
 // `Outer`'s start, which the top-level code runs, starts `Inner`, whose default waits on `Helper.Ask`, whose call of `Outer.Size`
-// waits in `Outer`'s inbox for the start that waits on it, and the error names that call, not the top-level code's call that waits
+// would wait in `Outer`'s inbox for the start that waits on it: a loop through `Outer`'s type, which layer 2 refuses at that call
 
 actor Helper {
     pub int Ask() => Outer.Size()
@@ -6227,7 +6279,10 @@ Case: [actors/per-node-limit.kz](../corpus/actors/per-node-limit.kz)
 ### U55 (assumed, §13) Its name inside it
 
 Inside a `per node` actor, a call through its name, `Cache.Get(1)`, is a message, as a call through
-`this` is: a call that waits is a call of its own chain, which layer 1 runs (U17), and
+`this` is: a call that waits is a call of its own chain, which layer 1 runs (U17), and no edge of layer 2's graph, as a
+call through `this` is none (U57) (the owner, 2026-11-21, #519, comment 7068198309, per node 1), and so is one through its
+name in a function or a lambda that its own message runs, the actor named passing through the calls as `this` does
+(the owner, 2026-11-21, #519, comment 7069702044), and
 `send Cache.Add(1)` runs after the current message (U11), against a direct call, as `Get(1)` is (U10)
 *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. `this` inside it gives a reference to the running instance, which ends with it, while its name
 reaches the fresh one that a stop or the limit starts (U54) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*.
@@ -6252,3 +6307,838 @@ actor Counter per node {
 print(Counter.Bump())
 print(Counter.Get())
 ```
+
+### U56 (decided, §6) A path of calls that wait that comes back to an actor type
+
+A loop is a path of methods that comes back to a type on it: `A.M` waits on `B.N`, whose code waits on any method of `A`
+(§6, "Deadlocks", layer 2; the owner, 2026-11-20, #519, comment 7051071630, T40 (c)). The compiler reads, over the whole program, a graph of the
+methods of the actor types: a point for each method an actor type declares and for its construction (U3), and an edge from
+a point to a method of `B` for each call that waits on it through a reference (U4) that the point's code reaches, with the
+blocks of `on crash` at its `spawn`s, which run as its messages (U28), and every function, class method, own method called
+directly (U10), constructor and lambda that code runs, as §5's throw sets read it: a call of a function value runs every
+lambda of the program whose type fits, wherever it was written, and a call through an interface every method that
+implements it; and an edge to the construction of `B` for each `spawn` of `B` that code reaches, whose calls are `B`'s. A
+`send` makes no edge (U6), a bound takes none out (U36, U39), and the top-level code, which nothing waits on, is no point of
+the graph (T41 (a), T42 (a), T43 (a), T44 (a), T45 (a) of that comment). A method of `A` is on a loop where a method that
+it reaches by one edge or more waits on a method of `A`, another instance of `A` among them, so that a loop through one type
+counts (T48 (a)), and two chains that cross through two different methods, `Left.Ask` waiting on `Right.Value` and
+`Right.Ask` on `Left.Value`, are no loop. The construction of a type is a point and starts a loop as a method does, and a
+loop comes back by a call that waits, so that a path that comes back to `A` by a `spawn` of `A` alone reaches a new actor
+and is none *(assumed: a reading of T40 (c) of comment 7051071630)*. The graph is read by reachability, never by a list of its paths, so
+that its cost stays polynomial in the program (T59 (a)). Each group of loops is the compile error `call-loop`, at the call
+of the group that stands first in source order, naming the shortest loop through that call with each hop's method, its line
+and the function or lambda it stands in, so that two chains that enter it at once, each actor of the loop busy in one and
+waiting on the other, are refused before they can hang (T52 (a)). A group is the methods on loops whose types reach one
+another's, a method on a loop of each of the two types reaching a call that waits on a method of the other, so that two
+loops through one method of a third type that waits on both are one group, and two that pass through two different methods
+of a third type, each waiting on one of them, are two; the calls of a group are those that wait on a loop of it; the
+shortest loop through the call starts at the method of the type it comes back to that reaches the call in the fewest
+edges, the construction before the methods, and of those the first declared, of two types it comes back to in as few edges
+the first declared, and comes back by the call that waits on that type that a walk from the call meets first, taking at each
+method its calls in source order *(assumed: a reading of T40 (c) of comment 7051071630)*. The text names a `send` where no result is needed, or a change of the code so that its calls do not come back,
+before `vouch` (U58). A call back to the caller is no edge (U57), and neither is a call after `vouch` (U58). The graph is
+read on every program that declares an actor, after every body and beside the other errors, a call that reported its own
+error making no edge, the walk reading each unit of code once, and a loop with a call in the program's own files is refused
+whether any code calls into it or not, as `reference-cycle` is (R2) (the owner, 2026-11-20, #519, comment 7051071630, T52 (a), T53 (b), T54 (a), T55 (a),
+T56 (a), T59 (a)). An actor with a part the build does not read, an interface after its name, a type parameter or `per`
+with other words than `node`, is `not supported` (U1), and the build does not read its code, so that it is no point of the
+graph: neither a call its code makes nor a call through a reference to it is an edge *(assumed: a reading of the build,
+proposed with this record and not put to the owner)*: T46 (a) of comment 7051071630, an edge to every implementer, is not
+built, since that construct is `not supported` on `main`. T47 (a) is built for the actor declared `per node` (U51): its
+methods and its construction are points of the graph, a call through its name is an edge, and `vouch` before it is `syntax`,
+since it always reaches its one actor (U58), a call through its own name in the code of its own messages, a function's and
+a lambda's they run among it, is a call through `this`, which makes no edge (U55, U57; the owner, 2026-11-21, #519, comment 7069702044), and a message to its name, which can start it (U52), is an edge into its construction, whose code
+is that actor's, as a `spawn`'s is, so that a loop through its start comes back by a call that waits in its construction
+(the owner, 2026-11-21, #519, comment 7068198309, per node 1). The block of an `attempt` is code of the method that runs it, which waits on it as on a call
+(U49), so that a call that waits in the block is an edge of that method, a call back to it through a local that holds
+`this` none (U57), and `vouch` there is read as anywhere (U58) (the owner, 2026-11-21, #519, comment 7068198309, attempt 1). No parallel form (§6, "Parallel work") is
+built, so that the graph reads none, and the body of one, where one exists, is code of its caller's method, as Q9 of issue
+525, comment 6850177383, reads it for layer 2 *(assumed: a reading of the build, proposed with this record and not put to
+the owner)*.
+
+Case: [actors/call-loop.kz](../corpus/actors/call-loop.kz)
+```kurz
+actor Left {
+    pub int Ask(Right other, Left back) => other.Ask(back) + 1
+
+    pub int Value() => 1
+}
+
+actor Right {
+    pub int Ask(Left other) => other.Value() + 2
+}
+
+l = spawn Left()
+r = spawn Right()
+print(l.Ask(r, l))
+```
+
+Case: [actors/call-loop-crossing.kz](../corpus/actors/call-loop-crossing.kz)
+```kurz
+actor Left {
+    pub int Ask(Right other) => other.Value() + 1
+
+    pub int Value() => 1
+}
+
+actor Right {
+    pub int Ask(Left other) => other.Value() + 2
+
+    pub int Value() => 2
+}
+
+l = spawn Left()
+r = spawn Right()
+print(l.Ask(r))
+print(r.Ask(l))
+```
+
+Case: [actors/call-loop-field-other.kz](../corpus/actors/call-loop-field-other.kz)
+```kurz
+actor A(B Other) {
+    pub void Join() {
+        Other.Keep(this)
+    }
+
+    pub int Total() => Other.Sum() + 1
+
+    pub int Load() => 7
+}
+
+actor B {
+    mut List<A> kept = []
+
+    pub void Keep(A x) {
+        kept.Add(x)
+    }
+
+    pub int Sum() {
+        mut total = 0
+        for k in kept {
+            total = total + k.Load()
+        }
+
+        return total
+    }
+}
+
+b = spawn B()
+a = spawn A(b)
+a.Join()
+b.Keep(spawn A(b))
+print(a.Total())
+```
+
+Case: [actors/call-loop-one-type.kz](../corpus/actors/call-loop-one-type.kz)
+```kurz
+actor Node {
+    mut List<Node> children = []
+
+    pub void Add(Node child) {
+        children.Add(child)
+    }
+
+    pub int Size() {
+        mut n = 1
+        for c in children {
+            n = n + c.Size()
+        }
+
+        return n
+    }
+}
+
+root = spawn Node()
+leaf = spawn Node()
+root.Add(leaf)
+print(root.Size())
+```
+
+Case: [actors/call-loop-function.kz](../corpus/actors/call-loop-function.kz)
+```kurz
+int AskOf(Right right, Left back) => right.Ask(back)
+
+actor Left {
+    pub int Ask(Right other, Left back) => AskOf(other, back) + 1
+
+    pub int Value() => 1
+}
+
+actor Right {
+    pub int Ask(Left other) => other.Value() + 2
+}
+
+l = spawn Left()
+r = spawn Right()
+print(l.Ask(r, l))
+```
+
+Case: [actors/call-loop-lambda.kz](../corpus/actors/call-loop-lambda.kz)
+```kurz
+actor Left {
+    pub int Ask(Right other, Left back) {
+        get = () => other.Ask(back)
+        return get() + 1
+    }
+
+    pub int Value() => 1
+}
+
+actor Right {
+    pub int Ask(Left other) => other.Value() + 2
+}
+
+l = spawn Left()
+r = spawn Right()
+print(l.Ask(r, l))
+```
+
+Case: [actors/call-loop-function-value.kz](../corpus/actors/call-loop-function-value.kz)
+```kurz
+int Call(() => int f) => f()
+
+actor Left {
+    pub int Ask(() => int f) => Call(f) + 1
+
+    pub int Value() => 1
+}
+
+actor Right {
+    pub int Ask(Left other) => other.Value() + 2
+}
+
+l = spawn Left()
+r = spawn Right()
+print(l.Ask(() => r.Ask(l)))
+```
+
+Case: [actors/call-loop-interface.kz](../corpus/actors/call-loop-interface.kz)
+```kurz
+interface Getter {
+    int Get()
+}
+
+class Via(Right Peer, Left Back) : Getter {
+    pub int Get() => Peer.Ask(Back)
+}
+
+int Read(Getter g) => g.Get()
+
+actor Left {
+    pub int Ask(Right other, Left back) => Read(Via(other, back)) + 1
+
+    pub int Value() => 1
+}
+
+actor Right {
+    pub int Ask(Left other) => other.Value() + 2
+}
+
+l = spawn Left()
+r = spawn Right()
+print(l.Ask(r, l))
+```
+
+Case: [actors/call-loop-spawn.kz](../corpus/actors/call-loop-spawn.kz)
+```kurz
+actor Child(Parent Up) {
+    int seen = Up.Count()
+
+    pub int Seen() => seen
+}
+
+actor Parent {
+    mut List<Child> kids = []
+
+    pub int Count() => 3
+
+    pub void Make(Parent other) {
+        kids.Add(spawn Child(other))
+    }
+}
+
+p = spawn Parent()
+q = spawn Parent()
+p.Make(q)
+print(q.Count())
+```
+
+Case: [actors/call-loop-crash-block.kz](../corpus/actors/call-loop-crash-block.kz)
+```kurz
+actor Child {
+    pub int Work(int n) {
+        if n == 0 {
+            throw "zero"
+        }
+
+        return n
+    }
+}
+
+actor Boss(Peer P) {
+    pub int Run(int n) {
+        c = spawn Child() on crash (crash) {
+            print("seen {P.Seen()}")
+            restart
+        }
+
+        return c.Work(n)
+    }
+}
+
+actor Peer {
+    pub int Ask(Boss boss) => boss.Run(1)
+
+    pub int Seen() => 2
+}
+
+p = spawn Peer()
+b = spawn Boss(p)
+print(b.Run(1))
+print(p.Ask(b))
+```
+
+Case: [actors/call-loop-within.kz](../corpus/actors/call-loop-within.kz)
+```kurz
+actor Node {
+    mut List<Node> children = []
+
+    pub void Add(Node child) {
+        children.Add(child)
+    }
+
+    pub int Size() {
+        mut n = 1
+        for c in children {
+            n = n + c.Size() within 1s
+        }
+
+        return n
+    }
+}
+
+root = spawn Node()
+print(root.Size())
+```
+
+Case: [actors/call-loop-unreached.kz](../corpus/actors/call-loop-unreached.kz)
+```kurz
+actor Left {
+    pub int Ask(Right other, Left back) => other.Ask(back) + 1
+
+    pub int Value() => 1
+}
+
+actor Right {
+    pub int Ask(Left other) => other.Value() + 2
+}
+
+print(3)
+```
+
+Case: [actors/call-loop-send.kz](../corpus/actors/call-loop-send.kz)
+```kurz
+actor Left {
+    pub void Tell(Right other) {
+        send other.Note(1)
+    }
+
+    pub int Value() => 1
+}
+
+actor Right(Left Up) {
+    mut int noted = Up.Value()
+
+    pub void Note(int n) {
+        noted = Up.Value() + n
+    }
+
+    pub int Ask() => noted
+}
+
+l = spawn Left()
+r = spawn Right(l)
+l.Tell(r)
+print(r.Ask())
+```
+
+Case: [actors/call-loop-spawns-alone.kz](../corpus/actors/call-loop-spawns-alone.kz)
+```kurz
+actor Counter(int Left) {
+    mut List<Counter> made = []
+
+    pub int Start() {
+        if Left > 0 {
+            made.Add(spawn Counter(Left - 1))
+        }
+
+        return Left
+    }
+}
+
+c = spawn Counter(2)
+print(c.Start())
+```
+
+Case: [actors/per-node-reentrant.kz](../corpus/actors/per-node-reentrant.kz)
+
+Case: [actors/per-node-reentrant-in-message.kz](../corpus/actors/per-node-reentrant-in-message.kz)
+
+Case: [actors/per-node-reentrant-nested.kz](../corpus/actors/per-node-reentrant-nested.kz)
+
+### U57 (decided, §6) A call back to the caller that waits
+
+A call through a reference that can only be the actor whose message makes it is no edge of U56's graph: `this` as a value
+outside a lambda, or a local without `mut` that holds it (the owner, 2026-11-20, #519, comment 7051071630, T49 (c), T61 (a)). Neither is a call through a
+parameter of an actor's method that is a callback. A parameter is a callback where calls through a reference reach the
+method, every one of them a call that waits, and each passes there `this`, as the call writes it, or a parameter of the
+method whose message makes the call that is a callback itself, read to a fixed point (the owner, 2026-11-20, #519, comment 7051071630, T60 (b)). The
+parameter is followed through locals without `mut` and through the arguments of the functions and methods the message calls
+(T49 (c)). A parameter of a method that no call through a reference reaches, and that the actor's own code calls directly
+(U10), is read through its callers, each of them reading the method's calls with what it passes there, and a call's
+arguments reach the method it picks and each of its overrides and of the methods that implement it, a data type's method
+taking the value it is called on first (D16) *(assumed: a reading of T49 (c) of comment 7051071630)*. The callbacks are the
+least fixed point: every parameter starts as none, and each is read again as long as one changes, so that a reference handed
+on through a chain of calls that wait is one (T60 (b)), and only a parameter that the rounds reach from a `this` without
+passing through itself is one, so that a cycle of parameters that no `this` fills is none, and so is a cycle that a `this`
+enters, a recursion through two actor types that hands the reference back and forth among them (the owner, 2026-11-20, #519, comment 7051071630, T62 (a)). Such a call reaches the caller that waits, which takes it as a call of its chain (U17), as layer 1 runs `A.Load`
+inside `A.Save` (§6, "Deadlocks", layer 2, "Exempt without override: a callback through a reference the caller passed in
+that same call"). So is a call through the name of a `per node` actor in the code of its own messages, inside its own
+method and in a function or a lambda that runs there, which U55 reads as a call through `this` (the owner, 2026-11-21, #519, comment 7069702044), and a call in the block of an `attempt` through a local of the method that runs it that holds `this`, a call
+back into the actor that waits on the block (U49) (the owner, 2026-11-21, #519, comment 7068198309, per node 1, attempt 1).
+
+A field set from a parameter that is a callback is one, and so is a list of them (the owner, 2026-11-20, #519, comment 7051071630, T49 (c)); a field
+outlives the message that set it, so that another message's call through it can reach an actor the caller's chain does not
+hold, as T49 (c) of #519, comment 7007991607, says of it. A field of an actor is one where every write of it takes a callback,
+and so is each item of a list field whose every item written takes one, read in the least fixed point with the parameters,
+so that a call through the field, or through an item of the list, read by an index or as the variable of a `for` over it, is
+no edge, and any other write makes the field none *(assumed: a reading of T49 (c) of comment 7051071630)*. A write is an
+assignment of a field of the actor's body in any method, by its name or through `this`, and its default, and of a list every
+item that `Add` or `Insert` puts in, every item assigned and each item of a list literal assigned; `null` and an empty list
+write nothing, and a field with no other write is a callback; a list that `AddRange` puts in, the field passed as `mut` and a
+write in a lambda write another reference, and a write in a lambda that no code runs makes the field none *(assumed: a
+reading of T49 (c) of comment 7051071630)*.
+
+A field of the actor's primary constructor that every `spawn` fills with `this` of a caller that waits is a callback, as
+T49 (b), T60 (b) and T62 (a) read one: the walk reads every `spawn` of the type, as it reads every write of a field, so that
+`spawn Worker(this)` that calls back through the field gets no `call-loop`, as the same field set by a method does, and a
+`spawn` that fills it with another reference makes it none (the owner, 2026-11-21, #519, comment 7060155980, T75 1). A
+`spawn` fills the field as a caller that waits fills a parameter, `this` held in a local without `mut` among what it passes,
+and gives none in the code outside the actors' messages; any other write of the field makes it none, as of a field of the
+body *(assumed: a reading of T75 1 of comment 7060155980)*. A field of an actor that no `spawn` makes is none, as a
+method that nothing calls has no caller (§6, the owner, 2026-11-21, #519, comment 7067131456).
+
+No callback comes from a reference that a `send` passes, or that another caller that waits passes as anything but `this` or
+a callback (T60 (b)), nor from an item of a list, but for a list field of callbacks, or from a capture in a lambda, a local
+that holds `this` among them (T49 (c)); an item of a collection that is no list gives none either *(assumed: a reading of
+T60 (b) of comment 7051071630)*. `this` inside a lambda gives none, since a lambda can be handed to another actor's message
+(U12), where `this` names an actor outside the chain, and so does `this` in a lambda that runs in place, a key of `SortBy`
+among them, which T61 (b) of #519, comment 7009683539, would have made a callback (the owner, 2026-11-20, #519, comment 7051071630, T61 (a)). Nor
+does a call that code outside the actors' messages runs make one: the outside is what the top-level code and the code no
+actor's message reaches run, not every `pub` method, so that a `this` handed on through a method of a class, an interface or
+a data type is a callback where every caller of that method is an actor's message (the owner, 2026-11-20, #519, comment 7051071630, T74 (b)). The code
+no actor's message reaches is read from the `pub` functions and the `pub` methods of the classes and the data types, which a
+caller outside the program could call, through every function, method and lambda they run, and a `static` method of an actor
+is no message of it, so that the code only such a method reaches is outside *(assumed: a reading of T74 (b) of comment
+7051071630)*. The walk keeps no context per call, so that one caller that passes another reference makes the parameter's
+calls edges for every caller (T49 (c)). A method that nothing calls has no caller to call back, so that a loop through its
+parameters is refused, as U56 refuses a loop no code calls into *(assumed: a reading of the build, proposed with this record
+and not put to the owner)*.
+
+Case: [actors/callback.kz](../corpus/actors/callback.kz)
+
+Case: [actors/chain-send-waits.kz](../corpus/actors/chain-send-waits.kz)
+
+Case: [actors/call-self-through-this.kz](../corpus/actors/call-self-through-this.kz)
+
+Case: [actors/call-loop-callback-helper.kz](../corpus/actors/call-loop-callback-helper.kz)
+```kurz
+int LoadOf(int k, A x) => x.Load() + k
+
+actor A(B Other) {
+    mut int saved = 0
+
+    pub int Save(int n) {
+        saved = n
+        return Other.Check(this) + 1
+    }
+
+    pub int Load() => saved
+}
+
+actor B {
+    pub int Check(A x) => LoadOf(1, x) * 10
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Save(4))
+```
+
+Case: [actors/callback-chain.kz](../corpus/actors/callback-chain.kz)
+
+Case: [actors/call-loop-passed-other.kz](../corpus/actors/call-loop-passed-other.kz)
+```kurz
+actor A(B Other) {
+    pub int Save(A other) => Other.Check(other) + 1
+
+    pub int Load() => 7
+}
+
+actor B {
+    pub int Check(A x) => x.Load() * 10
+}
+
+b = spawn B()
+a = spawn A(b)
+peer = spawn A(b)
+print(a.Save(peer))
+```
+
+Case: [actors/call-loop-two-callers.kz](../corpus/actors/call-loop-two-callers.kz)
+```kurz
+actor A(B Other) {
+    pub int Save() => Other.Check(this) + 1
+
+    pub int Load() => 7
+}
+
+actor B {
+    pub int Check(A x) => x.Load() * 10
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Save())
+print(b.Check(a))
+```
+
+Case: [actors/call-loop-chain-other.kz](../corpus/actors/call-loop-chain-other.kz)
+```kurz
+actor Store(Checker Check) {
+    pub int Save() => Check.Valid(this) + 1
+
+    pub int Audit(Store other) => Check.Valid(other) + 2
+
+    pub int Load() => 7
+}
+
+actor Checker(Verifier V) {
+    pub int Valid(Store store) => V.Verify(store) * 10
+}
+
+actor Verifier {
+    pub int Verify(Store store) => store.Load() * 10
+}
+
+v = spawn Verifier()
+c = spawn Checker(v)
+s = spawn Store(c)
+peer = spawn Store(c)
+print(s.Save())
+print(s.Audit(peer))
+```
+
+Case: [actors/call-loop-send-this.kz](../corpus/actors/call-loop-send-this.kz)
+```kurz
+actor A(B Other) {
+    pub void Save() {
+        Other.Check(this)
+    }
+
+    pub void Tell() {
+        send Other.Check(this)
+    }
+
+    pub int Load() => 7
+}
+
+actor B {
+    pub void Check(A x) {
+        print(x.Load())
+    }
+}
+
+b = spawn B()
+a = spawn A(b)
+a.Save()
+a.Tell()
+```
+
+Case: [actors/call-loop-callback-field.kz](../corpus/actors/call-loop-callback-field.kz)
+```kurz
+actor A(B Other) {
+    pub void Join() {
+        Other.Keep(this)
+    }
+
+    pub int Total() => Other.Sum() + 1
+
+    pub int Load() => 7
+}
+
+actor B {
+    mut List<A> kept = []
+
+    pub void Keep(A x) {
+        kept.Add(x)
+    }
+
+    pub int Sum() {
+        mut total = 0
+        for k in kept {
+            total = total + k.Load()
+        }
+
+        return total
+    }
+}
+
+b = spawn B()
+a = spawn A(b)
+a.Join()
+print(a.Total())
+```
+
+Case: [actors/call-loop-field-other.kz](../corpus/actors/call-loop-field-other.kz)
+
+Case: [actors/call-loop-lambda-capture.kz](../corpus/actors/call-loop-lambda-capture.kz)
+```kurz
+actor A(B Other) {
+    pub int Save() {
+        get = () => Other.Check(this)
+        return get() + 1
+    }
+
+    pub int Load() => 7
+}
+
+actor B {
+    pub int Check(A x) => x.Load() * 10
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Save())
+```
+
+Case: [actors/call-loop-lambda-local.kz](../corpus/actors/call-loop-lambda-local.kz)
+```kurz
+actor A(B Other) {
+    pub int Save() {
+        me = this
+        get = () => Other.Check(me)
+        return get() + 1
+    }
+
+    pub int Load() => 7
+}
+
+actor B {
+    pub int Check(A x) => x.Load() * 10
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Save())
+```
+
+Case: [actors/call-loop-callback-interface.kz](../corpus/actors/call-loop-callback-interface.kz)
+```kurz
+interface Checker {
+    int Run(A x)
+}
+
+class Via(B Peer) : Checker {
+    pub int Run(A x) => Peer.Check(x)
+}
+
+int Ask(Checker k, A s) => k.Run(s)
+
+actor A(B Other) {
+    pub int Save() => Ask(Via(Other), this) + 1
+
+    pub int Load() => 7
+}
+
+actor B {
+    pub int Check(A x) => x.Load() * 10
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Save())
+```
+
+Case: [actors/call-loop-unreached.kz](../corpus/actors/call-loop-unreached.kz)
+
+### U58 (decided, §6) `vouch`
+
+`vouch` before a call that waits on an actor's method through a reference (U4), `vouch c.Size()`, takes that call out of
+U56's graph, and with it every loop through it, and says that the call reaches another actor than the one of the loop that
+waits (§6, "Deadlocks", layer 2, "`vouch` on the call overrides it and means 'different instance, I vouch'"), which nothing
+checks at run time, U18's `deadlock` and `call-timeout` being the net for a false promise (the owner, 2026-11-20, #519, comment 7051071630, T57 (a)). Where it does not hold, the call runs as it would without the word: a call that reaches an actor busy in
+another chain waits on it, so that the two chains wait on each other and U18, the call's bound (U36) or, for a loop the
+top-level code never waits on, the end of the program (U13) ends the wait, and a call that reaches an actor waiting in the
+call's own chain gets in as a call of that chain (U17), so that a recursion of one chain through a `vouch` that does not hold
+runs to its result *(assumed: a reading of T57 (a) of comment 7051071630)*.
+It binds to the call after it, so that `n + vouch c.Size()` adds the call's result to `n`, and the call's clause and its
+`else` stand after the call, `vouch c.Size() within 1s` (U39); of a chain of calls after it, it takes the last, so that
+`vouch c.Child().Size()` takes the call of `Size` out and leaves `c.Child()` a call as any other *(assumed: a reading of the
+build, proposed with this record and not put to the owner)*. Before anything else, a function's call, a class's method, a
+direct call of the actor's own method (U10), `vouch this.Size()` among them, since a call through `this` is one (U10), a
+`spawn` (U2), what is no call, or inside a `send` (U14), it is `syntax` (E4), as `within` on such a call is (U41), and so it is
+before a call through the name of a `per node` actor, `vouch Cache.Get()`, which always reaches its one actor (U51)
+(the owner, 2026-11-21, #519, comment 7068198309, per node 1); a call
+through a local that holds `this` is a call through a reference, which U57 takes out, so that `vouch` before it is U59's
+warning *(assumed: a reading of the build, proposed with this record and not put to the owner)*. `vouch` is a word only
+where it stands, before a name, `this` or `spawn` on its line (§6, the owner, 2026-11-13, #519, comment 6847932993, Q10), so
+that `vouch` names a variable and `vouch(3)` calls a function (the owner, 2026-11-20, #519, comment 7051071630, T50 (a)). A statement is read as a declaration first, and `vouch` is the word only where none
+parses, so that `vouch c = vouch(2)` declares `c` of a type named `vouch` *(assumed: a reading of the build, proposed with
+this record and not put to the owner)*.
+
+Case: [actors/vouch-tree.kz](../corpus/actors/vouch-tree.kz)
+```kurz
+actor Node {
+    mut List<Node> children = []
+
+    pub void Add(Node child) {
+        children.Add(child)
+    }
+
+    pub int Size() {
+        mut n = 1
+        for c in children {
+            n = n + vouch c.Size()
+        }
+
+        return n
+    }
+}
+
+root = spawn Node()
+a = spawn Node()
+b = spawn Node()
+root.Add(a)
+a.Add(b)
+print(root.Size())
+```
+
+Case: [actors/vouch-within.kz](../corpus/actors/vouch-within.kz)
+```kurz
+actor Node {
+    mut List<Node> children = []
+
+    pub void Add(Node child) {
+        children.Add(child)
+    }
+
+    pub int Size() {
+        mut n = 1
+        for c in children {
+            s = vouch c.Size() within 1s
+            n = n + s
+        }
+
+        return n
+    }
+}
+
+root = spawn Node()
+leaf = spawn Node()
+root.Add(leaf)
+print(root.Size())
+```
+
+Case: [actors/vouch-other-loop.kz](../corpus/actors/vouch-other-loop.kz)
+```kurz
+actor Node {
+    mut List<Node> children = []
+
+    pub void Add(Node child) {
+        children.Add(child)
+    }
+
+    pub int Size() {
+        mut n = 1
+        for c in children {
+            n = n + vouch c.Size()
+        }
+
+        return n
+    }
+
+    pub int Depth() {
+        mut most = 0
+        for c in children {
+            d = c.Depth()
+            if d > most {
+                most = d
+            }
+        }
+
+        return most + 1
+    }
+}
+
+root = spawn Node()
+leaf = spawn Node()
+root.Add(leaf)
+print(root.Size() + root.Depth())
+```
+
+Case: [actors/vouch-not-actor-call.kz](../corpus/actors/vouch-not-actor-call.kz)
+```kurz
+int Twice(int n) => n * 2
+
+print(vouch Twice(3))
+```
+
+Case: [actors/vouch-send.kz](../corpus/actors/vouch-send.kz)
+```kurz
+actor Counter {
+    mut int count = 0
+
+    pub void Add(int n) {
+        count = count + n
+    }
+}
+
+c = spawn Counter()
+send vouch c.Add(1)
+```
+
+Case: [actors/vouch-name.kz](../corpus/actors/vouch-name.kz)
+```kurz
+vouch = 2
+print(vouch + 1)
+```
+
+Case: [actors/vouch-declaration.kz](../corpus/actors/vouch-declaration.kz)
+```kurz
+data vouch(int N)
+
+actor A {
+    pub int M() {
+        vouch c = vouch(2)
+        return c.N
+    }
+}
+
+a = spawn A()
+print(a.M())
+```
+
+Case: [actors/vouch-same-chain.kz](../corpus/actors/vouch-same-chain.kz)
+
+Case: [actors/vouch-own-method.kz](../corpus/actors/vouch-own-method.kz)
+
+### U59 (decided, §6, §12) A `vouch` that covers no loop
+
+A `vouch` whose call is on no loop of U56's graph read with every `vouch` left out, so that two on one loop keep each other,
+or whose call U57 takes out, is the lint `vouch-unneeded`: a warning at the word, in the program's own files, which stops
+no build, written as H5 writes `md5-insecure`, `app.kz:3: warning: vouch-unneeded: <text>`, as rustc warns of an
+`unsafe` block that holds no unsafe operation; nothing silences it, as H5's lint, it stands beside the program's other
+errors, and a program with a `not supported` gets none, since an unread construct can hide an edge (the owner, 2026-11-20, #519, comment 7051071630, T51 (b), T54 (a), T55 (a)).
+
+No case: a warning changes neither what a program prints nor whether it compiles, and a corpus header cannot expect one (V12).

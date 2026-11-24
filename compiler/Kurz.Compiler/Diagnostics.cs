@@ -9,7 +9,7 @@ namespace Kurz.Compiler;
 /// a case expects. The checker gives it to a construct it does not read, and the emitter to one it does not lay out, a build for
 /// Windows to the calls on files and sockets and the reads of the command line, the environment and the clock among them (S11); a
 /// corpus case that gets one fails its theory unless the theory names the case or its rules lie outside the checker. A <see cref="DiagnosticKind.Warning"/>
-/// is a lint with its id, <c>md5-insecure</c> (H5), which builds the program (design record, section 12, "Warning, build goes on").
+/// is a lint with its id, <c>md5-insecure</c> (H5) or <c>vouch-unneeded</c> (U59), which builds the program (design record, section 12, "Warning, build goes on").
 /// </summary>
 public enum DiagnosticKind
 {
@@ -194,6 +194,7 @@ public static class ErrorIds
     public const string MoveReachable = "move-reachable";
     public const string MoveAtCall = "move-at-call";
     public const string PointerCrosses = "pointer-crosses";
+    public const string CallLoop = "call-loop";
 
     /// <summary>L1 names this id in its rule and keeps it out of the table, which lists the ids cases expect: no corpus file can be a file that is not UTF-8.</summary>
     public const string InvalidSource = "invalid-source";
@@ -214,4 +215,7 @@ public static class ErrorIds
 public static class LintIds
 {
     public const string Md5Insecure = "md5-insecure";
+
+    /// <summary>U59: a <c>vouch</c> that covers no loop of calls that wait (U56), read with every <c>vouch</c> left out.</summary>
+    public const string VouchUnneeded = "vouch-unneeded";
 }

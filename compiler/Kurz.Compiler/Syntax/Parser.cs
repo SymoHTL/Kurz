@@ -2491,6 +2491,22 @@ public sealed class Parser
             return new UnaryExpression(op.Line, op.Kind, operand);
         }
 
+        // U58: `vouch c.Size()`, the word before a call that waits, where a name, `this` or `spawn` follows it on its line, as no name of
+        // an expression is followed, so that `vouch` is a word only where it stands and a name elsewhere, `vouch(3)` a call and `vouch + 1` a sum
+        // (section 6, comment 6847932993, Q10); it takes the postfix expression after it, as C#'s `await` does, which is a call, its
+        // clause and its postfix `else` among it, and the word is the call's; before anything else it is `syntax` (E4)
+        if (Current is { Kind: TokenKind.Name, Text: "vouch" } && Peek() is var next && next.Line == Current.Line
+            && (next.Kind == TokenKind.Name || next.IsKeyword("this") || next.IsKeyword("spawn")))
+        {
+            var word = Advance();
+            return ParsePostfix() switch
+            {
+                CallExpression call => call with { Vouch = word.Line },
+                ElseExpression { Call: CallExpression call } e => e with { Call = call with { Vouch = word.Line } },
+                _ => throw new ParseError(word.Line, "`vouch` stands before a call of an actor's method through a reference, `vouch c.Size()` (U58)"),
+            };
+        }
+
         return ParsePostfix();
     }
 

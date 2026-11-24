@@ -5321,7 +5321,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // "Deadlocks", layer 1), so that one assigns a field the parked message read: a field passed to a `mut` parameter and read before
         // the wait, or before a direct call of the method that assigns it, which the count of such a read holds to its statement's end; a
         // field as an argument before the wait, a `for` over a field whose body waits and a key of `SortBy` that waits, which hold what
-        // they read as they hold it across any call
+        // they read as they hold it across any call; `this` inside the key's lambda is no callback of U57, since a lambda can cross into
+        // another actor's message (U12; the owner, 2026-11-20, #519, comment 7051071630, T49 (c) and T61 (a)), and `vouch`
+        // takes `Valid`'s call out of U56's loop, a promise nothing checks (U58)
         const string actorWaits = """
             actor Store(Checker Check) {
                 mut List<int> items = [1, 2, 3]
@@ -5364,7 +5366,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             actor Checker {
                 pub int Valid(Store store) {
-                    store.Reset()
+                    vouch store.Reset()
                     return 0
                 }
             }

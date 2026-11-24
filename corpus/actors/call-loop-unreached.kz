@@ -1,0 +1,14 @@
+// expect: error call-loop at 5
+// rules: U56, U57
+
+actor Left {
+    pub int Ask(Right other, Left back) => other.Ask(back) + 1
+
+    pub int Value() => 1
+}
+
+actor Right {
+    pub int Ask(Left other) => other.Value() + 2
+}
+
+print(3)

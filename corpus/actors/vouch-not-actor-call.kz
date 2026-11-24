@@ -1,0 +1,6 @@
+// expect: error syntax at 6
+// rules: U58
+
+int Twice(int n) => n * 2
+
+print(vouch Twice(3))
