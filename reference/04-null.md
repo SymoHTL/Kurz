@@ -590,7 +590,7 @@ that `groups[key]?.Add(n)` adds to the map's list, as Rust's `get_mut` and `push
 no place, a call's result, it is the error the same call gets without `?.`, `mut-required` (M5) (§4,
 the owner, 2026-11-24). A path through the chain's value, `cfg?.Items.Add(1)`, is what the same call
 in a test's branch is, `not supported` (N3, M5) (§4, the owner, 2026-11-24, issue 624, comment
-7135538740); issue 630 holds the gap for both forms. Such a call on a path a call can change (N9),
+7135538740). Such a call on a path a call can change (N9),
 whose arguments run a call, is `nullable-unchecked`, the error the same call gets with that call on
 the line before it, with the help line N9 gives it (§4, the owner, 2026-11-24); a local variable, a
 path of `data` fields from one and a map one holds stay allowed.

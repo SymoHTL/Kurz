@@ -176,7 +176,12 @@ public sealed partial class Emitter
     /// place the chain names in place, a variable, a path of fields, an item of a list or an entry of a map, holding no count of its
     /// value, and takes the place where the call takes it, after its arguments for <c>Add</c> (M3), an item's or an entry's in a block
     /// no other value holds (<see cref="ItemPlace"/>, <see cref="EntryPlace"/>), so that a list or a map no other value holds is changed
-    /// where it is, as Rust's <c>get_mut</c> reaches it; the index or the key runs once, before the arguments.
+    /// where it is, as Rust's <c>get_mut</c> reaches it; the index or the key runs once, before the arguments. "No count" is that place
+    /// alone: N9 makes such a call on a path a call can change, whose arguments run a call, <c>nullable-unchecked</c>. Every other call is made on the value the chain's target gave,
+    /// kept as the value before the dot of any call is (<see cref="EmitDataMethodCall"/>): one read through a field of an instance holds a
+    /// count of its own to the end of its statement (<c>InstanceField</c>, K2), so that an argument that sets the field to <c>null</c>
+    /// frees nothing the call reads (the line <c>chain-receiver-fenced</c> of the fenced program), and one read from a variable or a path
+    /// of data fields from one is held, a change of it in the arguments being <c>changed-while-held</c> (M7).
     /// </summary>
     private string? EmitChainCall(CallExpression c, ChainCall chain)
     {
