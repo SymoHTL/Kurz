@@ -1,0 +1,18 @@
+// expect: output
+// | 2
+// rules: U56
+
+actor Counter(int Left) {
+    mut List<Counter> made = []
+
+    pub int Start() {
+        if Left > 0 {
+            made.Add(spawn Counter(Left - 1))
+        }
+
+        return Left
+    }
+}
+
+c = spawn Counter(2)
+print(c.Start())

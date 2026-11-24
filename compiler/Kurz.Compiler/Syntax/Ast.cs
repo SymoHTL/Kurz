@@ -109,9 +109,11 @@ public enum ArgumentWord
 
 /// <summary>
 /// A call, a construction (D2) or a conversion (T10); type arguments where the call writes them (T19). <paramref name="Within"/> is the
-/// bound of the call clause <c>x.M() within d</c> (U39, record section 6), null where the call writes none.
+/// bound of the call clause <c>x.M() within d</c> (U39, record section 6), null where the call writes none. <paramref name="Vouch"/> is
+/// the line of the word <c>vouch</c> before the call, <c>vouch c.Size()</c> (U58, record section 6), 0 where none stands: a word of the
+/// call, as its clause is, and no node of its own.
 /// </summary>
-public sealed record CallExpression(int Line, Expression Callee, IReadOnlyList<TypeSyntax> TypeArguments, IReadOnlyList<Argument> Arguments, Expression? Within = null) : Expression(Line)
+public sealed record CallExpression(int Line, Expression Callee, IReadOnlyList<TypeSyntax> TypeArguments, IReadOnlyList<Argument> Arguments, Expression? Within = null, int Vouch = 0) : Expression(Line)
 {
     /// <summary>
     /// The bound of the call's clause, none or one, a part of the call that runs after its arguments, as it is written after them; a

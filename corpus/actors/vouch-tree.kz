@@ -1,0 +1,27 @@
+// expect: output
+// | 3
+// rules: U58
+
+actor Node {
+    mut List<Node> children = []
+
+    pub void Add(Node child) {
+        children.Add(child)
+    }
+
+    pub int Size() {
+        mut n = 1
+        for c in children {
+            n = n + vouch c.Size()
+        }
+
+        return n
+    }
+}
+
+root = spawn Node()
+a = spawn Node()
+b = spawn Node()
+root.Add(a)
+a.Add(b)
+print(root.Size())

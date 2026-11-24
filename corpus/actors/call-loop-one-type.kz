@@ -1,0 +1,24 @@
+// expect: error call-loop at 14
+// rules: U56
+
+actor Node {
+    mut List<Node> children = []
+
+    pub void Add(Node child) {
+        children.Add(child)
+    }
+
+    pub int Size() {
+        mut n = 1
+        for c in children {
+            n = n + c.Size()
+        }
+
+        return n
+    }
+}
+
+root = spawn Node()
+leaf = spawn Node()
+root.Add(leaf)
+print(root.Size())

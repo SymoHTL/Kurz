@@ -1,0 +1,19 @@
+// expect: error call-loop at 6
+// rules: U56
+
+actor Left {
+    pub int Ask(Right other, Left back) {
+        get = () => other.Ask(back)
+        return get() + 1
+    }
+
+    pub int Value() => 1
+}
+
+actor Right {
+    pub int Ask(Left other) => other.Value() + 2
+}
+
+l = spawn Left()
+r = spawn Right()
+print(l.Ask(r, l))

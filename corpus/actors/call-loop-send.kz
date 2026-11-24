@@ -1,0 +1,26 @@
+// expect: output
+// | 2
+// rules: U56
+
+actor Left {
+    pub void Tell(Right other) {
+        send other.Note(1)
+    }
+
+    pub int Value() => 1
+}
+
+actor Right(Left Up) {
+    mut int noted = Up.Value()
+
+    pub void Note(int n) {
+        noted = Up.Value() + n
+    }
+
+    pub int Ask() => noted
+}
+
+l = spawn Left()
+r = spawn Right(l)
+l.Tell(r)
+print(r.Ask())

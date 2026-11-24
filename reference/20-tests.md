@@ -228,7 +228,7 @@ one chain (U17), and the runner's wait meets `deadlock` where the test's actor w
 can run, a block of its child's policy among them, as `tests/test-deadlock.kz` shows. *(assumed: a reading of U17 and U18, proposed with the reading of comment 6998754650 and not put to the owner)* The runner is the
 root actor, which runs the tests in place of the program's statements, and each test's actor is its child
 with the policy `stop` (U25), so that a crash of the test's actor fails that test and nothing restarts
-(§11, the owner, 2026-11-20, comment 7051499099, Q13 (a) of comment 6998786049 at its lean). A `deadlock` that a call an actor's start keeps out closes (U22, U52) names that
+(§11, the owner, 2026-11-20, comment 7051499099, Q13 (a) of comment 6998786049 at its lean). A `deadlock` that a call an actor's start keeps out closes (U22) names that
 call's line in place of the test's, the line the top-level code's error names for that loop (U18) (§11,
 the owner, 2026-11-21, #599, comment 7063693195, Y5's line 1), in any file, the test's or a file the
 test's file `use`s or the standard library (§11, the owner, 2026-11-21, #599, comment 7067131310, the
@@ -313,7 +313,7 @@ actor B {
     pub int Ask() {
         x = a
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -358,7 +358,7 @@ actor B {
     pub int Ask() {
         x = a
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -375,7 +375,7 @@ actor D {
     pub int Ask() {
         x = c
         if x != null {
-            return x.Peek()
+            return vouch x.Peek()
         }
 
         return 0
@@ -442,19 +442,19 @@ actor B {
         }
 
         return match k {
-            0 => x.Peek()
-            1 => x.Peek()
-            2 => x.Peek()
-            3 => x.Peek()
-            4 => x.Peek()
-            5 => x.Peek()
-            6 => x.Peek()
-            7 => x.Peek()
-            8 => x.Peek()
-            9 => x.Peek()
-            10 => x.Peek()
-            11 => x.Peek()
-            else => x.Peek()
+            0 => vouch x.Peek()
+            1 => vouch x.Peek()
+            2 => vouch x.Peek()
+            3 => vouch x.Peek()
+            4 => vouch x.Peek()
+            5 => vouch x.Peek()
+            6 => vouch x.Peek()
+            7 => vouch x.Peek()
+            8 => vouch x.Peek()
+            9 => vouch x.Peek()
+            10 => vouch x.Peek()
+            11 => vouch x.Peek()
+            else => vouch x.Peek()
         }
     }
 }

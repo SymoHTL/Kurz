@@ -1,0 +1,24 @@
+// expect: output
+// | 51
+// rules: U57
+
+int LoadOf(int k, A x) => x.Load() + k
+
+actor A(B Other) {
+    mut int saved = 0
+
+    pub int Save(int n) {
+        saved = n
+        return Other.Check(this) + 1
+    }
+
+    pub int Load() => saved
+}
+
+actor B {
+    pub int Check(A x) => LoadOf(1, x) * 10
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Save(4))

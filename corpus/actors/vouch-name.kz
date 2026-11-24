@@ -1,0 +1,6 @@
+// expect: output
+// | 3
+// rules: U58
+
+vouch = 2
+print(vouch + 1)

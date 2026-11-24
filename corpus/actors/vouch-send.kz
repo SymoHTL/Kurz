@@ -1,0 +1,13 @@
+// expect: error syntax at 13
+// rules: U58
+
+actor Counter {
+    mut int count = 0
+
+    pub void Add(int n) {
+        count = count + n
+    }
+}
+
+c = spawn Counter()
+send vouch c.Add(1)

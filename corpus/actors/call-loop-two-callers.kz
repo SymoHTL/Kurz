@@ -1,0 +1,17 @@
+// expect: error call-loop at 5
+// rules: U57
+
+actor A(B Other) {
+    pub int Save() => Other.Check(this) + 1
+
+    pub int Load() => 7
+}
+
+actor B {
+    pub int Check(A x) => x.Load() * 10
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Save())
+print(b.Check(a))
