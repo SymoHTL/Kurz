@@ -433,7 +433,9 @@ block of the heap that serves; the entry stays a call at every caller (`Emitter.
 `__rust_alloc` is a call into the global allocator (the owner, 2026-11-20, issue 157, comment
 7051500158, S4, against the allocator as it stood, an exception to "no row slower beyond noise": eight
 rows of that issue's sweep ran slower by 0.6% to 5.7%, `hex-encode-16mib` and `equal` the most, and
-`hex-decode-64-digits` 9% to 14% faster and `substring` 6% to 7%; pinned by
+`hex-decode-64-digits` 9% to 14% faster and `substring` 6% to 7%; with the alignment of loops, S2,
+`parse-decimal` 1.1% to 1.9% slower, the cost of the two together, read as their placement, the owner's
+S6 of 2026-11-23, comment 7095824731, recorded in `kurz-design.md` beside S2; pinned by
 `ListTests.The_heap_the_allocation_entry_serves_and_its_table_are_set_where_either_changes` and
 `ListTests.The_allocation_entry_stays_a_call_where_its_size_is_a_constant`). A heap
 takes its memory in pages, its first page sized to what it holds first, from 256 bytes, each later page
