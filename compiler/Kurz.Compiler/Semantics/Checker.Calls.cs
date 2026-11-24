@@ -78,7 +78,19 @@ public sealed partial class Checker
         /// <summary>The first argument whose own type does not fit its parameter, with the parameter's type after substitution.</summary>
         public (int Argument, KurzType Parameter)? Misfit { get; set; }
 
-        public bool Fits => BindingError is null && !CannotInfer && Misfit is null;
+        /// <summary>T19: the first limit that a type argument, inferred or written, does not meet, with the parameter and the argument; null where each meets all.</summary>
+        public UnmetLimit? Unmet { get; set; }
+
+        /// <summary>The name of the data type a construction builds, which an unmet limit's message names where no function stands (T19).</summary>
+        public string? Of { get; init; }
+
+        /// <summary>T19, T33 (Q22): in a copy, the type arguments that the arguments read through a view give, as the function's text writes them; null for none.</summary>
+        public Dictionary<TypeParameterSymbol, KurzType>? Written { get; set; }
+
+        /// <summary>T19, T33 (Q8, Q22): in a copy, the type arguments the call writes that name the function's type parameters, as written; null for none.</summary>
+        public Dictionary<TypeParameterSymbol, KurzType>? WrittenTypeArguments { get; set; }
+
+        public bool Fits => BindingError is null && !CannotInfer && Misfit is null && Unmet is null;
 
         public bool Exact { get; set; }
 
@@ -1445,7 +1457,7 @@ public sealed partial class Checker
         }
 
         var slots = data.ConstructorFields.Select(f => new Slot(f.Name, f.Type, false, f.HasDefault, data.TypeParameters.Any(p => Types.Mentions(f.Type, p)))).ToList();
-        var candidate = new Candidate { Slots = slots, TypeParameters = data.TypeParameters, Result = Types.Void }; // the result is built below from the type arguments
+        var candidate = new Candidate { Slots = slots, TypeParameters = data.TypeParameters, Result = Types.Void, Of = data.Name }; // the result is built below from the type arguments
         if (c.TypeArguments.Count > 0)
         {
             if (c.TypeArguments.Count != data.TypeParameters.Count)
@@ -1463,6 +1475,7 @@ public sealed partial class Checker
             }
 
             candidate.Map = data.TypeParameters.Zip(written).ToDictionary(p => p.First, p => p.Second);
+            candidate.WrittenTypeArguments = WrittenTypeArguments(c, data.TypeParameters, written); // T19, T33 (Q8, Q22)
         }
 
         if (typeArguments is not null)
@@ -1484,6 +1497,7 @@ public sealed partial class Checker
 
         var made = new DataType(data, arguments);
         model.RecordCall(c, new CallInfo(CallKind.DataNew, null, data, null, candidate.Map, candidate.Binding, candidate.Slots.Count, made));
+        RecordWritten(c, candidate, new DataType(data, [.. data.TypeParameters.Select(p => new TypeParameterType(p))])); // T19, T33 (Q22)
         return new Typed(made);
     }
 
@@ -1511,7 +1525,7 @@ public sealed partial class Checker
 
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
         {
-            if (IsUnreadName(n.Name) || ProcessNameAsValue(n.Name, n.Line) || UnreadTypeMember(n.Name, m.Member, m.Line))
+            if (IsUnreadName(n.Name) || ProcessNameAsValue(n.Name, n.Line) || UnreadTypeMember(n.Name, m.Member, m.Line) || TypeParameterMember(n.Name, m.Member, m.Line))
             {
                 CheckArgumentsLoosely(c);
                 return Typed.Error;
@@ -1648,6 +1662,16 @@ public sealed partial class Checker
         {
             CheckArgumentsLoosely(c);
             return Typed.Error;
+        }
+
+        if (target.Type is TypeParameterType { Symbol: { } limited })
+        {
+            return CallThroughLimits(limited, m, c); // T19
+        }
+
+        if (ViewedLimit(m.Target, target.Type) is { } viewed)
+        {
+            return CallThroughLimits(viewed, m, c); // T19, T33: in a copy, through a parameter or a local of a type parameter with limits
         }
 
         if (target.Type is VectorType vector)
@@ -2323,6 +2347,7 @@ public sealed partial class Checker
                     // T35: a type parameter the call leaves out takes its default, one that was not read the error type, since its
                     // diagnostic stands at the default (E1)
                     candidate.Map = f.TypeParameters.Zip(typeArguments.Concat(left.Select(p => (KurzType?)p.Default ?? Types.Error))).ToDictionary(p => p.First, p => p.Second);
+                    candidate.WrittenTypeArguments = WrittenTypeArguments(c, f.TypeParameters, typeArguments); // T19, T33 (Q8, Q22)
                 }
             }
 
@@ -2590,6 +2615,7 @@ public sealed partial class Checker
             var map = picked.Map.Count == 0 ? NoMap : picked.Map;
             var recorded = kind == CallKind.Method && picked.Function is { IsStatic: true } ? CallKind.Function : kind; // K7: a `static` method has no instance
             model.RecordCall(c, new CallInfo(recorded, picked.Function, null, null, map, binding ?? picked.Binding, picked.Slots.Count, Types.Substitute(picked.Result, picked.Map)));
+            RecordWritten(c, picked, picked.Result); // T19, T33: the call's result as the function's text writes it (Q22)
             if (kind == CallKind.Function)
             {
                 KeepGenericCall(c, picked.Function); // T33: a call that may make a copy
@@ -2694,6 +2720,15 @@ public sealed partial class Checker
         if (candidate.Fits)
         {
             Fit(candidate, pres, only);
+        }
+
+        if (candidate.Fits)
+        {
+            // T19: the types inferred or written are checked against the limits after the inference (T27), and a function whose limit
+            // they do not meet does not fit the call (F13) (Q10 of issue 605, comment 7051071380); in a copy, a type argument that an
+            // argument read through the copy's type parameter gives is that type parameter, as the function's text writes it (Q22)
+            var written = candidate.Written = WrittenArguments(candidate, pres);
+            candidate.Unmet = Unmet(candidate.TypeParameters.Where(candidate.Map.ContainsKey).Select(p => (p, written?.GetValueOrDefault(p) ?? candidate.Map[p])));
         }
     }
 
@@ -3205,6 +3240,12 @@ public sealed partial class Checker
             return;
         }
 
+        if (bound.Unmet is { } unmet)
+        {
+            Report(ErrorIds.TypeMismatch, c.Line, UnmetText(unmet, bound.Function?.Name ?? bound.Of!)); // T19: at the line of the call
+            return;
+        }
+
         var (index, parameter) = bound.Misfit!.Value;
         var pre = pres[index];
         var own = ArgumentType(bound, pres, index);
@@ -3300,6 +3341,11 @@ public sealed partial class Checker
         if (candidate.CannotInfer)
         {
             return $"its type arguments are neither written nor inferable from the arguments{GivesNothing(candidate, pres)} (T27)";
+        }
+
+        if (candidate.Unmet is { } unmet)
+        {
+            return UnmetText(unmet, candidate.Function?.Name ?? candidate.Of!); // T19
         }
 
         var (index, parameter) = candidate.Misfit!.Value;
@@ -3399,7 +3445,9 @@ public sealed partial class Checker
             var a = pre.Argument;
             if (pre.Lambda is not null)
             {
+                lambdaText = WrittenType(candidate, slot.Type); // T19, T33 (Q22)
                 var typed = CheckExpression(pre.Lambda, type);
+                lambdaText = null;
                 if (!typed.IsError && !Types.IsError(type) && !Types.Assignable(typed.Type, type))
                 {
                     Report(ErrorIds.TypeMismatch, a.Line, $"{Types.A(typed.Type)} where {Types.A(type)} is required (F11, T1)");

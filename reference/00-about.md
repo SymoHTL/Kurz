@@ -7,8 +7,9 @@ and it stays that way until the owner has answered.
 
 It covers the sequential core, what a program without actors needs, the actors of one machine
 (chapter 19) and a program's tests (chapter 20). The rest of actors, distribution, keywords, jobs,
-`mock` and the test's clock, packages and clients (sections 6, 7 and 9 to 13 of the record) are outside
-it.
+`mock`, the test's clock and the cluster test, of which chapter 20 holds only the rules that read
+their forms, answer `not supported` and state what the record decides of them (Y8 to Y10), packages and clients
+(sections 6, 7 and 9 to 13 of the record) are outside it.
 
 ## The status of a rule
 
@@ -223,7 +224,9 @@ shortest digits that read back as the same number: `0.5`, and `0.300000000000000
 
 A class instance is the exception. It has a text only when its class declares one (A5). Printing
 an instance of a class that declares none, or putting one into an interpolated string (L6), is
-the compile error `no-text`. An instance can reach itself through a `weak` reference, so a
+the compile error `no-text`. A throw is the one place where such an instance has a text, its
+class's name on the error line of `thrown` (O7; §5, the owner, 2026-11-20, issue 598, comment
+7051500939). An instance can reach itself through a `weak` reference, so a
 derived text would need a rule for where to stop. The case shows one line for each sentence of
 the first paragraph: a list, an `enum` value, a `data` value without fields, null and two
 `double`s; the texts of A3 and of the class cases have cases of their own.
@@ -275,6 +278,41 @@ class Counter(mut int Count)
 
 c = Counter(0)
 print(c)
+```
+
+Case: [outcomes/throw-instance-without-text.kz](../corpus/outcomes/throw-instance-without-text.kz)
+```kurz
+data Missing
+
+class Note(string Body, List<int> Marks)
+
+int | Note | Missing Find(int id) {
+    if id == 1 {
+        return Note("note {id}", [id, id])
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Rethrown(int id) {
+    v = Find(id) else {
+        Note n => {
+            print("seen {n.Body}")
+            throw n
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3))
+print(Rethrown(2))
+print(Rethrown(1))
 ```
 
 A value of a union (D9) shows the text of the value of its case: an `int | string` that holds 5
@@ -375,7 +413,10 @@ print(Counter(1))
 `print(x)` with a value whose static type is an interface (K6) compiles when the interface declares
 `string Text()`, and is `no-text` otherwise; with a type parameter (T19) it compiles when the
 parameter is limited to an interface that declares it, and is `no-text` otherwise, whatever the call
-passes. A type meets such a limit when it has a text: every value with a derived text (A3, A4, A8,
+passes. A throw is the one place where a value of an interface that declares no `Text()` has a text,
+that of a thrown class instance: what the `Text()` of the instance's own class gives, found when the
+program runs, else that class's name (O7; §5, the owner, 2026-11-21, issue 621, comment 7067091007).
+A type meets such a limit when it has a text: every value with a derived text (A3, A4, A8,
 A11 to A14), a class that declares or inherits a `pub Text()` (A5, A9), and a value whose interface
 or type parameter has a text by the sentence before, without naming the interface (the owner,
 2026-10-04, against an interface a class has to name). The match holds only for an interface whose
@@ -385,6 +426,10 @@ the reference's reading, accepted by its id on 2026-10-09 without its text shown
 generic function, which would have reported an error at a call site for a line inside another
 function; the cost is that a generic function that prints its argument needs the limit, and that the
 standard library would declare one interface for it.
+Through such a limit a call of its method, `item.Text()`, gives in each copy the text of the type
+the copy binds, and a value of the type parameter where the interface is required is `not
+supported`, since a type without the interface meets it (T19, §4: the owner, 2026-11-20, issue 605,
+comment 7051071380, Q21).
 
 Case: [classes/text-through-interface.kz](../corpus/classes/text-through-interface.kz)
 ```kurz
@@ -410,6 +455,60 @@ void Show<T>(T item) {
 }
 
 Show(1)
+```
+
+Case: [classes/text-through-limit.kz](../corpus/classes/text-through-limit.kz)
+```kurz
+interface Texty {
+    string Text()
+}
+
+void Show<T: Texty>(T item) {
+    print(item)
+}
+
+Show(1)
+```
+
+Case: [classes/text-through-limit-union.kz](../corpus/classes/text-through-limit-union.kz)
+```kurz
+interface Texty {
+    string Text()
+}
+
+void Show<T: Texty>(T item) {
+    print(item)
+}
+
+void Use(int | string u) {
+    Show(u)
+}
+
+Use("hi")
+```
+
+Case: [classes/text-call-through-limit.kz](../corpus/classes/text-call-through-limit.kz)
+```kurz
+interface Texty {
+    string Text()
+}
+
+class Tag {
+    pub string Text() => "tag"
+}
+
+data Point(int X, int Y)
+
+string Show<T: Texty>(T item) => item.Text()
+
+print(Show(1))
+print(Show("ok"))
+print(Show(Point(1, 2)))
+print(Show(Tag()))
+n = 4
+s = "n={n}"
+print(Show(s))
+print(s)
 ```
 
 ### A6 (decided, §8) The text of a map
@@ -443,7 +542,12 @@ A3 and A4 make the text of a `data` value and of a list out of the texts of what
 an instance of a class a text only when its class declares one (A5). A list whose items are
 instances of a class that declares none has no text either, and neither has a `data` value with
 such a field: printing one, or putting it into an interpolated string (L6), is the compile error
-`no-text`, as for the instance itself. The type of what is held is known where it is printed.
+`no-text`, as for the instance itself. The type of what is held is known where it is printed. A throw
+is the one place where such a value has a text: a thrown `data` value or list that holds such an
+instance has the text A3 and A4 derive from what it holds, the instance's part of it being its
+class's name (O7; §5, the owner, 2026-11-21, issue 598, comment 7060156252, Q8 of comment
+7055578588), or what the `Text()` of the instance's own class gives where that class's chain declares
+one, as for a thrown instance (O7; §5, the owner, 2026-11-21, issue 598, comment 7063693020, F1).
 
 Case: [classes/print-list-without-text.kz](../corpus/classes/print-list-without-text.kz)
 ```kurz

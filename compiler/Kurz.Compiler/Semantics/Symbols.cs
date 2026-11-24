@@ -42,14 +42,27 @@ public sealed class VariableSymbol(string name, KurzType type, bool mut, Variabl
     public bool Move { get; init; }
 }
 
-/// <summary>A type parameter (T19). A limit written on it is <c>not supported</c> and is not read; whether one is written is kept, since only a limit gives a type parameter members.</summary>
+/// <summary>A type parameter (T19), with the interfaces and the class its limits name, which alone give a value of it members.</summary>
 public sealed class TypeParameterSymbol(string name, int line)
 {
     public string Name { get; } = name;
 
     public int Line { get; } = line;
 
-    public bool HasLimit { get; init; }
+    /// <summary>T19: the interfaces the limits name, <c>T: Shape + Named</c>, in their order; empty for none.</summary>
+    public List<InterfaceSymbol> Limits { get; } = [];
+
+    /// <summary>T19: the class a limit names, <c>T: Animal</c>, met by the class and every class derived from it (Q5 of issue 605); null for none.</summary>
+    public ClassSymbol? ClassLimit { get; set; }
+
+    /// <summary>T19: a limit is read, an interface or a class.</summary>
+    public bool HasLimits => Limits.Count > 0 || ClassLimit is not null;
+
+    /// <summary>
+    /// T19, E1: a limit is written that is not read, one reported already (a name of nothing, no interface, a carrier the build
+    /// does not read), so that a member of the parameter and an argument for it are errors of that diagnostic alone.
+    /// </summary>
+    public bool LimitUnread { get; set; }
 
     /// <summary>T35: the type of the constant the parameter holds, written <c>const JsonKeys K</c>; null for a type parameter, the error type where it is not read.</summary>
     public KurzType? Constant { get; set; }
@@ -357,6 +370,9 @@ public sealed class InterfaceSymbol(string name, TypeDeclaration declaration)
 
     /// <summary>A10: the <c>string Text()</c> the interface declares, which gives a value of it its text; null where it declares none.</summary>
     public FunctionSymbol? TextMethod => Methods.FirstOrDefault(f => f.Name == "Text" && f.Parameters.Count == 0 && f.ReturnType is PrimitiveType { Kind: Primitive.String });
+
+    /// <summary>A10: the interface's only member is <c>string Text()</c>, so that as a limit (T19) every type that has a text meets it, without naming it.</summary>
+    public bool TextOnly => Methods.Count == 1 && TextMethod is not null;
 }
 
 /// <summary>K10, K11, K16: a parameter of a class's primary constructor: the field it gives, own or the base's, the class whose declaration writes it, and that parameter.</summary>

@@ -571,20 +571,39 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// U39, U19: whether the bound of a call's clause can raise with no call in it, an index out of range or an operator's
-    /// <c>overflow</c> or <c>divide-by-zero</c> (chapter 12), which crashes the actor whose code runs it: anything but a duration's literal,
-    /// a number with its unit (L14), its sign included, or a read of a name, either in brackets, a bound of another type being
-    /// <c>type-mismatch</c> (U39, U40); a bound that runs a call, a name that runs a property's among them, can wait
-    /// (<see cref="SemanticModel.CanWait"/>).
+    /// U39, U19: whether an expression can raise with no call in it, an index out of range or an operator's <c>overflow</c> or
+    /// <c>divide-by-zero</c> (chapter 12), which crashes the actor whose code runs it: anything but a literal, a number, a string with no
+    /// hole, a <c>char</c>, a <c>bool</c>, <c>null</c> or a duration's, a number with its unit (L14), a number's sign and a duration's included, which the checker folds into a constant, or a read of a
+    /// name, either in brackets; an expression that runs a call, a name that runs a property's among them, can wait
+    /// (<see cref="SemanticModel.CanWait"/>). <see cref="EmitMessage"/> reads it of the bound of a call's clause, where no literal but a
+    /// duration's passes the checker, a bound of another type being <c>type-mismatch</c> (U39, U40), and of each argument of a message
+    /// after one that crosses (<see cref="RaisesAfterCrossing"/>; section 6, the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)",
+    /// and 2026-11-21, comment 7060155980, "T83 1", the arguments read as a bound is, assumed there).
     /// </summary>
-    private static bool Raises(Expression bound) => bound switch
+    private static bool Raises(Expression e) => e switch
     {
         ParenthesizedExpression p => Raises(p.Inner),
-        UnitLiteral => false,
-        UnaryExpression { Operand: UnitLiteral } => false,
+        IntegerLiteral or RealLiteral or UnitLiteral or CharLiteral or BoolLiteral or NullLiteral => false,
+        StringLiteral s => !s.IsPlain,
+        UnaryExpression { Operand: UnitLiteral or IntegerLiteral or RealLiteral } => false,
         NameExpression => false,
         _ => true,
     };
+
+    /// <summary>
+    /// Section 6: whether an argument of the message <paramref name="c"/> of the method <paramref name="f"/> after one that crosses
+    /// into the callee's heap, a value that holds a block (U12), can raise with no call in it (<see cref="Raises"/>), whose raise would
+    /// crash the builder with the copies made before it unqueued, were they made where they are evaluated: the crossing arguments of such
+    /// a message are then copied after its last argument, so that a raise leaves no copy (<see cref="Arguments"/>; the owner, 2026-11-20,
+    /// #519, comment 7051492844, "T24 (1)", and 2026-11-21, comment 7060155980, "T83 1", which copies them so in place of the heap of
+    /// the message's own of T24 (1)). An argument that raises before every crossing one leaves no copy, and one that runs a call can
+    /// wait and builds the message in a heap of its own (<see cref="SemanticModel.CanWait"/>).
+    /// </summary>
+    private bool RaisesAfterCrossing(CallExpression c, CallInfo info, FunctionSymbol f)
+    {
+        var first = Enumerable.Range(0, c.Arguments.Count).FirstOrDefault(i => info.Binding[i] >= 0 && Counted(Sub(f.Parameters[info.Binding[i]].Type)), -1);
+        return first >= 0 && c.Arguments.Skip(first + 1).Any(a => Raises(a.Value));
+    }
 
     /// <summary>
     /// U4, U6, U11: a call of an actor's method as a message: the actor's reference, read first, or, inside it, made from <c>this</c>
@@ -609,7 +628,9 @@ public sealed partial class Emitter
     /// built: its raise crashes the actor whose code builds the message before its queueing, and that crash frees the heap of its own with
     /// the message and the copies of its arguments (the runtime's <c>Fall</c>), which the actor's heap would keep unqueued to the actor's
     /// end. Where no argument can wait, the message is built in the actor's heap, and nothing runs between the read of that heap and the
-    /// queueing that could end the actor. Where the actor ended, the message is built or copied in the heap the caller allocates in (the
+    /// queueing that could end the actor; where an argument can raise after one that crosses (<see cref="RaisesAfterCrossing"/>), the
+    /// crossing arguments are copied into that heap after the last, so that a raise leaves no copy there (<see cref="Arguments"/>;
+    /// section 6, the owner, 2026-11-21, #519, comment 7060155980, "T83 1"). Where the actor ended, the message is built or copied in the heap the caller allocates in (the
     /// runtime's <c>ActorHeap</c>), and its queueing raises <c>actor-gone</c> at the call's line, a <c>send</c>'s too (the runtime's
     /// <c>Enqueue</c>; U6, U20; section 6, the owner, 2026-11-16, #519, comments 6919351399 and 6923513534).
     /// </summary>
@@ -627,7 +648,7 @@ public sealed partial class Emitter
         var own = c.Arguments.Select(a => a.Value).Concat(c.Clause()).Any(Model.CanWait) || c.Clause().Any(Raises) ? fn.Value($"call ptr {RuntimeFunction("MessageHeapNew")}()") : null;
         var left = own is null ? null : HeapBegun(own, "MessageHeapFree");
         var heap = own ?? fn.Value($"call ptr {RuntimeFunction("ActorHeap")}({ReferenceWords(actor)})");
-        var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => Default(f.Declaration!.Parameters[j].Default, owners[f]), cConvention: false, owned: true, into: heap);
+        var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => Default(f.Declaration!.Parameters[j].Default, owners[f]), cConvention: false, owned: true, into: heap, after: own is null && RaisesAfterCrossing(c, info, f));
         var message = MessageType(f);
         var block = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr {heap}, i64 {IrSize(message)})");
         var run = MessageRun(f);

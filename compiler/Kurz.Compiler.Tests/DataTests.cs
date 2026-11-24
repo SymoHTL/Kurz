@@ -437,6 +437,55 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_thrown_instance_of_a_class_without_a_text_writes_its_class_s_name_below_the_error_line()
+    {
+        // O7: an instance of a class that neither declares nor inherits a `Text()`, thrown by `throw` or by a bare `throw`, has its class's
+        // name below the error line (the owner, 2026-11-20, issue 598, comment 7051500939): the bare name of the instance's own class, a
+        // derived one thrown as its base (2026-11-21, comment 7060156252, Q2 and Q3 of comment 7055011193), and that name where the instance
+        // stands in a `data` value or a list that is thrown (the same answer, Q8 of comment 7055578588)
+        const string Note = "data Missing\n\nclass Note(string Body)\n\nint | Note | Missing Find(int id) {\n    if id == 1 {\n        return Note(\"a\")\n    }\n\n    return Missing\n}\n\nv = Find(1) else {\n";
+        Ran(BuildAndRun(Note + "    Note n => throw n\n    Missing => 0\n}\nprint(v)\n", "throw-class"), 1, [], "error: thrown at program.kz:14:\nNote\n");
+        Ran(BuildAndRun(Note + "    Note => throw\n    Missing => 0\n}\nprint(v)\n", "throw-class-bare"), 1, [], "error: thrown at program.kz:14:\nNote\n");
+        Ran(BuildAndRun(Note + "    else => throw\n}\nprint(v)\n", "throw-class-union"), 1, [], "error: thrown at program.kz:14:\nNote\n");
+        const string Animals = "class Animal(string Name)\n\nclass Dog(int Legs) : Animal\n\nvoid Fail(Animal a) {\n    throw a\n}\n\n";
+        Ran(BuildAndRun(Animals + "Fail(Dog(\"rex\", 4))\n", "throw-class-derived"), 1, [], "error: thrown at program.kz:6:\nDog\n");
+        Ran(BuildAndRun(Animals + "Fail(Animal(\"tom\"))\n", "throw-class-base"), 1, [], "error: thrown at program.kz:6:\nAnimal\n");
+
+        // an instance thrown as a base that has no `Text()` shows what the `Text()` of its own class gives, found when the program runs, its
+        // class's own or that of a base between the two, a `virtual` one's override among them, as C#'s virtual `ToString()` (the owner,
+        // 2026-11-21, issue 598, comment 7060156252, Q9 of comment 7055578588); an instance whose class's chain declares none keeps its name,
+        // a sibling class's `Text()` aside; an instance a thrown `data` value holds as such a base takes the text by the same rule (F1),
+        // and a `Text()` without `pub` is called as one with it (F2) (the owner, 2026-11-21, issue 598, comment 7063693020)
+        const string Texted = "class Animal(string Name)\n\nclass Dog(int Legs) : Animal {\n    pub string Text() => \"dog {Name}\"\n}\n\nvoid Fail(Animal a) {\n    throw a\n}\n\n";
+        Ran(BuildAndRun(Texted + "print(Dog(\"rex\", 4))\nFail(Dog(\"rex\", 4))\n", "throw-class-derived-text"), 1, ["dog rex"], "error: thrown at program.kz:8:\ndog rex\n");
+        const string Kinds = Texted + "class Puppy(int Age) : Dog\n\nclass Cat(int Lives) : Animal\n\n";
+        Ran(BuildAndRun(Kinds + "Fail(Puppy(\"pip\", 4, 1))\n", "throw-class-inherited-text"), 1, [], "error: thrown at program.kz:8:\ndog pip\n");
+        Ran(BuildAndRun(Kinds + "Fail(Cat(\"tom\", 9))\n", "throw-class-sibling-text"), 1, [], "error: thrown at program.kz:8:\nCat\n");
+        Ran(BuildAndRun(Kinds + "Fail(Animal(\"any\"))\n", "throw-class-base-of-text"), 1, [], "error: thrown at program.kz:8:\nAnimal\n");
+        Ran(BuildAndRun(Texted.Replace("pub string", "pub virtual string") + "class Puppy(int Age) : Dog {\n    pub override string Text() => \"puppy {Name}\"\n}\n\nFail(Puppy(\"pip\", 4, 1))\n", "throw-class-override-text"), 1, [], "error: thrown at program.kz:8:\npuppy pip\n");
+        Ran(BuildAndRun(Texted + "data Pen(Animal Item)\n\nthrow Pen(Dog(\"rex\", 4))\n", "throw-class-held-text"), 1, [], "error: thrown at program.kz:13:\nPen { Item = dog rex }\n");
+        Ran(BuildAndRun(Texted.Replace("pub string", "string") + "Fail(Dog(\"rex\", 4))\n", "throw-class-private-text"), 1, [], "error: thrown at program.kz:8:\ndog rex\n");
+        Ran(BuildAndRun("class Counter(mut int Count)\ndata Box(Counter Item)\n\nthrow Box(Counter(1))\n", "throw-class-held"), 1, [], "error: thrown at program.kz:4:\nBox { Item = Counter }\n");
+        Ran(BuildAndRun("class Counter(mut int Count)\n\nthrow [Counter(1), Counter(2)]\n", "throw-class-list"), 1, [], "error: thrown at program.kz:3:\n[Counter, Counter]\n");
+    }
+
+    [Fact]
+    public void A_thrown_value_of_an_interface_without_a_text_writes_the_text_of_its_instance_s_class()
+    {
+        // O7: a value thrown as an interface that declares no `Text()` takes the text of a thrown class instance: what the `Text()` of the
+        // instance's own class gives, found when the program runs, its own or a base's, else that class's name (the owner, 2026-11-21, issue
+        // 621, comment 7067091007); one that a thrown `data` value holds takes it by the same rule, and a `Text()` without `pub` is called
+        // as one with it (assumed: F1 and F2 of issue 598, comment 7063693020, read for such a value)
+        const string Sized = "interface Sized {\n    int Size()\n}\n\nclass Dot : Sized {\n    pub int Size() => 1\n}\n\nclass Ring(int Width) : Sized {\n    pub int Size() => Width\n    pub string Text() => \"ring {Width}\"\n}\n\nvoid Fail(Sized s) {\n    throw s\n}\n\n";
+        Ran(BuildAndRun(Sized + "Fail(Ring(2))\n", "throw-face-text"), 1, [], "error: thrown at program.kz:15:\nring 2\n");
+        Ran(BuildAndRun(Sized + "Fail(Dot())\n", "throw-face-name"), 1, [], "error: thrown at program.kz:15:\nDot\n");
+        Ran(BuildAndRun(Sized + "class Band(int More) : Ring\n\nclass Spot : Dot\n\nFail(Band(3, 4))\n", "throw-face-inherited-text"), 1, [], "error: thrown at program.kz:15:\nring 3\n");
+        Ran(BuildAndRun(Sized + "class Band(int More) : Ring\n\nclass Spot : Dot\n\nFail(Spot())\n", "throw-face-derived-name"), 1, [], "error: thrown at program.kz:15:\nSpot\n");
+        Ran(BuildAndRun(Sized + "data Pen(Sized Item)\n\nthrow Pen(Ring(2))\n", "throw-face-held"), 1, [], "error: thrown at program.kz:20:\nPen { Item = ring 2 }\n");
+        Ran(BuildAndRun(Sized.Replace("pub string", "string") + "Fail(Ring(2))\n", "throw-face-private-text"), 1, [], "error: thrown at program.kz:15:\nring 2\n");
+    }
+
+    [Fact]
     public void A_data_type_the_emitter_does_not_lay_out_builds_where_no_code_needs_it()
     {
         // the owner, 2026-10-23, "At first use"; the theory below has the same type where code needs it

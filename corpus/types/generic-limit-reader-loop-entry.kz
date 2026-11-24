@@ -1,0 +1,25 @@
+// expect: error type-mismatch at 18
+// rules: T19
+
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Measure<T>(Map<string, T> m) {
+    print(T.Kind)
+    mut total = 0
+    for e in m {
+        total = total + AreaOf(e.Value)
+    }
+    return total
+}
+
+mut squares = Map<string, Square>()
+squares["a"] = Square(3)
+print(Measure(squares))

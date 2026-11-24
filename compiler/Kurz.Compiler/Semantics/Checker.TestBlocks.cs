@@ -82,11 +82,11 @@ public sealed partial class Checker
     /// </summary>
     private static bool Shows(KurzType type) => HasText(type) && !HoldsRaw(type, []) && PrivateTextClass(type, []) is null;
 
-    /// <summary>Y9: <c>mock X with Y</c>, whose types the checker does not resolve, is <c>not supported</c> while what it accepts is open.</summary>
+    /// <summary>Y9: <c>mock X with Y</c>, whose types the checker does not resolve, is <c>not supported</c>: what it accepts, decided by Q7, is not built.</summary>
     private void CheckMock(MockStatement m) => NotSupported(m.Line, "`mock X with Y` (Y9)");
 
     /// <summary>
-    /// Y10: <c>advance d</c> is <c>not supported</c> while where it stands is open; its duration is checked as any expression is, and as the
+    /// Y10: <c>advance d</c> is <c>not supported</c>: where it stands, decided by Q8, is not built; its duration is checked as any expression is, and as the
     /// bound of <c>within</c> is (U40): a value of another type than <c>duration</c> is <c>type-mismatch</c> at its line, a nullable one
     /// <c>nullable-unchecked</c>, a call with a <c>void</c> success <c>syntax</c> (O10).
     /// </summary>

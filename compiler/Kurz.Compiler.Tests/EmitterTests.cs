@@ -1122,6 +1122,65 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal(heaps, Regex.Count(program.Ir, @"call ptr @""[^""]+\.MessageHeapNew\.[0-9]+[^""]*""\(\)"));
     }
 
+    [Theory]
+    [InlineData("print(s.Take(items, n))", 0, "")]
+    [InlineData("print(s.Take(items, (n)))", 0, "")]
+    [InlineData("print(s.Take(items, 2))", 0, "")]
+    [InlineData("print(s.Text(items, \"a\"))", 0, "")]
+    [InlineData("print(s.Letter(items, 'a'))", 0, "")]
+    [InlineData("print(s.Flag(items, true))", 0, "")]
+    [InlineData("print(s.Maybe(items, null))", 0, "")]
+    [InlineData("print(s.Wait(items, -2s))", 0, "")]
+    [InlineData("print(s.Take(items, -2))", 0, "")]
+    [InlineData("print(s.Take(items, ns[0]))", 0, "after")]
+    [InlineData("print(s.Take(items, (ns[0])))", 0, "after")]
+    [InlineData("print(s.Take(items, n + 1))", 0, "after")]
+    [InlineData("print(s.Text(items, \"{n}\"))", 0, "")]
+    [InlineData("send s.Add(items, ns[0])", 0, "after")]
+    [InlineData("print(s.Take(items, ns[0]) within 2s)", 0, "after")]
+    [InlineData("print(s.Take(items, n))\nprint(Cache.Take(items, n))", 0, "")]
+    [InlineData("print(s.Take(items, n))\nprint(Cache.Take(items, ns[0]))", 0, "after")]
+    [InlineData("print(s.Three(items, ns[0], items))", 0, "after")]
+    [InlineData("print(s.First(ns[0], items))", 0, "")]
+    [InlineData("print(s.Two(n, ns[0]))", 0, "")]
+    [InlineData("print(s.Take(items, ns[s.Two(n, n)]))", 1, "before")]
+    [InlineData("print(s.Take(move items, ns[0]))", 0, "after")]
+    public void A_message_whose_argument_after_a_crossing_one_can_raise_with_no_call_in_it_copies_its_crossing_arguments_after_its_last(string statement, int heaps, string copies)
+    {
+        // section 6 (the owner, 2026-11-21, #519, comment 7060155980, "T83 1"): where an argument after one that crosses, `items`, can
+        // raise with no call in it, an index, an operator or a string's hole, the crossing arguments are copied into the callee's heap
+        // after the last argument, `items` held as it was read from its name, or as it was moved, so that the raise comes before the last copy and leaves
+        // no copy (ActorTests, `A_message_whose_argument_after_a_crossing_one_crashes_its_builder_leaves_no_block_in_its_callees_heap`),
+        // and no heap of its own is made (the runtime's `MessageHeapNew`, which T24 (1), comment 7051492844, made there), a `send`'s, a
+        // call's with a clause and a `per node` actor's alike; a message with an argument that runs a call, which can wait, is built in
+        // a heap of its own, `items` copied into it where it is evaluated, before the raise that follows; a literal, a number's or a
+        // duration's with its sign, and a read of a name, either in brackets, raise nothing, and neither does a message whose argument
+        // that can raise comes before every crossing one, or none of whose arguments crosses, as the reading of the product pass has it
+        // (comment 7056985643), each copied where it is evaluated, which no program tells from a copy after the last; the IR is read,
+        // since the copy of a message whose builder does not crash answers alike wherever it is made
+        var text = "actor Store {\n    pub int Take(List<int> xs, int k) => k\n\n    pub int First(int k, List<int> xs) => k\n\n"
+            + "    pub int Two(int a, int k) => k\n\n    pub int Three(List<int> xs, int k, List<int> zs) => k\n\n    pub int Text(List<int> xs, string t) => xs.Count\n\n"
+            + "    pub int Letter(List<int> xs, char c) => xs.Count\n\n    pub int Flag(List<int> xs, bool b) => xs.Count\n\n"
+            + "    pub int Maybe(List<int> xs, string? t) => xs.Count\n\n    pub int Wait(List<int> xs, duration d) => xs.Count\n\n"
+            + "    pub void Add(List<int> xs, int k) {\n    }\n}\n\nactor Cache per node {\n    pub int Take(List<int> xs, int k) => k\n}\n\n"
+            + $"s = spawn Store()\nns = [1]\nn = 1\nitems = [1]\nprint(ns.Count + n + items.Count)\n{statement}\n";
+        var compilation = Compile(text, Builder.CheckRuntime(Builder.HostTarget!.Value));
+        var program = compilation.Program;
+        Assert.True(program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        Assert.Equal(heaps, Regex.Count(program.Ir, @"call ptr @""[^""]+\.MessageHeapNew\.[0-9]+[^""]*""\(\)"));
+        if (copies.Length > 0)
+        {
+            // the raise at the statement's last line, and the last copy of the function that holds it and builds the message, after or
+            // before it
+            var line = text.Split('\n').Length - 1;
+            var raise = new Regex($@"call void @""[^""]+\.Raise\.[0-9]+[^""]*""\([^\n]*, i32 {line}\)");
+            var function = Assert.Single(program.Ir.Split("\ndefine "), f => raise.IsMatch(f) && f.Contains("@\"message.table.", StringComparison.Ordinal));
+            var copy = function.LastIndexOf("call void @\"copy.run\"(", StringComparison.Ordinal);
+            Assert.True(copy >= 0, $"no copy in the function that raises at line {line}");
+            Assert.Equal(copies, copy > raise.Match(function).Index ? "after" : "before");
+        }
+    }
+
     [Fact]
     public void Remove_finds_the_slot_of_its_key_once_and_takes_the_slot_of_a_copy_at_its_offset()
     {
@@ -1455,6 +1514,31 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Contains("%\"c.Holder\" = type { i64, i64, ptr, %kz.obj, ptr, %kz.obj }", program.Ir, StringComparison.Ordinal);
         Assert.Contains("%\"c.Mid\" = type { i64, i64, i32, i32 }", program.Ir, StringComparison.Ordinal); // the counts, the base's `N`, then `M`
         Ran(Toolchain.Run(toolchain.Build(program, "class-layout")), 0, ["1", "5", "3", "8", "3", "true"], string.Empty);
+    }
+
+    [Fact]
+    public void A_call_through_a_limit_is_direct_in_a_copy_that_binds_a_class_and_through_the_table_in_one_that_binds_the_interface()
+    {
+        // T19 (Q14 of issue 605, comment 7051071380): in `AreaOf<Square>` the call is `Square`'s `Area`, as a call on a `Square` runs it, with no
+        // table read; in `AreaOf<Shape>` it loads the slot of `Area` from the instance's table for `Shape` (K6)
+        var program = Compile(
+            "interface Shape {\n    int Area()\n}\n\nclass Square(int Side) : Shape {\n    pub int Area() => Side * Side\n}\n\nint AreaOf<T: Shape>(T item) => item.Area()\n\nShape s = Square(2)\nprint(AreaOf(Square(3)) + AreaOf(s))\n",
+            Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
+        Assert.True(program is not null, "no program");
+        string Body(string copy)
+        {
+            var lines = program.Ir.ReplaceLineEndings("\n").Split('\n'); // the module's lines end as the system's do
+            var start = Array.FindIndex(lines, l => l.StartsWith("define ", StringComparison.Ordinal) && l.Contains($".AreaOf<{copy}>.", StringComparison.Ordinal));
+            Assert.True(start >= 0, $"no copy `AreaOf<{copy}>` in the IR");
+            return string.Join("\n", lines.Skip(start).TakeWhile(l => l != "}"));
+        }
+
+        var direct = Body("Square");
+        Assert.Contains(".Square.Area.", direct, StringComparison.Ordinal);
+        Assert.DoesNotContain("extractvalue %kz.obj", direct, StringComparison.Ordinal);
+        var through = Body("Shape");
+        Assert.DoesNotContain(".Square.Area.", through, StringComparison.Ordinal);
+        Assert.Contains("extractvalue %kz.obj", through, StringComparison.Ordinal);
     }
 
     [Fact]
