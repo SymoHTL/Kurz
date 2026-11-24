@@ -1122,6 +1122,81 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal(heaps, Regex.Count(program.Ir, @"call ptr @""[^""]+\.MessageHeapNew\.[0-9]+[^""]*""\(\)"));
     }
 
+    [Theory]
+    [InlineData("print(s.Take(items, n))", 0, "")]
+    [InlineData("print(s.Take(items, (n)))", 0, "")]
+    [InlineData("print(s.Take(items, 2))", 0, "")]
+    [InlineData("print(s.Text(items, \"a\"))", 0, "")]
+    [InlineData("print(s.Letter(items, 'a'))", 0, "")]
+    [InlineData("print(s.Flag(items, true))", 0, "")]
+    [InlineData("print(s.Maybe(items, null))", 0, "")]
+    [InlineData("print(s.Wait(items, -2s))", 0, "")]
+    [InlineData("print(s.Take(items, -2))", 0, "")]
+    [InlineData("print(s.Take(items, ns[0]))", 0, "after")]
+    [InlineData("print(s.Take(items, (ns[0])))", 0, "after")]
+    [InlineData("print(s.Take(items, n + 1))", 0, "after")]
+    [InlineData("print(s.Text(items, \"{n}\"))", 0, "")]
+    [InlineData("send s.Add(items, ns[0])", 0, "after")]
+    [InlineData("print(s.Take(items, ns[0]) within 2s)", 0, "after")]
+    [InlineData("print(s.Take(items, n))\nprint(Cache.Take(items, n))", 0, "")]
+    [InlineData("print(s.Take(items, n))\nprint(Cache.Take(items, ns[0]))", 0, "after")]
+    [InlineData("print(s.Three(items, ns[0], items))", 0, "after")]
+    [InlineData("print(s.First(ns[0], items))", 0, "")]
+    [InlineData("print(s.Two(n, ns[0]))", 0, "")]
+    [InlineData("print(s.Take(items, ns[s.Two(n, n)]))", 1, "before")]
+    [InlineData("print(s.Take(move items, ns[0]))", 0, "after")]
+    public void A_message_whose_argument_after_a_crossing_one_can_raise_with_no_call_in_it_copies_its_crossing_arguments_after_its_last(string statement, int heaps, string copies)
+    {
+        // section 6 (the owner, 2026-11-21, #519, comment 7060155980, "T83 1"): where an argument after one that crosses, `items`, can
+        // raise with no call in it, an index, an operator or a string's hole, the crossing arguments are copied into the callee's heap
+        // after the last argument, `items` held as it was read from its name, or as it was moved, so that the raise comes before the last copy and leaves
+        // no copy (ActorTests, `A_message_whose_argument_after_a_crossing_one_crashes_its_builder_leaves_no_block_in_its_callees_heap`),
+        // and no heap of its own is made (the runtime's `MessageHeapNew`, which T24 (1), comment 7051492844, made there), a `send`'s, a
+        // call's with a clause and a `per node` actor's alike; a message with an argument that runs a call, which can wait, is built in
+        // a heap of its own, `items` copied into it where it is evaluated, before the raise that follows; a literal, a number's or a
+        // duration's with its sign, and a read of a name, either in brackets, raise nothing, and neither does a message whose argument
+        // that can raise comes before every crossing one, or none of whose arguments crosses, as the reading of the product pass has it
+        // (comment 7056985643), each copied where it is evaluated, which no program tells from a copy after the last; the IR is read,
+        // since the copy of a message whose builder does not crash answers alike wherever it is made
+        var text = "actor Store {\n    pub int Take(List<int> xs, int k) => k\n\n    pub int First(int k, List<int> xs) => k\n\n"
+            + "    pub int Two(int a, int k) => k\n\n    pub int Three(List<int> xs, int k, List<int> zs) => k\n\n    pub int Text(List<int> xs, string t) => xs.Count\n\n"
+            + "    pub int Letter(List<int> xs, char c) => xs.Count\n\n    pub int Flag(List<int> xs, bool b) => xs.Count\n\n"
+            + "    pub int Maybe(List<int> xs, string? t) => xs.Count\n\n    pub int Wait(List<int> xs, duration d) => xs.Count\n\n"
+            + "    pub void Add(List<int> xs, int k) {\n    }\n}\n\nactor Cache per node {\n    pub int Take(List<int> xs, int k) => k\n}\n\n"
+            + $"s = spawn Store()\nns = [1]\nn = 1\nitems = [1]\nprint(ns.Count + n + items.Count)\n{statement}\n";
+        var compilation = Compile(text, Builder.CheckRuntime(Builder.HostTarget!.Value));
+        var program = compilation.Program;
+        Assert.True(program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        Assert.Equal(heaps, Regex.Count(program.Ir, @"call ptr @""[^""]+\.MessageHeapNew\.[0-9]+[^""]*""\(\)"));
+        if (copies.Length > 0)
+        {
+            // the raise at the statement's last line, and the last copy of the function that holds it and builds the message, after or
+            // before it
+            var line = text.Split('\n').Length - 1;
+            var raise = new Regex($@"call void @""[^""]+\.Raise\.[0-9]+[^""]*""\([^\n]*, i32 {line}\)");
+            var function = Assert.Single(program.Ir.Split("\ndefine "), f => raise.IsMatch(f) && f.Contains("@\"message.table.", StringComparison.Ordinal));
+            var copy = function.LastIndexOf("call void @\"copy.run\"(", StringComparison.Ordinal);
+            Assert.True(copy >= 0, $"no copy in the function that raises at line {line}");
+            Assert.Equal(copies, copy > raise.Match(function).Index ? "after" : "before");
+        }
+    }
+
+    [Fact]
+    public void A_message_whose_clauses_bound_is_the_name_of_a_property_is_built_in_a_heap_of_its_own()
+    {
+        // U39, U12, K7: a name that reads a property inside its class, `Bound`, is the call of its getter, which can raise, an index
+        // there, and the checker reads it as a call that can wait (`Checker.Calls`, `SemanticModel.CanWait`), so that its message is
+        // built in a heap of its own, as one whose bound runs a call is; the name of a field, `d`, raises nothing, and its message is
+        // built in the callee's heap: one call of `MessageHeapNew` in the IR, the property's
+        var compilation = Compile("actor Store {\n    pub int Get(List<int> xs) => xs[0]\n}\n\nclass Box {\n    List<duration> ds = [1s]\n"
+            + "    duration d = 1s\n\n    duration Bound => ds[0]\n\n    pub void Ask(Store store, List<int> items) {\n"
+            + "        print(store.Get(items) within Bound)\n        print(store.Get(items) within d)\n    }\n}\n\ns = spawn Store()\nBox().Ask(s, [1])\n",
+            Builder.CheckRuntime(Builder.HostTarget!.Value));
+        var program = compilation.Program;
+        Assert.True(program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        Assert.Equal(1, Regex.Count(program.Ir, @"call ptr @""[^""]+\.MessageHeapNew\.[0-9]+[^""]*""\(\)"));
+    }
+
     [Fact]
     public void Remove_finds_the_slot_of_its_key_once_and_takes_the_slot_of_a_copy_at_its_offset()
     {
@@ -1640,7 +1715,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         InOrder(Body(@"kz\.main"), @"store i32 0, ptr %v\.reply\.\d+", @"call void @""rt\.common\.ReplyWaiter\.\d+""\(ptr %v\.reply\.\d+\)",
             @"store ptr %v\.reply\.\d+, ptr %t\d+", @"call void @""rt\.common\.Enqueue\.\d+""", @"call void @""rt\.common\.Wait\.\d+""");
-        Assert.Contains("getelementptr { i32, ptr, i64, ptr, ptr, i64, ptr, i64 }, ptr %v.reply.", ir, StringComparison.Ordinal); // U36, U43: the deadline, the timers' links and the time of a crash or an end before the heap
+        Assert.Contains("getelementptr { i32, ptr, i64, ptr, ptr, i64, ptr, i64, i64, ptr, i64 }, ptr %v.reply.", ir, StringComparison.Ordinal); // U36, U43, U22: the deadline, the timers' links, the time of a crash or an end and the call's place before the heap
         InOrder(Body(@"""message\.Counter\.Get\.\d+"""), @"call i64 @""f\.Counter\.Get\.\d+""", @"call ptr @""rt\.common\.ReplyTaken\.\d+""\(ptr %a1\)",
             @"call void @""rt\.common\.Replied\.\d+""");
         InOrder(Runtime("ReplyTaken"), @"atomicrmw xchg ptr %t\d+, ptr null acq_rel, align 8");

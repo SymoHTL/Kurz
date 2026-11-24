@@ -1,0 +1,106 @@
+// expect: throws deadlock at 48
+// | 0
+// | test "keeps out calls of thirteen places" ... FAILED
+// |     deadlock at tests/test-restart-reentrant-places.kz:48
+// |     kept out at tests/test-restart-reentrant-places.kz:49
+// |     kept out at tests/test-restart-reentrant-places.kz:50
+// |     kept out at tests/test-restart-reentrant-places.kz:51
+// |     kept out at tests/test-restart-reentrant-places.kz:52
+// |     kept out at tests/test-restart-reentrant-places.kz:53
+// |     kept out at tests/test-restart-reentrant-places.kz:54
+// |     kept out at tests/test-restart-reentrant-places.kz:55
+// |     kept out at tests/test-restart-reentrant-places.kz:56
+// |     kept out at tests/test-restart-reentrant-places.kz:57
+// |     kept out at tests/test-restart-reentrant-places.kz:58
+// |     ... and 2 more
+// | 0
+// | test "keeps out calls of three places, two of them twice" ... FAILED
+// |     deadlock at tests/test-restart-reentrant-places.kz:48 (2 calls)
+// |     kept out at tests/test-restart-reentrant-places.kz:49 (2 calls)
+// |     kept out at tests/test-restart-reentrant-places.kz:60
+// | 0
+// | test "keeps out two calls of one place" ... FAILED
+// |     deadlock at tests/test-restart-reentrant-places.kz:48 (2 calls)
+// | 3 tests: 0 passed, 3 failed
+// command: test
+// threads: 1
+// rules: Y5, U22
+
+// each test restarts `A`s whose constructors wait on `B.Ask`, whose call back waits in the inbox for that constructor, from places
+// of `Ask` in the order the list gives, so that the runner's wait for the test finds nothing left to run; the words under its
+// `FAILED` line name the places in the file's order, each place that keeps out two calls with their count, at most ten lines
+// `kept out at` and then one line for the places past those
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask(int k) {
+        x = a
+        if x == null {
+            return 0
+        }
+
+        return match k {
+            0 => x.Peek()
+            1 => x.Peek()
+            2 => x.Peek()
+            3 => x.Peek()
+            4 => x.Peek()
+            5 => x.Peek()
+            6 => x.Peek()
+            7 => x.Peek()
+            8 => x.Peek()
+            9 => x.Peek()
+            10 => x.Peek()
+            11 => x.Peek()
+            else => x.Peek()
+        }
+    }
+}
+
+actor A(B Other, int K) {
+    int first = Other.Ask(K)
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+int KeepOut(List<int> places) {
+    mut sum = 0
+    mut all = List<A>()
+    for k in places {
+        b = spawn B()
+        a = spawn A(b, k)
+        sum = sum + a.Get()
+        b.Set(a)
+        all.Add(a)
+    }
+
+    print(sum)
+    for target in all {
+        send target.Fail()
+    }
+
+    return all[0].Get()
+}
+
+test "keeps out calls of thirteen places" {
+    print(KeepOut([12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 12]))
+}
+
+test "keeps out calls of three places, two of them twice" {
+    print(KeepOut([12, 1, 0, 1, 0]))
+}
+
+test "keeps out two calls of one place" {
+    print(KeepOut([0, 0]))
+}

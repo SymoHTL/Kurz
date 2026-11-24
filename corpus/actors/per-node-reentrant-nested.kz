@@ -1,0 +1,29 @@
+// expect: throws deadlock at 9
+// threads: 1
+// rules: U52
+
+// `Outer`'s start, which the top-level code runs, starts `Inner`, whose default waits on `Helper.Ask`, whose call of `Outer.Size`
+// waits in `Outer`'s inbox for the start that waits on it, and the error names that call, not the top-level code's call that waits
+
+actor Helper {
+    pub int Ask() => Outer.Size()
+}
+
+actor Inner per node {
+    int value = Asked()
+
+    pub int Get() => value
+}
+
+actor Outer per node {
+    int size = Inner.Get()
+
+    pub int Size() => size
+}
+
+int Asked() {
+    h = spawn Helper()
+    return h.Ask()
+}
+
+print(Outer.Size())
