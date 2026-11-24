@@ -899,7 +899,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // function value's, as R1 states for a jump out of a construction or a call (assumed: a reading of the build), as Rust drops
         // the operands of an expression that one of its operands leaves (the Rust Reference, "Destructors", drop scopes, operands;
         // issue 569): the instance of the larger class, made second, is freed before the smaller one, made first, a copy where the
-        // call makes two, and no other block is freed while the program records but the tables of the session of those two copies,
+        // call makes two, and in the rows of a call of two copies no other block is freed while the program records but the tables
+        // of the session of those two copies,
         // which its end frees first (`CopyAbort`), before the instance made after the first copy, the tables larger than the instances
         // of `Small` (24 bytes) and of `Large` (32); a call's one copy is let go of among the values its arguments made, the last made
         // first, so that the copy, made second, goes before the instance made first, and the instance, made second, before the copy
@@ -6884,10 +6885,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void A_test_has_no_bound_of_time_while_each_call_it_makes_keeps_its_own()
+    public void A_test_has_no_bound_of_time_so_that_it_calls_on_past_the_default_bound_of_a_call()
     {
-        // D6, Y7: the test's message carries no deadline, so a test that holds its thread past the default bound of a call calls on, the
-        // call with that bound of its own, here 10 ms for the run; a read of the clock is `not supported` in a build for Windows (S11)
+        // D6, Y5: the test's message carries no deadline, so a test that holds its thread past the default bound of a call, here 10 ms
+        // for the run, calls on and its call is answered; a read of the clock is `not supported` in a build for Windows (S11)
         if (!OperatingSystem.IsLinux())
         {
             return;

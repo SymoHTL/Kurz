@@ -899,7 +899,8 @@ public sealed class Parser
     }
 
     /// <summary>
-    /// Y1: <c>test "name" { ... }</c>, its name a plain string literal, a hole in it <c>syntax</c>, its block opening on the line of its name
+    /// Y1: <c>test "name" { ... }</c>, its name a string literal of one line, plain or raw, with at least one character, a hole in it, a
+    /// <c>"""</c> block and the empty name <c>syntax</c>, its block opening on the line of its name
     /// as C1 has an <c>if</c>'s; it stands at the top level of a file alone, and inside a block it is <c>syntax</c> (E4), read all the same, as R16's
     /// block is, so that the rest of the file is read. Y8: <c>test cluster N seed S { ... }</c> of section 13, whose words and body are
     /// passed over, as an actor's <c>per</c> is (U1), and kept for the checker's <c>not supported</c>.
@@ -923,6 +924,15 @@ public sealed class Parser
         if (text is null && statementDepth == 1)
         {
             ReportSyntax(name.Line, "the name of a test is a plain string, with no interpolation (Y1)");
+        }
+        else if (name.Text.Contains('\n') && statementDepth == 1)
+        {
+            // Y1: a literal of one line, plain or raw, so that a name fits its result line; a `"""` block, raw or not, is none (L13, L20)
+            ReportSyntax(name.Line, "the name of a test is a string literal of one line, not a `\"\"\"` block (Y1)");
+        }
+        else if (text is "" && statementDepth == 1)
+        {
+            ReportSyntax(name.Line, "the name of a test has at least one character (Y1)");
         }
 
         return new TestDeclaration(word.Line, text, name.Text, ParseBlockAfter(name.Line, "a `test`"));

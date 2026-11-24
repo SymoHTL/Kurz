@@ -1,0 +1,11 @@
+// expect: output
+// | 3
+// rules: L18, Y1
+
+// `test` before `cluster` and `=`, and `mock` before a name and `=`, start declarations of variables whose types are named so
+data test(int N)
+data mock(int N)
+
+test cluster = test(1)
+mock x = mock(2)
+print(cluster.N + x.N)

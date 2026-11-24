@@ -53,6 +53,7 @@ public sealed partial class Checker
     private Frame frame = null!;
     private List<TypeParameterSymbol>? typeContext;
     private bool inElseArm;
+    private VariableSymbol? elseArmName; // O7, U12: the name the arm of `else` being checked binds, which its bare `throw` reads
     private CallExpression? loopSource; // S16: the collection of the `for` loop being checked, the one place `f.Lines()` stands
     private bool realKeepsOwnType;
     private int blockDepth;
@@ -2428,6 +2429,13 @@ public sealed partial class Checker
                 else if (!inElseArm)
                 {
                     Report(ErrorIds.ThrowNeedsValue, t.Line, "a bare `throw` stands only in an arm of `else` (O7)");
+                }
+                else if (elseArmName is { } name)
+                {
+                    // O7, U12: a bare `throw` throws the case its arm took, which is a use of the arm's name, so that one a `move` may have
+                    // ended is `used-after-move` at the `throw`, as rustc refuses a use after a move (E0382) (the owner, 2026-11-20, issue
+                    // 596, comment 7051500690); it reads no expression, so that no `move` is its own
+                    UseOfMoved(null, name, t.Line);
                 }
 
                 return Flow.Ends;

@@ -7475,13 +7475,14 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnusedVariable, 6)], Errors(program.Replace("Check(n)", "true")));
     }
 
-    // ---- tests (Y1 to Y10; assumed: issue 586, comments 6992687784 and 6993110710) ----------------------------------------------
+    // ---- tests (Y1 to Y10; issue 586, comments 6992687784, 6993110710 and 7051499099) -------------------------------------------
 
     [Fact]
     public void A_second_test_of_one_name_is_syntax_at_its_line_naming_the_first()
     {
         // Y1 with E4: a test's name is its own in its file, compared by its value; the text of the second names the line of the first
-        // (assumed: D3 of issue 586, comment 6992687784)
+        // (assumed: D3 of issue 586, comment 6992687784; for the value the owner's answers of 2026-11-20, comment 7051499099, Q10 (a)
+        // of comment 6994632453)
         Assert.Equal([(ErrorIds.Syntax, 4)], Errors("test \"a\" {\n}\n\ntest \"a\" {\n}"));
         Assert.Contains("line 3", ErrorText("print(1)\n\ntest \"a\" {\n}\n\ntest \"a\" {\n}"), StringComparison.Ordinal);
         Assert.Equal([(ErrorIds.Syntax, 6), (ErrorIds.Syntax, 8)], Errors("test \"a\" {\n}\n\ntest \"b\" {\n}\ntest \"a\" {\n}\ntest \"b\" {\n}"));
@@ -7493,7 +7494,7 @@ public sealed class CheckerTests
     public void A_check_narrows_nothing_after_it()
     {
         // Y6: after `check n != null` the variable is still nullable (N2), as Rust's `assert!` narrows no type; an `if` is the control
-        // (the reading in compiler/README.md)
+        // (the owner's answers of 2026-11-20, issue 586, comment 7051499099, Q9 (a) of comment 6994632453)
         Assert.Equal([(ErrorIds.NullableUnchecked, 3)], Errors("int? n = null\ncheck n != null\nprint(n + 1)"));
         Assert.Empty(Errors("int? n = null\nif n != null {\n    print(n + 1)\n}"));
     }
@@ -7526,7 +7527,8 @@ public sealed class CheckerTests
     public void The_condition_of_a_check_is_a_bool_as_a_condition_is(string program, string? id)
     {
         // Y6 with C3: a condition of another type is `type-mismatch` at its line, a nullable one N2's `nullable-unchecked`, and a call
-        // with a `void` success O10's `syntax` (assumed: Q1 of issue 586, comment 6992687784, and F8 of comment 6993110710)
+        // with a `void` success O10's `syntax`, as Y6 reads a check's condition as a condition is read (the owner's answers of
+        // 2026-11-20, issue 586, comment 7051499099, Q1 of comment 6992687784)
         var line = program.Split('\n').Length;
         Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
     }
@@ -7534,8 +7536,8 @@ public sealed class CheckerTests
     [Fact]
     public void A_check_stands_in_any_code()
     {
-        // Y6: in top-level code, a function, a method, a lambda and a test, in every build (assumed: Q1 of issue 586, comment
-        // 6992687784, and F9 of comment 6993110710)
+        // Y6: in top-level code, a function, a method, a lambda and a test, in every build (the owner's answers of 2026-11-20, issue
+        // 586, comment 7051499099, Q1 of comment 6992687784; assumed: F8 of comment 6993110710)
         Assert.Empty(Errors("int Twice(int n) {\n    check n >= 0\n    return n * 2\n}\n\nclass Box(int N) {\n    pub int Get() {\n        check N > 0\n        return N\n    }\n}\n\nf = (int x) => {\n    check x != 0\n    return x\n}\n\ncheck Twice(1) == 2\nprint(f(Box(1).Get()))\ntest \"a\" {\n    check Twice(2) == 4\n}"));
     }
 
@@ -7543,8 +7545,8 @@ public sealed class CheckerTests
     public void The_model_keeps_each_test_in_its_order_and_each_check_s_text_and_the_types_its_failure_shows()
     {
         // Y5, Y6 with F10: the tests of the file in their order, each its function; a check's text, and for one of the six comparisons
-        // whose two sides have a text (A4) the comparison and each side's type, which its failure line shows in parentheses (assumed:
-        // Q1 of issue 586, comment 6992687784, and F10 of comment 6993110710)
+        // whose two sides have a text (A4) the comparison and each side's type, which its failure line shows in parentheses (the owner's
+        // answers of 2026-11-20, issue 586, comment 7051499099, Q1 of comment 6992687784, and F10 as comment 6994632453 said it back)
         var diagnostics = new DiagnosticBag();
         var tree = Parser.Parse(SourceText.FromString("test.kz", "class Box(int N)\n\nb = Box(1)\nnames = [\"a\"]\ncheck (names.Count == 1)\ncheck b == b\nprint(b.N)\ntest \"second\" {\n    check 1 + 1 == 2\n}\n\ntest \"first\" {\n    check \"a\" != \"b\" && true\n    check 2.5 < 3.0\n}"), diagnostics);
         var model = Checker.Check(tree, diagnostics, []).Model;
@@ -7608,9 +7610,10 @@ public sealed class CheckerTests
     [Fact]
     public void A_cluster_test_mock_and_advance_are_not_supported()
     {
-        // Y8: the cluster test of section 13, once at its line, its body unread; Y9 and Y10: `mock` and `advance`, whose questions are
-        // open, once at their line, in a test or not; the duration's variables count as read (E1) (assumed: D7 of issue 586, comment
-        // 6992687784, and F20 of comment 6993110710)
+        // Y8: the cluster test of section 13, once at its line, its body unread; Y9 and Y10: `mock` and `advance`, whose answers of
+        // 2026-11-20 are not built, once at their line, in a test or not; the duration's variables count as read (E1) (assumed: D7 of
+        // issue 586, comment 6992687784, and F20 of comment 6993110710 for `mock`; for `advance` the readings of comment 6994632453,
+        // which the owner's answers of 2026-11-20, comment 7051499099, let stand)
         NotSupportedAt(1, "Y8", "test cluster 3 seed 42 {\n    a = spawn Store()\n    split 2 | 3\n    check a.Count() == 1\n}");
         Assert.Empty(Check("test cluster 3 seed 42 {\n}").Checker.Model.Tests); // no test of `kurz test`
         NotSupportedAt(2, "Y9", "test \"a\" {\n    mock Clock with FakeClock\n}");
@@ -7633,7 +7636,8 @@ public sealed class CheckerTests
     public void An_error_in_a_test_refuses_the_build_of_its_program()
     {
         // Y7: every command checks every test, so that an error in one refuses `kurz build` and `kurz run` of its file as an error
-        // elsewhere does; the control has no error (assumed: Q5 of issue 586, comment 6992687784)
+        // elsewhere does; the control has no error (the owner's answers of 2026-11-20, issue 586, comment 7051499099, Q5 of comment
+        // 6992687784)
         var refused = Builder.Compile(SourceText.FromString("program.kz", "test \"a\" {\n    check 1\n}\n\nprint(1)"), [], StdRuntime.Value, testBuild: true);
         Assert.Null(refused.Program);
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], refused.Diagnostics.Items.Where(d => d.IsError).Select(d => (d.Id, d.Line)));
@@ -8219,6 +8223,51 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "cart = Cart(1)\nshop.Two(move cart, 1 +\n    cart.Items)\n"));
         Assert.Equal([(ErrorIds.UsedAfterMove, 63)], Errors(MoveShop + "cart = Cart(1)\nf = () => cart.Items\nshop.Add(move cart)\nprint(f())\n"));
         Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "cart = Cart(1)\nshop.Add(move cart)\nf = () => cart.Items\nprint(f())\n"));
+    }
+
+    private const string MovedArm = "data Missing\n\nclass Cart(mut int Items)\n\nint | List<int> | Cart | Missing Plain(int id) {\n    if id == 1 {\n        return [id]\n    }\n\n    if id == 2 {\n        return Cart(id)\n    }\n\n    return Missing\n}\n\nint Use(move List<int> l) => l.Count\n\nint Take(move Cart c) => c.Items\n\nint Run(int id) {\n    v = Plain(id) else {\n";
+    [Fact]
+    public void A_bare_throw_after_a_move_of_its_arms_name_is_used_after_move_at_the_throw()
+    {
+        // O7, U12: a bare `throw` throws the case its arm took, a use of the arm's name, so that one after a `move` that may have ended the
+        // name is `used-after-move` at the `throw`, naming the line of the `move` (the owner, 2026-11-20, issue 596, comment 7051500690): for
+        // a list and for a class, whose region a `move` of another name ends, on a path the `move` reaches and in a guarded block (R18), while a `throw` on a path with
+        // no `move`, one after a read and the bare `throw` of an arm inside it that binds no name rethrow, and the arm's own name holds again
+        // after an `else` inside it (section 5, assumed: the readings of comment 7055001448)
+        const string End = "        else => 0\n    }\n\n    return v\n}\n\nprint(Run(1))\n";
+        Assert.Equal([(ErrorIds.UsedAfterMove, 25)], Errors(MovedArm + "        List<int> n => {\n            print(Use(move n))\n            throw\n        }\n" + End));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 26)], Errors(MovedArm + "        Cart n => {\n            m = n\n            print(Take(move m))\n            throw\n        }\n" + End));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 27)], Errors(MovedArm + "        List<int> n => {\n            if id > 0 {\n                print(Use(move n))\n            }\n            throw\n        }\n" + End));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 26)], Errors(MovedArm + "        List<int> n => {\n            print(Use(move n))\n            if X86.Sse41.IsSupported {\n                throw\n            } else {\n                throw\n            }\n        }\n" + End));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 29)], Errors(MovedArm + "        List<int> n => {\n            print(Use(move n))\n            w = Plain(id) else {\n                else => 0\n            }\n            print(w)\n            throw\n        }\n" + End));
+        Clean(MovedArm + "        List<int> n => {\n            if id > 0 {\n                return Use(move n)\n            } else {\n                throw\n            }\n        }\n" + End);
+        Clean(MovedArm + "        List<int> n => {\n            print(n.Count)\n            throw\n        }\n" + End);
+        Clean(MovedArm + "        List<int> n => {\n            print(Use(move n))\n            w = Plain(id) else {\n                Missing => throw\n                else => 0\n            }\n            w\n        }\n" + End);
+    }
+
+    [Fact]
+    public void A_print_of_a_base_without_a_text_is_no_text_where_a_derived_class_declares_one()
+    {
+        // A4, A7: whether a value has a text at a `print` or in an interpolation is decided by its type, so that a value of a base with no
+        // `Text()` is `no-text` there whatever its instance, while a `throw` of it builds and shows the text of the instance's class (O7, the
+        // owner, 2026-11-21, issue 598, comment 7060156252, Q9 of comment 7055578588)
+        const string Animals = "class Animal(string Name)\n\nclass Dog(int Legs) : Animal {\n    pub string Text() => \"dog {Name}\"\n}\n\nAnimal a = Dog(\"rex\", 4)\n";
+        Assert.Equal([(ErrorIds.NoText, 8)], Errors(Animals + "print(a)\n"));
+        Assert.Equal([(ErrorIds.NoText, 8)], Errors(Animals + "print(\"got {a}\")\n"));
+        Assert.Equal([(ErrorIds.NoText, 8)], Errors(Animals + "print([a])\n"));
+        Clean(Animals + "print(Dog(\"tom\", 3))\nthrow a\n");
+    }
+
+    [Fact]
+    public void A_print_of_an_interface_value_without_a_text_is_no_text_where_a_throw_of_it_builds()
+    {
+        // A10: whether a value of an interface has a text at a `print` or in an interpolation is decided by its interface, so that one whose
+        // interface declares no `Text()` is `no-text` there whatever its instance's class declares, while a `throw` of it builds and shows
+        // the text of the instance's class (O7, the owner, 2026-11-21, issue 621, comment 7067091007)
+        const string Sized = "interface Sized {\n    int Size()\n}\n\nclass Dot : Sized {\n    pub int Size() => 1\n    pub string Text() => \"dot\"\n}\n\nSized s = Dot()\n";
+        Assert.Equal([(ErrorIds.NoText, 11)], Errors(Sized + "print(s)\n"));
+        Assert.Equal([(ErrorIds.NoText, 11)], Errors(Sized + "print(\"got {s}\")\n"));
+        Clean(Sized + "print(Dot())\nthrow s\n");
     }
 
     [Fact]

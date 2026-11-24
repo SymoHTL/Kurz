@@ -1177,6 +1177,240 @@ the order of the union's cases (U30) *(assumed: as §5 marks it)*. The bare `thr
 raised (E3): it throws the case value that reached the arm, and nothing is raised a second time,
 because nothing catches.
 
+A bare `throw` is a use of the arm's name, the case it throws being that name's value: after a `move`
+that may have ended the name on a path that reaches the `throw`, it is `used-after-move` at the
+`throw`, naming the line of the `move`, as U12 has it for every use and as rustc refuses a use of a
+value after its move (E0382) (§5, the owner, 2026-11-20, issue 596, comment 7051500690). It holds for
+every type of the name, on every path on which the name may have moved, with U12's message, and an
+arm's name is declared without `mut` (V7), so that no assignment makes it live again *(assumed, §5:
+the readings of the product pass on issue 596, comment 7055001448)*. A thrown instance of a class
+that neither declares nor inherits a `Text()` (A9) is allowed, and the error line of `thrown` prints
+its class's name where a thrown value's text stands (chapter 12), for a `throw` of the instance and
+for a bare `throw` of such a case alike (§5, the owner, 2026-11-20, issue 598, comment 7051500939).
+The name is the bare name of the instance's own class, a derived instance thrown as its base giving
+its own, and a `print` of a `Reason` whose union holds such a class stays `no-text`, as A7 has it
+(§5, the owner, 2026-11-21, issue 598, comment 7060156252, Q2 and Q3 of comment 7055011193). A thrown
+value that holds such an instance, a `data` value or a list, is allowed and has the text A3 and A4
+derive from what it holds, the instance's part of it being its class's name (§5, the owner,
+2026-11-21, comment 7060156252, Q8 of comment 7055578588). An instance thrown as a base that has no
+`Text()`, whose own class or a base between the two declares one (A9), shows what that `Text()` gives,
+found when the program runs from the instance's class, as C#'s virtual `ToString()` is, while a
+`print` of a value of that base stays `no-text` (A4) (§5, the owner, 2026-11-21, comment 7060156252,
+Q9 of comment 7055578588). An instance that a thrown `data` value or list holds as such a base takes
+its text by the same rule (§5, the owner, 2026-11-21, comment 7063693020, F1), and a `Text()` declared
+without `pub` is called there as one with it (§5, the owner, 2026-11-21, comment 7063693020, F2). A
+value thrown as an interface that declares no `Text()` (A10) takes the text of a thrown class instance,
+what the `Text()` of the instance's own class gives, found when the program runs, else that class's
+name, while a `print` of it stays `no-text` (A10) (§5, the owner, 2026-11-21, issue 621, comment
+7067091007). One that a thrown `data` value or list holds takes its text by the same rule, and a
+`Text()` declared without `pub` is called there *(assumed, §5: F1 and F2 read for such a value)*.
+
+Case: [outcomes/else-throw-after-move.kz](../corpus/outcomes/else-throw-after-move.kz)
+```kurz
+data Missing
+
+int | List<int> | Missing Plain(int id) {
+    if id == 1 {
+        return [id, 7, 9]
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Use(move List<int> l) => l.Count
+
+int Rethrown(int id) {
+    v = Plain(id) else {
+        List<int> n => {
+            c = Use(move n)
+            print("used {c}")
+            throw
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3))
+print(Rethrown(1))
+```
+
+Case: [outcomes/else-throw-after-move-other-path.kz](../corpus/outcomes/else-throw-after-move-other-path.kz)
+```kurz
+data Missing
+
+int | List<int> | Missing Plain(int id) {
+    if id == 1 {
+        return [id, 7, 9]
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Use(move List<int> l) => l.Count
+
+int Rethrown(int id, bool give) {
+    v = Plain(id) else {
+        List<int> n => {
+            if give {
+                return Use(move n)
+            } else {
+                throw
+            }
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3, true))
+print(Rethrown(1, true))
+print(Rethrown(1, false))
+```
+
+Case: [outcomes/else-throw-after-read.kz](../corpus/outcomes/else-throw-after-read.kz)
+```kurz
+data Missing
+
+int | List<int> | Missing Plain(int id) {
+    if id == 1 {
+        return [id, 7, 9]
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Rethrown(int id) {
+    v = Plain(id) else {
+        List<int> n => {
+            print("seen {n.Count}")
+            throw
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3))
+print(Rethrown(1))
+```
+
+Case: [outcomes/throw-instance-without-text.kz](../corpus/outcomes/throw-instance-without-text.kz)
+```kurz
+data Missing
+
+class Note(string Body, List<int> Marks)
+
+int | Note | Missing Find(int id) {
+    if id == 1 {
+        return Note("note {id}", [id, id])
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Rethrown(int id) {
+    v = Find(id) else {
+        Note n => {
+            print("seen {n.Body}")
+            throw n
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3))
+print(Rethrown(2))
+print(Rethrown(1))
+```
+
+Case: [outcomes/else-throw-instance-without-text.kz](../corpus/outcomes/else-throw-instance-without-text.kz)
+```kurz
+data Missing
+
+class Note(string Body, List<int> Marks)
+
+int | Note | Missing Find(int id) {
+    if id == 1 {
+        return Note("note {id}", [id, id])
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Rethrown(int id) {
+    v = Find(id) else {
+        Note n => {
+            print("seen {n.Body}")
+            throw
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3))
+print(Rethrown(2))
+print(Rethrown(1))
+```
+
+Case: [outcomes/throw-derived-instance-without-text.kz](../corpus/outcomes/throw-derived-instance-without-text.kz)
+```kurz
+class Animal(string Name)
+
+class Dog(int Legs) : Animal
+
+void Fail(Animal a) {
+    throw a
+}
+
+print("before")
+Fail(Dog("rex", 4))
+```
+
+Case: [outcomes/throw-interface-without-text.kz](../corpus/outcomes/throw-interface-without-text.kz)
+```kurz
+interface Sized {
+    int Size()
+}
+
+class Dot : Sized {
+    pub int Size() => 1
+}
+
+void Fail(Sized s) {
+    throw s
+}
+
+Fail(Dot())
+```
+
 Case: [outcomes/bare-throw.kz](../corpus/outcomes/bare-throw.kz)
 ```kurz
 void Fail() {

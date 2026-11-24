@@ -665,7 +665,8 @@ the units read off with `BigInteger`, and that of 4000 timestamps and the edges 
 
 The error lines are the record's (section 6): `error: <id> at <file>:<n>` for an exception of the
 run-time table, the file named as the command line gave it, and `error: thrown at <file>:<n>:` for
-a `throw`, with the thrown value's text on the line below it. A `print` passes its file and its line
+a `throw`, with the thrown value's text on the line below it, the text of the instance's own class for an
+instance thrown as a class or an interface with no `Text()`, or the name of the instance's own class where that class's chain declares none (O7). A `print` passes its file and its line
 to `Print`, which raises `print-failed` there where the system refuses the write or a write takes
 no byte, as Rust's `write_all` fails on a write of zero bytes, in every build (the owner,
 2026-10-23, "Caller passes it"), but for error 9 on Linux: there a write the system fails with error
@@ -942,7 +943,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   held by a field of an instance, and an item or an entry written into one (M4, M5, M9); a method, a function of the module whose first parameter is
   the instance, `this`, borrowed from the caller as a parameter is (K7); a read of a property, `b.Count` or `Count` inside its
   class, the call of its method, whose result is a temporary of its statement, as a call's is (K7); the text of an instance, which
-  its `Text()` gives (A5); a class some class derives from (K6), whose reference is two words, the
+  its `Text()` gives (A5), or at a `throw` where its class has none the text of the instance's own class, or its name where
+  that class's chain declares none, both read off the table where a class derives from its type (O7); a class some class derives from (K6), whose reference is two words, the
   address of the instance's block and the table of the instance's class, as Rust lays out
   `Rc<dyn Trait>`, while the reference to a class nothing derives from, a derived one among them, stays
   the address alone, and no block holds a table; the table, one constant per class, holds the release of
@@ -976,7 +978,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a derived class a function that makes the pair `this` is from the address; an instance given where an
   interface is expected takes that table, a constant where its static type is a class nothing derives
   from, and else read from the table the reference holds, in the slot of the interface; a call through an interface calls its slot with the address,
-  the text of such a value is its `Text()` through its slot (A10), and `==` and a key compare and hash it
+  the text of such a value is its `Text()` through its slot (A10), or at a `throw` where the interface declares
+  none the text of the instance's own class, or its name where that class's chain declares none, the class
+  found by comparing the table with each implementing class's table for the interface (O7), and `==` and a key compare and hash it
   as through a reference that holds a table (K13); an arm of a class over a value of an interface or of a
   class some class derives from tests the class of the instance (C4, O5, K6): a comparison of the table
   for the interface with the arm's class's where that class has no base and no derived class, else of the
@@ -2809,14 +2813,21 @@ that sit under a rule by its id. Every one is pinned by a test.
   closing `"""`, so that the block's text is not read as code, and reads what follows the
   closing quotes on their line as code.
 
-- Y1, Y6, Y9: where `test`, `check`, `mock` and `advance` are words, inside D2's letter (issue 586, comment
-  6992687784). `test cluster` is the cluster test only where a token that can start an expression follows
-  `cluster`, so that `test cluster = 1` declares a variable `cluster` of a type named `test`; `mock` is the
-  statement only where a type, `with` and a type follow it, so that `mock x = 1` declares a variable `x` of
-  a type named `mock`; a `test` block in a class's body is the member parser's `syntax` at its line; and
-  the text of a `check` is its tokens as the source writes them, a `>` of a `>>` that type arguments took
-  apart among them, each run of spaces, line breaks and comments between two tokens one space. Pinned by
-  `ParserTests`.
+- Y1, Y6, Y9, Y10: where `test`, `check`, `mock` and `advance` are words, inside D2's letter (issue 586,
+  comment 6992687784). `test cluster` is the cluster test only where a token that can start an expression
+  and is no `[` follows `cluster`, so that `test cluster = 1` declares a variable `cluster` of a type named
+  `test`; `mock` is the statement only where a type, `with` and a type follow it, so that `mock x = 1`
+  declares a variable `x` of a type named `mock`; `check` and `advance` are the statements before a token
+  that can start an expression and is no `[`, with no look at what the name is, and fall back to no
+  declaration, so that a call of a variable so named at the start of a statement is the statement, a
+  function value named `check` is not called there, and `check x = 1`, a declaration of a variable of a type
+  named `check`, is a `check` of `x` with `= 1` after it, `syntax` at its line; a `test` block in a class's
+  body is the member parser's `syntax` at its line; a test's name is a string literal of one line with at
+  least one character, so that the empty name, `""` or `r""`, and a `"""` block, raw or not, are `syntax`
+  at the line of its `test` (Q12 (a) of comment 6998786049, the owner's answer of 2026-11-20, comment
+  7051499099); and the text of a `check` is its tokens as the source writes them, a `>` of a `>>` that
+  type arguments took apart among them, each run of spaces, line breaks and comments between two tokens
+  one space. Pinned by `ParserTests`.
 
 Six shapes still get two errors, or an uneven one, from the front end, each low: `if x print(1)
 else print(2)` is `braces-required` twice on one line, because the postfix `else` binds to the call
@@ -2871,7 +2882,8 @@ links a call, an assignment to a field or an item, a `with`, a lambda's captures
 `else`, `&&` and `||`, whose join keeps the moves of the right side, and a loop's rounds until both
 stand still; a value that crosses with no word joins none. A
 `move` ends the variable it names and every variable its region reaches, on the paths that reach a
-later read, which is `used-after-move` at the read, naming each `move`'s line; a loop whose body
+later read, which is `used-after-move` at the read, naming each `move`'s line, a bare `throw` reading the name
+of its arm of `else` (O7); a loop whose body
 moves either of its variables takes its list, whatever its item, and one the build cannot take, over
 a range, a map or a list of a type parameter's items, is `not supported`; a `move` of what the region outside reaches is `move-reachable`,
 and a word that does not fit a plain call's parameter `move-at-call`, in U16's order; a block that
@@ -3122,7 +3134,8 @@ path the copy follows, a lambda's capture and a field of any class among them, o
 copy of its function for a type argument that is one of them would share that block (U12); `copy` at a call that is no message before a value that
 reaches a function value or an interface's value, which no word makes cross (U12); a log call
 inside an actor (P8); the cluster test of section 13, `test cluster N seed S { ... }`, whose words and
-block the parser passes over (Y8); and `mock X with Y` and `advance d`, whose questions are open (Y9, Y10),
+block the parser passes over (Y8); and `mock X with Y` and `advance d`, whose answers of 2026-11-20 it
+does not build (Y9, Y10),
 the duration of an `advance` checked as the bound of `within` is (U40) and its error reported beside the
 line. The refusal of
 the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered
@@ -3714,5 +3727,5 @@ round can ask about it by the rule's id.
   is still nullable (N2), as Rust's `assert!` narrows no type, where C#'s `Debug.Assert` tells its
   flow analysis the condition held. A comparison shows its sides' values where it stands alone or in
   parentheses and each side shows its value as a hole of an interpolation does; a test's name is its
-  own by its value, so that `"A"` and `"\u0041"` are one name. Pinned by
+  own by its value (Y1), so that `"A"` and `"\u0041"` are one name. Pinned by
   `CheckerTests`.
