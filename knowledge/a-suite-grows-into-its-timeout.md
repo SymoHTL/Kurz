@@ -21,6 +21,19 @@ of the three jobs that run the gate held 25 minutes.
   container and the other gates. The table of the gates is the last thing `tools/gates.py` prints, so
   a job stopped at its own limit ends before it.
 
+The limit was raised to 1200 seconds and the jobs' limits around it, and the suite grew into that
+too:
+
+- On 2026-11-24 the Windows job's step took 729 to 1178 s on the heads of pull requests 615, 623 and
+  631 and on `main`: 729 s and 1178 s on the same head `732957f9` (runs 45473652225 and 45473510913),
+  1055 s on `main` at `bdbaa03a` (run 45469331519). Three runs met the 1200 with no test named, on
+  the heads `be86c412` (run 45465952795, whose head passed in run 45465716598) and `2f6c1413` (runs
+  45471979520 and 45472163974). The same head's step differs by 449 s between two runs, so a step
+  near the limit on one runner is past it on a slower one.
+- The limit went to 1800 seconds, and the jobs' limits to 40 minutes for `compiler-windows` and
+  `compiler-arm` and 50 for `gates`, so that the budget with each job's share still ends before its
+  job's limit.
+
 Each change that adds tests moves every job that runs the gate closer to its limit, and each that
 adds red proofs moves the `gates` job, the one that replays them; so the failure comes back more
 often, on heads that have nothing to do with it, and on a slow runner first.
