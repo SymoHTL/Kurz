@@ -4869,8 +4869,8 @@ and of the runtime's error type, `RuntimeError(RuntimeKind Kind, string Detail)`
 `Reason` (O7; §5, the owner, 2026-10-03), so that a run-time error of chapter 12 reaches the block as
 a `RuntimeError` of its kind, with the detail its error line names, the kinds being `Overflow`, `DivideByZero`,
 `IndexOutOfRange`, `ReversedRangeAtRunTime`, `InvalidOrderingAtRunTime`, `StackOverflow`, `PrintFailed`, `AllocationFailed`,
-`NotCharBoundary`, `RandomFailed`, `Deadlock`, `CalleeCrashed`, `ActorGone`, `RestartLimit`, `CpuLacksSet`,
-`SettingsUnpublished` and `InvalidInput`, each run-time row's id of chapter 12 as one capitalised word for each of its
+`NotCharBoundary`, `RandomFailed`, `Deadlock`, `CalleeCrashed`, `ActorGone`, `RestartLimit`, `CallTimeout`, `CpuLacksSet`,
+`SettingsUnpublished`, `CheckFailed` and `InvalidInput`, each run-time row's id of chapter 12 as one capitalised word for each of its
 parts, in the table's order, `thrown` left out, and `InvalidArgument` after them, for `invalid-argument`
 (S13), which chapter 12 names outside its table *(assumed: its place after the table's, which the order
 of the table does not give)*; the child's code is its
@@ -5300,8 +5300,8 @@ of the block on a line after the bound's is `braces-required` at the line where 
 *(assumed in §6: proposed there and not put to the owner)*. A bound of zero or less is refused, as the sockets refuse such a
 time (S9), against a deadline that has passed (§6, the owner, 2026-11-20, #519, comment 7051492844, "T4 (2)"). A constant bound
 of 0 ns or less, a constant as T25 reads one, a literal or one folded from literals, `0s`, `-1s`, `(0s)` or `1s - 1s`, is the
-compile error `bound-not-positive` at its line, whose text names the form and the bound as written, "the bound of `within` is
-0s; a bound is positive"; every other bound, a variable's name among them whatever it was given, is read at run time, at the
+compile error `bound-not-positive` at its line, whose text names the form, the bound as written and the rule, "the bound of
+`within` is 0s; a bound is positive (U40)"; every other bound, a variable's name among them whatever it was given, is read at run time, at the
 block's entry, before its first statement, so that a block with no call in it is refused too, and one of 0 ns or less raises
 `invalid-input` at the bound's line, the crash of the code that runs it, at the top-level code the end of the process with the
 exit code 1 (U19), its value standing on the line after the error line, "the bound
@@ -5426,7 +5426,8 @@ one, the word where a `{` follows its expression and a name otherwise, so that `
 `syntax` at its line, `within` being a name there; inside a
 `(` or a `[`, where a line break ends no statement (L4), it may stand on a line after the call's *(assumed: a
 reading of the build, proposed with this record and not put to the owner)*. The bound of a call's clause of zero or less is refused
-as U40 refuses a block's, a constant as `bound-not-positive` and every other bound at run time as `invalid-input` at the bound's
+as U40 refuses a block's, a constant as `bound-not-positive`, "the bound of the call's `within` is 0ms; a bound is positive
+(U41, U40)", and every other bound at run time as `invalid-input` at the bound's
 line, read after the call's arguments and before the call is queued, where its actor is looked up, so that over an actor that
 ended it is `invalid-input` and not `actor-gone` (U43), and under a block whose deadline wins over the clause too (U39)
 *(assumed in §6: T80 and T81 of comment 7055305138, and T79 of it as corrected on 2026-11-21)*. The operand of a declaration's clause is a number
@@ -5435,9 +5436,10 @@ literal alone, any other operand `syntax`, as a knob of a policy is read (U26), 
 whose option names a duration literal)*; that the literal is a number literal of any type, its sign included, as a knob of a
 policy takes one (U26), and is read as U40 reads a bound, so that a number literal of another type, `within 2`, is
 `type-mismatch`, as a knob's is (U26), and not `syntax`, is the build's *(assumed: a reading of the build, proposed with this
-record and not put to the owner)*; and a literal of zero or less there is `bound-not-positive`, as U40 reads one and as a knob
-refuses a value of 0 or less (U26), the one error a declaration's bound of zero or less meets *(assumed in §6: T80 of comment
-7055305138)*.
+record and not put to the owner)*; and a `duration` literal of zero or less there is `bound-not-positive`, "the bound of the
+declaration's `within` is -1s; a bound is positive (U41, U40)", as U40 reads one and as a knob refuses a value of 0 or less
+(U26), the one error a declaration's `duration` bound of zero or less meets, while one of another type has its `type-mismatch`
+alone (E1) *(assumed in §6: T80 of comment 7055305138)*.
 
 Case: [actors/within-clause-send.kz](../corpus/actors/within-clause-send.kz)
 ```kurz
