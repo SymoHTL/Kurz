@@ -1022,6 +1022,45 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void A_message_to_the_name_of_a_per_node_actor_from_its_own_method_brings_nothing_of_its_start()
+    {
+        // U55, U17 (assumed: T33 of issue 519, comment 6983903100): a method of `Cache` runs in the actor that stands, so that a call or
+        // a `send` through its name there starts none and runs no default; a function's call through the name brings the start's
+        // throw, the control (U52)
+        const string text = """
+            data EStart
+
+            int Started() {
+                throw EStart
+            }
+
+            actor Cache per node {
+                int first = Started()
+
+                pub int Get() => first
+
+                pub void Add() {
+                    print(first)
+                }
+
+                pub int Again() {
+                    send Cache.Add()
+                    return Cache.Get()
+                }
+            }
+
+            pub void Call() {
+                print(Cache.Get())
+            }
+
+            """;
+        var own = Own(text);
+        var cache = own.Checker.Model.ClassOf(own.Tree.Statements.OfType<TypeDeclaration>().Single(t => t.Name == "Cache"));
+        Assert.Equal(["RuntimeError"], Names(own.Sets.RaisedBy(cache.Methods["Again"].Single())));
+        Assert.Equal(["EStart", "RuntimeError"], RaisedIn(own, "Call"));
+    }
+
+    [Fact]
     public void A_text_reads_each_instantiation_of_one_generic_type_it_holds()
     {
         // section 5: `Two` holds a `Box<int>` and a `Box<Quiet>`, and its text reads both, `Quiet`'s Text() through the second
@@ -1044,6 +1083,68 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
 
             """;
         Assert.Equal(["EQuiet", "RuntimeError"], RaisedIn(Own(text), "Show"));
+    }
+
+    [Fact]
+    public void The_text_of_a_type_parameter_reaches_the_types_its_limits_let_in()
+    {
+        // T19 with A10: the text of a `T` limited to `Shaped`, which declares `string Text()`, is the Text() of each class that implements
+        // it, and not `Other`'s; the text of one limited to `Plain`, the interface of a text alone, is that of every class and data type,
+        // and so is a call of its `Text()`; the text of one limited to the class `Ring` is `Ring`'s
+        const string text = """
+            data ERing
+            data EOther
+            data ENote
+
+            interface Shaped {
+                string Text()
+                int Size()
+            }
+
+            interface Plain {
+                string Text()
+            }
+
+            class Ring(int N) : Shaped {
+                pub string Text() {
+                    throw ERing
+                }
+
+                pub int Size() => N
+            }
+
+            class Other(int N) {
+                pub string Text() {
+                    throw EOther
+                }
+            }
+
+            data Note(int N) {
+                pub string Text() {
+                    throw ENote
+                }
+            }
+
+            pub void Show<T: Shaped>(T item) {
+                print(item)
+            }
+
+            pub void ShowAny<T: Plain>(T item) {
+                print(item)
+            }
+
+            pub string TextAny<T: Plain>(T item) => item.Text()
+
+            pub void ShowRing<T: Ring>(T item) {
+                print(item)
+            }
+
+            """;
+        var own = Own(text);
+        Assert.Equal(["ERing", "RuntimeError"], RaisedIn(own, "Show"));
+        Assert.Equal(["ERing", "EOther", "ENote", "RuntimeError"], RaisedIn(own, "ShowAny"));
+        Assert.Equal(["ERing", "EOther", "ENote", "RuntimeError"], RaisedIn(own, "TextAny")); // Q21 of issue 605: the text of every type, as `print` makes it
+        Assert.Equal(["ERing", "RuntimeError"], RaisedIn(own, "ShowRing")); // Q5: the text of the class limit and its derived classes
     }
 
     [Fact]

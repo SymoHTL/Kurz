@@ -1,0 +1,10 @@
+// expect: error type-mismatch at 8
+// rules: T19
+
+interface Shape {
+    int Area()
+}
+
+bool Before<T: Shape>(T a, T b) => a < b
+
+print(1)

@@ -1,0 +1,12 @@
+// expect: error argument-mismatch at 12
+// rules: T19, F13
+
+interface Shape {
+    int Area()
+}
+
+string F<T: Shape>(T x) => "generic"
+
+string F(bool b) => "bool"
+
+print(F(5))

@@ -1,0 +1,10 @@
+// expect: output
+// | called false
+// rules: L18, Y1
+
+// `check(x)` at the start of a statement is the statement, a `check` of `(x)`, so that the function value the variable
+// `check` holds is not called there, and is called by another name
+check = (bool b) => print("called {b}")
+check(true)
+f = check
+f(false)

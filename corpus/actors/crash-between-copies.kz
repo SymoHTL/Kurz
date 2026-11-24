@@ -1,0 +1,31 @@
+// expect: output
+// | 8
+// | 8
+// rules: U21
+
+// the first `Go` crashes `Caller` at the index, between the two lists that cross into the message: both are copied after the last
+// argument, so that no copy was made, and `Keeper` runs on with its total unchanged
+
+actor Keeper {
+    mut int total = 0
+
+    pub int Take(List<int> xs, int n, List<int> zs) {
+        total = total + xs.Count + n + zs.Count
+        return total
+    }
+
+    pub int Total() => total
+}
+
+actor Caller(Keeper Target) {
+    pub void Go(List<int> xs, int at) {
+        ys = [1, 2]
+        print(Target.Take(xs, ys[at], xs))
+    }
+}
+
+k = spawn Keeper()
+c = spawn Caller(k)
+send c.Go([10, 20, 30], 5)
+c.Go([10, 20, 30], 1)
+print(k.Total())

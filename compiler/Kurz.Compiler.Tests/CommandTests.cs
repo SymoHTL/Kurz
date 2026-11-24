@@ -627,6 +627,17 @@ public sealed class CommandTests : IDisposable
     }
 
     [Fact]
+    public void A_failed_check_of_the_top_level_code_writes_its_text_on_the_line_after_the_error_line()
+    {
+        // Y6, F10: at the top level the failed check ends the process (U19), its error line ending with a colon and the condition's
+        // text, each side's value after it, on the line after it, as a thrown value's text stands after its error line (O6); a corpus
+        // case pins the id and the line alone (E2)
+        var source = Path.Combine(root, "top.kz");
+        File.WriteAllText(source, "names = [\"a\", \"b\", \"c\"]\nprint(\"before\")\ncheck names.Count == 2\nprint(\"after\")\n");
+        Assert.Equal((1, "before\n", $"error: check-failed at {source}:3:\nnames.Count == 2 (3 == 2)\n"), KurzWithPlaces("run", source));
+    }
+
+    [Fact]
     public void Test_takes_lines_as_run_does_so_that_a_release_build_names_the_line_of_a_tests_stack_overflow()
     {
         // D4, section 2: `--lines` is taken as `kurz run` takes it; on Linux, where an overflow of an actor's stack is its crash (U19), the

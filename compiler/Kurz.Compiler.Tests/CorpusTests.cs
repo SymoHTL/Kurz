@@ -31,9 +31,9 @@ public sealed class CorpusTests
     private const int FrontEndErrorFloor = 15;
 
     /// <summary>The checker reads more cases in full than this, and more cases that expect an error it reports than the second floor; fewer means it refuses what it read before.</summary>
-    private const int ReadInFullFloor = 260;
+    private const int ReadInFullFloor = 289;
 
-    private const int CheckerErrorFloor = 97;
+    private const int CheckerErrorFloor = 116;
 
     /// <summary>The checker of <c>std/</c>, whose types of the prelude a case sees as a build does (W1); they are the same for every target.</summary>
     internal static readonly Lazy<Checker> StdChecker = new(() => Builder.CheckRuntime(Target.Linux).StdChecker);
@@ -52,7 +52,7 @@ public sealed class CorpusTests
     /// <summary>
     /// The rules the checker does not read: the null chapter's paths through class instances (N9), the
     /// memory chapter's counted references and <c>weak</c> (R1 to R6, R8, R9),
-    /// folders (F9, F10), the limit of a type parameter and a member of one (T19), collections between actors (M8), the texts of class instances (A5, A7, A9,
+    /// folders (F9, F10), collections between actors (M8), the texts of class instances (A5, A7, A9,
     /// A10, A15), the grants of files and sockets (S12) and the reading of a type by its fields and its parts (T33). A
     /// case that cites one may get <c>not supported</c>; one the checker reads in full is held to its header. The rules of the
     /// class chapter the checker reads, so a case of theirs that uses a construct it does not, a constructor in the body of a class
@@ -61,7 +61,7 @@ public sealed class CorpusTests
     private static bool OutsideTheChecker(string rule) =>
         rule is "N9"
         || rule is "R1" or "R2" or "R3" or "R4" or "R5" or "R6" or "R8" or "R9"
-        || rule is "F9" or "F10" or "T19" or "M8"
+        || rule is "F9" or "F10" or "M8"
         || rule is "A5" or "A7" or "A9" or "A10" or "A15"
         || rule is "S12"
         || rule is "T33";

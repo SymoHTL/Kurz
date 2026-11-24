@@ -1,0 +1,266 @@
+// expect: output
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 4
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 9
+// | Class
+// | 1
+// | Class
+// | 1
+// rules: T19
+
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+T Id<T>(T x) => x
+
+data Box<T>(T Item)
+
+data Missing(int Code)
+
+T | Missing First<T>(List<T> items) {
+    if items.Count == 0 {
+        return Missing(1)
+    }
+    return items[0]
+}
+
+int Opt<U: Shape>(U? v) {
+    if v != null {
+        return v.Area()
+    }
+    return 0
+}
+
+int Sum<U: Shape>(List<U> items) => items[0].Area()
+
+int Apply<U>(U v, (U) => int f) => f(v)
+
+int Count<U: Shape>() => 1
+
+data Tag<U: Shape>(int Count)
+
+int ByResult<T: Shape>(T item) {
+    print(T.Kind)
+    return AreaOf(Id(item))
+}
+
+int ByField<T: Shape>(Box<T> b) {
+    print(T.Kind)
+    return AreaOf(b.Item)
+}
+
+int ByMade<T: Shape>(T item) {
+    print(T.Kind)
+    b = Box(item)
+    return AreaOf(b.Item)
+}
+
+int ByMap<T: Shape>(Map<string, T> m) {
+    print(T.Kind)
+    return Opt(m["a"])
+}
+
+int ByWith<T: Shape>(Box<T> b) {
+    print(T.Kind)
+    return AreaOf((b with { Item = b.Item }).Item)
+}
+
+int ByFunction<T: Shape>(T item, (T) => T f) {
+    print(T.Kind)
+    return AreaOf(f(item))
+}
+
+int ByCoalesce<T: Shape>(T? item, T other) {
+    print(T.Kind)
+    return AreaOf(item ?? other)
+}
+
+int ByNarrowed<T: Shape>(T? item) {
+    print(T.Kind)
+    if item != null {
+        return AreaOf(item)
+    }
+    return 0
+}
+
+int ByMatch<T: Shape>(T item) {
+    print(T.Kind)
+    return AreaOf(match T.Kind {
+        TypeKind.Class => item
+        else => item
+    })
+}
+
+int ByElse<T: Shape>(List<T> items, T other) {
+    print(T.Kind)
+    return AreaOf(First(items) else {
+        Missing e => other
+    })
+}
+
+int ByList<T: Shape>(T item) {
+    print(T.Kind)
+    return Sum([item, item])
+}
+
+int ByConditional<T: Shape>(Box<T>? b, T other) {
+    print(T.Kind)
+    return AreaOf(b?.Item ?? other)
+}
+
+int ByLocal<T: Shape>(List<T> items) {
+    print(T.Kind)
+    List<T> xs = items
+    return AreaOf(xs[0])
+}
+
+int ByLocalNullable<T: Shape>(T item) {
+    print(T.Kind)
+    T? x = item
+    if x != null {
+        return AreaOf(x)
+    }
+    return 0
+}
+
+int ByLocalMap<T: Shape>(Map<string, T> m) {
+    print(T.Kind)
+    Map<string, T> held = m
+    return Opt(held["a"])
+}
+
+int ByLocalData<T: Shape>(Box<T> b) {
+    print(T.Kind)
+    Box<T> held = b
+    return AreaOf(held.Item)
+}
+
+int ByLocalFunction<T: Shape>(T item, (T) => T f) {
+    print(T.Kind)
+    (T) => T g = f
+    return AreaOf(g(item))
+}
+
+int ByLambda<T: Shape>(T item) {
+    print(T.Kind)
+    f = (T x) => AreaOf(x)
+    return f(item)
+}
+
+int ByLambdaInferred<T: Shape>(T item) {
+    print(T.Kind)
+    return Apply(item, x => AreaOf(x))
+}
+
+int ByLoop<T: Shape>(List<T> items) {
+    print(T.Kind)
+    mut total = 0
+    for x in items {
+        total = total + AreaOf(x)
+    }
+    return total
+}
+
+int ByLoopEntry<T: Shape>(Map<string, T> m) {
+    print(T.Kind)
+    mut total = 0
+    for e in m {
+        total = total + AreaOf(e.Value)
+    }
+    return total
+}
+
+int ByLoopMap<T: Shape>(Map<string, T> m) {
+    print(T.Kind)
+    mut total = 0
+    for k, v in m {
+        total = total + AreaOf(v)
+    }
+    return total
+}
+
+int ByTypeArgument<T: Shape>(T item) {
+    print(T.Kind)
+    return Count<T>()
+}
+
+int ByDataTypeArgument<T: Shape>(T item) {
+    print(T.Kind)
+    t = Tag<T>(1)
+    return t.Count
+}
+
+mut squares = Map<string, Square>()
+squares["a"] = Square(3)
+print(ByResult(Square(3)))
+print(ByField(Box(Square(3))))
+print(ByMade(Square(3)))
+print(ByMap(squares))
+print(ByWith(Box(Square(3))))
+print(ByFunction(Square(3), s => s))
+print(ByCoalesce(null, Square(2)))
+print(ByNarrowed(Square(3)))
+print(ByMatch(Square(3)))
+print(ByElse([Square(3)], Square(2)))
+print(ByList(Square(3)))
+print(ByConditional(Box(Square(3)), Square(2)))
+print(ByLocal([Square(3)]))
+print(ByLocalNullable(Square(3)))
+print(ByLocalMap(squares))
+print(ByLocalData(Box(Square(3))))
+print(ByLocalFunction(Square(3), s => s))
+print(ByLambda(Square(3)))
+print(ByLambdaInferred(Square(3)))
+print(ByLoop([Square(3)]))
+print(ByLoopEntry(squares))
+print(ByLoopMap(squares))
+print(ByTypeArgument(Square(3)))
+print(ByDataTypeArgument(Square(3)))
