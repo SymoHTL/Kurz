@@ -132,15 +132,37 @@ public sealed partial class Checker
     }
 
     /// <summary><c>T.Kind</c> in a copy: the value of <c>TypeKind</c> for the type the copy binds to <c>T</c>, a constant.</summary>
-    private Typed? KindOfCopy(string name, string member)
+    private Typed? KindOfCopy(string name, string member, int line)
     {
         if (member != "Kind" || TypeParameter(name) is not null || BoundType(name) is not { } bound)
         {
             return null;
         }
 
+        if (KindOfInterface(name, member, bound, line))
+        {
+            return Typed.Error;
+        }
+
         var kinds = enums["TypeKind"];
         return new Typed(new EnumType(kinds), new EnumConstant(kinds.IndexOf(KindOf(bound))));
+    }
+
+    /// <summary>
+    /// T33 with T19: an interface type, which a value whose type is the interface gives a type parameter (Q11 of issue 605), is of no
+    /// kind T33 names, so <c>T.Kind</c>, a loop over <c>T.Fields</c> and <c>T.Make</c> in a copy that binds one are <c>not supported</c>,
+    /// with a text that names the interface *(assumed: a reading of the build, proposed with this record and not put to the owner)*;
+    /// a copy for a type parameter without a limit takes it as well.
+    /// </summary>
+    private bool KindOfInterface(string name, string member, KurzType bound, int line)
+    {
+        if (bound is not InterfaceType face)
+        {
+            return false;
+        }
+
+        NotSupported(line, $"`{name}.{member}` where `{name}` is the interface type `{face.Symbol.Name}`, whose kind T33 does not name (T33)");
+        return true;
     }
 
     /// <summary>The name of the value of <c>TypeKind</c> for a type (T33; section 4, assumed with "Kinds + parts"). No copy binds <c>void</c>, which has none: it is
@@ -597,6 +619,12 @@ public sealed partial class Checker
             return true;
         }
 
+        if (KindOfInterface(n.Name, "Fields", bound, f.Collection.Line))
+        {
+            CountNamesRead(f.Body);
+            return true;
+        }
+
         if (bound is not DataType walked)
         {
             var outermost = copy.Outermost;
@@ -676,6 +704,11 @@ public sealed partial class Checker
         if (lambda.ExpressionBody is not { } body)
         {
             NotSupported(lambda.Line, $"a block as the body of the lambda `{n.Name}.Make` takes (T33)"); // no rule makes a block an argument
+            return Typed.Error;
+        }
+
+        if (KindOfInterface(n.Name, "Make", bound, c.Line))
+        {
             return Typed.Error;
         }
 

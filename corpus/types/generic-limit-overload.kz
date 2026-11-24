@@ -1,0 +1,13 @@
+// expect: output
+// | long
+// rules: T19, F13
+
+interface Shape {
+    int Area()
+}
+
+string F<T: Shape>(T x) => "generic"
+
+string F(long n) => "long"
+
+print(F(5))

@@ -53,6 +53,7 @@ public sealed partial class Checker
     private Frame frame = null!;
     private List<TypeParameterSymbol>? typeContext;
     private bool inElseArm;
+    private VariableSymbol? elseArmName; // O7, U12: the name the arm of `else` being checked binds, which its bare `throw` reads
     private CallExpression? loopSource; // S16: the collection of the `for` loop being checked, the one place `f.Lines()` stands
     private bool realKeepsOwnType;
     private int blockDepth;
@@ -339,8 +340,17 @@ public sealed partial class Checker
     /// <paramref name="text"/> with the rules it cites, <paramref name="rule"/> where the place has one, then the rule of that id
     /// (<see cref="Types.MismatchRule"/>).
     /// </summary>
-    private void ReportMismatch(KurzType from, KurzType to, int line, string text, string? rule = null) =>
+    private void ReportMismatch(KurzType from, KurzType to, int line, string text, string? rule = null)
+    {
+        if (from is TypeParameterType limited && to is InterfaceType face && limited.Symbol.Limits.Contains(face.Symbol))
+        {
+            // T19 with A10: a limit that a type meets by its text alone holds values of types without the interface (Types.Assignable)
+            NotSupported(line, $"a value of `{limited.Symbol.Name}` where its limit `{face.Symbol.Name}` is required, which a type meets by its text alone (A10, T19)");
+            return;
+        }
+
         Report(Types.MismatchId(from, to), line, $"{text} ({(rule is null ? "" : rule + ", ")}{Types.MismatchRule(from, to)})");
+    }
 
     private void NotSupported(int line, string construct) => Add(Diagnostic.NotSupported(line, construct));
 
@@ -414,6 +424,18 @@ public sealed partial class Checker
         RefuseUnreadBases();
         FindBaseCycles();
         pendingPointees = [];
+        foreach (var symbol in dataDeclared.Concat(refusedTypes))
+        {
+            // T19: every data type's limits before any type is resolved, since a use of a generic data type checks its arguments
+            typeContext = symbol.TypeParameters;
+            foreach (var (p, parameter) in symbol.Declaration.TypeParameters.Zip(symbol.TypeParameters))
+            {
+                ResolveLimits(p, parameter);
+            }
+
+            typeContext = null;
+        }
+
         foreach (var symbol in dataDeclared.Concat(refusedTypes))
         {
             ResolveData(symbol);
@@ -740,7 +762,7 @@ public sealed partial class Checker
         foreach (var p in d.TypeParameters)
         {
             RefusePreludeTypeParameter(p);
-            symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
+            symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line));
         }
 
         if (clash)
@@ -1155,14 +1177,6 @@ public sealed partial class Checker
         symbol.Resolved = true;
         var d = symbol.Declaration;
         typeContext = symbol.TypeParameters;
-        foreach (var p in d.TypeParameters)
-        {
-            if (p.Limit is not null)
-            {
-                NotSupported(p.Line, "the limit of a type parameter (T19)"); // not resolved: the one diagnostic of the construct (E1)
-            }
-        }
-
         // D6 gives a data type one base, the data type among the bases wherever it stands; a second one is text no rule gives a
         // meaning (E4); what the checker does not read among them left the type unread before (RefuseUnreadBases), unless the
         // type is a redeclared one, whose bases report it here
@@ -1464,7 +1478,20 @@ public sealed partial class Checker
                 return Types.Error;
             }
 
-            return arguments.Any(Types.IsError) ? Types.Error : new DataType(data, arguments);
+            if (arguments.Any(Types.IsError))
+            {
+                return Types.Error;
+            }
+
+            // T19: the limits at every use that names the type with its arguments, never implied by a signature (Q7 and Q16 of issue
+            // 605, comment 7051071380)
+            if (Unmet(data.TypeParameters.Zip(arguments)) is { } unmet)
+            {
+                Report(ErrorIds.TypeMismatch, n.Line, UnmetText(unmet, data.Name));
+                return Types.Error;
+            }
+
+            return new DataType(data, arguments);
         }
 
         if (classes.TryGetValue(n.Name, out var classSymbol))
@@ -1584,7 +1611,7 @@ public sealed partial class Checker
         foreach (var p in d.TypeParameters)
         {
             RefusePreludeTypeParameter(p);
-            symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null, HasDefault = p.Default is not null });
+            symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasDefault = p.Default is not null });
         }
 
         if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || interfaces.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || flagsTypes.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
@@ -1610,11 +1637,7 @@ public sealed partial class Checker
         typeContext = symbol.TypeParameters;
         foreach (var (p, parameter) in d.TypeParameters.Zip(symbol.TypeParameters))
         {
-            if (p.Limit is not null)
-            {
-                NotSupported(p.Line, "the limit of a type parameter (T19)"); // not resolved: the one diagnostic of the construct (E1)
-            }
-
+            ResolveLimits(p, parameter);
             if (p.Constant is not null)
             {
                 parameter.Constant = ResolveConstantParameter(symbol, p);
@@ -1640,6 +1663,69 @@ public sealed partial class Checker
         if (symbol.TakesC && !modifiedFunctions.Contains(symbol))
         {
             CheckCSignature(symbol, d); // R12, R16
+        }
+    }
+
+    /// <summary>
+    /// T19: the interfaces and the class the limits of a type parameter name, read with the type parameters of its declaration in scope
+    /// (the owner's answers of 2026-11-20 on issue 605, comment 7051071380). A limit names an interface or a class that can have derived
+    /// classes, which every class but an actor can (K6, U1; Q5); any other type, a data type, an enum, a number type, a type parameter,
+    /// a union and a function type among them, is <c>limit-not-interface</c> (Q6), the union and the function type that the parser reads
+    /// there as a reading of Q6; a limit named twice in one list is <c>syntax</c> (Q19). A second class, and a class after an interface,
+    /// are <c>not supported</c>, as a reading of the build, as a class's second base and its base after an interface are (K6, K7). A
+    /// generic interface as a limit, which Q15 lets stand, is <c>not supported</c>. Each limit that is not read leaves the parameter with
+    /// a limit unread, whose members and arguments report nothing more (E1).
+    /// </summary>
+    private void ResolveLimits(TypeParameter p, TypeParameterSymbol parameter)
+    {
+        foreach (var limit in p.Limits)
+        {
+            if (limit is NamedType { } n && genericInterfaces.Contains(n.Name))
+            {
+                NotSupported(limit.Line, "a generic interface as a limit (Q15 of issue 605, T19)");
+                parameter.LimitUnread = true;
+                continue;
+            }
+
+            var type = Resolve(limit);
+            if (Types.IsError(type))
+            {
+                parameter.LimitUnread = true; // its diagnostic is reported (E1)
+            }
+            else if (type is InterfaceType face)
+            {
+                if (parameter.Limits.Contains(face.Symbol))
+                {
+                    Report(ErrorIds.Syntax, limit.Line, $"`{face.Symbol.Name}` is named twice among the limits of `{p.Name}` (T19)");
+                }
+                else
+                {
+                    parameter.Limits.Add(face.Symbol);
+                }
+            }
+            else if (type is ClassType { Symbol: var named })
+            {
+                if (ReferenceEquals(parameter.ClassLimit, named))
+                {
+                    Report(ErrorIds.Syntax, limit.Line, $"`{named.Name}` is named twice among the limits of `{p.Name}` (T19)");
+                }
+                else if (parameter.ClassLimit is not null || parameter.Limits.Count > 0)
+                {
+                    NotSupported(limit.Line, parameter.ClassLimit is not null
+                        ? $"a second class, `{named.Name}`, among the limits of `{p.Name}` (T19)"
+                        : $"the class `{named.Name}` after an interface among the limits of `{p.Name}` (T19)");
+                    parameter.LimitUnread = true;
+                }
+                else
+                {
+                    parameter.ClassLimit = named;
+                }
+            }
+            else
+            {
+                Report(ErrorIds.LimitNotInterface, limit.Line, $"`{type.Text}` is neither an interface nor a class that can have derived classes, which a limit names (T19)");
+                parameter.LimitUnread = true;
+            }
         }
     }
 
@@ -1864,6 +1950,7 @@ public sealed partial class Checker
             DeclareParameter(p.Name, p.Type, p.Mut, p.Line, node, p.Move);
         }
 
+        ViewParameters(f);
         var returnType = f.ReturnType;
         if (d.ExpressionBody is not null)
         {
@@ -2343,6 +2430,13 @@ public sealed partial class Checker
                 {
                     Report(ErrorIds.ThrowNeedsValue, t.Line, "a bare `throw` stands only in an arm of `else` (O7)");
                 }
+                else if (elseArmName is { } name)
+                {
+                    // O7, U12: a bare `throw` throws the case its arm took, which is a use of the arm's name, so that one a `move` may have
+                    // ended is `used-after-move` at the `throw`, as rustc refuses a use after a move (E0382) (the owner, 2026-11-20, issue
+                    // 596, comment 7051500690); it reads no expression, so that no `move` is its own
+                    UseOfMoved(null, name, t.Line);
+                }
 
                 return Flow.Ends;
             case RawBlock r:
@@ -2616,6 +2710,7 @@ public sealed partial class Checker
         }
 
         Declare(v.Name, type, v.Mut, VariableKind.Local, v.Line, v);
+        ViewLocal(v.Name, v.Type, v.Value);
         Assigned(new NullPath(model.DeclarationOf(v), string.Empty), type, t); // N7: a value that is not null, as C# reads a declaration
         BindRegion(model.DeclarationOf(v), v.Value, v); // U12
     }
@@ -2720,6 +2815,7 @@ public sealed partial class Checker
         }
 
         Declare(a.Name, type, false, VariableKind.Local, a.Line, a);
+        ViewLocal(a.Name, null, a.Value);
         BindRegion(model.DeclarationOf(a), a.Value, a); // U12
     }
 
@@ -3038,6 +3134,8 @@ public sealed partial class Checker
             DeclareChecked(f.Second.Name, value ?? Types.Error, false, VariableKind.Loop, f.Second.Line, f.Second);
             model.RecordSecondName(f); // U12: a `move` of either name reads the loop (SemanticModel.LoopOf)
         }
+
+        ViewLoop(f); // T19, T33
 
         var fields = WalksFieldsOfTypeParameter(f); // T34: a loop over `T.Fields` read on a function's text, outside a copy
         if (fields)

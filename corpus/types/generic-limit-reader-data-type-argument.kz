@@ -1,0 +1,22 @@
+// expect: error type-mismatch at 18
+// rules: T19
+
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+data Tag<U: Shape>(int Count)
+
+int Measure<T>(T item) {
+    print(T.Kind)
+    t = Tag<T>(1)
+    return t.Count
+}
+
+print(Measure(Square(3)))

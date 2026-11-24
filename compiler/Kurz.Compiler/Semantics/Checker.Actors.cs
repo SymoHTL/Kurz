@@ -186,7 +186,7 @@ public sealed partial class Checker
     {
         foreach (var d in unreadActors)
         {
-            typeContext = [.. d.TypeParameters.Where(p => p.Constant is null).Select(p => new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null })];
+            typeContext = [.. d.TypeParameters.Where(p => p.Constant is null).Select(p => new TypeParameterSymbol(p.Name, p.Line))];
             var error = ActorDeclarationError(d);
             typeContext = null;
             if (!error && UnreadActorPart(d) is { } part)

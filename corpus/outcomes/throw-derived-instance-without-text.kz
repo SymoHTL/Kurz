@@ -1,0 +1,14 @@
+// expect: throws thrown at 10
+// | before
+// rules: O7
+
+class Animal(string Name)
+
+class Dog(int Legs) : Animal
+
+void Fail(Animal a) {
+    throw a
+}
+
+print("before")
+Fail(Dog("rex", 4))

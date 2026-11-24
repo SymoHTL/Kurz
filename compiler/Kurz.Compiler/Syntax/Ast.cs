@@ -364,10 +364,10 @@ public enum Modifiers
 public sealed record Parameter(int Line, bool Mut, TypeSyntax? Type, string Name, Expression? Default, bool Move = false);
 
 /// <summary>
-/// A type parameter with its limit (T19): <c>T</c>, <c>T: Comparable</c>; or one that holds a constant of a type, with its default
-/// (T35): <c>const JsonKeys K</c>, <c>const Mode M = Mode.Plain</c>.
+/// A type parameter with its limits (T19): <c>T</c>, <c>T: Shape</c>, <c>T: Shape &amp; Named</c>; or one that holds a constant of a
+/// type, with its default (T35): <c>const JsonKeys K</c>, <c>const Mode M = Mode.Plain</c>.
 /// </summary>
-public sealed record TypeParameter(int Line, string Name, TypeSyntax? Limit, TypeSyntax? Constant = null, Expression? Default = null);
+public sealed record TypeParameter(int Line, string Name, IReadOnlyList<TypeSyntax> Limits, TypeSyntax? Constant = null, Expression? Default = null);
 
 /// <summary>
 /// A function or a method (F1 to F4, K7). Both bodies are null for the signature of an interface method. <paramref name="Property"/>

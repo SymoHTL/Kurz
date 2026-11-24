@@ -324,7 +324,7 @@ public sealed partial class Checker
     /// naming the line of each such <c>move</c>; a read inside the moved value itself is that <c>move</c>'s own, unless the checker read
     /// the <c>move</c> in an earlier round of a loop, which is a use after it.
     /// </summary>
-    private void UseOfMoved(Expression read, VariableSymbol variable, int line)
+    private void UseOfMoved(Expression? read, VariableSymbol variable, int line)
     {
         if (!frame.Moves.Moved.TryGetValue(variable, out var sites))
         {
@@ -351,7 +351,7 @@ public sealed partial class Checker
     }
 
     /// <summary>Whether <paramref name="read"/> is <paramref name="value"/> or one of its parts.</summary>
-    private bool Within(Expression read, Expression value) =>
+    private bool Within(Expression? read, Expression value) =>
         ReferenceEquals(read, value) || (value is CallExpression c ? c.Arguments.Select(a => a.Value).Prepend(c.Callee) : Parts(value)).Any(p => Within(read, p));
 
     /// <summary>E1: one <c>used-after-move</c> for each variable and the moves it names, the first in the file.</summary>

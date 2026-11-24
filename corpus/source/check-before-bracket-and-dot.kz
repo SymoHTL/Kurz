@@ -1,0 +1,11 @@
+// expect: output
+// | 7
+// | 4
+// rules: L18, Y1
+
+// before `[` and `.` at the start of a statement the word `check` is a name, so that a variable named so keeps its meaning there
+mut check = [1, 2, 3]
+check[0] = 7
+check.Add(4)
+print(check[0])
+print(check.Count)
