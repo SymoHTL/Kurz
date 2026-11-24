@@ -58,7 +58,7 @@ public static class SyntaxCopy
         public FunctionDeclaration Function(FunctionDeclaration d) => d with
         {
             ReturnType = Type(d.ReturnType),
-            TypeParameters = d.TypeParameters.Select(p => p with { Limit = OptionalType(p.Limit), Constant = OptionalType(p.Constant), Default = Optional(p.Default) }).ToList(),
+            TypeParameters = d.TypeParameters.Select(p => p with { Limits = p.Limits.Select(Type).ToList(), Constant = OptionalType(p.Constant), Default = Optional(p.Default) }).ToList(),
             Parameters = d.Parameters.Select(Parameter).ToList(),
             ExpressionBody = Optional(d.ExpressionBody),
             BlockBody = d.BlockBody is null ? null : Block(d.BlockBody),

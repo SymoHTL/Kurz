@@ -1517,6 +1517,31 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_call_through_a_limit_is_direct_in_a_copy_that_binds_a_class_and_through_the_table_in_one_that_binds_the_interface()
+    {
+        // T19 (Q14 of issue 605, comment 7051071380): in `AreaOf<Square>` the call is `Square`'s `Area`, as a call on a `Square` runs it, with no
+        // table read; in `AreaOf<Shape>` it loads the slot of `Area` from the instance's table for `Shape` (K6)
+        var program = Compile(
+            "interface Shape {\n    int Area()\n}\n\nclass Square(int Side) : Shape {\n    pub int Area() => Side * Side\n}\n\nint AreaOf<T: Shape>(T item) => item.Area()\n\nShape s = Square(2)\nprint(AreaOf(Square(3)) + AreaOf(s))\n",
+            Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
+        Assert.True(program is not null, "no program");
+        string Body(string copy)
+        {
+            var lines = program.Ir.ReplaceLineEndings("\n").Split('\n'); // the module's lines end as the system's do
+            var start = Array.FindIndex(lines, l => l.StartsWith("define ", StringComparison.Ordinal) && l.Contains($".AreaOf<{copy}>.", StringComparison.Ordinal));
+            Assert.True(start >= 0, $"no copy `AreaOf<{copy}>` in the IR");
+            return string.Join("\n", lines.Skip(start).TakeWhile(l => l != "}"));
+        }
+
+        var direct = Body("Square");
+        Assert.Contains(".Square.Area.", direct, StringComparison.Ordinal);
+        Assert.DoesNotContain("extractvalue %kz.obj", direct, StringComparison.Ordinal);
+        var through = Body("Shape");
+        Assert.DoesNotContain(".Square.Area.", through, StringComparison.Ordinal);
+        Assert.Contains("extractvalue %kz.obj", through, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_value_of_an_interface_is_the_address_and_the_table_its_class_has_for_the_interface()
     {
         // K6, as Rust lays out `Rc<dyn Trait>`: a value of an interface is the address of the instance's block and its class's table for

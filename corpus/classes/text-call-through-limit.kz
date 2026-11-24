@@ -1,0 +1,29 @@
+// expect: output
+// | 1
+// | ok
+// | Point { X = 1, Y = 2 }
+// | tag
+// | n=4
+// | n=4
+// rules: A10, T19
+
+interface Texty {
+    string Text()
+}
+
+class Tag {
+    pub string Text() => "tag"
+}
+
+data Point(int X, int Y)
+
+string Show<T: Texty>(T item) => item.Text()
+
+print(Show(1))
+print(Show("ok"))
+print(Show(Point(1, 2)))
+print(Show(Tag()))
+n = 4
+s = "n={n}"
+print(Show(s))
+print(s)

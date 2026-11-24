@@ -1,0 +1,17 @@
+// expect: output
+// | hi
+// rules: A10, T19
+
+interface Texty {
+    string Text()
+}
+
+void Show<T: Texty>(T item) {
+    print(item)
+}
+
+void Use(int | string u) {
+    Show(u)
+}
+
+Use("hi")
