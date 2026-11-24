@@ -7,8 +7,9 @@ and it stays that way until the owner has answered.
 
 It covers the sequential core, what a program without actors needs, the actors of one machine
 (chapter 19) and a program's tests (chapter 20). The rest of actors, distribution, keywords, jobs,
-`mock` and the test's clock, packages and clients (sections 6, 7 and 9 to 13 of the record) are outside
-it.
+`mock`, the test's clock and the cluster test, of which chapter 20 holds only the rules that read
+their forms, answer `not supported` and state what the record decides of them (Y8 to Y10), packages and clients
+(sections 6, 7 and 9 to 13 of the record) are outside it.
 
 ## The status of a rule
 

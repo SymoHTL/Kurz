@@ -1,0 +1,9 @@
+// expect: error syntax at 5
+// rules: Y1
+
+// a test's name is a string literal of one line, so that it fits its result line, and a `"""` block is none
+test """
+    adds
+    """ {
+    check 1 + 1 == 2
+}
