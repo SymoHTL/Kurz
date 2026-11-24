@@ -360,9 +360,20 @@ public sealed partial class Emitter
     /// </summary>
     private string? EmitElse(ElseExpression e, bool asValue)
     {
-        var call = (CallExpression)Unwrap(e.Call);
-        var union = Sub(Model.CallOf(call).Result) as UnionType ?? throw new InvalidOperationException($"`else` after a call whose result is no union at line {e.Line}: the checker reports it (O5)");
-        var value = EmitCall(call) ?? throw new InvalidOperationException($"the call before `else` at line {e.Line} has no value");
+        UnionType union;
+        string value;
+        if (Unwrap(e.Call) is AttemptExpression attempt)
+        {
+            union = (UnionType)Sub(Model.AttemptOf(attempt).Type); // U46: the whole value of the `attempt`, its block's value and `Crashed`
+            value = EmitAttemptValue(attempt);
+        }
+        else
+        {
+            var call = (CallExpression)Unwrap(e.Call);
+            union = Sub(Model.CallOf(call).Result) as UnionType ?? throw new InvalidOperationException($"`else` after a call whose result is no union at line {e.Line}: the checker reports it (O5)");
+            value = EmitCall(call) ?? throw new InvalidOperationException($"the call before `else` at line {e.Line} has no value");
+        }
+
         var success = union.Cases[0];
         var tag = Tag(value, union);
         var slot = asValue && success is not VoidType ? fn.Alloca(Ir(success), "recovered") : null;
@@ -418,7 +429,7 @@ public sealed partial class Emitter
             else if (arm.Pattern is ElsePattern)
             {
                 hasElse = true;
-                elseCase = (value, union);
+                elseCase = success is VoidType ? Reached(value, union, tag, rest) : (value, union);
                 if (Counted(union))
                 {
                     held = (fn.Alloca(Ir(union), "case"), union);
@@ -457,6 +468,30 @@ public sealed partial class Emitter
         {
             Leave(value, union, left, line);
         }
+    }
+
+    /// <summary>
+    /// O7 with A7: the case value that reached the arm <c>else</c> over a union whose success is <c>void</c>, which has no text, as a value
+    /// of the cases beside the success, which a bare <c>throw</c> there throws: of one case, its value; of more, a union of them, by the
+    /// tag. A union whose success has a value has a text, the text of its case, and is thrown as it is.
+    /// </summary>
+    private (string Value, KurzType Type) Reached(string value, UnionType union, string tag, List<KurzType> rest)
+    {
+        if (rest.Count == 1)
+        {
+            return (Payload(value, union, rest[0]), rest[0]);
+        }
+
+        var cases = new UnionType(rest);
+        var slot = fn.Alloca(Ir(cases), "case");
+        var done = fn.Label("reached");
+        ByCase(tag, union, rest, c =>
+        {
+            fn.Emit($"store {Ir(cases)} {MakeUnion(cases, c, Payload(value, union, c))}, ptr {slot}");
+            fn.Branch(done);
+        });
+        fn.Block(done);
+        return (fn.Value($"load {Ir(cases)}, ptr {slot}"), cases);
     }
 
     /// <summary>O5: what an arm of <c>else</c> does; in a block, its last statement: the value it recovers with, or what it does.</summary>

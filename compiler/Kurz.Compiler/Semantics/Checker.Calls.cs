@@ -142,7 +142,7 @@ public sealed partial class Checker
         {
             if (a.Word == ArgumentWord.Copy)
             {
-                var (kind, why, limit) = CrossingOf(model.TypeOf(a.Value).Type);
+                var (kind, why, limit, _) = CrossingOf(model.TypeOf(a.Value).Type);
                 if ((limit ?? (kind == ActorCrossing.Never ? why : null)) is { } refused)
                 {
                     NotSupported(a.Line, $"`copy` of {refused} (U12)");

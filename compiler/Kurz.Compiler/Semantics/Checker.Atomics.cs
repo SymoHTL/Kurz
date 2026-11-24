@@ -6,7 +6,7 @@ namespace Kurz.Compiler.Semantics;
 /// R19: the atomic types behind <c>raw</c>, Rust's <c>core::sync::atomic</c> in Kurz's names (design record, section 6, the owner,
 /// 2026-11-17, #519, comment 6946657505, answer 1, "Rust's set"): <c>AtomicBool</c>, <c>AtomicInt</c>, <c>AtomicLong</c> and
 /// <c>AtomicPtr&lt;T&gt;</c>, each a view of a word through a pointer that <c>FromPtr</c> makes, as Rust's <c>from_ptr</c> does, with
-/// Rust's members, each order an <c>MemoryOrder</c>, and <c>Fence</c>. A member and <c>Fence</c> stand in a <c>raw</c> block, as a read
+/// Rust's members, each order a <c>MemoryOrder</c>, and <c>Fence</c>. A member and <c>Fence</c> stand in a <c>raw</c> block, as a read
 /// through a pointer does (R10); <c>FromPtr</c> reads nothing, as <c>Ptr&lt;T&gt;(x)</c> (R14). An order written as a value of
 /// <c>MemoryOrder</c> at the call that Rust's lint <c>invalid_atomic_ordering</c> refuses is <c>invalid-ordering</c>; any other order is
 /// read when the call runs (the emitter's).
@@ -62,7 +62,11 @@ public sealed partial class Checker
         return pointer is PointerType p ? new AtomicType(Atomic.Ptr, p.Pointee) : Types.Error;
     }
 
-    /// <summary>R19: a member of an atomic type read through its name as a value, <c>AtomicLong.FromPtr</c>, which is called; false for any other read.</summary>
+    /// <summary>
+    /// R19: a member of an atomic type read through its name as a value: <c>AtomicLong.FromPtr</c>, a function of a type, which is called,
+    /// <c>syntax</c>, as a function's name where a value stands is (F11) (the owner, 2026-11-17, #572, comment 6961064484, Q3, "syntax for
+    /// all (Recommended)"), and any other member, which the type has not, <c>unknown-name</c>; false for any other read.
+    /// </summary>
     private bool AtomicMemberAsValue(MemberAccess m)
     {
         if (m.Target is not NameExpression n || !IsAtomicName(n.Name))
@@ -70,9 +74,13 @@ public sealed partial class Checker
             return false;
         }
 
-        Report(ErrorIds.UnknownName, m.Line, m.Member == "FromPtr"
-            ? $"`{n.Name}.FromPtr` is a function, which is called (R19, V10)"
-            : $"`{n.Name}` has no member `{m.Member}`: its view is made by `FromPtr` (R19, V10)");
+        if (m.Member == "FromPtr")
+        {
+            Report(ErrorIds.Syntax, m.Line, $"`{n.Name}.FromPtr` is a function, and no value stands here: it is called, `{n.Name}.FromPtr(p)` (R19, F11)");
+            return true;
+        }
+
+        Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no member `{m.Member}`: its view is made by `FromPtr` (R19, V10)");
         return true;
     }
 
@@ -86,12 +94,33 @@ public sealed partial class Checker
 
         if (n.Name == "AtomicPtr")
         {
-            Report(ErrorIds.CannotInfer, n.Line, "`AtomicPtr` takes one type argument, the type its word points to: `AtomicPtr<T>.FromPtr(p)` (R19, T27)");
+            // T27: the `T` the call does not write is inferred from its argument, a `T**`; an argument of another type gives it
+            // nothing, and the call is `cannot-infer`, and an argument with an error of its own has nothing reported beside it (E1)
+            var argument = m.Member == "FromPtr" && c.Arguments is [{ Mut: false, Value: not LambdaExpression } only] ? Pretyped(only.Value) : (Typed?)null;
+            if (argument is { Type: PointerType { Pointee: PointerType { Pointee: { } pointee } } } && !Types.IsError(pointee))
+            {
+                return CheckFromPtr(new AtomicType(Atomic.Ptr, pointee), m.Member, m.Line, c);
+            }
+
+            if (argument is not { IsError: true })
+            {
+                Report(ErrorIds.CannotInfer, n.Line, "`AtomicPtr` takes one type argument, the type its word points to, which a `T**` given to `FromPtr` infers: `AtomicPtr<T>.FromPtr(p)` (R19, T27)");
+            }
+
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }
 
         return CheckFromPtr(new AtomicType(AtomicOf(n.Name)), m.Member, m.Line, c);
+    }
+
+    /// <summary>The type of <paramref name="value"/>, read with what that reports kept back, since the call reads it again (T27).</summary>
+    private Typed Pretyped(Expression value)
+    {
+        Push();
+        var typed = CheckExpression(value, null);
+        Pop(commit: false);
+        return typed;
     }
 
     /// <summary>
@@ -127,7 +156,7 @@ public sealed partial class Checker
     private EnumType OrderingType => new(enums["MemoryOrder"]);
 
     /// <summary>
-    /// R19: a member called on a view, with Rust's parameters, its orders an <c>MemoryOrder</c>: <c>Load</c>, <c>Store</c>, <c>Swap</c>,
+    /// R19: a member called on a view, with Rust's parameters, its orders a <c>MemoryOrder</c>: <c>Load</c>, <c>Store</c>, <c>Swap</c>,
     /// <c>CompareExchange</c> and <c>CompareExchangeWeak</c>, which give the value found, or the case <c>NotExchanged</c> with it where
     /// nothing was stored (O1, as Rust's <c>Result&lt;T, T&gt;</c>), on every atomic type, <c>FetchAdd</c> and <c>FetchSub</c> on
     /// <c>AtomicInt</c> and <c>AtomicLong</c>, and <c>FetchAnd</c>, <c>FetchOr</c> and <c>FetchXor</c> on all four, an

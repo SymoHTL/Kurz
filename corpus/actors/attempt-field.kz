@@ -1,0 +1,28 @@
+// expect: output
+// | 56
+// rules: U47
+
+// `count` is taken by value at the block's start: the call back into `Counter`, which the wait of its `attempt` lets in,
+// changes the field and not the block's value
+actor Counter {
+    mut int count = 5
+
+    pub void Bump() {
+        count = count + 1
+    }
+
+    pub int Peek() {
+        me = this
+        v = attempt {
+            me.Bump()
+            return count
+        } else {
+            Crashed c => -1
+        }
+
+        return v * 10 + count
+    }
+}
+
+k = spawn Counter()
+print(k.Peek())
