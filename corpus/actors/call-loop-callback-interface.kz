@@ -1,0 +1,27 @@
+// expect: output
+// | 71
+// rules: U57
+
+interface Checker {
+    int Run(A x)
+}
+
+class Via(B Peer) : Checker {
+    pub int Run(A x) => Peer.Check(x)
+}
+
+int Ask(Checker k, A s) => k.Run(s)
+
+actor A(B Other) {
+    pub int Save() => Ask(Via(Other), this) + 1
+
+    pub int Load() => 7
+}
+
+actor B {
+    pub int Check(A x) => x.Load() * 10
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Save())

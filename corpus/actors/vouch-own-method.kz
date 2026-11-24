@@ -1,0 +1,11 @@
+// expect: error syntax at 7
+// rules: U58, U10
+
+actor A {
+    pub int Size() => 1
+
+    pub int Twice() => vouch this.Size() + 1
+}
+
+a = spawn A()
+print(a.Twice())

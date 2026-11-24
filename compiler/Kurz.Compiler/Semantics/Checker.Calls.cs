@@ -127,6 +127,11 @@ public sealed partial class Checker
             result = Typed.Error;
         }
 
+        if (c.Vouch > 0 && !result.IsError && !Vouched(c))
+        {
+            result = Typed.Error; // E1: the call's one error, and a clause after it read with no diagnostic
+        }
+
         if (c.Within is { } bound)
         {
             CallClause(c, bound, result);

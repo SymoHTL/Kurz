@@ -1,9 +1,9 @@
-// expect: throws deadlock at 15
+// expect: error call-loop at 15
 // threads: 1
-// rules: U52
+// rules: U52, U56
 
-// `User`'s `Use` starts `Cache`, whose default calls `Cache.Size` in the chain of `Use`, so that the call waits in `Cache`'s inbox
-// for the start that waits on it, and the error names that call, not the top-level code's call that waits
+// `User`'s `Use` starts `Cache`, whose default calls `Cache.Size` in the chain of `Use`, a call that would wait in `Cache`'s inbox
+// for the start that waits on it: a loop through `Cache`'s type, which layer 2 refuses at that call
 
 actor Cache per node {
     int size = Measured()

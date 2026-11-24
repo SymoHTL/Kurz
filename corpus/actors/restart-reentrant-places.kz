@@ -21,9 +21,9 @@ actor B {
         }
 
         return match k {
-            0 => x.Peek()
-            1 => x.Peek()
-            else => x.Peek()
+            0 => vouch x.Peek()
+            1 => vouch x.Peek()
+            else => vouch x.Peek()
         }
     }
 }

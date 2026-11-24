@@ -2228,9 +2228,11 @@ main thread's stack, where U18 has the main thread sleep beside the worker threa
 code waits for a call's result, one message of each actor in turn, so that a `send` made after the
 last call that waits does not run, and a message parked in a wait when the top-level code ends does
 not go on (U13); of section 6's deadlocks the build makes layer 1 (U17) and the `deadlock` of a wait
-of the top-level code that nothing can end (U18), and neither layer 2, the compile error `call-loop`,
-nor layer 3, so that a loop of waits that the top-level code does not wait on stays to the end of the
-program; a crash in a message is the crash of its actor (U19): the runtime stores it in the
+of the top-level code that nothing can end (U18), and the checker layer 2, the compile error `call-loop`
+on every program that declares an actor (U56 to U58), with the warning `vouch-unneeded` (U59), which the
+walk of the throw sets (`ThrowSets.ActorsCode`) and `Semantics/CallLoops.cs` read, and the build makes no
+layer 3, so that a wait that layer 2 lets through, by a `vouch` or as no loop of calls, and that the
+top-level code does not wait on stays to the end of the program; a crash in a message is the crash of its actor (U19): the runtime stores it in the
 activation's header and switches to the scheduler's stack, frees the actor's heap whole but for its
 first block, the record and the state, copies the messages of its inbox into a new heap, ends the
 open copy sessions of its activations, unhooks the reply each parked activation waits on by the swap

@@ -210,12 +210,26 @@ public sealed partial class Checker
             }
 
             checker.KeepOneUseAfterMove();
+
+            // U56 to U59: the loops of calls that wait, read on the reading that is reported, after every body and beside its errors, on every
+            // program with an actor (the owner, 2026-11-20, #519, comment 7051071630, T54 (a) and T59 (a))
+            var loops = checker.model.Classes.Any(c => c.IsActor) ? new CallLoops(checker, std) : null;
+            foreach (var error in loops?.Errors() ?? [])
+            {
+                bag.Add(error);
+            }
+
             foreach (var d in bag.Items)
             {
                 diagnostics.Add(d);
             }
 
             foreach (var lint in checker.lints.Values)
+            {
+                diagnostics.Add(lint);
+            }
+
+            foreach (var lint in bag.HasNotSupported ? [] : loops?.Warnings() ?? [])
             {
                 diagnostics.Add(lint);
             }
