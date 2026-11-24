@@ -381,7 +381,7 @@ public sealed record CallInfo(
 
     /// <summary>
     /// U51: a message of <see cref="CallKind.ActorCall"/> or <see cref="CallKind.ActorSend"/> addressed by the name of a <c>per node</c>
-    /// actor, <c>Cache.Get(1)</c>, whose one actor the call finds, or starts, before its arguments run (U52).
+    /// actor, <c>Cache.Get(1)</c>, whose one actor the call finds, or starts (U52), before its arguments run (U51).
     /// </summary>
     public bool ByName { get; init; }
 }

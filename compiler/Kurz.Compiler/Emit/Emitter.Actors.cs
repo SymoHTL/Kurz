@@ -151,8 +151,9 @@ public sealed partial class Emitter
     /// <summary>
     /// U51 to U54 (assumed: T27 to T33 of issue 519, comment 6983903100, at their defaults): the function a message to the name of the
     /// <c>per node</c> type <paramref name="symbol"/> calls before its arguments run, made once for the type with three globals of its
-    /// own, declared here, once, where its entry is set: its cell, the lock, the slot and the number of its one actor (the runtime's
-    /// <c>PerFind</c>); its block of a restart, as <see cref="KeptArguments"/> makes a <c>spawn</c>'s with no argument kept, naming the
+    /// own, declared here, once, where its entry is set: its cell, whose words are the lock, the slot and the number of its one
+    /// actor (the runtime's <c>PerFind</c>); its block of a restart, as <see cref="KeptArguments"/> makes a <c>spawn</c>'s with no
+    /// argument kept, naming the
     /// function of its restart (<see cref="Restarted"/>), or none for <c>escalate</c>, the policy after its name or <c>restart</c> (U27),
     /// and no block for <c>stop</c>; and its knobs where <c>after</c> or <c>max N in</c> is written, marked as a <c>per node</c> type's
     /// (<see cref="KnobsValue"/>), whose place no <c>restart-limit</c> names, so that it holds none. The function finds the actor that
@@ -160,7 +161,8 @@ public sealed partial class Emitter
     /// one with that block of a restart, whose supervisor <c>ActorNew</c> takes as at a <c>spawn</c>, the code that runs (U53), stores it
     /// in the cell before its constructor runs (<c>PerStarted</c>), so that a message that reaches it meanwhile waits for it, and runs the
     /// constructor, the defaults of its body, on the stack of that code, as a <c>spawn</c> runs it (<see cref="EmitActorSpawn"/>; U3), so
-    /// that a throw there is that code's crash, which ends the actor half built, its supervisor's child; then the root becomes its
+    /// that a throw there is that code's crash, at the throw's line where T29's words name the call's (U52; assumed: T37 of issue
+    /// 519, comment 6991862214, put to the owner), which ends the actor half built, its supervisor's child; then the root becomes its
     /// supervisor (<c>PerBuilt</c>). A message to it from the code its constructor runs waits for a constructor that waits for it, the
     /// top-level code's <c>deadlock</c> on one thread (U18).
     /// </summary>
@@ -716,9 +718,15 @@ public sealed partial class Emitter
 
         // U39: the call's bound, that of its clause, run after the arguments, at every call it stands on, under a `within` block whose
         // deadline wins over it too (assumed: a reading of the build), else the literal of the method's declaration, the call's clause
-        // winning over the declaration's, which the runtime's `Enqueue` takes where no `within` block runs (assumed in section 6); the
-        // callee's reference and its heap, read before the arguments, stay the callee's while the bound runs, since a bound that
-        // changes the variable the callee was read from, `s.Get() within Swap(mut s)`, is `changed-while-held` (M7), as an argument is
+        // winning over the declaration's, which the runtime's `Enqueue` takes where no `within` block runs (assumed in section 6). The
+        // callee's reference, its two words read before the arguments as a receiver is (F12, U2), is the call's own while the bound
+        // runs; the callee's heap is read before the arguments too only where the message is built in it, its bound a literal or the
+        // name of a variable or a field, which runs no code, and a message built in a heap of its own reads it at its queueing alone.
+        // A bound that changes the variable the callee was read from, `s.Get() within Swap(mut s)`, or the list it was read from as an item,
+        // `ss[0].Get() within Clear(mut ss)`, is `changed-while-held` (M7), as an argument is; one that gives the field it was read from
+        // another actor, through its instance passed as `mut`, `b.s.Get() within Swap(mut b)`, or in a method of the actor the bound
+        // calls, `helper.Get() within Reset()`, leaves the call with the actor read before the bound, which stands while its slot holds
+        // its number (U2)
         var bound = c.Within is { } clause ? EmitExpression(clause) : f.Declaration!.Within is { } declared ? EmitExpression(declared) : null;
         var result = f.ReturnType;
         var reply = fn.Alloca(Reply(result), "reply");
