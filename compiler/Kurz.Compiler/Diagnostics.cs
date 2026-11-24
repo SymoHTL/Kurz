@@ -193,6 +193,7 @@ public static class ErrorIds
     public const string UsedAfterMove = "used-after-move";
     public const string MoveReachable = "move-reachable";
     public const string MoveAtCall = "move-at-call";
+    public const string BoundNotPositive = "bound-not-positive";
     public const string PointerCrosses = "pointer-crosses";
     public const string CallLoop = "call-loop";
 
@@ -209,6 +210,7 @@ public static class ErrorIds
     public const string InvalidOrderingAtRunTime = "invalid-ordering-at-run-time";
     public const string StackOverflow = "stack-overflow";
     public const string CheckFailed = "check-failed";
+    public const string InvalidInput = "invalid-input";
 }
 
 /// <summary>The ids of the lints, which warn and build the program (H5): no case expects one, and the error table keeps them out.</summary>

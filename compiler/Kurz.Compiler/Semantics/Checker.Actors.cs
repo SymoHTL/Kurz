@@ -1053,7 +1053,7 @@ public sealed partial class Checker
 
     /// <summary>
     /// U39, U41: the clause <c>within d</c> on a call bounds a call of an actor's method through a reference that waits (U4), its bound read
-    /// as a block's is (U40, <see cref="CheckBound"/>), after the call's arguments, and recorded as one that can wait where it runs a call,
+    /// as a block's is (U40, <see cref="CheckBound"/>, <see cref="Positive"/>), after the call's arguments, and recorded as one that can wait where it runs a call,
     /// as an argument is (<see cref="RecordWaits"/>); on any other call, a <c>send</c>'s (U6), a function's, a class's method's or an
     /// actor's own method called inside it, it is <c>syntax</c>, as <c>send</c> before what is no call of an actor's method is (U14) (U41;
     /// assumed: T11 of comment 6967625156), the bound then read with no diagnostic, as is that of a call that reported its own error (U41,
@@ -1078,6 +1078,7 @@ public sealed partial class Checker
         }
 
         CheckBound(bound);
+        Positive(bound, "the bound of the call's `within`", "U41, U40");
         if (Calls(bound))
         {
             model.RecordWaitingArgument(bound);
@@ -1111,8 +1112,8 @@ public sealed partial class Checker
 
     /// <summary>
     /// U39, U41: the clause <c>within d</c> on a declaration bounds every call through a reference of a message, a <c>pub</c> method of an
-    /// actor (U4, U9), its number literal, its sign included, read as a block's bound is (U40, <see cref="CheckBound"/>; U41, assumed: a
-    /// reading of the build); on any other declaration, a function's, a class's, a data type's or an interface's method, or an actor's
+    /// actor (U4, U9), its number literal, its sign included, read as a block's bound is (U40, <see cref="CheckBound"/>, <see cref="Positive"/>;
+    /// U41, assumed: a reading of the build); on any other declaration, a function's, a class's, a data type's or an interface's method, or an actor's
     /// method without <c>pub</c>, it is <c>syntax</c>, as <c>send</c> before what is no call of an actor's method is (U14) (U41; assumed:
     /// T11 of comment 6967625156). An actor the checker does not read has its one diagnostic (<see cref="RefuseUnreadActors"/>; U41, E1;
     /// assumed: a reading of the build), and a <c>static</c> method of an actor its <c>not supported</c> (U1).
@@ -1138,6 +1139,7 @@ public sealed partial class Checker
                 {
                     frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = f.Line };
                     CheckBound(bound);
+                    Positive(bound, "the bound of the declaration's `within`", "U41, U40");
                     continue;
                 }
 
