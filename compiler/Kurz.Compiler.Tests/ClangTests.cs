@@ -228,6 +228,87 @@ public sealed class ClangTests : IDisposable
         }
     }
 
+    [Fact]
+    public void A_release_build_aligns_every_loop_at_64_bytes_and_a_test_build_leaves_llvms_alignment()
+    {
+        // section 2 (the owner, 2026-11-20, issue 157, comment 7051500158, S2): the arguments `Build` gives clang, with `-S`, compile a
+        // function with a loop to assembly; in a release build the directive that aligns the head of each loop, the block LLVM's
+        // comment below its label calls a loop's header, is `.p2align 6`, 64 bytes, where LLVM aligns it at 16 bytes on x86-64 and
+        // not at all on 64-bit Arm, and in a test build each is the one clang writes with no option at `-O0`. The heads are read with a
+        // floor of one, so that a reading that finds no loop fails
+        var clang = Clang.Find().Found;
+        Assert.True(clang is not null, "no clang");
+        var ir = Path.Combine(root, "loops.ll");
+        File.WriteAllText(ir, """
+            define i64 @fold(ptr %p, i64 %n) noinline {
+            entry:
+              br label %loop
+
+            loop:
+              %i = phi i64 [ 0, %entry ], [ %next, %loop ]
+              %acc = phi i64 [ 0, %entry ], [ %acc2, %loop ]
+              %at = getelementptr i64, ptr %p, i64 %i
+              %v = load volatile i64, ptr %at
+              %acc2 = xor i64 %acc, %v
+              %next = add i64 %i, 1
+              %done = icmp eq i64 %next, %n
+              br i1 %done, label %exit, label %loop
+
+            exit:
+              ret i64 %acc2
+            }
+
+            define i32 @main() {
+              %a = alloca [4 x i64]
+              store [4 x i64] [i64 1, i64 2, i64 3, i64 4], ptr %a
+              %r = call i64 @fold(ptr %a, i64 4)
+              %t = trunc i64 %r to i32
+              ret i32 %t
+            }
+
+            """);
+        foreach (var release in new[] { true, false })
+        {
+            var assembly = Path.Combine(root, release ? "loops-release.s" : "loops-test.s");
+            var (code, _, error) = Processes.Capture(clang!.Path, [.. clang.Arguments(ir, assembly, [], release, lines: false), "-S"], null, TimeSpan.FromMinutes(1));
+            Assert.True(code == 0, error);
+            var heads = LoopHeads(File.ReadAllLines(assembly));
+            Assert.NotEmpty(heads);
+            if (release)
+            {
+                Assert.All(heads, d => Assert.Matches(@"^\t\.p2align\t6(,|$)", d));
+            }
+            else
+            {
+                var plain = Path.Combine(root, "loops-plain.s");
+                var (plainCode, _, plainError) = Processes.Capture(clang.Path, ["-O0", ir, "-o", plain, "-S"], null, TimeSpan.FromMinutes(1));
+                Assert.True(plainCode == 0, plainError);
+                Assert.Equal(LoopHeads(File.ReadAllLines(plain)), heads);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The directive of alignment nearest above the label of each loop's head in an assembly listing, <c>none</c> where none stands
+    /// there: the head is the block whose label LLVM follows with the comment <c>Loop Header: Depth=</c>, after <c>#</c> on x86-64 and
+    /// <c>//</c> on 64-bit Arm.
+    /// </summary>
+    private static List<string> LoopHeads(string[] lines) =>
+        [.. Enumerable.Range(1, Math.Max(0, lines.Length - 1)).Where(i => lines[i].Contains("Loop Header: Depth=", StringComparison.Ordinal)).Select(i =>
+        {
+            var directive = System.Text.RegularExpressions.Regex.IsMatch(lines[i - 1], @"^[.\w]+:") ? "none" : "no label";
+            for (var j = i - 2; directive == "none" && j >= 0 && lines[j].StartsWith("\t.", StringComparison.Ordinal); j--)
+            {
+                if (lines[j].StartsWith("\t.p2align", StringComparison.Ordinal) || lines[j].StartsWith("\t.prefalign", StringComparison.Ordinal))
+                {
+                    directive = lines[j];
+                    break;
+                }
+            }
+
+            return directive;
+        })];
+
     /// <summary>Each function of an assembly listing, ELF's or COFF's, with the directive of alignment nearest above its label.</summary>
     private static List<(string Name, string Directive)> Alignments(string[] lines)
     {

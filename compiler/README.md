@@ -423,7 +423,21 @@ call `handle_alloc_error`. The entry serves a heap (record, section 3): the one 
 switch to an actor's stack and puts back after it, the running actor's, which a waiting call sets
 aside while it waits (`Wait`); the new actor's, while `spawn` runs its constructor and the defaults
 of its body; the heap of a copy's session, from `CopyUse` to `CopyLeft`; else the thread's own, which
-holds what the top-level code allocates and what lives as long as the process ("The runtime"). A heap
+holds what the top-level code allocates and what lives as long as the process ("The runtime"). The
+thread holds the heap the entry serves and that heap's table of free blocks by size class in two words
+of its own, kept true wherever the heap that serves or its table changes (`HeapUse`, `HeapCurrent`,
+`HeapNew`, `HeapReset`, `Heads`), as mimalloc's thread-local `_mi_heap_default` names the heap that
+serves, so that the entry finds the free block of its class by one load of the thread, where it loaded
+the heap set to serve, then the thread's own, then that heap's table, and `Free` takes that table for a
+block of the heap that serves; the entry stays a call at every caller (`Emitter.OutOfLine`), as Rust's
+`__rust_alloc` is a call into the global allocator (the owner, 2026-11-20, issue 157, comment
+7051500158, S4, against the allocator as it stood, an exception to "no row slower beyond noise": eight
+rows of that issue's sweep ran slower by 0.6% to 5.7%, `hex-encode-16mib` and `equal` the most, and
+`hex-decode-64-digits` 9% to 14% faster and `substring` 6% to 7%; with the alignment of loops, S2,
+`parse-decimal` 1.1% to 1.9% slower, the cost of the two together, read as their placement, the owner's
+S6 of 2026-11-23, comment 7095824731, recorded in `kurz-design.md` beside S2; pinned by
+`ListTests.The_heap_the_allocation_entry_serves_and_its_table_are_set_where_either_changes` and
+`ListTests.The_allocation_entry_stays_a_call_where_its_size_is_a_constant`). A heap
 takes its memory in pages, its first page sized to what it holds first, from 256 bytes, each later page
 twice the size of the one before it, up to 65536 bytes, and larger, the smallest power of two that holds
 the block, only where one block needs more (record, section 3: the owner, 2026-11-15, #519, comment
@@ -696,7 +710,15 @@ pinned clang compiles unoptimised, at `-O0`, in a test build, as Cargo's `dev` p
 `-O2` in a release build (the owner, 2026-10-29, "As Rust's dev profile, -O0"), every function of which
 it aligns at 64 bytes through LLVM's `-align-all-functions=6`, where LLVM, and rustc with it, aligns one
 at 16 (the owner, 2026-11-02, issue 156, comment 6580739215; pinned by
-`ClangTests.A_release_build_aligns_every_function_at_64_bytes_and_a_test_build_leaves_llvms_alignment`), and links with the C
+`ClangTests.A_release_build_aligns_every_function_at_64_bytes_and_a_test_build_leaves_llvms_alignment`),
+and the head of every loop at 64 bytes through clang's `-falign-loops=64`, which reaches IR, where LLVM
+aligns one at 16 on x86-64 and leaves it unaligned on 64-bit Arm (the owner, 2026-11-20, issue 157,
+comment 7051500158, S2, against leaving the loops to LLVM, an exception to "no row slower beyond noise"
+as the alignment of functions is: the Cyrillic rows of `ToLower` and `ToUpper` ran 16.1% faster, and 42
+of the 102 rows of that issue's sweep slower beyond the band of two copies of a build, by up to 12.2%, in
+a larger binary; measured with the build of the option, five rows slower beyond the noise of S3 in two
+runs and 10.3% to 13.6% more text in each program of that sweep; pinned by
+`ClangTests.A_release_build_aligns_every_loop_at_64_bytes_and_a_test_build_leaves_llvms_alignment`), and links with the C
 library as the platform links it, on Linux its math library `libm` with it, as Rust's standard
 library links it through its `libc` crate (checked 2026-10-29: the `libc` crate's `src/unix/mod.rs`,
 which links `m` beside `c` on Linux), whose `fmod` an unoptimised `%` of a `double` calls, and with the

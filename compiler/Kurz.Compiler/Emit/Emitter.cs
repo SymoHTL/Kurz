@@ -523,10 +523,13 @@ public sealed partial class Emitter
     /// one caller is <c>Same</c>: LLVM inlines a function into its one caller, and <c>Same</c> with it grew too big to be inlined, a
     /// call at every <c>==</c> of strings. Rust's <c>==</c> of <c>str</c> has the shape this keeps, the test in every caller and a
     /// call for the bytes, because that call is <c>bcmp</c>, in the C library, which LLVM cannot inline; the runtime of Kurz is
-    /// written in Kurz (design record, section 2), so the emitter keeps the call. No program sees the mark: it names no function of a
-    /// program.
+    /// written in Kurz (design record, section 2), so the emitter keeps the call. <c>std.Allocate</c>, the allocation entry, stays a
+    /// call at every caller, as Rust's <c>__rust_alloc</c> is a call into the global allocator: once its fast path read the heap that
+    /// serves by one load, it was small enough that LLVM put it into callers that ask for a constant size, the loops of issue 157's
+    /// programs among them, which moved rows that allocate nothing in their loop. No program sees the mark: it names no function of
+    /// a program.
     /// </summary>
-    private static readonly HashSet<string> OutOfLine = new(StringComparer.Ordinal) { "rt.common.SameBytes" };
+    private static readonly HashSet<string> OutOfLine = new(StringComparer.Ordinal) { "rt.common.SameBytes", "std.Allocate" };
 
     private void EmitFunctionCore(FunctionSymbol f, FunctionDeclaration d, IReadOnlyDictionary<TypeParameterSymbol, KurzType> instanceMap, string name)
     {
