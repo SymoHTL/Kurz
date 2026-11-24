@@ -2629,7 +2629,7 @@ public sealed partial class Checker
 
     /// <summary>
     /// U40, U41: a constant bound of <c>within</c> (<see cref="ConstantBound"/>) of 0 ns or less, a block's, a call's clause's or a
-    /// declaration's, is <c>bound-not-positive</c> at its line, its text naming the form, <paramref name="of"/>, and the bound as written
+    /// declaration's, is <c>bound-not-positive</c> at the line where it starts (<see cref="BoundLine"/>), its text naming the form, <paramref name="of"/>, and the bound as written
     /// (section 6, the owner, 2026-11-20, #519, comment 7051492844, "T4 (2)"; assumed: T77 and T80 of comment 7055305138, and T79 of it as
     /// corrected on 2026-11-21); a bound that is no <c>duration</c>, or a constant with an error of its own, <c>constant-overflow</c> among
     /// them, has that one error (E1; assumed: a reading of the build). Every other bound is read at run time, and the emitter refuses one
@@ -2639,9 +2639,29 @@ public sealed partial class Checker
     {
         if (ConstantBound(model, bound) && ((IntegerConstant)model.TypeOf(bound).Constant!).Value <= 0)
         {
-            Report(ErrorIds.BoundNotPositive, bound.Line, $"{of} is {DefaultText(bound)}; a bound is positive ({rules})");
+            Report(ErrorIds.BoundNotPositive, BoundLine(bound), $"{of} is {DefaultText(bound)}; a bound is positive ({rules})");
         }
     }
+
+    /// <summary>
+    /// U40, U41: the line a bound of <c>within</c> of zero or less reports, <c>bound-not-positive</c> here and <c>invalid-input</c> at
+    /// run time (<c>Emitter.Positive</c>), for every form of the bound: the line where the bound starts, the line of its first token,
+    /// as an error of the whole is read (E1), and not the line of its node, which for a sum continued after an operator at a line's
+    /// end (L4) is its last operator's (section 6, the owner, 2026-11-24, issue 39, comment 7144769568, "Start line"). The first token
+    /// of a binary operator, a range, a member, an index, a call, an <c>else</c> and a <c>with</c> is that of the part on its left;
+    /// every other node starts on its own line.
+    /// </summary>
+    internal static int BoundLine(Expression bound) => bound switch
+    {
+        BinaryExpression b => BoundLine(b.Left),
+        RangeExpression r => BoundLine(r.Start),
+        MemberAccess m => BoundLine(m.Target),
+        IndexExpression i => BoundLine(i.Target),
+        CallExpression c => BoundLine(c.Callee),
+        ElseExpression e => BoundLine(e.Call),
+        WithExpression w => BoundLine(w.Target),
+        _ => bound.Line,
+    };
 
     /// <summary>
     /// U40, U41: whether a bound of <c>within</c> is a constant as T25 reads one, a <c>duration</c> the checker knows while it compiles, a
