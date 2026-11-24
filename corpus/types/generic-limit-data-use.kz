@@ -1,0 +1,12 @@
+// expect: error type-mismatch at 10
+// rules: T19
+
+interface Shape {
+    int Area()
+}
+
+data Box<T: Shape>(T Item)
+
+int Count(Box<int> b) => 1
+
+print(1)

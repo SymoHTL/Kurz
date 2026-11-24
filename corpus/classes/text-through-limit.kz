@@ -1,0 +1,13 @@
+// expect: output
+// | 1
+// rules: A10, T19
+
+interface Texty {
+    string Text()
+}
+
+void Show<T: Texty>(T item) {
+    print(item)
+}
+
+Show(1)

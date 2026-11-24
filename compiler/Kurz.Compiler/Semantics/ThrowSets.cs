@@ -30,6 +30,7 @@ public sealed class ThrowSets
     private readonly Checker? std;
     private readonly bool blocks;
     private readonly IReadOnlySet<CrashPolicy>? skipped;
+    private readonly IReadOnlySet<AttemptExpression>? skippedArms;
     private readonly Dictionary<object, Unit> units = new(new UnitKeys());
     private readonly List<Unit> order = [];
     private readonly KurzType runtimeError;
@@ -42,15 +43,17 @@ public sealed class ThrowSets
     /// The sets of the code of <paramref name="program"/>, which sees the types of <paramref name="std"/> (W1); null where the program is
     /// <c>std/</c> itself. Where <paramref name="blocks"/> does not hold, the bodies of the blocks of <c>on crash</c> are left out, as at the
     /// checker's first reading of such a program, which reads them with no <c>Reason</c> found yet (U30), and so are those of the blocks
-    /// <paramref name="skipped"/> names, which reported errors at a reading whose <c>Reason</c>s may not have settled.
+    /// <paramref name="skipped"/> names, which reported errors at a reading whose <c>Reason</c>s may not have settled; so are the arms of
+    /// the <c>else</c> of every <c>attempt</c> there, and of those <paramref name="skippedArms"/> names, for the same reasons (U46).
     /// </summary>
-    public ThrowSets(Checker program, Checker? std, bool blocks = true, IReadOnlySet<CrashPolicy>? skipped = null)
+    public ThrowSets(Checker program, Checker? std, bool blocks = true, IReadOnlySet<CrashPolicy>? skipped = null, IReadOnlySet<AttemptExpression>? skippedArms = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         this.program = program;
         this.std = std;
         this.blocks = blocks;
         this.skipped = skipped;
+        this.skippedArms = skippedArms;
         var error = (std ?? program).Model.DataTypes.FirstOrDefault(d => d.Name == "RuntimeError")
             ?? throw new InvalidOperationException("std/ declares no `RuntimeError`, the runtime's error type of section 5");
         runtimeError = new DataType(error, []);
@@ -85,7 +88,7 @@ public sealed class ThrowSets
         [typeof(ElseExpression)] = "its call and its arms",
         [typeof(ParenthesizedExpression)] = "its inner expression",
         [typeof(SpawnExpression)] = "the actor's construction, its code under escalate or a block, and the block's body",
-        [typeof(AttemptExpression)] = "no code: the checker refuses it",
+        [typeof(AttemptExpression)] = "nothing where it runs but what its block builds, whose throws its child's crash holds; `retry`: no code, the checker refuses it",
         [typeof(Block)] = "its statements",
         [typeof(VariableDeclaration)] = "its value",
         [typeof(AssignOrDeclare)] = "its value",
@@ -128,6 +131,16 @@ public sealed class ThrowSets
     {
         ArgumentNullException.ThrowIfNull(actor);
         return actor.IsActor ? Solved(new Root(actor)) : throw new ArgumentException($"`{actor.Name}` is no actor", nameof(actor));
+    }
+
+    /// <summary>
+    /// U46: the <c>Reason</c> of the <c>Crashed</c> of an <c>attempt</c> of the program's file: every type the code of its block can throw,
+    /// with what that code reaches, then the runtime's error type.
+    /// </summary>
+    public IReadOnlyList<KurzType> ReasonOf(AttemptExpression attempt)
+    {
+        ArgumentNullException.ThrowIfNull(attempt);
+        return program.Model.HasAttempt(attempt) ? Solved(attempt) : throw new ArgumentException($"no `attempt` the checker read stands at line {attempt.Line}", nameof(attempt));
     }
 
     /// <summary>What a call of the function can raise (section 5): every type its code can throw, then the runtime's error type.</summary>
@@ -213,14 +226,14 @@ public sealed class ThrowSets
         public List<DataType> Built { get; } = [];
     }
 
-    /// <summary>The keys of the units: a lambda by its node, never by its text, and every other key by its own equality.</summary>
+    /// <summary>The keys of the units: a lambda and an <c>attempt</c> by its node, never by its text, and every other key by its own equality.</summary>
     private sealed class UnitKeys : IEqualityComparer<object>
     {
         public new bool Equals(object? x, object? y) =>
-            x is LambdaExpression || y is LambdaExpression ? ReferenceEquals(x, y) : object.Equals(x, y);
+            x is LambdaExpression or AttemptExpression || y is LambdaExpression or AttemptExpression ? ReferenceEquals(x, y) : object.Equals(x, y);
 
         public int GetHashCode(object obj) =>
-            obj is LambdaExpression ? System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj) : obj.GetHashCode();
+            obj is LambdaExpression or AttemptExpression ? System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj) : obj.GetHashCode();
     }
 
     private Unit Discover(object key)
@@ -405,9 +418,9 @@ public sealed class ThrowSets
     // call gives it (section 5, the owner, 2026-11-17, #560, comment 6952257456, "(b) As built (Recommended)"); the list holds each
     // actor's `pub` methods, which alone take messages (U9), so that what an actor builds is built: its other methods run from its own
     // code alone, and its construction from a `spawn` that a root reaches; and each test of the file, which the build of `kurz test`
-    // runs as a function of its own (Y5), as Rust's `cargo test` builds each `#[test]` function as a root of its harness, in every
-    // reading, since the checker reads every test whatever command the build is for (Y7), so that a `Reason` is one set under every
-    // command
+    // runs as a function of its own (Y5), as Rust's `cargo test` builds each `#[test]` function as a root of its harness, which Rust
+    // does in the test build alone, where Kurz takes the tests as roots in every reading, since the checker reads every test whatever
+    // command the build is for (Y7), so that a `Reason` is one set under every command
     private IEnumerable<object> Roots() => Pub().Concat(program.Model.Tests.Select(program.Model.TestOf)).Prepend<object>(new TopLevel(program.Model));
 
     // a type once, at the earliest place that throws it
@@ -525,6 +538,20 @@ public sealed class ThrowSets
                     break;
                 }
 
+            case AttemptExpression a:
+                {
+                    // U46: the block's code, which its child runs; an `attempt` stands in the program's file alone, `std/` holding none
+                    var block = program.Model.AttemptOf(a).Lambda;
+                    var walk = new Walk(this, program.Model, 0, unit);
+                    walk.Optional(block.ExpressionBody);
+                    if (block.BlockBody is { } body)
+                    {
+                        walk.Statement(body);
+                    }
+
+                    break;
+                }
+
             case Valued v:
                 unit.Edges.AddRange(Lambdas().Where(x => Fits(x.Type, v.Type)).Select(x => new Edge(x.Lambda, null)));
                 break;
@@ -583,7 +610,7 @@ public sealed class ThrowSets
             return;
         }
 
-        var walk = new Walk(this, site.Model, site.File, unit);
+        var walk = new Walk(this, site.Model, site.File, unit, f.Owner);
         foreach (var parameter in declaration.Parameters)
         {
             walk.Optional(parameter.Default);
@@ -717,7 +744,8 @@ public sealed class ThrowSets
 
     // ---- the walk of a unit's code ------------------------------------------------------------------------------------------
 
-    private sealed class Walk(ThrowSets sets, SemanticModel model, int file, Unit unit)
+    // `inside`: the type whose method the walk reads, null for any other code (U55)
+    private sealed class Walk(ThrowSets sets, SemanticModel model, int file, Unit unit, ClassSymbol? inside = null)
     {
         // O7: the cases a bare `throw` throws in the arm of `else` being walked, innermost on top
         private readonly Stack<IReadOnlyList<KurzType>> bare = new();
@@ -803,12 +831,27 @@ public sealed class ThrowSets
                     }
 
                     break;
+                case ElseExpression el when (el.Call is ParenthesizedExpression p ? p.Inner : el.Call) is AttemptExpression a:
+                    Expression(a);
+                    if (sets.blocks && sets.skippedArms?.Contains(a) != true && model.HasAttempt(a))
+                    {
+                        Arms(el.Arms, model.AttemptOf(a).Type); // U46: the arms are the code of the actor that waits, at a reading whose `Reason`s may settle
+                    }
+
+                    break;
                 case ElseExpression el:
                     Expression(el.Call);
                     Arms(el.Arms, Result(el.Call));
                     break;
                 case ParenthesizedExpression p:
                     Expression(p.Inner);
+                    break;
+                case AttemptExpression a:
+                    if (model.HasAttempt(a))
+                    {
+                        unit.Edges.Add(new Edge(a, null, Runs: false)); // U46: what its block builds, and nothing it throws, which `Crashed` holds
+                    }
+
                     break;
                 case SpawnExpression s:
                     Call(s.Call);
@@ -1067,6 +1110,11 @@ public sealed class ThrowSets
                         }
 
                         var method = info.Function!;
+                        if (method.Interface is { TextOnly: true } && c.Callee is MemberAccess { Target: var receiver })
+                        {
+                            Text(model.TypeOf(receiver).Type); // T19, A10: a call of the text through a limit of a text alone is the text of the value (Q21)
+                        }
+
                         var targets = sets.Overrides(method).Prepend(method)
                             .Concat(sets.Implementers(method).SelectMany(g => sets.Overrides(g).Prepend(g)))
                             .Distinct();
@@ -1116,10 +1164,11 @@ public sealed class ThrowSets
 
                     break;
                 case CallKind.ActorCall or CallKind.ActorSend:
-                    if (info.ByName)
+                    if (info.ByName && !ReferenceEquals(((ActorType)info.Target!).Symbol, inside))
                     {
                         // U52: a message to the name of a `per node` actor starts it where none stands, its constructor run on the caller's
-                        // stack, whose throw is the caller's crash, as at a `spawn`
+                        // stack, whose throw is the caller's crash, as at a `spawn`; a method of that actor runs in it while it stands, so
+                        // that a message to its own name there starts none (U55, U17)
                         unit.Edges.Add(new Edge(new Construction(((ActorType)info.Target!).Symbol), null));
                     }
 
@@ -1229,8 +1278,35 @@ public sealed class ThrowSets
                     Text(m.Key, seen);
                     Text(m.Value, seen);
                     break;
+                case TypeParameterType p when p.Symbol.Limits.Any(face => face.TextOnly):
+                    // T19 with A10: a limit that every type with a text meets, whose argument the walk does not see: the Text() of every
+                    // class, and the text of every data type, each instantiation of a generic one the program builds (section 5)
+                    TextMethods(sets.AllClasses().Select(x => x.TextMethod));
+                    foreach (var x in sets.AllData())
+                    {
+                        if (x.IsGeneric)
+                        {
+                            unit.Edges.Add(new Edge(new Each(x), null));
+                        }
+                        else
+                        {
+                            Text(new DataType(x, []), seen);
+                        }
+                    }
+
+                    break;
+                case TypeParameterType { Symbol.ClassLimit: { } limit }:
+                    Text(new ClassType(limit), seen); // T19, A9: the Text() of the class limit and of every class derived from it (K6)
+                    break;
+                case TypeParameterType p when p.Symbol.Limits.Any(face => face.TextMethod is not null):
+                    foreach (var face in p.Symbol.Limits.Where(face => face.TextMethod is not null))
+                    {
+                        Text(new InterfaceType(face), seen); // T19, A10: the Text() of every class that implements a limit that declares it (K6)
+                    }
+
+                    break;
                 case TypeParameterType p:
-                    throw new InvalidOperationException($"the text of the type parameter `{p.Symbol.Name}`, whose argument the walk does not see: no program the checker reads reaches it, since the checker reports the text of a type parameter as `no-text` (A10), and the walk reads a generic data type derived from the type it makes text of only for each instantiation the program builds, which names every type argument (section 5)");
+                    throw new InvalidOperationException($"the text of the type parameter `{p.Symbol.Name}`, whose argument the walk does not see: no program the checker reads reaches it, since the checker reports the text of a type parameter whose limits declare no `string Text()` as `no-text` (A10), and the walk reads a generic data type derived from the type it makes text of only for each instantiation the program builds, which names every type argument (section 5)");
                 default:
                     break; // a text the runtime makes, which runs no code of the program
             }

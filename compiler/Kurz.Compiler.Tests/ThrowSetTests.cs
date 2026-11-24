@@ -1022,6 +1022,45 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void A_message_to_the_name_of_a_per_node_actor_from_its_own_method_brings_nothing_of_its_start()
+    {
+        // U55, U17 (assumed: T33 of issue 519, comment 6983903100): a method of `Cache` runs in the actor that stands, so that a call or
+        // a `send` through its name there starts none and runs no default; a function's call through the name brings the start's
+        // throw, the control (U52)
+        const string text = """
+            data EStart
+
+            int Started() {
+                throw EStart
+            }
+
+            actor Cache per node {
+                int first = Started()
+
+                pub int Get() => first
+
+                pub void Add() {
+                    print(first)
+                }
+
+                pub int Again() {
+                    send Cache.Add()
+                    return Cache.Get()
+                }
+            }
+
+            pub void Call() {
+                print(Cache.Get())
+            }
+
+            """;
+        var own = Own(text);
+        var cache = own.Checker.Model.ClassOf(own.Tree.Statements.OfType<TypeDeclaration>().Single(t => t.Name == "Cache"));
+        Assert.Equal(["RuntimeError"], Names(own.Sets.RaisedBy(cache.Methods["Again"].Single())));
+        Assert.Equal(["EStart", "RuntimeError"], RaisedIn(own, "Call"));
+    }
+
+    [Fact]
     public void A_text_reads_each_instantiation_of_one_generic_type_it_holds()
     {
         // section 5: `Two` holds a `Box<int>` and a `Box<Quiet>`, and its text reads both, `Quiet`'s Text() through the second
@@ -1044,6 +1083,68 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
 
             """;
         Assert.Equal(["EQuiet", "RuntimeError"], RaisedIn(Own(text), "Show"));
+    }
+
+    [Fact]
+    public void The_text_of_a_type_parameter_reaches_the_types_its_limits_let_in()
+    {
+        // T19 with A10: the text of a `T` limited to `Shaped`, which declares `string Text()`, is the Text() of each class that implements
+        // it, and not `Other`'s; the text of one limited to `Plain`, the interface of a text alone, is that of every class and data type,
+        // and so is a call of its `Text()`; the text of one limited to the class `Ring` is `Ring`'s
+        const string text = """
+            data ERing
+            data EOther
+            data ENote
+
+            interface Shaped {
+                string Text()
+                int Size()
+            }
+
+            interface Plain {
+                string Text()
+            }
+
+            class Ring(int N) : Shaped {
+                pub string Text() {
+                    throw ERing
+                }
+
+                pub int Size() => N
+            }
+
+            class Other(int N) {
+                pub string Text() {
+                    throw EOther
+                }
+            }
+
+            data Note(int N) {
+                pub string Text() {
+                    throw ENote
+                }
+            }
+
+            pub void Show<T: Shaped>(T item) {
+                print(item)
+            }
+
+            pub void ShowAny<T: Plain>(T item) {
+                print(item)
+            }
+
+            pub string TextAny<T: Plain>(T item) => item.Text()
+
+            pub void ShowRing<T: Ring>(T item) {
+                print(item)
+            }
+
+            """;
+        var own = Own(text);
+        Assert.Equal(["ERing", "RuntimeError"], RaisedIn(own, "Show"));
+        Assert.Equal(["ERing", "EOther", "ENote", "RuntimeError"], RaisedIn(own, "ShowAny"));
+        Assert.Equal(["ERing", "EOther", "ENote", "RuntimeError"], RaisedIn(own, "TextAny")); // Q21 of issue 605: the text of every type, as `print` makes it
+        Assert.Equal(["ERing", "RuntimeError"], RaisedIn(own, "ShowRing")); // Q5: the text of the class limit and its derived classes
     }
 
     [Fact]
@@ -1421,5 +1522,129 @@ public sealed class ThrowSetTests(ITestOutputHelper output)
         of = of[..of.IndexOf("\n}\n", StringComparison.Ordinal)];
         var arms = Regex.Matches(of, "\"([a-z-]+)\" => RuntimeKind\\.([A-Za-z]+)").Select(m => (m.Groups[1].Value, m.Groups[2].Value)).ToList();
         Assert.Equal(ids.Zip(kinds).ToList(), arms);
+    }
+
+    [Fact]
+    public void The_reason_of_an_attempt_is_what_its_block_throws_and_its_throw_leaves_neither_the_function_nor_the_actor()
+    {
+        // U46: an `attempt`'s `Reason` is what its block's code can throw, a function it calls among it, with the runtime's error type
+        // (assumed: the small defaults of comment 6980152255); that throw is the crash of the child, which the `attempt` holds, so it
+        // reaches neither the function around the block nor the `Reason` of the actor whose method runs it (section 6: an actor never
+        // catches its own exception, only its child's death), while what the function throws after it does
+        const string text = """
+            data ELost(int Code)
+            data EAfter(int Code)
+
+            int Lose(int n) {
+                if n > 0 {
+                    throw ELost(n)
+                }
+
+                return n
+            }
+
+            actor Worker {
+                pub int Go(int n) {
+                    v = attempt { Lose(n) } else {
+                        Crashed c => -1
+                    }
+
+                    if v > 5 {
+                        throw EAfter(v)
+                    }
+
+                    return v
+                }
+            }
+
+            int Plain(int n) {
+                v = attempt { Lose(n) } else {
+                    Crashed c => -1
+                }
+
+                return v
+            }
+
+            w = spawn Worker()
+            print(w.Go(1) + Plain(2))
+
+            """;
+        var own = Own(text);
+        var attempts = new List<AttemptExpression>();
+        var worker = own.Tree.Statements.OfType<TypeDeclaration>().Single(t => t.Name == "Worker");
+        foreach (var function in worker.Members!.OfType<FunctionDeclaration>().Concat(own.Tree.Statements.OfType<FunctionDeclaration>().Where(f => f.Name == "Plain")))
+        {
+            SyntaxCopy.Walk(function, e =>
+            {
+                if (e is AttemptExpression a)
+                {
+                    attempts.Add(a);
+                }
+            });
+        }
+
+        Assert.Equal(2, attempts.Count);
+        Assert.All(attempts, a => Assert.Equal(["ELost", "RuntimeError"], Names(own.Sets.ReasonOf(a))));
+        Assert.DoesNotContain("ELost", RaisedIn(own, "Plain"));
+        var reason = Names(own.Sets.ReasonOf(own.Checker.Model.ClassOf(worker)));
+        Assert.Contains("EAfter", reason);
+        Assert.DoesNotContain("ELost", reason);
+    }
+
+    [Fact]
+    public void The_reason_of_an_attempt_in_the_block_of_an_attempt_is_what_its_own_block_throws_and_a_throw_of_its_arms_the_outer_ones()
+    {
+        // U50 (assumed: the small defaults of comment 6980152255): the inner `attempt` belongs to the outer one's child, so that what its block
+        // throws is the inner child's crash, which the inner `attempt` holds and which stays out of the outer one's `Reason`, while what its
+        // arms throw, a crash the inner one does not hold, is the outer child's, as under `escalate`
+        const string text = """
+            data ELost(int Code)
+            data EArm(int Code)
+
+            int Lose(int n) {
+                if n > 0 {
+                    throw ELost(n)
+                }
+
+                return n
+            }
+
+            int ArmThrows(int n) {
+                if n > 0 {
+                    throw EArm(n)
+                }
+
+                return n
+            }
+
+            v = attempt {
+                w = attempt { Lose(1) } else {
+                    Crashed c => ArmThrows(2)
+                }
+
+                return w
+            } else {
+                Crashed c => -1
+            }
+
+            print(v)
+
+            """;
+        var own = Own(text);
+        var attempts = new List<AttemptExpression>();
+        foreach (var statement in own.Tree.Statements)
+        {
+            SyntaxCopy.Walk(statement, e =>
+            {
+                if (e is AttemptExpression a)
+                {
+                    attempts.Add(a);
+                }
+            });
+        }
+
+        Assert.Equal(2, attempts.Count);
+        Assert.Equal(["ELost", "RuntimeError"], Names(own.Sets.ReasonOf(attempts.MaxBy(a => a.Line)!)));
+        Assert.Equal(["EArm", "RuntimeError"], Names(own.Sets.ReasonOf(attempts.MinBy(a => a.Line)!)));
     }
 }

@@ -679,7 +679,8 @@ the units read off with `BigInteger`, and that of 4000 timestamps and the edges 
 
 The error lines are the record's (section 6): `error: <id> at <file>:<n>` for an exception of the
 run-time table, the file named as the command line gave it, and `error: thrown at <file>:<n>:` for
-a `throw`, with the thrown value's text on the line below it. A `print` passes its file and its line
+a `throw`, with the thrown value's text on the line below it, the text of the instance's own class for an
+instance thrown as a class or an interface with no `Text()`, or the name of the instance's own class where that class's chain declares none (O7). A `print` passes its file and its line
 to `Print`, which raises `print-failed` there where the system refuses the write or a write takes
 no byte, as Rust's `write_all` fails on a write of zero bytes, in every build (the owner,
 2026-10-23, "Caller passes it"), but for error 9 on Linux: there a write the system fails with error
@@ -964,7 +965,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   held by a field of an instance, and an item or an entry written into one (M4, M5, M9); a method, a function of the module whose first parameter is
   the instance, `this`, borrowed from the caller as a parameter is (K7); a read of a property, `b.Count` or `Count` inside its
   class, the call of its method, whose result is a temporary of its statement, as a call's is (K7); the text of an instance, which
-  its `Text()` gives (A5); a class some class derives from (K6), whose reference is two words, the
+  its `Text()` gives (A5), or at a `throw` where its class has none the text of the instance's own class, or its name where
+  that class's chain declares none, both read off the table where a class derives from its type (O7); a class some class derives from (K6), whose reference is two words, the
   address of the instance's block and the table of the instance's class, as Rust lays out
   `Rc<dyn Trait>`, while the reference to a class nothing derives from, a derived one among them, stays
   the address alone, and no block holds a table; the table, one constant per class, holds the release of
@@ -998,7 +1000,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a derived class a function that makes the pair `this` is from the address; an instance given where an
   interface is expected takes that table, a constant where its static type is a class nothing derives
   from, and else read from the table the reference holds, in the slot of the interface; a call through an interface calls its slot with the address,
-  the text of such a value is its `Text()` through its slot (A10), and `==` and a key compare and hash it
+  the text of such a value is its `Text()` through its slot (A10), or at a `throw` where the interface declares
+  none the text of the instance's own class, or its name where that class's chain declares none, the class
+  found by comparing the table with each implementing class's table for the interface (O7), and `==` and a key compare and hash it
   as through a reference that holds a table (K13); an arm of a class over a value of an interface or of a
   class some class derives from tests the class of the instance (C4, O5, K6): a comparison of the table
   for the interface with the arm's class's where that class has no base and no derived class, else of the
@@ -1112,13 +1116,17 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   end of the run queue, so that an inbox keeps the order its messages were sent in
   (U5, U15, U17). The function of a method's messages, made at its first use and named outside the
   program's functions, so that a trace leaves its frame out with the runtime's, calls the method on
-  the state, lets go of the arguments, takes the reply off the message by the runtime's `ReplyTaken`,
+  the state, lets go of the arguments, so that a crash in that release, an overflow of the actor's
+  stack among it, finds the reply still on the message and is answered `callee crashed` (U20), takes
+  the reply off the message by the runtime's `ReplyTaken`,
   one atomic swap that leaves null there, so that of it and the crash of the waiter's actor, which
   unhooks the reply by the same swap, exactly one owns the reply, as tokio's `oneshot` decides
   between its two ends by one word (not checked at source), and where it owns the reply moves the
   result beside it and calls the runtime's `Replied`, which reads the reply's waiter, then stores the
   reply's word with release, then wakes the actor where the activation that waits on it is its top,
-  as tokio's `oneshot` stores its value and wakes its receiver, and frees the message. An argument of a message or of `spawn` crosses as the type of its parameter says,
+  as tokio's `oneshot` stores its value and wakes its receiver, lets go of the method's own result
+  once the reply is set, so that no code whose fault is the actor's crash stands between the swap and
+  `Replied`, and frees the message. An argument of a message or of `spawn` crosses as the type of its parameter says,
   where it is evaluated, before a later argument's call that waits can change what it reads, and a
   result crosses before it moves beside the reply, while the method's count of it still holds it
   (U12): a value that holds a block is copied deep into the receiver's heap, the actor's or, for a
@@ -1583,7 +1591,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   what it gathered of each pipe, the bytes its `File` read ahead first, back to that `File`'s buffer, which is made again with
   more room than its 8 KiB where they need it, so that a later read takes them before the rest of the pipe. The wait never
   waits on a reader's lock: at each wake of its poll `Drive` tries each lock it does not hold yet through the emitter's
-  `try.reader`, which it gets as a C function (R17), since the runtime's code tries no lock through an atomic type (R19), and which reads the bytes ahead only once it
+  `try.reader`, which it gets as a C function (R17), the runtime's code reaching the lock through none of R19's types, and which reads the bytes ahead only once it
   took the lock; a pipe is polled from the wake that took its lock, the next wake comes within 4 ms while another holder holds
   one, and the emitter lets go of each lock the runtime took once the bytes are taken or given back, so that `Timeout(d)`
   bounds the whole call and a read through the `File` on another thread waits for the call only while the call holds its lock
@@ -1659,7 +1667,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the line together in a buffer of its thread and hands it to one write call on standard error, the
   line of the lines dropped before it in the same write; a refused write counts the line as dropped,
   and after a line the system took in part, the next write starts with a line feed. The count of the
-  lines dropped and the flag of a line cut short are plain `static mut`s, the runtime's code using no atomic type for them (R19),
+  lines dropped and the flag of a line cut short are plain `static mut`s,
   and the runtime starts no thread: two threads a program starts through C (R16) that log at once race on
   them, as the runtime's comment on them says. The corpus's runner
   takes `KURZ_LOG` away from every case it runs. `LogTests` pins what no case can: the layout of a line
@@ -2124,15 +2132,16 @@ The atomic types of R19 (section 6), on every target: a view is the pointer `Fro
 each member is one LLVM instruction on the word it points to, aligned to the word's size, as Rust's
 `core::sync::atomic` lowers them: `Load` a `load atomic`, `Store` a `store atomic`, `Swap` an
 `atomicrmw xchg`, `FetchAdd`, `FetchSub`, `FetchAnd`, `FetchOr` and `FetchXor` an `atomicrmw` of
-`add`, `sub`, `and`, `or` and `xor`, an `AtomicPtr<T>`'s on the address as an `i64`,
+`add`, `sub`, `and`, `or` and `xor`, an `AtomicPtr<T>`'s `FetchAnd`, `FetchOr` and `FetchXor` on the address as an `i64`,
 `CompareExchange` and `CompareExchangeWeak` a `cmpxchg` and a `cmpxchg weak`, whose pair gives the
 union's case, and `Fence` a `fence`; a `bool`'s word is a byte that holds 0 or 1, as Rust's
-`AtomicBool` holds a `u8`. An order written at the call is the instruction's own, `Relaxed` LLVM's
-`monotonic`; any other is read when the call runs, by a `switch` over the five values of `MemoryOrder`
+`AtomicBool` holds a `u8`. An order written at the call, or held by a copy of a function as its constant
+(T35), is the instruction's own, `Relaxed` LLVM's `monotonic`, and a copy's constant that Rust refuses
+raises `invalid-ordering-at-run-time` at the call's line with no `switch`; any other is read when the call runs, by a `switch` over the five values of `MemoryOrder`
 to the instruction for each, as Rust's `match` on the order chooses among its intrinsics, and a
 choice Rust refuses raises `invalid-ordering-at-run-time` at the call's line (`Emit/Emitter.Atomics.cs`;
-`EmitterTests` pins the instructions and the choice). A view crossing into an actor is
-`not supported`, as a pointer's crossing is (U12).
+`EmitterTests` pins the instructions and the choice). A view crossing into an actor, or out of one as
+a waiting call's result, is the checker's `pointer-crosses`, as a pointer's crossing is (U12, R19).
 
 ### The tests and `check`
 
@@ -2201,10 +2210,14 @@ reads the guarantee in force on Windows and on Linux compiles the program alone.
 Of section 6 the emitter builds the actors of one thread, each message run to its end or to a wait that parks it (Q1 (a), the
 answers of 2026-11-14, issue 519, comment 6880404917), and no case shows
 where a program it builds differs from the section: every actor runs on the one thread the runtime
-runs, each message on a stack of its own ("The runtime"), its state word and the replies of its
-calls changed by atomic operations that hold on any number of threads ("What the emitter emits"), with no worker thread, no line `threads`
-and no `KURZ_THREADS` read (U35), and the top-level code's wait runs the scheduler in place on the
-main thread's stack (U18), and messages run only while the top-level
+runs, each message on a stack of its own ("The runtime"), its state word, and the choice of the one owner of
+each reply of its calls by a swap, changed by atomic operations that hold on any number of threads ("What the
+emitter emits"), while the lifetimes of the message a crash's swap reads and of the record of the waiter's actor,
+which the owner of a reply reads after its store, hold on one thread alone, with no worker thread, no line `threads`
+and no `KURZ_THREADS` read (U35), so that a program started with a `KURZ_THREADS` that U35 refuses, `0`
+among them, runs on the one thread with no error line, and the compiler reads no `project.kz`, so no line
+of one reaches it, and the top-level code's wait runs the scheduler in place on the
+main thread's stack, where U18 has the main thread sleep beside the worker threads, and messages run only while the top-level
 code waits for a call's result, one message of each actor in turn, so that a `send` made after the
 last call that waits does not run, and a message parked in a wait when the top-level code ends does
 not go on (U13); of section 6's deadlocks the build makes layer 1 (U17) and the `deadlock` of a wait
@@ -2261,12 +2274,29 @@ the child's error line and its trace; a supervisor's crash or end, and the end o
 code, drop its pending blocks and end their children. On Linux the `Crashed` value of a stack
 overflow holds an empty file and the line 0 in its `Place`, its place standing in its `Detail`, and
 an overflow escalated to the top level writes the trace of the top-level code where it waits, since
-the stack the child overflowed on, whose state the signal's stack held, is not kept. What stays `not
-supported` of section 6's supervision: `attempt { ... }` and `retry { ... }`; a block whose child can
+the stack the child overflowed on, whose state the signal's stack held, is not kept. The block
+`attempt { ... }` is built (U46 to U50): the checker reads its block as a lambda of no parameter, the
+fields of the actor whose method runs it that the block names taken through variables of their own,
+and its `Reason` as a block's child's is read, again at each reading; the emitted code makes a child
+actor (the runtime's `AttemptNew`) with a heap of its own and a pooled stack, whose policy word names
+its own state, puts one message in its heap that holds a copy of the block's function value, made as a
+message's argument crosses (U12), queues it with the chain's deadline and no bound of its own, and
+waits for its reply as a call waits (`Attempted`), with no deadline of its own; the reply holds the
+block's value, copied into the heap of the code that waits, and the child's crash, taken in `Fell` as
+a block's is, puts the copy of the crash in that heap, writes the log line, ends the child and wakes
+the waiter, whose code builds `Crashed` as a block's function does and frees the copy
+(`PendingLeft`); an arm of its `else` lets go of the case it takes. A pointer or a view of an atomic type
+that the block takes, or that its value reaches, is `pointer-crosses`, as at a message (U47, U12). What stays `not supported` of
+section 6's supervision: `retry { ... }`; of `attempt { ... }`, a block that names `this`, a method or
+a property of the class whose method runs it, a `move` in the block of a variable or a field around
+it, a block whose value is a union, a nullable value among them, or a value the crossing copy does not
+bring back, a block that takes a value no word makes cross or that the crossing copy does not copy, a
+block that can throw a type the crossing copy does not copy, one in a file read without `std/` and one
+whose `Reason` still grows at the fifth reading; a block of `on crash` whose child can
 throw a type the crossing copy does not copy (U12), a block in a file read without `std/`, and a block
 whose child's `Reason` grows by what the blocks of the program read, read five times, the first and four more; `per` with other
 words than `node`, `per cluster` with a text of its own, since it needs the directory of section 7, and a policy after such a
-name with it (U1, U51); the block `on crash (c) { ... }` after the name of a `per node` actor (U28, U54); the crash paths of the ESP32
+name with it (U1, U51); the block `on crash (c) { ... }` after the name of a `per` actor, `per node` among them (U27, U28); the crash paths of the ESP32
 models, AVR and WebAssembly, for which the build has no target; and, on Windows, an actor's stack
 overflow, which ends the process as the system ends it whatever the policy (U19); a crash at the root, the top-level code, still ends
 the process with its error line, its trace and the exit code 1. A call whose caller crashed runs to its end and its result goes nowhere, which on
@@ -2275,7 +2305,10 @@ a call of its own chain; the swap by which a crash unhooks a reply reads the mes
 waits on, which the callee frees once it answered, so that on threads of their own that message has to
 stay while either can reach it, as tokio's `oneshot` keeps its state in an `Arc` (not checked at
 source), which is not built, where on the one thread the crash reads the reply's word first and no
-answer comes between; and the copies a crashed message made of the
+answer comes between; the owner of a reply reads the record of the waiter's actor after its release store, to wake
+that actor (`Replied`, `Signal`), so that on threads of their own that record has to stay by a count the owner
+takes before the store and drops after the wake, the record freed by its last holder, which is not built
+either, where on the one thread nothing runs between the store and the wake; and the copies a crashed message made of the
 arguments of a call it had not sent yet, in the callee's heap where no argument could wait, and the heap of a `spawn` whose arguments it was still
 evaluating, stay in their heaps until those are freed. A message has 2 MiB of
 stack where its clause sets no other size, where a message on Linux had the main thread's 8 MiB
@@ -2343,19 +2376,23 @@ checker reads `Cache.M(...)` and `send Cache.M(...)` as a call through a referen
 (`ThrowSets`); `spawn` of it is `type-mismatch`, a parameter of its constructor and its name as a value `syntax`, a field
 named through its name `not-visible` (U8), and a method named through it with no call and its name called as a function,
 `Cache()`, `not supported`. The emitter gets the reference before the call's arguments from a function made once for each
-such type, `actor.per.<n>`, with three globals of its own: its cell, a lock word, the slot and the number of its one actor;
+such type, `actor.per.<n>`, with three globals of its own: its cell, whose three words are a lock word, the slot and the number of its one actor;
 its block of a restart, with no argument kept, a null function for `escalate` and none for `stop`; and its knobs where
 `after` or `max N in` is written, their last word 1 to mark a `per node` type's. The runtime's `PerFind` reads the cell: where
 its number names an actor `Lookup` finds, it gives that actor with no lock taken; else it takes the cell's lock and reads
 again, and where no actor stands there either it gives null with the lock held, and the function makes the actor's heap and
 record as a `spawn` does, its supervisor the code that runs, and `PerStarted` sets the pause of the type's block and the
 count of its knobs' ring back to 0, stores the slot and the number in the cell, the number with release, and lets go of the
-lock. The lock is held around the read, the making of the record and that store alone,
-never around a constructor or a wait, which the one thread of the build never contends (U35). The defaults then run on the
+lock. The lock is held around the read, the making of the heap and the record and that store alone,
+never around a constructor or a wait, which the one thread of the build never contends (U35): the making of the heap
+and the record under it is a reading of the build beyond the words of the default said back in comment 6983903100,
+"around the check and the publication alone". The defaults then run on the
 caller's stack in the actor's heap, the actor BUILDING, so that a message that reaches it meanwhile waits in its inbox, and
 named as the one built (`Building`), so that an actor they spawn is its child (U21), and
 at their end `PerBuilt` makes the root its supervisor and ends its building as `ActorBuilt` does (U53). A throw in the
-defaults is the caller's crash, which ends its child, the actor half built, the calls queued in it raising `actor-gone`,
+defaults is the caller's crash, whose log line names the line of the throw where T29's words name the call's
+(U52; assumed: T37 of issue 519, comment 6991862214, put to the owner), which ends its child, the actor half built, the
+calls queued in it raising `actor-gone`,
 and the message after it finds no actor in the cell and starts a fresh one (U52). The crash of a `per node` actor whose knobs
 carry the mark, past `max N in`, ends it with no `restart-limit` (`Fell`), and `on crash stop` ends it as at a `spawn`,
 the calls queued in it raising `actor-gone` and the message after it starting a fresh one (U54). It ends with the process,
@@ -2489,9 +2526,9 @@ ask about it.
   match, from the last position before that match's end at which its state held no thread of an earlier start; its cache, made for each call and bounded at 2 MiB, is emptied when it fills, and after three emptyings that read
   fewer than 10 bytes a state, or where it cannot hold two states, the search goes to the Pike VM (the owner, 2026-11-12, issue 176,
   comment 6819137493, Q1, Q2 and Q4 of comment 6813110851) *(assumed, as the record and G2 keep them: the members a state
-  keeps, the cache the searches of one call share, its 2 MiB and the checks at an emptying and of the capacity)*; the text
-  length below which Q3 of that comment has the Pike VM
-  run alone is not built, and the DFA runs first at every length. The parse is
+  keeps, the cache the searches of one call share, its 2 MiB and the checks at an emptying and of the capacity)*; the DFA
+  runs first at every length of the text (the owner, 2026-11-20, issue 176, comment 7051500478, R1 of comment 7007321718,
+  which replaces Q3 of comment 6813110851 and its length). The parse is
   Rust's `ParserI`, one pass with stacks of the open groups, sequences, alternations and brackets, so that a pattern gives
   the error Rust's gives at the byte Rust's names, and the levels of Rust's `NestLimiter` are counted after it, a group, a
   sequence of two items or more, an alternation, a repetition, a bracketed class, a bracket inside one, a class's union of two
@@ -2775,7 +2812,8 @@ that sit under a rule by its id. Every one is pinned by a test.
   `escalate` before anything but `=` are statements, and `return` is `syntax`, the words names in a
   lambda inside it; no name, a second one or a type in the parentheses, a block on a line of its own,
   a knob after `restart` and a word after a decision are `syntax` (U28, U29). `attempt` and `retry`
-  before a block are an expression of that block, which the checker says `not supported` to (section 6),
+  before a block are an expression of that block, which the checker reads for `attempt`, with a postfix
+  `else` after it as after a call (U46), and says `not supported` to for `retry` (section 6),
   but in the condition, the collection or the subject before the block of an `if`, a `while`, a `for`
   or a `match` the word is a name, as a struct literal is no condition in Rust, and inside that header's parentheses,
   brackets, arms and blocks the expression again, as Rust reads a struct literal there (U28; assumed: section 6, comment
@@ -2801,14 +2839,21 @@ that sit under a rule by its id. Every one is pinned by a test.
   closing `"""`, so that the block's text is not read as code, and reads what follows the
   closing quotes on their line as code.
 
-- Y1, Y6, Y9: where `test`, `check`, `mock` and `advance` are words, inside D2's letter (issue 586, comment
-  6992687784). `test cluster` is the cluster test only where a token that can start an expression follows
-  `cluster`, so that `test cluster = 1` declares a variable `cluster` of a type named `test`; `mock` is the
-  statement only where a type, `with` and a type follow it, so that `mock x = 1` declares a variable `x` of
-  a type named `mock`; a `test` block in a class's body is the member parser's `syntax` at its line; and
-  the text of a `check` is its tokens as the source writes them, a `>` of a `>>` that type arguments took
-  apart among them, each run of spaces, line breaks and comments between two tokens one space. Pinned by
-  `ParserTests`.
+- Y1, Y6, Y9, Y10: where `test`, `check`, `mock` and `advance` are words, inside D2's letter (issue 586,
+  comment 6992687784). `test cluster` is the cluster test only where a token that can start an expression
+  and is no `[` follows `cluster`, so that `test cluster = 1` declares a variable `cluster` of a type named
+  `test`; `mock` is the statement only where a type, `with` and a type follow it, so that `mock x = 1`
+  declares a variable `x` of a type named `mock`; `check` and `advance` are the statements before a token
+  that can start an expression and is no `[`, with no look at what the name is, and fall back to no
+  declaration, so that a call of a variable so named at the start of a statement is the statement, a
+  function value named `check` is not called there, and `check x = 1`, a declaration of a variable of a type
+  named `check`, is a `check` of `x` with `= 1` after it, `syntax` at its line; a `test` block in a class's
+  body is the member parser's `syntax` at its line; a test's name is a string literal of one line with at
+  least one character, so that the empty name, `""` or `r""`, and a `"""` block, raw or not, are `syntax`
+  at the line of its `test` (Q12 (a) of comment 6998786049, the owner's answer of 2026-11-20, comment
+  7051499099); and the text of a `check` is its tokens as the source writes them, a `>` of a `>>` that
+  type arguments took apart among them, each run of spaces, line breaks and comments between two tokens
+  one space. Pinned by `ParserTests`.
 
 Six shapes still get two errors, or an uneven one, from the front end, each low: `if x print(1)
 else print(2)` is `braces-required` twice on one line, because the postfix `else` binds to the call
@@ -2827,9 +2872,9 @@ brace. Each is pinned as it is, so that a fix shows.
 ## What the checker reads
 
 The checker (`Semantics/`) takes a tree the parser read without an error and checks it against
-chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type parameters and the
-type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
-generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
+chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type parameters, their
+limits on a function and a `data` type, and the type arguments a use names or leaves to be
+inferred, without a generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
 class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
 a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D20, of D16 the methods of a body, each with a body as a method of a class has one, `syntax` without (K7, F2), its `Text()` and its fields, with their initializers, under inheritance too, `virtual` and `override` among its methods), 6 (values: M1 to M7,
 M9 for lists and maps, and M11), 7 (classes: K1 to K20, for a class with its primary constructor or none and the constructors of its body,
@@ -2850,7 +2895,8 @@ of P3 and its category of P6), 19 (actors of one machine: U1, U2, U4, U6 to U12,
 others the run's, an actor's body read as a class's, its reference a type of its own, the calls
 through it recorded as messages that wait or not, `CallKind.ActorCall` and `CallKind.ActorSend`, and
 a `send` of its own method inside it recorded as `CallKind.ActorSend`, and of U12 what crosses, by
-the type of the parameter, with `send-needs-word` at an argument and at a waiting call's result, a
+the type of the parameter, with `send-needs-word` at an argument and at a waiting call's result, and
+`pointer-crosses` there where a value reaches a pointer or a view of an atomic type, with any word, a
 function value by the lambda its function shows, and `copy` at any call recorded for the emitter,
 `SemanticModel.IsCopied`, and `move` before an argument, before a parameter's type and in a function
 type, a lambda's parameter whose type is not written taking it from the type the lambda is given for:
@@ -2862,7 +2908,8 @@ links a call, an assignment to a field or an item, a `with`, a lambda's captures
 `else`, `&&` and `||`, whose join keeps the moves of the right side, and a loop's rounds until both
 stand still; a value that crosses with no word joins none. A
 `move` ends the variable it names and every variable its region reaches, on the paths that reach a
-later read, which is `used-after-move` at the read, naming each `move`'s line; a loop whose body
+later read, which is `used-after-move` at the read, naming each `move`'s line, a bare `throw` reading the name
+of its arm of `else` (O7); a loop whose body
 moves either of its variables takes its list, whatever its item, and one the build cannot take, over
 a range, a map or a list of a type parameter's items, is `not supported`; a `move` of what the region outside reaches is `move-reachable`,
 and a word that does not fit a plain call's parameter `move-at-call`, in U16's order; a block that
@@ -2908,7 +2955,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`, `named-asm-label`, `binary-asm-label`,
 `naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `static-cycle`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, `lane-out-of-range`,
 `equal-by-unknown`, `equals-method`, `mutable-key`, `spawn-required`, `send-result`, `actor-field-public`,
-`mut-in-message`, `send-needs-word`, `used-after-move`, `move-reachable`, `move-at-call`, and
+`mut-in-message`, `send-needs-word`, `used-after-move`, `move-reachable`, `move-at-call`, `pointer-crosses`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
 Over a program the checker read without a diagnostic and the model of `std/`, `Semantics/ThrowSets.cs` computes what code can
@@ -3078,7 +3125,13 @@ not declare is `unknown-name` as after a type without a body (V10), and a method
 call, and `equal by` (K8); among the bases of a `data` type a class or an interface
 (chapter 7, K10), the explicit form of inheritance (K17) and a
 generic data type (T19), each of which leaves the data type, and every data type derived from it,
-unread; the limit of a type parameter and a member of a type parameter with one (T19); a function
+unread; a generic interface as a limit, which Q15 of issue 605 lets stand (T19); a property and a
+field of a class limit read through a value of a type parameter, and a `static` member of a class
+limit reached through the type parameter, where Q2 of issue 605 lets a body reach a property and a
+`static` member (T19); a second class among the limits of a type parameter, and a class after an
+interface there (T19); with a limit that a type meets by its text alone, a value of the type
+parameter where it is required (T19, A10; Q21 of issue 605); in a copy that binds an interface type to a type parameter, `T.Kind`,
+a loop over `T.Fields` and `T.Make`, since T33 names no kind of an interface type (T33, T19); a function
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
 type or a time type (T10, T29);
@@ -3090,7 +3143,8 @@ may take as a class's does (U1, U9), each of which leaves the
 actor and every use of its name unread, besides what a class's body does not read, as the checker's `syntax` for a base after
 an actor's name, `equal by` and a constructor in its body (U1, U2), and its `static-state` for a `static mut` field and one
 whose type is or holds a class (U1), leave it too, while an actor after a class's `:` is `syntax` and the class is read without
-that base (U1); `attempt { ... }` and `retry { ... }` (section 6, U28); a block of `on crash` whose child can throw a type the
+that base (U1); `retry { ... }` (section 6, U28), and of `attempt { ... }` what the build does not bring into its child or
+out of it, one in a file read without `std/` and one whose `Reason` still grows at the fifth reading (U46, U47); a block of `on crash` whose child can throw a type the
 crossing copy does not copy, one in a file read without `std/` and one whose child's `Reason` still grows at the fifth reading
 (U30); `move` before a field of a primary
 constructor, a parameter of a constructor of K14, of a C function's declaration or of a `naked`
@@ -3098,13 +3152,16 @@ function, a `move` of the variable of a loop over anything but a list, and a `mo
 region the checker does not keep (U12); an argument
 or a result of a message or of an actor's constructor, and a value after `copy` at any call, that
 reaches a value of a type parameter, an instance of a class of `std/`, `HttpRequest` and
-`HttpHeaders` among them, a handle of section 12 or a pointer, an argument written `move` only where it
-reaches a handle, a hasher, a command or a child process by any path the copy follows, a lambda's capture and
-a field of any class among them, or a value of a type parameter, which the copy of its function for such a type
-argument makes one of them, whose copy would share the sender's block by its count (U12); `copy` at a call that is no message before a value that
+`HttpHeaders` among them, or a handle of section 12, a value after `copy` at a call that is no message
+that reaches a pointer or a view of an atomic type, which crosses into no actor (`pointer-crosses`,
+U12), an argument written `move` only where it
+reaches a handle, a hasher, a command or a child process, whose copy would share the sender's block by its count, by any
+path the copy follows, a lambda's capture and a field of any class among them, or a value of a type parameter, since the
+copy of its function for a type argument that is one of them would share that block (U12); `copy` at a call that is no message before a value that
 reaches a function value or an interface's value, which no word makes cross (U12); a log call
 inside an actor (P8); the cluster test of section 13, `test cluster N seed S { ... }`, whose words and
-block the parser passes over (Y8); and `mock X with Y` and `advance d`, whose questions are open (Y9, Y10),
+block the parser passes over (Y8); and `mock X with Y` and `advance d`, whose answers of 2026-11-20 it
+does not build (Y9, Y10),
 the duration of an `advance` checked as the bound of `within` is (U40) and its error reported beside the
 line. The refusal of
 the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered
@@ -3212,8 +3269,9 @@ round can ask about it by the rule's id.
   `unknown-name` at the dot: V10 gives that id to a name that is not visible at the place it
   stands, and a member no rule gives the type is such a name; so is a member after the name of a
   type or a function (`int.Parse(s)`, `print.Count`), which stands before a dot, where the parser
-  reads a member access, and not where a value stands, and a member of a type parameter without a
-  limit, since only a limit gives a type parameter members (T19); a member of a union is
+  reads a member access, and not where a value stands, and a member of a type parameter that none of
+  its limits declares, since only a limit gives a type parameter members, and a name through a type
+  parameter itself, `T.Create()`, that no limit declares as a `static` member (T19); a member of a union is
   `type-mismatch`, since a union is one of its cases only after a `match` (D9).
 - V7 with C8 and M9: an assignment to a loop variable is `assign-immutable`, since C8 names it a
   variable and V7 makes a second assignment to a variable without `mut` that error; so is an
@@ -3301,6 +3359,29 @@ round can ask about it by the rule's id.
   without its type arguments (`Pair p`): T19 lets a use name them or leave them to be inferred, and
   a written type has nothing to infer them from. A count that is neither none nor the type's is
   E4's `syntax` (above).
+- T19 with T33: a copy of a function that reads its type reaches the limits' members alone through
+  a value whose type the function's text writes as a type parameter with limits. Q8 of issue 605
+  holds in its copies too (Q22, comment 7051071380): where a call in a copy passes a value whose type
+  the function's text writes with a type parameter, or writes the type parameter as a type argument,
+  the call meets its limits by the type the function's text writes, so `int M<T>(T item)` that reads
+  `T.Kind` and calls `AreaOf(item)` or `AreaOf(Id(item))` is `type-mismatch` at that call in every
+  copy, with the text of a type parameter of the caller. The checker reads that type for a parameter;
+  a local, written or taking such a value; a parameter of a lambda, written or given by the call it
+  is passed to; the names of a loop over a list or a map; an item of a list or a map; a field of a
+  `data` value, also after `?.` or `?[`; the result of a call of a function or of a value of a
+  function type; a `with`; the value after `??`; a list literal; a `match` and an `else` whose arms
+  and success give one type; and a type argument written in the call. A value of `T?` that a check
+  narrowed (N2) is read as `T`, and a value whose type in the copy is not the one its type in the text
+  becomes there is read on the type the copy binds.
+- T19 with K6, K7 and A10: a class as a limit (Q5 of issue 605, comment 7051071380) gives a value of
+  the type parameter the class's visible methods, before the methods of its interfaces among the
+  limits, and the class's text; the value converts to the class, to a base of it and to an interface
+  the class implements, as C# converts a value of a type parameter to its class constraint; and a
+  method that the class and an interface among the limits declare with the same parameters is
+  `ambiguous-call`, as for two interfaces, where C# takes the class's member. These are the build's
+  readings, which the record marks. A class of `std/` that the prelude brings, `HttpHeaders` (W1),
+  stands as a limit as any class does, though one after `:` is `not supported` (K6, above): the
+  record's reading of Q5 (b) under W1.
 - F12: of two functions that do not differ in their parameters the second is `duplicate-function`,
   and it is left out of overload resolution, so a call of the name gets no second error (E1).
 - O5: an arm of a postfix `else` that names a type the call cannot return beside its success, and
@@ -3672,5 +3753,5 @@ round can ask about it by the rule's id.
   is still nullable (N2), as Rust's `assert!` narrows no type, where C#'s `Debug.Assert` tells its
   flow analysis the condition held. A comparison shows its sides' values where it stands alone or in
   parentheses and each side shows its value as a hole of an interpolation does; a test's name is its
-  own by its value, so that `"A"` and `"\u0041"` are one name. Pinned by
+  own by its value (Y1), so that `"A"` and `"\u0041"` are one name. Pinned by
   `CheckerTests`.

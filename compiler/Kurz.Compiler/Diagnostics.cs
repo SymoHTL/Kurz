@@ -142,8 +142,10 @@ public static class ErrorIds
     public const string Semicolon = "semicolon";
     public const string ReservedWord = "reserved-word";
     public const string CaptureAssign = "capture-assign";
+    public const string CaptureNeedsWord = "capture-needs-word";
     public const string ReversedRange = "reversed-range";
     public const string AmbiguousCall = "ambiguous-call";
+    public const string LimitNotInterface = "limit-not-interface";
     public const string CannotInfer = "cannot-infer";
     public const string EqualByUnknown = "equal-by-unknown";
     public const string EqualsMethod = "equals-method";
@@ -185,6 +187,7 @@ public static class ErrorIds
     public const string UsedAfterMove = "used-after-move";
     public const string MoveReachable = "move-reachable";
     public const string MoveAtCall = "move-at-call";
+    public const string PointerCrosses = "pointer-crosses";
 
     /// <summary>L1 names this id in its rule and keeps it out of the table, which lists the ids cases expect: no corpus file can be a file that is not UTF-8.</summary>
     public const string InvalidSource = "invalid-source";
