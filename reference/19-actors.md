@@ -5,7 +5,7 @@ of its method through its reference is a message (§6, "Actors"). This chapter h
 one machine and what a program writes of them: an actor's declaration, `spawn`, the call that waits
 for its result, `send`, and what crosses into a message, the crash of an actor, its restart by
 the default policy and its log line (U19 to U24), the words of a policy (U25 to U27), the block of a policy (U28
-to U34), the threads that run the actors (U35), the bounds of the calls that wait (U36 to U45) and the actors declared `per node` (U51 to U55). The scheduler but its threads, the stacks, deadlocks but the
+to U34), the threads that run the actors (U35), the bounds of the calls that wait (U36 to U45), the block of an `attempt` (U46 to U50) and the actors declared `per node` (U51 to U55). The scheduler but its threads, the stacks, deadlocks but the
 calls a waiting actor lets in (U17), the loops of calls that wait between actor types (U56 to U59),
 the wait of the top-level code that nothing can end (U18) and the deadline of a call that waits in a message, which is nothing
 left to run (U42), the clauses after an actor's name but
@@ -402,6 +402,11 @@ the `spawn` is the spawner's crash (§6, the owner, 2026-11-14, #519, comment 68
 while a throw in its run at a restart is the actor's own crash under its policy (§6, the owner,
 2026-11-14, #519, comment 6882624606, Q28, "All six leans (Recommended)").
 
+A call that reaches the actor while this constructor runs at its `spawn` waits in its inbox, as at a
+restart (U22), one rule for every start of an actor (§6, the owner, 2026-11-21, #599, comment
+7060156109, Q3 1), and no program can make one: no code holds the reference before `spawn` returns,
+since a field's default reads no `this` (K7) and a constructor in an actor's body is `syntax` (U2).
+
 Case: [actors/constructor-arguments.kz](../corpus/actors/constructor-arguments.kz)
 
 Case: [actors/constructor-waits.kz](../corpus/actors/constructor-waits.kz)
@@ -423,6 +428,22 @@ s = spawn Config()
 p = spawn Pool(s)
 print("spawned")
 print(p.Count())
+```
+
+Case: [actors/constructor-this-refused.kz](../corpus/actors/constructor-this-refused.kz)
+```kurz
+actor B {
+    pub int Ask(A x) => x.Peek()
+}
+
+actor A(B Other) {
+    int first = Other.Ask(this)
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+}
+
+print(spawn A(spawn B()).Peek())
 ```
 
 ### U4 (decided, §5, §6) A call through a reference waits
@@ -1031,7 +1052,9 @@ A use of a variable after its `move` is the compile error `used-after-move`, at 
 line of the `move`, on every path on which the value may have moved, as rustc reports a use after a
 move at the use (E0382) (§6, the owner, 2026-11-15, #519, comment 6896192351, Q1, "Rust: at the
 use, own id"), and its id has its row in the table of errors, as `move-reachable`'s and
-`move-at-call`'s do, since cases of this rule expect them (§6). Two paths to one block of a value that crosses, or of a
+`move-at-call`'s do, since cases of this rule expect them (§6). A bare `throw` in an arm of `else` is a use of the
+arm's name (O7), so that one after a `move` that may have ended the name is `used-after-move` at the `throw` (§5,
+§6, the owner, 2026-11-20, issue 596, comment 7051500690). Two paths to one block of a value that crosses, or of a
 value after `copy`, arrive as two paths to one copy, as Rust's clone of an `Rc` graph keeps its
 sharing, so that a copy is never larger than its source and a mutable graph keeps its shape (§6,
 the owner, 2026-11-15, #519, comment 6896192351, Q2, "Sharing kept"). The copies one call makes,
@@ -2034,6 +2057,79 @@ send s.Take(move m)
 print(f())
 ```
 
+Case: [outcomes/else-throw-after-move.kz](../corpus/outcomes/else-throw-after-move.kz)
+```kurz
+data Missing
+
+int | List<int> | Missing Plain(int id) {
+    if id == 1 {
+        return [id, 7, 9]
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Use(move List<int> l) => l.Count
+
+int Rethrown(int id) {
+    v = Plain(id) else {
+        List<int> n => {
+            c = Use(move n)
+            print("used {c}")
+            throw
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3))
+print(Rethrown(1))
+```
+
+Case: [outcomes/else-throw-after-move-other-path.kz](../corpus/outcomes/else-throw-after-move-other-path.kz)
+```kurz
+data Missing
+
+int | List<int> | Missing Plain(int id) {
+    if id == 1 {
+        return [id, 7, 9]
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Use(move List<int> l) => l.Count
+
+int Rethrown(int id, bool give) {
+    v = Plain(id) else {
+        List<int> n => {
+            if give {
+                return Use(move n)
+            } else {
+                throw
+            }
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3, true))
+print(Rethrown(1, true))
+print(Rethrown(1, false))
+```
+
 ### U13 (decided, §6) The end of the program drops what is queued
 
 When the top-level code ends, a message that runs in an actor it spawned runs to its end, and the
@@ -2263,7 +2359,9 @@ it is queued, the newest message its target has started and not ended, running o
 carries its chain, so that a call that a message makes through a reference to its own actor gets in
 too *(assumed in §6)*. A path of calls that wait that comes back to an actor type on it, which two chains can enter at once, is
 U56's compile error, and a call back to the caller that waits makes no edge of it (U57) (§6, the owner, 2026-11-20, #519, comment 7051071630, T40 (c)). An actor under construction takes no
-message until its `spawn` returns, one of its chain neither *(assumed in §6)*. The chain ID is 16 bytes,
+message until its `spawn` returns, one of its chain neither *(assumed in §6)*, and an actor whose
+restart runs its constructor takes no call of the restart's chain, which waits in its inbox for the
+constructor's end (U22; §6, the owner, 2026-11-20, #599, comment 7051501153, "Option 1"). The chain ID is 16 bytes,
 drawn at random from a generator of its thread that the system's randomness seeds once, and a system
 that gives no randomness when a thread starts its first chain ends the program with `random-failed`,
 as a thread's first map does (M9) *(assumed in §6)*.
@@ -2379,6 +2477,36 @@ print(a.Ping())
 print(b.Get(2))
 ```
 
+Case: [actors/restart-then-callback.kz](../corpus/actors/restart-then-callback.kz)
+```kurz
+// after a restart whose constructor ended, `B.Check`'s call of `Load` gets into `A`, which waits in `Save` on that chain
+
+actor B {
+    pub int Check(A x) => x.Load() * 10
+}
+
+actor A(B Other) {
+    mut int saved = 0
+
+    pub int Save(int n) {
+        saved = n
+        return Other.Check(this) + 1
+    }
+
+    pub int Load() => saved
+
+    pub void Fail() {
+        throw "a fails"
+    }
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Save(4))
+send a.Fail()
+print(a.Save(5))
+```
+
 Case: [actors/vouch-same-chain.kz](../corpus/actors/vouch-same-chain.kz)
 ```kurz
 // `vouch` says that the call reaches another `Node`, and it reaches the one that waits, in the same chain: it gets in (U17)
@@ -2408,7 +2536,13 @@ actor left to run on any thread, no timer pending and nothing registered with th
 call each other from different chains and wait for each other do not hang silently
 (§6, "Deadlocks"; the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level
 wait"). A call that waits in a function the top-level code called is the top-level code's, at its
-own line. Two chains that cross through two different methods, as `deadlock.kz`'s do, `Left.Ask` waiting on `Right.Value` and
+own line. Where a call that an actor's start keeps out closes the loop, the error names that call's
+line (U22, U52) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and where more than one
+such call closes it, the error line names the first place in source order and ends with a colon, and
+each further place stands under it on a line `kept out at <file>:<n>`, before the trace (U22) (§6, the
+owner, 2026-11-21, #599, comment 7067131310, several 2; comment 7067139953, the form 1), a place with
+the count of its calls where more than one, at most 10 such lines and then `... and K more` (U22)
+(§6, the owner, 2026-11-21, #599, comment 7067639209, the order 1, the same place 1, the cap 1). Two chains that cross through two different methods, as `deadlock.kz`'s do, `Left.Ask` waiting on `Right.Value` and
 `Right.Ask` on `Left.Value`, are no loop of U56, whose loop comes back to a type on it (§6, the owner, 2026-11-20, #519, comment 7051071630, T40 (c)), so
 that the case reaches its run with no `vouch` (the owner, 2026-11-21, #519, comment 7060155980, T76 1). A deadline of a call that waits in a message is nothing left to run (U42) *(assumed: T6 of comment 6967625156)*. A loop of actors the top-level code never waits on stays until the end of the program,
 where U13 drops it.
@@ -2627,9 +2761,9 @@ print(c.Done())
 
 Case: [actors/timeout-chain-nested.kz](../corpus/actors/timeout-chain-nested.kz)
 ```kurz
-// `Ask` holds the thread past the 100 ms of the chain's root, so its call `S.Get()`, which takes the time its chain has left,
-// raises `call-timeout` in `Front`, its crash, and the top-level code's call, whose callee crashed once its deadline had
-// passed, raises `call-timeout` too
+// `Ask` holds the thread past the 100 ms of the chain's root before it calls `S.Get()`: the top-level code's call raises
+// `call-timeout`, its callee's crash set once its deadline had passed (U43), where a crash set before it is `callee-crashed`
+// (U20); the time the nested call takes from its chain is shown by `timeout-chain-left.kz` (U37)
 
 // the thread held for `d`, with no call and no wait
 void Hold(duration d) {
@@ -2717,7 +2851,23 @@ pool, the messages of
 its inbox copied into the new instance's heap first, as a crossing copies them (U12), and the
 actor's reference names the same actor after the restart (U2) (§6; the taken points of comment
 6899225864). A crash ends the actors the crashed instance spawned as an end does, after their
-current message, their queued messages dropped (U13), and none of them restarts.
+current message, their queued messages dropped (U13), and none of them restarts. A message whose
+builder crashes at an argument that can raise after one that crosses leaves no copy of its arguments:
+its crossing arguments are copied into the callee's heap after its last argument is evaluated, a value
+read from a name held with no copy across the arguments after it, which M7's `changed-while-held`
+guards and none of which runs a call, and an argument made in place, a list literal, built in the
+caller's heap and copied once (§6, the owner, 2026-11-21, #519, comment 7060155980, "T83 1", which
+retired the heap of the message's own that T24 (1), comment 7051492844, built such a message in). An
+argument can raise where it has no call in it and is neither a literal, a number, a string with no hole,
+a `char`, a `bool`, `null` or a duration's, a number's sign and a duration's included, nor a read of a name, either in brackets;
+a message whose argument that can raise comes before every argument that crosses, or none of whose
+arguments crosses, copies each crossing argument where it is evaluated; and a `send`, a message to a
+`per node` actor and a call with a clause take the same path *(assumed: the reading of the product
+pass, #519, comment 7056985643, and a reading of T83 1, which names the copies after the last argument
+for the messages T24 (1) built in a heap of their own and no other)*. A message with an argument that
+can wait after one that crosses is built in a heap of its own, as any message with an argument that
+can wait is, and its crossing arguments are copied into that heap where they are evaluated *(assumed:
+a reading of T83 1, whose words keep that heap and do not say where its copies are made)*.
 
 Case: [actors/crash-inbox-kept.kz](../corpus/actors/crash-inbox-kept.kz)
 ```kurz
@@ -2775,6 +2925,125 @@ b = spawn Box()
 s = spawn Slow()
 send b.Boom()
 print(b.Sum([10, 20, 30], s.Get()))
+```
+
+Case: [actors/crash-after-copy.kz](../corpus/actors/crash-after-copy.kz)
+```kurz
+// the first `Go` crashes `Caller` at the index, after the list that crosses into the message: the list is copied after the last
+// argument, so that no copy was made, and `Keeper` runs on with its total unchanged
+
+actor Keeper {
+    mut int total = 0
+
+    pub int Take(List<int> xs, int n) {
+        total = total + xs.Count + n
+        return total
+    }
+
+    pub int Total() => total
+}
+
+actor Caller(Keeper Target) {
+    pub void Go(List<int> xs, int at) {
+        ys = [1, 2]
+        print(Target.Take(xs, ys[at]))
+    }
+}
+
+k = spawn Keeper()
+c = spawn Caller(k)
+send c.Go([10, 20, 30], 5)
+c.Go([10, 20, 30], 1)
+print(k.Total())
+```
+
+Case: [actors/crash-after-copy-send.kz](../corpus/actors/crash-after-copy-send.kz)
+```kurz
+// the first `Go` crashes `Caller` at the index, after the list that crosses into the message it sends: the list is copied after
+// the last argument, so that no copy was made, and `Keeper` runs on with its total unchanged
+
+actor Keeper {
+    mut int total = 0
+
+    pub void Add(List<int> xs, int n) {
+        total = total + xs.Count + n
+    }
+
+    pub int Total() => total
+}
+
+actor Caller(Keeper Target) {
+    pub void Go(List<int> xs, int at) {
+        ys = [1, 2]
+        send Target.Add(xs, ys[at])
+    }
+}
+
+k = spawn Keeper()
+c = spawn Caller(k)
+send c.Go([10, 20, 30], 5)
+c.Go([10, 20, 30], 1)
+print(k.Total())
+```
+
+Case: [actors/crash-before-copy.kz](../corpus/actors/crash-before-copy.kz)
+```kurz
+// the first `Go` crashes `Caller` at the index, before the list after it crossed: no copy was made, and `Keeper` runs on with its
+// total unchanged
+
+actor Keeper {
+    mut int total = 0
+
+    pub int Take(int n, List<int> xs) {
+        total = total + xs.Count + n
+        return total
+    }
+
+    pub int Total() => total
+}
+
+actor Caller(Keeper Target) {
+    pub void Go(List<int> xs, int at) {
+        ys = [1, 2]
+        print(Target.Take(ys[at], xs))
+    }
+}
+
+k = spawn Keeper()
+c = spawn Caller(k)
+send c.Go([10, 20, 30], 5)
+c.Go([10, 20, 30], 1)
+print(k.Total())
+```
+
+Case: [actors/crash-between-copies.kz](../corpus/actors/crash-between-copies.kz)
+```kurz
+// the first `Go` crashes `Caller` at the index, between the two lists that cross into the message: both are copied after the last
+// argument, so that no copy was made, and `Keeper` runs on with its total unchanged
+
+actor Keeper {
+    mut int total = 0
+
+    pub int Take(List<int> xs, int n, List<int> zs) {
+        total = total + xs.Count + n + zs.Count
+        return total
+    }
+
+    pub int Total() => total
+}
+
+actor Caller(Keeper Target) {
+    pub void Go(List<int> xs, int at) {
+        ys = [1, 2]
+        print(Target.Take(xs, ys[at], xs))
+    }
+}
+
+k = spawn Keeper()
+c = spawn Caller(k)
+send c.Go([10, 20, 30], 5)
+c.Go([10, 20, 30], 1)
+print(k.Total())
 ```
 
 Case: [actors/crash-child-gone.kz](../corpus/actors/crash-child-gone.kz)
@@ -2913,6 +3182,30 @@ The runtime runs the restart before any message of the inbox, and runs it in no 
 supervisor *(assumed, §6)*. The new instance has its state from the constructor and its body's
 defaults alone, as a new actor has it; a throw in the constructor at a restart is the actor's own
 crash, which restarts it again (U3).
+
+A call that reaches the actor while its restart runs its constructor, a call of the chain the restart
+starts, waits in its inbox and is not let in by that chain (U17), so that a constructor that waits on
+it waits on a call that waits for that constructor, as a message to a `per node` actor from its own
+start does (U52), which the top-level code's wait on one thread reads as `deadlock` (U18) (§6, the
+owner, 2026-11-20, #599, comment 7051501153, "Option 1"). No actor crashes on it, so that no restart
+loops on it, and a `send` of that chain to the actor waits in its inbox behind the restart and is no
+`deadlock` *(assumed: the reading of "as T29 option 1 reads", #599, comment 7056452417)*. The error
+names the line of the call the inbox holds, the call that closes the loop, not the line of the
+top-level code's call that waits (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and the
+trace below it is the top-level code's where it waits, the stack that raises (§6, the owner,
+2026-11-21, #599, comment 7063693195, the trace 1). Where more than one call is kept out, one by each
+of several actors' starts, the error names every one: its line names the first place in source order
+and ends with a colon, and one line `kept out at <file>:<n>` for each further place stands under it,
+before the trace, while one kept-out call keeps the error line of U18 (§6, the owner,
+2026-11-21, #599, comment 7067131310, several 2; comment 7067139953, the form 1). The places stand
+in source order, by file and then line, not in the order the runtime meets the actors; a place that
+keeps out more than one call, as two actors that run the same code do, takes one line with the count
+of its calls, `kept out at kept-same.kz:12 (2 calls)`, and on the error line
+`deadlock at kept-same.kz:12 (2 calls):`, so also where it is the one place kept out, while a place
+kept out once keeps its text with no count; at most 10 `kept out at` lines stand under the error
+line, then one line `... and K more` (§6, the owner, 2026-11-21, #599, comment 7067639209, the
+order 1, the same place 1, the cap 1). A path sorts as the error line writes it, byte for byte as
+`<` compares two strings (T32), and K counts places, not calls *(assumed in §6)*.
 
 Case: [actors/crash-in-constructor-at-restart.kz](../corpus/actors/crash-in-constructor-at-restart.kz)
 ```kurz
@@ -3080,6 +3373,592 @@ send Counter.Add(5)
 print(Counter.Get())
 ```
 
+Case: [actors/restart-reentrant.kz](../corpus/actors/restart-reentrant.kz)
+```kurz
+// at its restart `A`'s constructor waits on `B.Ask`, whose call of `Peek` waits in `A`'s inbox for that constructor, so that the
+// top-level code's wait on `Get` finds nothing left to run, and the error names that call of `Peek`, which closes the loop
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Get())
+b.Set(a)
+send a.Fail()
+print(a.Get())
+```
+
+Case: [tests/test-restart-reentrant.kz](../corpus/tests/test-restart-reentrant.kz)
+```kurz
+// at its restart `A`'s constructor waits on `B.Ask`, whose call of `Peek` waits in `A`'s inbox for that constructor, so that the
+// runner's wait for the test finds nothing left to run, and the words under its `FAILED` line name that call of `Peek`, not the test
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+test "restarts into a call it keeps out" {
+    b = spawn B()
+    a = spawn A(b)
+    print(a.Get())
+    b.Set(a)
+    send a.Fail()
+    print(a.Get())
+}
+```
+
+Case: [actors/restart-reentrant-two.kz](../corpus/actors/restart-reentrant-two.kz)
+```kurz
+// at their restarts `A`'s and `C`'s constructors each wait on a call whose call back waits in the inbox for that constructor, so
+// that the top-level code's wait on `Get` finds nothing left to run, and the error names both calls kept out, `A`'s on its line and
+// `C`'s on a line of its own under it
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor D {
+    mut C? c = null
+
+    pub void Set(C x) {
+        c = x
+    }
+
+    pub int Ask() {
+        x = c
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+actor C(D Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "c fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+d = spawn D()
+c = spawn C(d)
+print(a.Get())
+print(c.Get())
+b.Set(a)
+d.Set(c)
+send a.Fail()
+send c.Fail()
+print(a.Get())
+```
+
+Case: [tests/test-restart-reentrant-two.kz](../corpus/tests/test-restart-reentrant-two.kz)
+```kurz
+// at their restarts `A`'s and `C`'s constructors each wait on a call whose call back waits in the inbox for that constructor, so
+// that the runner's wait for the test finds nothing left to run, and the words under its `FAILED` line name both calls, `A`'s first
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor D {
+    mut C? c = null
+
+    pub void Set(C x) {
+        c = x
+    }
+
+    pub int Ask() {
+        x = c
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+actor C(D Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "c fails"
+    }
+
+    pub int Get() => first
+}
+
+test "restarts two actors into calls they keep out" {
+    b = spawn B()
+    a = spawn A(b)
+    d = spawn D()
+    c = spawn C(d)
+    print(a.Get())
+    print(c.Get())
+    b.Set(a)
+    d.Set(c)
+    send a.Fail()
+    send c.Fail()
+    print(a.Get())
+}
+```
+
+Case: [actors/restart-reentrant-places.kz](../corpus/actors/restart-reentrant-places.kz)
+```kurz
+// at their restarts five `A`s' constructors each wait on `B.Ask`, whose call back waits in the inbox for that constructor, from
+// three places of `Ask`, spawned so that the runtime's walk of the actors meets the places in another order than the file's: the
+// error names them in the file's order, the first on its line, and each place that keeps out two calls with their count
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask(int k) {
+        x = a
+        if x == null {
+            return 0
+        }
+
+        return match k {
+            0 => x.Peek()
+            1 => x.Peek()
+            else => x.Peek()
+        }
+    }
+}
+
+actor A(B Other, int K) {
+    int first = Other.Ask(K)
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+mut sum = 0
+mut all = List<A>()
+for k in [2, 1, 0, 1, 0] {
+    b = spawn B()
+    a = spawn A(b, k)
+    sum = sum + a.Get()
+    b.Set(a)
+    all.Add(a)
+}
+
+print(sum)
+for target in all {
+    send target.Fail()
+}
+
+print(all[0].Get())
+```
+
+Case: [actors/restart-reentrant-one-place.kz](../corpus/actors/restart-reentrant-one-place.kz)
+```kurz
+// at their restarts two `A`s' constructors each wait on `B.Ask`, whose call back waits in the inbox for that constructor, both from
+// one place of `Ask`: the error line names that place with the count of its calls and ends with a colon, and no line stands under it
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+d = spawn B()
+c = spawn A(d)
+print(a.Get() + c.Get())
+b.Set(a)
+d.Set(c)
+send a.Fail()
+send c.Fail()
+print(a.Get())
+```
+
+Case: [actors/restart-reentrant-cap.kz](../corpus/actors/restart-reentrant-cap.kz)
+```kurz
+// at their restarts fourteen `A`s' constructors each wait on `B.Ask`, whose call back waits in the inbox for that constructor, from
+// thirteen places of `Ask`, spawned in the reverse of the file's order, the last place twice: the error line names the first place
+// in the file, ten lines `kept out at` the ten after it, and one line the two places past those
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask(int k) {
+        x = a
+        if x == null {
+            return 0
+        }
+
+        return match k {
+            0 => x.Peek()
+            1 => x.Peek()
+            2 => x.Peek()
+            3 => x.Peek()
+            4 => x.Peek()
+            5 => x.Peek()
+            6 => x.Peek()
+            7 => x.Peek()
+            8 => x.Peek()
+            9 => x.Peek()
+            10 => x.Peek()
+            11 => x.Peek()
+            else => x.Peek()
+        }
+    }
+}
+
+actor A(B Other, int K) {
+    int first = Other.Ask(K)
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+mut sum = 0
+mut all = List<A>()
+for k in [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 12] {
+    b = spawn B()
+    a = spawn A(b, k)
+    sum = sum + a.Get()
+    b.Set(a)
+    all.Add(a)
+}
+
+print(sum)
+for target in all {
+    send target.Fail()
+}
+
+print(all[0].Get())
+```
+
+Case: [tests/test-restart-reentrant-places.kz](../corpus/tests/test-restart-reentrant-places.kz)
+```kurz
+// each test restarts `A`s whose constructors wait on `B.Ask`, whose call back waits in the inbox for that constructor, from places
+// of `Ask` in the order the list gives, so that the runner's wait for the test finds nothing left to run; the words under its
+// `FAILED` line name the places in the file's order, each place that keeps out two calls with their count, at most ten lines
+// `kept out at` and then one line for the places past those
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask(int k) {
+        x = a
+        if x == null {
+            return 0
+        }
+
+        return match k {
+            0 => x.Peek()
+            1 => x.Peek()
+            2 => x.Peek()
+            3 => x.Peek()
+            4 => x.Peek()
+            5 => x.Peek()
+            6 => x.Peek()
+            7 => x.Peek()
+            8 => x.Peek()
+            9 => x.Peek()
+            10 => x.Peek()
+            11 => x.Peek()
+            else => x.Peek()
+        }
+    }
+}
+
+actor A(B Other, int K) {
+    int first = Other.Ask(K)
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+int KeepOut(List<int> places) {
+    mut sum = 0
+    mut all = List<A>()
+    for k in places {
+        b = spawn B()
+        a = spawn A(b, k)
+        sum = sum + a.Get()
+        b.Set(a)
+        all.Add(a)
+    }
+
+    print(sum)
+    for target in all {
+        send target.Fail()
+    }
+
+    return all[0].Get()
+}
+
+test "keeps out calls of thirteen places" {
+    print(KeepOut([12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 12]))
+}
+
+test "keeps out calls of three places, two of them twice" {
+    print(KeepOut([12, 1, 0, 1, 0]))
+}
+
+test "keeps out two calls of one place" {
+    print(KeepOut([0, 0]))
+}
+```
+
+Case: [actors/restart-no-call-back.kz](../corpus/actors/restart-no-call-back.kz)
+```kurz
+// the program of `actors/restart-reentrant.kz` with `B` given no `A`: at the restart `B.Ask` calls nothing back, and the constructor
+// ends
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Get())
+send a.Fail()
+print(a.Get())
+```
+
+Case: [actors/restart-send-waits.kz](../corpus/actors/restart-send-waits.kz)
+```kurz
+// at its restart `A`'s constructor waits on `B.Ask`, whose `send` of `Note` waits in `A`'s inbox behind that constructor and behind the
+// top-level code's `Get`, and runs on the new instance
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            send x.Note()
+            return 5
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+    List<int> items = [1, 2, 3]
+
+    pub void Note() {
+        print("note {items.Count}")
+    }
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Get())
+b.Set(a)
+send a.Fail()
+print(a.Get())
+print(a.Get())
+```
+
+Case: [actors/restart-then-callback.kz](../corpus/actors/restart-then-callback.kz)
+
 ### U23 (decided, §6) The pause before a restart grows
 
 A restart waits a pause of 100 ms at the actor's first crash, twice the one before at each crash
@@ -3149,7 +4028,11 @@ runs at its `spawn` goes on to its spawner, since a throw there is the spawner's
 as §6 marks it)*. At the top level the root is the supervisor, so that `escalate` there ends the
 process with the child's error line, the text below it and the exit code 1 (§6, comment 6902210646,
 Q4), and with the trace of the child's stack, from its raise to its message's method *(assumed: as §6
-marks it, the trace of the stack that raised, as at a raise of the top-level code)*.
+marks it, the trace of the stack that raised, as at a raise of the top-level code)*. Under `kurz test` a
+crash that escalates into a test's own actor is taken there with no log line and fails that test, the
+child's words under its `FAILED` line, and the run goes on with the test after it (Y5; §11, the owner,
+2026-11-20, issue 586, comment 7051499099, Q2 of comment 6992687784 at its lean) *(assumed: F3 of comment
+6993110710, a reading of the build said back there)*.
 
 Case: [actors/crash-stop.kz](../corpus/actors/crash-stop.kz)
 ```kurz
@@ -3225,6 +4108,38 @@ send gone.Fail()
 print(o.Ping())
 within 0s {
     print(gone.Get())
+}
+```
+
+Case: [actors/timeout-chain-left.kz](../corpus/actors/timeout-chain-left.kz)
+```kurz
+// `Ask` holds the thread past the 100 ms of the chain's root, the top-level code's call, so that its call `S.Get()`, which
+// takes the time its chain has left, raises `call-timeout` at its line, the crash of `Front`, whose policy passes the crash up
+// to the root, which ends the process with that line (U25); a call that took its own 5 seconds would wait, and the top-level
+// code's call raise `call-timeout` at its own line
+
+// the thread held for `d`, with no call and no wait
+void Hold(duration d) {
+    instant start = instant.Now
+    while start.Elapsed < d {
+    }
+}
+
+actor Store {
+    pub int Get() => 1
+}
+
+actor Front(Store S) {
+    pub int Ask() {
+        Hold(150ms)
+        return S.Get()
+    }
+}
+
+s = spawn Store()
+f = spawn Front(s) on crash escalate
+within 100ms {
+    print(f.Ask())
 }
 ```
 
@@ -3430,8 +4345,38 @@ actor Counter per node on crash stop {
 }
 
 send Counter.Fail()
-// the call waits in the inbox behind `Fail`, as one sender's messages run in the order it sent them (U5), and the stop at
-// `Fail`'s crash gives it `actor-gone`
+// the call waits in the inbox behind `Fail`, as one sender's messages run in the order it sent them (U5) and no worker thread
+// runs `Fail` before the top-level code waits (U35), and the stop at `Fail`'s crash gives it `actor-gone`
+print(Counter.Get())
+```
+
+Case: [actors/per-node-stop-sends.kz](../corpus/actors/per-node-stop-sends.kz)
+```kurz
+// `Counter`'s `Fail` runs before `Probe`'s `Ping`, as one thread runs the ready actors first in, first out (U35), and the stop
+// at its crash takes the `send` of `Add` queued behind it with the inbox (U25), so that the fresh start counts 0
+
+actor Counter per node on crash stop {
+    mut int count = 0
+
+    pub void Add() {
+        count = count + 1
+    }
+
+    pub void Fail() {
+        throw "counter fails"
+    }
+
+    pub int Get() => count
+}
+
+actor Probe {
+    pub int Ping() => 9
+}
+
+p = spawn Probe()
+send Counter.Fail()
+send Counter.Add()
+print(p.Ping())
 print(Counter.Get())
 ```
 
@@ -4191,7 +5136,7 @@ Case: [actors/timeout-capped.kz](../corpus/actors/timeout-capped.kz)
 
 Case: [actors/timeout-send.kz](../corpus/actors/timeout-send.kz)
 
-Case: [actors/timeout-chain-nested.kz](../corpus/actors/timeout-chain-nested.kz)
+Case: [actors/timeout-chain-left.kz](../corpus/actors/timeout-chain-left.kz)
 
 ### U38 (decided, §6) The block `within`
 
@@ -4202,7 +5147,7 @@ owner, 2026-11-13, #519, comment 6850539879, "One deadline for the block (Recomm
 deadline binds the calls that wait, and their waits, made by the code the block runs, in the functions it calls too, as Tokio's
 `timeout` cancels its future with every wait in it (checked in §6 on 2026-11-13, at Tokio 1.54.1) *(assumed in §6)*. The
 message of such a call carries the call's own deadline (U44), which caps the calls its callee makes, each taking its own bound
-(U36, U39) *(assumed: T8 of comment 6967625156)*. A `send` in the block carries the chain's own deadline (U37), and a message of
+(U36, U39) *(assumed in §6: T8 of comment 6967625156)*. A `send` in the block carries the chain's own deadline (U37), and a message of
 another chain or a policy's block that runs in the top-level code's wait is not bound by it (U44, U45). The waits it binds are
 those of calls on actors: a socket's wait keeps its own bound of §12 (S9), which no `within` bounds *(assumed in §6: whether a
 block bounds a socket's wait stands open in §14, T5 of comment 6967147952)*. The deadline
@@ -4321,12 +5266,13 @@ otherwise it is a name, so that `within(3)` is a call, `within + 1` a sum and
 `type-mismatch`, a `duration?` is `nullable-unchecked` (N2), and a call with a `void` success is `syntax` (O10); and a `{`
 of the block on a line after the bound's is `braces-required` at the line where the bound ends, as C1 has it of an `if`
 *(assumed in §6: proposed there and not put to the owner)*. A bound of zero or less sets a deadline that has passed, so
-that each call it bounds raises `call-timeout` at once, but a call to an actor that ended, which raises `actor-gone` first (U43)
-*(assumed: T14 of comment 6972461413)*, and no id of its own is added, as Tokio's
+that each call it bounds raises `call-timeout` at once, but a call to an actor that had ended before the call was queued, which
+raises `actor-gone` first (U43) *(assumed in §6: T14 of comment 6972461413)*, and no id of its own is added, as Tokio's
 `timeout(Duration::ZERO, f)` elapses at its first wait (not checked at source) *(assumed: T4 of comment 6967147952)*. A
-bound whose deadline would pass the largest time the clock holds sets no deadline, which the calls it bounds take over the 5
-seconds of U36, each waiting with no bound but the time its chain has left (U37), as Tokio's `timeout` falls back on a far
-future where its sum overflows (not checked at source) *(assumed in §6)*.
+bound whose deadline would pass the largest time the clock holds sets no deadline of its own: the calls it bounds wait with no
+bound of their own in place of U36's 5 seconds, each capped by the time its chain has left (U37) and by the deadline of a block
+it stands in (U38), as Tokio's `timeout` falls back on a far future where its sum overflows (not checked at source)
+*(assumed in §6)*.
 
 Case: [actors/timeout-zero.kz](../corpus/actors/timeout-zero.kz)
 ```kurz
@@ -4378,7 +5324,9 @@ bound standing in parentheses, and the clause stands before a postfix `else` (O5
 *(assumed: T12 of comment 6967625156)*. An `else` after a call inside the operand is that call's, as a unary expression takes its
 own postfix forms (T35) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. A call takes one
 clause, a second `within` after its clause being `syntax`, and outside brackets the clause stands on the line where the call
-ends: a line break ends the call first, so that a `within` at the start of the next line begins a statement, U40's; inside a
+ends: a line break ends the call first, so that a `within` at the start of the next line begins a statement, read as U40 reads
+one, the word where a `{` follows its expression and a name otherwise, so that `within 2s` there with no block after it is
+`syntax` at its line, `within` being a name there; inside a
 `(` or a `[`, where a line break ends no statement (L4), it may stand on a line after the call's *(assumed: a
 reading of the build, proposed with this record and not put to the owner)*. The operand of a declaration's clause is a number
 literal alone, its sign included, any other operand being `syntax`, its type read as U40 reads a bound. That the operand is a
@@ -4451,6 +5399,8 @@ actor Store {
 s = spawn Store()
 print(s.Get())
 ```
+
+Case: [actors/within-clauses.kz](../corpus/actors/within-clauses.kz)
 
 ### U42 (assumed, §6) A wait of the top-level code with no message to run while a deadline stands
 
@@ -4997,12 +5947,17 @@ declared `per cluster` or `per node` and addressed by its type name"; §13, "Act
 by name"), the machine one process of the program, as an Erlang node is one virtual machine *(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*. A
 call or a `send` through its name is a message as one through a reference is (U4, U6, U9, U12), and
 reads the instance it reaches before its arguments, as a call through a reference reads its target
-*(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*. Its name stands only as the target of such a call, inside the actor as outside it (U55):
+*(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*. The instance is found there or started, its start run whole, before the first argument runs, and a
+message whose instance an argument ended, by a stop or past its limit (U54), gets `actor-gone` at the call's line, as one
+through a reference whose actor ended does (U6, U20) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. Its name stands only as the target of such a call, inside the actor as outside it (U55):
 `spawn Cache()` is `type-mismatch`, as U14 refuses a `spawn` of what it cannot make, and a parameter of
 its constructor and its name where a value stands are `syntax` (E4), as a class's name as a value is,
-each text naming the `per node` form *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. A field named through its name is `not-visible`, as one
-named through a reference is (U8), and a method named through it with no call, and its name called as
-a function, `Cache()`, are `not supported` *(assumed: a reading of the build, proposed with this record and not put to the owner)*. `per` with other words than `node` has no rule here
+each text naming the `per node` form *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. Whether its name can be written as a type, `Cache c = this`, a
+parameter `Cache c` or `List<Cache>`, is open, put to the owner as T38 of comment 6991862214; the build reads such a type
+as any actor's, whose value is a reference to one instance *(assumed: a reading of the build, put to the owner as T38 of comment 6991862214)*. A field named through its name is
+`not-visible`, as one named through a reference is (U8) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. A method named through it with no call, and its
+name called as a function, `Cache()`, have no rule here, their id put to the owner as T39 of comment 6991862214, and the
+build says `not supported` to both *(assumed: a reading of the build, said back in comment 6986934971 and put to the owner as T39 of comment 6991862214)*. `per` with other words than `node` has no rule here
 (U1), and the build says `not supported` at the clause: to `per cluster` with a text of its own, "the clause `per cluster`
 after an actor's name, one actor in the cluster, which needs the directory of section 7 (U1, U51)" *(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*, and to `per` written
 twice, `per node per node`, to `per` with any other words, `per caller` among them, and to a clause beside `per node` that
@@ -5103,19 +6058,37 @@ print(Cache.hits)
 ### U52 (assumed, §13) The start at its first message
 
 A `per node` actor starts at the first message that names it, a call or a `send`, from any code, the
-top-level code, a function, another actor or itself, and a program that names it nowhere starts none,
+top-level code, a function or another actor, and a program that names it nowhere starts none,
 as Orleans activates a grain at its first call (not checked at source) and C#'s `Lazy<T>` makes its value
-at the first read of its `Value` (§13) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*; a `send` starts it as a call does *(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*. Its constructor and its fields' defaults run on
+at the first read of its `Value` (§13) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*; a `send` starts it as a call does *(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*, so that a `send` through its name that starts it waits for the
+start and a throw there crashes its sender, the one exception to U6's message that nobody waits for *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. Its
+constructor and its fields' defaults run on
 the first caller's stack, as `spawn`'s do (U3), and a throw there is that caller's crash, under the
-caller's own policy: the half-built actor ends, the calls of other actors queued behind its start get
-`actor-gone`, and the first message after that starts it again, as Rust's `OnceLock::get_or_init`
-leaves its cell empty after a panic in its function (checked 2026-11-18: its documentation, "the cell remains uninitialized") *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. An actor its defaults spawn is its child, which a
+caller's own policy: the half-built actor ends, the calls queued behind its start, of other actors and of the top-level
+code, the root (O6), get `actor-gone`, and the first message after that starts it again, as Rust's `OnceLock::get_or_init`
+leaves its cell empty after a panic in its function (checked 2026-11-18: its documentation, "the cell remains uninitialized") *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*; the `send`s queued there go with its inbox, as the
+inbox of an actor that ended goes (U25) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. An actor its defaults spawn is its child, which a
 crash of it ends, as at a `spawn` (U3, U21) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. The crash names the line of the throw, as a
-throw in a constructor at `spawn` does *(assumed: a reading of the build, proposed with this record and not put to the owner)*. Messages that reach it while it is built wait in its
-inbox for its start, and a call that waits on it from the code its own start runs, a default that calls a
+throw in a constructor at `spawn` does (U3) and as U24 gives a crash's place, where T29's option 1 of comment
+6983903100 words it "its throw is the caller's crash at the call's line": the build departs from T29's words, as the
+reading said back in comment 6986934971 states *(assumed: a reading of the build, said back in comment 6986934971 and put to the owner as T37 of comment 6991862214)*. Messages that reach it while it is built wait in its
+inbox for its start, and the first caller's own message joins that inbox after the call's arguments, behind them
+*(assumed: a reading of the build, proposed with this record and not put to the owner)*, and a call that waits on it from the code its own start runs, a default that calls a
 function that calls `Cache.Get()`, waits for a start that waits for it: a loop of calls that wait through its type, which
 layer 2 refuses at compile time as `call-loop` at that call's line (U56), where U18's `deadlock` at run time read it before
-(the owner, 2026-11-21, #519, comment 7068198309, per node 1).
+(the owner, 2026-11-21, #519, comment 7068198309, per node 1). A call that waits from the code its own start runs, a default that calls a
+function that calls `Cache.Get()`, waits for a start that waits for it, which the top-level code's
+wait that finds nothing left to run reads as `deadlock` (U18) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*, at that message's line, the call that closes the loop,
+wherever the code that runs the start stands, the top-level code, an actor's message or another
+actor's constructor, as at a restart (U22) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1): at that call's line where the top-level
+code ran the start, a call in a function it called being its own (U18), and, where an actor's message runs the start,
+where the top-level code waits on nothing, the end of the program
+drops the loop (U13) *(assumed: a reading of the build, proposed with this record and not put to the owner)*; a `send` from that code waits in the inbox behind the start *(assumed: a reading of the build, proposed with this record and not put to the owner)*.
+Where more than one call is kept out, a `per node` actor's start among the starts that keep them, the
+error names every one, the first place in source order on its line and each further place under it,
+with the counts and the cap of U22, as at a restart (U22) (§6, the owner, 2026-11-21, #599, comment
+7067131310, several 2; comment 7067139953, the form 1; comment 7067639209, the order 1, the same
+place 1, the cap 1).
 
 Case: [actors/per-node-first-message.kz](../corpus/actors/per-node-first-message.kz)
 ```kurz
@@ -5221,14 +6194,67 @@ int Measured() {
 print(Cache.Size())
 ```
 
+Case: [actors/per-node-reentrant-in-message.kz](../corpus/actors/per-node-reentrant-in-message.kz)
+```kurz
+// `User`'s `Use` starts `Cache`, whose default calls `Cache.Size` in the chain of `Use`, so that the call waits in `Cache`'s inbox
+// for the start that waits on it, and the error names that call, not the top-level code's call that waits
+
+actor Cache per node {
+    int size = Measured()
+
+    pub int Size() => size
+}
+
+int Measured() {
+    return Cache.Size() + 1
+}
+
+actor User {
+    pub int Use() => Cache.Size()
+}
+
+u = spawn User()
+print(u.Use())
+```
+
+Case: [actors/per-node-reentrant-nested.kz](../corpus/actors/per-node-reentrant-nested.kz)
+```kurz
+// `Outer`'s start, which the top-level code runs, starts `Inner`, whose default waits on `Helper.Ask`, whose call of `Outer.Size`
+// waits in `Outer`'s inbox for the start that waits on it, and the error names that call, not the top-level code's call that waits
+
+actor Helper {
+    pub int Ask() => Outer.Size()
+}
+
+actor Inner per node {
+    int value = Asked()
+
+    pub int Get() => value
+}
+
+actor Outer per node {
+    int size = Inner.Get()
+
+    pub int Size() => size
+}
+
+int Asked() {
+    h = spawn Helper()
+    return h.Ask()
+}
+
+print(Outer.Size())
+```
+
 Case: [actors/per-node-child.kz](../corpus/actors/per-node-child.kz)
 
 ### U53 (assumed, §6, §13) Its supervisor is the root
 
-The supervisor of a `per node` actor is the root, the top-level code, as for an actor the top-level code
-spawns, though its first caller started it: it outlives that caller, and `on crash escalate` after its
-name ends the process as the escalation of a child of the top-level code does (U25) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. It ends with
-the process (§6, "`per` actors end with the process"), its heap freed with every actor's at the end
+The supervisor of a `per node` actor is its first caller while it is built, whose crash a throw in its start is (U52),
+and the root, the top-level code, from the end of its start, as for an actor the top-level code spawns, though its first
+caller started it: it outlives that caller, and `on crash escalate` after its
+name ends the process as the escalation of a child of the top-level code does (U25) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. Unless a throw in its start (U52)
+or its policy (U54) ends it first, it ends with the process (§6, "`per` actors end with the process"), its heap freed with every actor's at the end
 (U13) *(assumed: said back with T27 to T33 of comment 6983903100, taken at the default while it waits for the owner)*.
 
 Case: [actors/per-node-outlives-caller.kz](../corpus/actors/per-node-outlives-caller.kz)
@@ -5237,15 +6263,17 @@ Case: [actors/per-node-escalate.kz](../corpus/actors/per-node-escalate.kz)
 
 ### U54 (decided, §6, §13) Its policy
 
-The words of a policy after a `per node` actor's name are its policy, which runs as at a `spawn` of the
-top-level code (U53) (§6, "Policy at `spawn`", the owner, 2026-11-13, #519, comment 6847932993, Q15):
+The words of a policy after a `per node` actor's name are its policy (§6, "Policy at `spawn`", the owner, 2026-11-13, #519,
+comment 6847932993, Q15), which runs as at a `spawn` of the top-level code (U53) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*:
 with none, or with `on crash restart`, a crash restarts it in place with fresh state and its inbox kept
 (U21, U22), and past the limit of `max N in` it ends and the first message after that starts a fresh
 one, its constructor run again, with no `restart-limit`, as the key of a `per` type does past its limit (U26; §6, the owner, 2026-11-17, #561, comment
 6945857315, Q2, "Key restarts fresh on next call") *(assumed: the one actor of a `per node` type read as the key of comment 6945857315, Q2; the product pass, comment 6983506072)* *(assumed, §6: the calls queued in it at the crash
 that passes the limit raise `actor-gone`)*. `on crash stop` ends it so: the calls queued in it get
-`actor-gone`, and the first message after that starts a fresh one *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. A fresh start begins the pause
-and the window of its policy again, as §6 counts the window from a fresh start *(assumed: a reading of the build, proposed with this record and not put to the owner)*. The block
+`actor-gone`, and the first message after that starts a fresh one *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*. The `send`s queued in it at a crash
+that stops it or passes its limit go with its inbox, as the inbox of an actor that ended goes (U25) *(assumed: a reading of the build, proposed with this record and not put to the owner)*. A
+fresh start begins the window of its policy again, as §6 gives the key of a `per` type past its limit "no limit across
+those starts" (comment 6945857315, Q2) *(assumed: the one actor of a `per node` type read as the key of comment 6945857315, Q2; the product pass, comment 6983506072)*, and the pause of its policy again *(assumed: a reading of the build, proposed with this record and not put to the owner)*. The block
 `on crash (c) { ... }` after its name has no rule here (U28), and `compiler/README.md` says what the
 build does with it.
 
@@ -5254,6 +6282,8 @@ Case: [actors/per-node-restart.kz](../corpus/actors/per-node-restart.kz)
 Case: [actors/per-node-stop.kz](../corpus/actors/per-node-stop.kz)
 
 Case: [actors/per-node-stop-gone.kz](../corpus/actors/per-node-stop-gone.kz)
+
+Case: [actors/per-node-stop-sends.kz](../corpus/actors/per-node-stop-sends.kz)
 
 Case: [actors/per-node-limit.kz](../corpus/actors/per-node-limit.kz)
 

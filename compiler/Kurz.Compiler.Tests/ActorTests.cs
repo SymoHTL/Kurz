@@ -899,7 +899,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // function value's, as R1 states for a jump out of a construction or a call (assumed: a reading of the build), as Rust drops
         // the operands of an expression that one of its operands leaves (the Rust Reference, "Destructors", drop scopes, operands;
         // issue 569): the instance of the larger class, made second, is freed before the smaller one, made first, a copy where the
-        // call makes two, and no other block is freed while the program records but the tables of the session of those two copies,
+        // call makes two, and in the rows of a call of two copies no other block is freed while the program records but the tables
+        // of the session of those two copies,
         // which its end frees first (`CopyAbort`), before the instance made after the first copy, the tables larger than the instances
         // of `Small` (24 bytes) and of `Large` (32); a call's one copy is let go of among the values its arguments made, the last made
         // first, so that the copy, made second, goes before the instance made first, and the instance, made second, before the copy
@@ -5223,7 +5224,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // it while it is built, `Counter`'s crash under `stop` ends it, and `Limited`'s second crash passes its limit and ends it; each
         // message after that finds no actor by the cell's slot and number and starts a fresh one, reading nothing of the record its end
         // freed; under the allocator that makes every freed block inaccessible, with the word of the heap of a record its end frees
-        // written 16 before the free (PoisonedEnds)
+        // written 16 before the free (PoisonedEnds); each start's crash names the line of the throw, where T29's words name the
+        // call's (U52; assumed: T37 of issue 519, comment 6991862214, put to the owner)
         const string text = """
             List<string> Words(string s) {
                 words = ["start", s]
@@ -6473,6 +6475,71 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_bound_that_gives_the_field_its_callee_was_read_from_another_actor_through_its_instance_leaves_the_call_with_the_actor_read_before_it()
+    {
+        // U39, F12, U2: the callee's reference, two words, is read before the arguments and the bound, as a receiver is, so that a bound
+        // that gives the field it was read from another actor, through its instance passed as `mut`, leaves the call with the actor read
+        // before it, which answers `1`, and the next read of the field the other actor, which answers `2`; M7 refuses no such bound, as
+        // it refuses one that changes the callee's variable or its list
+        // (`CheckerTests.The_bound_of_a_calls_clause_changes_nothing_its_callee_was_read_from`); under the allocator that makes every
+        // freed block inaccessible
+        const string swap = """
+            actor Store(int N) {
+                pub int Get() => N
+            }
+
+            class Box {
+                pub mut Store s = spawn Store(1)
+            }
+
+            duration Swap(mut Box held) {
+                held.s = spawn Store(2)
+                return 1s
+            }
+
+            mut b = Box()
+            print(b.s.Get() within Swap(mut b))
+            print(b.s.Get())
+
+            """;
+        Ran(BuildAndRun(swap, ListTests.Fenced, "actor-callee-field-swap"), 0, ["1", "2"], "");
+    }
+
+    [Fact]
+    public void A_bound_that_gives_the_actors_field_its_callee_was_read_from_another_actor_in_its_method_leaves_the_call_with_the_actor_read_before_it()
+    {
+        // U39, F12, U2: as through an instance passed as `mut`
+        // (`A_bound_that_gives_the_field_its_callee_was_read_from_another_actor_through_its_instance_leaves_the_call_with_the_actor_read_before_it`),
+        // a bound that calls a method of the actor that holds the field, which gives the field another actor, leaves the call with the
+        // actor read before it, which answers `1`, and the next read of the field the other actor, which answers `2`; under the
+        // allocator that makes every freed block inaccessible
+        const string reset = """
+            actor Store(int N) {
+                pub int Get() => N
+            }
+
+            actor Front {
+                mut Store helper = spawn Store(1)
+
+                duration Reset() {
+                    helper = spawn Store(2)
+                    return 1s
+                }
+
+                pub int Ask() => helper.Get() within Reset()
+
+                pub int Now() => helper.Get()
+            }
+
+            f = spawn Front()
+            print(f.Ask())
+            print(f.Now())
+
+            """;
+        Ran(BuildAndRun(reset, ListTests.Fenced, "actor-callee-field-reset"), 0, ["1", "2"], "");
+    }
+
+    [Fact]
     public void A_message_whose_callee_ends_while_its_clauses_bound_waits_holds_no_block_of_the_heap_the_end_freed()
     {
         // U39, U12, U21: the bound of the clause waits after the arguments ran, as an argument that waits does (`A_message_whose_callee_
@@ -6586,6 +6653,51 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         var run = BuildAndRun(text, ListTests.Edited([.. ListTests.Fence, .. BigBlocks]), "actor-clause-bound-crashes");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Front#2 crashed: index-out-of-range at program.kz:14"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["1", "2", "0"], "");
+    }
+
+    [Fact]
+    public void A_message_whose_argument_after_a_crossing_one_crashes_its_builder_leaves_no_block_in_its_callees_heap()
+    {
+        // section 6 (the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)", and 2026-11-21, comment 7060155980, "T83 1"): the index
+        // `ks[i]` stands after the list `xs`, which crosses into the callee's heap, and its `index-out-of-range` crashes `Front`, the
+        // actor whose code builds the message, before the message's queueing; the list is copied after the last argument, so that the
+        // crash comes before its copy and `Store`'s heap holds no more blocks than it held before, where a copy made where the list is
+        // evaluated would stay there, unqueued, to `Store`'s end; `Held` is the control that the count sees that copy in `Store`'s heap
+        // while its message runs; under the allocator that makes every freed block inaccessible
+        const string text = """
+            actor Store {
+                pub long Held(List<int> xs, int k) => HttpServer.Big()
+
+                pub long Big() => HttpServer.Big()
+            }
+
+            actor Front {
+                pub void Ask(Store s, List<int> ks, int i, long start) {
+                    mut xs = List<int>()
+                    for n in 0..<40000 {
+                        xs.Add(n)
+                    }
+
+                    held = s.Held(xs, ks[i])
+                    print(held - start)
+                }
+
+                pub int Ping() => 2
+            }
+
+            store = spawn Store()
+            f = spawn Front()
+            before = store.Big()
+            send f.Ask(store, [1], 0, before)
+            send f.Ask(store, [1], 1, before)
+            print(f.Ping())
+            print(store.Big() - before)
+
+            """;
+        var run = BuildAndRun(text, ListTests.Edited([.. ListTests.Fence, .. BigBlocks]), "actor-argument-raises-after-crossing");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Front#2 crashed: index-out-of-range at program.kz:14"], crashes);
         Ran((run.Code, run.Output, rest), 0, ["1", "2", "0"], "");
@@ -6884,10 +6996,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void A_test_has_no_bound_of_time_while_each_call_it_makes_keeps_its_own()
+    public void A_test_has_no_bound_of_time_so_that_it_calls_on_past_the_default_bound_of_a_call()
     {
-        // D6, Y7: the test's message carries no deadline, so a test that holds its thread past the default bound of a call calls on, the
-        // call with that bound of its own, here 10 ms for the run; a read of the clock is `not supported` in a build for Windows (S11)
+        // D6, Y5: the test's message carries no deadline, so a test that holds its thread past the default bound of a call, here 10 ms
+        // for the run, calls on and its call is answered; a read of the clock is `not supported` in a build for Windows (S11)
         if (!OperatingSystem.IsLinux())
         {
             return;

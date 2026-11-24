@@ -1,0 +1,9 @@
+// expect: error syntax at 8
+// rules: L18, Y1
+
+// `check` before a name at the start of a statement is the statement, so that a declaration of a variable whose type is
+// named `check` is a `check` of `x` with `= check(1)` after it
+data check(int N)
+
+check x = check(1)
+print(x.N)

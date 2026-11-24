@@ -68,7 +68,7 @@ internal static class SyntaxPrinter
     }
 
     /// <summary>
-    /// Type parameters with their limits, <c>&lt;T, U: Shape&gt;</c>, and one that holds a constant with its type and default,
+    /// Type parameters with their limits, <c>&lt;T, U: Shape, V: Shape &amp; Named&gt;</c>, and one that holds a constant with its type and default,
     /// <c>&lt;const Mode M = (. Mode Plain)&gt;</c>, so that a limit or a default the parser dropped shows; nothing for none.
     /// </summary>
     private static string TypeParameters(IReadOnlyList<TypeParameter> parameters) =>
@@ -77,7 +77,7 @@ internal static class SyntaxPrinter
     private static string TypeParameter(TypeParameter p) => p switch
     {
         { Constant: { } constant } => $"const {Type(constant)}{p.Name}{(p.Default is null ? "" : " = " + Print(p.Default))}",
-        { Limit: { } limit } => $"{p.Name}: {Type(limit)}".TrimEnd(),
+        { Limits.Count: > 0 } => $"{p.Name}: {string.Join(" + ", p.Limits.Select(l => Type(l).TrimEnd()))}",
         _ => p.Name,
     };
 

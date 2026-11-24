@@ -438,8 +438,10 @@ public sealed partial class Checker
         InterfaceType face => face.Symbol.TextMethod is not null, // A10: a value of an interface that declares `string Text()`
         WeakRefType w => HasText(w.Target, seen), // A4 with R3: the text of what its read gives
         PointerType or CFunctionType => true, // its text is not read (HoldsRaw), and decides nothing here
-        TypeParameterType p => seen.Any(s => s.TypeParameters.Contains(p.Symbol)), // a parameter of a data type whose fields are read: its argument is judged where the type is used
-        _ => false, // a function value; a type parameter of a function, which has no limit the checker reads (A10)
+        TypeParameterType p => p.Symbol.LimitUnread || p.Symbol.Limits.Any(face => face.TextMethod is not null) // A10: a limit that declares `string Text()`
+            || p.Symbol.ClassLimit?.TextMethod is not null // A9, A10: a class limit whose chain declares it
+            || seen.Any(s => s.TypeParameters.Contains(p.Symbol)), // a parameter of a data type whose fields are read: its argument is judged where the type is used
+        _ => false, // a function value
     };
 
     private static bool ArgumentsHaveText(DataType d, List<DataSymbol> seen) =>
@@ -677,12 +679,12 @@ public sealed partial class Checker
 
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
         {
-            if (KindOfCopy(n.Name, m.Member) is { } kind)
+            if (KindOfCopy(n.Name, m.Member, m.Line) is { } kind)
             {
                 return kind; // T33: `T.Kind` in a copy, a constant
             }
 
-            if (IsUnreadName(n.Name) || UnreadTypeMember(n.Name, m.Member, m.Line))
+            if (IsUnreadName(n.Name) || UnreadTypeMember(n.Name, m.Member, m.Line) || TypeParameterMember(n.Name, m.Member, m.Line))
             {
                 return Typed.Error;
             }
@@ -742,6 +744,11 @@ public sealed partial class Checker
         }
 
         var target = CheckExpression(m.Target, null);
+        if (!target.IsError && ViewedLimit(m.Target, target.Type) is { } viewed)
+        {
+            return MemberOf(new TypeParameterType(viewed), m.Member, m.Line); // T19, T33: in a copy, the limits' members alone
+        }
+
         if (target.Type is ClassType owner && Property(owner.Symbol, m.Member) is { } property)
         {
             return ReadProperty(m, owner, property); // K7: a call at every read, which no test narrows (N9)
@@ -917,9 +924,8 @@ public sealed partial class Checker
             case UnionType:
                 Report(ErrorIds.TypeMismatch, line, $"{Types.A(type)} is one of its cases only after a `match` (D9)");
                 return Typed.Error;
-            case TypeParameterType { Symbol.HasLimit: true }:
-                NotSupported(line, "a member of a type parameter with a limit (T19)");
-                return Typed.Error;
+            case TypeParameterType p:
+                return MemberOfParameter(p.Symbol, member, line); // T19
             default:
                 break;
         }
@@ -1794,6 +1800,8 @@ public sealed partial class Checker
     /// </summary>
     private Typed CheckLambda(LambdaExpression l, FunctionType? expected, bool atUnreadType = false, IReadOnlyList<KurzType>? given = null)
     {
+        var text = lambdaText; // T19, T33 (Q22): this lambda's, and no lambda's inside it
+        lambdaText = null;
         // after an error on the parameters the body is still read, with them error-typed, so that its own defects and the variables it reads count (E1)
         var parameterTypes = new List<KurzType>();
         var failed = false;
@@ -1862,7 +1870,10 @@ public sealed partial class Checker
         foreach (var (p, type, move) in l.Parameters.Zip(parameterTypes, moves))
         {
             parameters.Add(DeclareParameter(p.Name, type, p.Mut, p.Line, p, move));
+            ViewLocal(p.Name, p.Type, null); // T19, T33: a parameter written with a type parameter of the copy's function
         }
+
+        ViewLambdaParameters(l, text); // T19, T33 (Q22)
 
         // O7: the body is code of its own, which can run after the arm of `else` that makes it, so a bare `throw` there is
         // `throw-needs-value` (section 5, assumed there)

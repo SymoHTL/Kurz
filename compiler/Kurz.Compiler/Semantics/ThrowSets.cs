@@ -603,9 +603,9 @@ public sealed class ThrowSets
     // call gives it (section 5, the owner, 2026-11-17, #560, comment 6952257456, "(b) As built (Recommended)"); the list holds each
     // actor's `pub` methods, which alone take messages (U9), so that what an actor builds is built: its other methods run from its own
     // code alone, and its construction from a `spawn` that a root reaches; and each test of the file, which the build of `kurz test`
-    // runs as a function of its own (Y5), as Rust's `cargo test` builds each `#[test]` function as a root of its harness, in every
-    // reading, since the checker reads every test whatever command the build is for (Y7), so that a `Reason` is one set under every
-    // command
+    // runs as a function of its own (Y5), as Rust's `cargo test` builds each `#[test]` function as a root of its harness, which Rust
+    // does in the test build alone, where Kurz takes the tests as roots in every reading, since the checker reads every test whatever
+    // command the build is for (Y7), so that a `Reason` is one set under every command
     private IEnumerable<object> Roots() => Pub().Concat(program.Model.Tests.Select(program.Model.TestOf)).Prepend<object>(new TopLevel(program.Model));
 
     // a type once, at the earliest place that throws it
@@ -802,7 +802,7 @@ public sealed class ThrowSets
 
         // U57: the parameters the arguments of a call of the function fill, each by its place, where the checker read it
         var parameters = declaration.Parameters.Select(p => site.Model.Declares(p) ? site.Model.DeclarationOf(p) : null).ToList();
-        var walk = new Walk(this, site.Model, site.File, unit, parameters);
+        var walk = new Walk(this, site.Model, site.File, unit, parameters, inside: f.Owner);
         foreach (var parameter in declaration.Parameters)
         {
             walk.Optional(parameter.Default);
@@ -950,12 +950,13 @@ public sealed class ThrowSets
 
     // ---- the walk of a unit's code ------------------------------------------------------------------------------------------
 
+    // `inside`: the type whose method the walk reads, null for any other code (U55)
     /// <summary>
     /// The walk of one unit's code: <paramref name="parameters"/> are those of the function it is, by their place, null for any other
     /// unit, and <paramref name="lambda"/> holds for a lambda's body, whose <c>this</c> and parameters are no origin the loops follow
     /// (U57).
     /// </summary>
-    private sealed class Walk(ThrowSets sets, SemanticModel model, int file, Unit unit, List<VariableSymbol?>? parameters = null, bool lambda = false)
+    private sealed class Walk(ThrowSets sets, SemanticModel model, int file, Unit unit, List<VariableSymbol?>? parameters = null, bool lambda = false, ClassSymbol? inside = null)
     {
         // O7: the cases a bare `throw` throws in the arm of `else` being walked, innermost on top
         private readonly Stack<IReadOnlyList<KurzType>> bare = new();
@@ -1392,6 +1393,11 @@ public sealed class ThrowSets
                         }
 
                         var method = info.Function!;
+                        if (method.Interface is { TextOnly: true } && c.Callee is MemberAccess { Target: var receiver })
+                        {
+                            Text(model.TypeOf(receiver).Type); // T19, A10: a call of the text through a limit of a text alone is the text of the value (Q21)
+                        }
+
                         var targets = sets.Overrides(method).Prepend(method)
                             .Concat(sets.Implementers(method).SelectMany(g => sets.Overrides(g).Prepend(g)))
                             .Distinct();
@@ -1455,10 +1461,11 @@ public sealed class ThrowSets
                     break;
                 case CallKind.ActorCall or CallKind.ActorSend:
                     var target = ((ActorType)info.Target!).Symbol;
-                    if (info.ByName)
+                    if (info.ByName && !ReferenceEquals(((ActorType)info.Target!).Symbol, inside))
                     {
                         // U52: a message to the name of a `per node` actor starts it where none stands, its constructor run on the caller's
-                        // stack, whose throw is the caller's crash, as at a `spawn`; for the loops the construction is the started actor's code,
+                        // stack, whose throw is the caller's crash, as at a `spawn`; a method of that actor runs in it while it stands, so
+                        // that a message to its own name there starts none (U55, U17); for the loops the construction is the started actor's code,
                         // which no loop of the caller holds, and the start an edge into it, as a `spawn`'s (U56; the owner, 2026-11-21, #519,
                         // comment 7068198309, per node 1), from the actor named, which the code of its own messages is (U55, U57)
                         unit.Edges.Add(new Edge(new Construction(target), null, Crosses: true));
@@ -1724,10 +1731,37 @@ public sealed class ThrowSets
                     Text(m.Key, seen);
                     Text(m.Value, seen);
                     break;
+                case TypeParameterType p when p.Symbol.Limits.Any(face => face.TextOnly):
+                    // T19 with A10: a limit that every type with a text meets, whose argument the walk does not see: the Text() of every
+                    // class, and the text of every data type, each instantiation of a generic one the program builds (section 5)
+                    TextMethods(sets.AllClasses().Select(x => x.TextMethod));
+                    foreach (var x in sets.AllData())
+                    {
+                        if (x.IsGeneric)
+                        {
+                            unit.Edges.Add(new Edge(new Each(x), null));
+                        }
+                        else
+                        {
+                            Text(new DataType(x, []), seen);
+                        }
+                    }
+
+                    break;
+                case TypeParameterType { Symbol.ClassLimit: { } limit }:
+                    Text(new ClassType(limit), seen); // T19, A9: the Text() of the class limit and of every class derived from it (K6)
+                    break;
+                case TypeParameterType p when p.Symbol.Limits.Any(face => face.TextMethod is not null):
+                    foreach (var face in p.Symbol.Limits.Where(face => face.TextMethod is not null))
+                    {
+                        Text(new InterfaceType(face), seen); // T19, A10: the Text() of every class that implements a limit that declares it (K6)
+                    }
+
+                    break;
                 case TypeParameterType when sets.reach:
                     break; // A10: `no-text`, which the checker reported
                 case TypeParameterType p:
-                    throw new InvalidOperationException($"the text of the type parameter `{p.Symbol.Name}`, whose argument the walk does not see: no program the checker reads reaches it, since the checker reports the text of a type parameter as `no-text` (A10), and the walk reads a generic data type derived from the type it makes text of only for each instantiation the program builds, which names every type argument (section 5)");
+                    throw new InvalidOperationException($"the text of the type parameter `{p.Symbol.Name}`, whose argument the walk does not see: no program the checker reads reaches it, since the checker reports the text of a type parameter whose limits declare no `string Text()` as `no-text` (A10), and the walk reads a generic data type derived from the type it makes text of only for each instantiation the program builds, which names every type argument (section 5)");
                 default:
                     break; // a text the runtime makes, which runs no code of the program
             }

@@ -2,7 +2,7 @@
 // | 1
 // | 1
 // threads: 1
-// rules: U39
+// rules: U39, U41
 
 // the thread held for `d`, with no call and no wait
 void Hold(duration d) {

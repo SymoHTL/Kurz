@@ -332,14 +332,19 @@ public sealed partial class Emitter
     /// takes is a value of its own (<see cref="HeldCopy"/>). With <paramref name="into"/>, the heap of an actor, the arguments cross into
     /// it (U12): a value that holds a block is its copy there, every block it reaches copied (<see cref="Crossed"/>; the owner, 2026-11-15,
     /// #519, comment 6902210646, Q5, "Copy all, share big unbuilt"), which the slot owns, or which is a temporary where the callee borrows
-    /// it.
+    /// it. With <paramref name="after"/>, the copies of a message with an argument that can raise after one that crosses, each crossing
+    /// argument is held as it was evaluated, a value read from a name with no copy, and copied after the last argument, so that a raise
+    /// leaves no copy (section 6, the owner, 2026-11-21, #519, comment 7060155980, "T83 1"); no argument of such a message runs a call,
+    /// which can wait and builds the message in a heap of its own (<see cref="EmitMessage"/>), so that nothing but a raise runs between a
+    /// crossing argument and its copy, and a read of what an argument after it changes is <c>changed-while-held</c> (M7).
     /// </summary>
-    private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, (Expression Value, Unit File)?> slotDefault, bool cConvention, bool owned, string? into = null)
+    private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, (Expression Value, Unit File)?> slotDefault, bool cConvention, bool owned, string? into = null, bool after = false)
     {
         var values = new string?[c.Arguments.Count];
         var session = into is null ? null : CallSession(Enumerable.Range(0, c.Arguments.Count).Count(i => info.Binding[i] >= 0 && !slotMut(info.Binding[i]) && Counted(Sub(slotType(info.Binding[i])))), into);
         var late = new List<(int Index, Func<string, string> Read)>(); // U12: the copies read after the call's last copy (Late)
         var taken = new List<string>(); // the values the slots took, temporaries of the region until the last argument (Taken)
+        var held = new List<Action>(); // T83 1: the copies of the crossing arguments, made after the last argument where `after`
         string? copied = null;
 
         // U12: a function value crosses with the environment of the lambda the checker saw for it, the argument itself or the one an
@@ -349,6 +354,18 @@ public sealed partial class Emitter
         string? CrossingEnvironment(Expression a, KurzType type) => (Types.NonNull(type) ?? type) is FunctionType
             ? CopyEnvironmentInto(Model.LambdaOf(Model.CrossingLambda(a) ?? throw new InvalidOperationException($"a function value crosses at line {a.Line} with no lambda the checker saw")).Captures.Select(v => Sub(v.Type)).ToList())
             : null;
+
+        // T83 1: a crossing argument's copy, made where it is evaluated, or after the last argument where `after`
+        void Copying(Action copy)
+        {
+            if (after)
+            {
+                held.Add(copy);
+                return;
+            }
+
+            copy();
+        }
 
         void Cross(int i, string value, KurzType type, string? environment, bool keep)
         {
@@ -381,12 +398,16 @@ public sealed partial class Emitter
                     if (into is not null && Counted(type))
                     {
                         // a function value with its environment copied, as an argument with no word crosses (comment 6902210646, Q5)
-                        Cross(i, moved, type, CrossingEnvironment(a, type), takes);
+                        var (at, environment) = (i, CrossingEnvironment(a, type));
+                        Copying(() =>
+                        {
+                            Cross(at, moved, type, environment, takes);
 
-                        // in a session of more than one copy, the memo holds a count of every block it maps until the session's end
-                        // (`CopyKeep`, runtime/common/runtime.kz), so that this frees no block whose address a later argument's copy
-                        // could take
-                        Release(moved, type);
+                            // in a session of more than one copy, the memo holds a count of every block it maps until the session's end
+                            // (`CopyKeep`, runtime/common/runtime.kz), so that this frees no block whose address a later argument's copy
+                            // could take
+                            Release(moved, type);
+                        });
                         continue;
                     }
 
@@ -396,10 +417,11 @@ public sealed partial class Emitter
 
                 if (into is not null && Counted(type))
                 {
-                    // U12: each argument copied where it is evaluated, left to right, in the call's session; a function value with the
-                    // environment of the lambda the checker saw for it
+                    // U12: each argument copied where it is evaluated, or after the last where `after` (T83 1), left to right, in the
+                    // call's session; a function value with the environment of the lambda the checker saw for it
                     var crossing = Convert(EmitExpression(a), TypeOf(a), type, a.Line, owned: false);
-                    Cross(i, crossing, type, CrossingEnvironment(a, type), owned);
+                    var (at, environment) = (i, CrossingEnvironment(a, type));
+                    Copying(() => Cross(at, crossing, type, environment, owned));
                     continue;
                 }
 
@@ -421,6 +443,11 @@ public sealed partial class Emitter
                     Taken(values[i]!, type, taken);
                 }
             }
+        }
+
+        foreach (var copy in held)
+        {
+            copy(); // T83 1: the call has its last argument, and its crossing ones are copied
         }
 
         ReadLate(session ?? copied, (k, v) => values[late[k].Index] = late[k].Read(v));

@@ -1,0 +1,16 @@
+// expect: throws thrown at 13
+// rules: O7
+
+interface Sized {
+    int Size()
+}
+
+class Dot : Sized {
+    pub int Size() => 1
+}
+
+void Fail(Sized s) {
+    throw s
+}
+
+Fail(Dot())

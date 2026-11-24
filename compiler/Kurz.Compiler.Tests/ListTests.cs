@@ -3409,6 +3409,67 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         """;
 
+    // O5, O7: an arm of a postfix `else` that reads the case it holds and throws it with a bare `throw`, a list case and a plain data
+    // case with a list: the throw reads the case before any end of the arm lets go of it; a throw ends the program, so a program of
+    // it throws once
+    private const string ArmRethrows = """
+        data Missing
+
+        data Inner(List<int> Xs)
+
+        int | List<int> | Missing Listed(int id) {
+            if id == 1 {
+                return [id, 7, 9]
+            }
+
+            if id == 2 {
+                return Missing
+            }
+
+            return id
+        }
+
+        int | Inner | Missing Plain(int id) {
+            if id == 1 {
+                return Inner([id, 7, 9])
+            }
+
+            if id == 2 {
+                return Missing
+            }
+
+            return id
+        }
+
+        int ListRethrown(int id) {
+            v = Listed(id) else {
+                List<int> n => {
+                    print("seen {n.Count}")
+                    throw
+                }
+                Missing => 0
+            }
+
+            return v
+        }
+
+        int PlainRethrown(int id) {
+            v = Plain(id) else {
+                Inner n => {
+                    print("seen {n.Xs.Count}")
+                    throw
+                }
+                Missing => 0
+            }
+
+            return v
+        }
+
+        """;
+
+    // what each program of `ArmRethrows` prints before its throw: the success, the case no arm throws, and the arm's read of its case
+    private static readonly string[] RethrownPrint = ["3", "0", "seen 3"];
+
     // the environments of fields of a function type, made, replaced and let go of with their instances each round
     private const string FunctionFieldRounds = """
         class Button(string Name, mut () => int OnClick)
@@ -5684,11 +5745,20 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(ArmCases + armCasesMain, fenced, "arm-cases-fenced"), 0, ["9 9", "4 4", "8 8", "11 11", "4 4", "9 9", "5 5", "5 5", "11 11", "17 17", "2 2", "5 5", "4 4", "9 9", "4 4"], "");
         const string unionFieldsMain = """
             for row in 0..<5 {
-                print("{Run(row, 0)} {Run(row, 1)} {Run(row, 2)} {Run(row, 0)}")
+                print("{Run(row, 0)} {Run(row, 0)} {Run(row, 1)} {Run(row, 1)} {Run(row, 2)} {Run(row, 2)}")
             }
 
             """;
-        Ran(BuildAndRun(UnionFields + unionFieldsMain, fenced, "union-fields-fenced"), 0, ["9 5 2 9", "18 10 4 18", "18 10 4 18", "9 5 2 9", "9 5 2 9"], "");
+        Ran(BuildAndRun(UnionFields + unionFieldsMain, fenced, "union-fields-fenced"), 0, ["9 9 5 5 2 2", "18 18 10 10 4 4", "18 18 10 10 4 4", "9 9 5 5 2 2", "9 9 5 5 2 2"], "");
+        // O5, O7: the case an arm holds, read and thrown with a bare `throw` (`ArmRethrows`)
+        var listThrown = BuildAndRun(ArmRethrows + "print(ListRethrown(3))\nprint(ListRethrown(2))\nprint(ListRethrown(1))\n", fenced, "arm-rethrows-list-fenced");
+        Assert.Equal(1, listThrown.Code);
+        Assert.Equal(RethrownPrint, listThrown.Output);
+        Assert.StartsWith("error: thrown at program.kz:33:\n[1, 7, 9]\n", listThrown.Error, StringComparison.Ordinal);
+        var plainThrown = BuildAndRun(ArmRethrows + "print(PlainRethrown(3))\nprint(PlainRethrown(2))\nprint(PlainRethrown(1))\n", fenced, "arm-rethrows-plain-fenced");
+        Assert.Equal(1, plainThrown.Code);
+        Assert.Equal(RethrownPrint, plainThrown.Output);
+        Assert.StartsWith("error: thrown at program.kz:45:\nInner { Xs = [1, 7, 9] }\n", plainThrown.Error, StringComparison.Ordinal);
         Ran(BuildAndRun(Interfaces, fenced, "class-interfaces-fenced"), 0, InterfacesPrint, "");
         Ran(BuildAndRun(ClassArms, fenced, "class-arms-fenced"), 0, ClassArmsPrint, "");
         // the first release a program lays out is of a class that holds another, whose release it lays out inside its own: the flag of

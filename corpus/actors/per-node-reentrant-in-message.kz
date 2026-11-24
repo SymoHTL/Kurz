@@ -1,0 +1,23 @@
+// expect: throws deadlock at 15
+// threads: 1
+// rules: U52
+
+// `User`'s `Use` starts `Cache`, whose default calls `Cache.Size` in the chain of `Use`, so that the call waits in `Cache`'s inbox
+// for the start that waits on it, and the error names that call, not the top-level code's call that waits
+
+actor Cache per node {
+    int size = Measured()
+
+    pub int Size() => size
+}
+
+int Measured() {
+    return Cache.Size() + 1
+}
+
+actor User {
+    pub int Use() => Cache.Size()
+}
+
+u = spawn User()
+print(u.Use())
