@@ -150,7 +150,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             ? CrashLine().Replace(written, string.Empty) : written;
 
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the cases whose <c>system:</c> line names Linux, the stack overflows', nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls, the reads of standard input and running a program. The number for Linux is the count measured with no margin in an image built locally from <c>ci/Dockerfile</c>, whose clang is the point release of the day it was built and not always the one of the image the gates job pulls by its digest (knowledge/the-gates-job-runs-in-its-image.md), so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156); a green gates job shows only that its own image counts at least this number, and a count in that image is one run of the job on a pushed head with the number at 999. The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 688 : 830;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 689 : 832;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -190,7 +190,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         "actors/timeout-block.kz", "actors/timeout-callee-crash.kz", "actors/timeout-capped.kz", "actors/timeout-carried.kz", "actors/timeout-crashed.kz",
         "actors/timeout-crashed-early.kz", "actors/timeout-default.kz", "actors/timeout-send.kz", "actors/within-clauses.kz",
         "actors/attempt-deadline.kz", "actors/attempt-dropped.kz", "actors/attempt-dropped-queued.kz",
-        "actors/timeout-chain-nested.kz", "actors/timeout-chain-left.kz",
+        "actors/timeout-chain-nested.kz", "actors/timeout-chain-left.kz", "actors/timeout-gone-queued.kz",
     ];
 
     /// <summary>The cases of log calls that expect a run, which a build for Windows says <c>not supported</c> to (S11, P6).</summary>
@@ -425,6 +425,11 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         else if (KeptOut.TryGetValue(relativePath, out var kept))
         {
             Assert.Equal(line + kept.Calls + ":\n" + string.Concat(kept.Under.Select(u => u + "\n")), error);
+        }
+        else if (header.ErrorId == ErrorIds.InvalidInput)
+        {
+            // U40, U41: the bound of zero or less on the line below, written as a duration's text is (assumed: T78 of comment 7055305138)
+            Assert.Matches($"^{Regex.Escape(line)}:\nthe bound of `within` is -?[0-9a-z]+; a bound is positive\n$", error);
         }
         else
         {

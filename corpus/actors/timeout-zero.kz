@@ -1,5 +1,4 @@
-// expect: throws call-timeout at 12
-// | 1
+// expect: error bound-not-positive at 10
 // rules: U40
 
 actor Store {
