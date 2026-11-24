@@ -1,0 +1,34 @@
+// expect: output
+// | circle 2
+// | removed
+// | not found
+// rules: O10
+
+data Circle(int R)
+data NotFound
+
+string Describe(Circle | void s) {
+    return match s {
+        Circle c => "circle {c.R}"
+        void => "none"
+    }
+}
+
+void | NotFound Remove(int id) {
+    if id < 0 {
+        return NotFound
+    }
+}
+
+void Show(void | NotFound v) {
+    match v {
+        void => print("removed")
+        NotFound => print("not found")
+    }
+}
+
+print(Describe(Circle(2)))
+void | NotFound kept = Remove(1)
+Show(kept)
+void | NotFound lost = Remove(-1)
+Show(lost)
