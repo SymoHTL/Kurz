@@ -1,0 +1,21 @@
+// expect: throws thrown at 15
+// | ok
+// rules: O7
+
+data NotFound
+
+void | NotFound Find(int id) {
+    if id == 1 {
+        return NotFound
+    }
+}
+
+void Run(int id) {
+    Find(id) else {
+        else => throw
+    }
+}
+
+Run(2)
+print("ok")
+Run(1)
