@@ -6838,7 +6838,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
                 pub void Sized(int i) {
                     at = i
-                    h = spawn Holder([1, 2, 3], Size) on crash stop
+                    xs = [1, 2, 3]
+                    h = spawn Holder(xs, Size) on crash stop
                     print(h.Count())
                 }
 
