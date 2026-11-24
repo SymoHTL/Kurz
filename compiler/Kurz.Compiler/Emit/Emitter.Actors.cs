@@ -120,8 +120,9 @@ public sealed partial class Emitter
     /// <summary>
     /// U51 to U54 (assumed: T27 to T33 of issue 519, comment 6983903100, at their defaults): the function a message to the name of the
     /// <c>per node</c> type <paramref name="symbol"/> calls before its arguments run, made once for the type with three globals of its
-    /// own, declared here, once, where its entry is set: its cell, the lock, the slot and the number of its one actor (the runtime's
-    /// <c>PerFind</c>); its block of a restart, as <see cref="KeptArguments"/> makes a <c>spawn</c>'s with no argument kept, naming the
+    /// own, declared here, once, where its entry is set: its cell, whose words are the lock, the slot and the number of its one
+    /// actor (the runtime's <c>PerFind</c>); its block of a restart, as <see cref="KeptArguments"/> makes a <c>spawn</c>'s with no
+    /// argument kept, naming the
     /// function of its restart (<see cref="Restarted"/>), or none for <c>escalate</c>, the policy after its name or <c>restart</c> (U27),
     /// and no block for <c>stop</c>; and its knobs where <c>after</c> or <c>max N in</c> is written, marked as a <c>per node</c> type's
     /// (<see cref="KnobsValue"/>), whose place no <c>restart-limit</c> names, so that it holds none. The function finds the actor that
@@ -129,7 +130,8 @@ public sealed partial class Emitter
     /// one with that block of a restart, whose supervisor <c>ActorNew</c> takes as at a <c>spawn</c>, the code that runs (U53), stores it
     /// in the cell before its constructor runs (<c>PerStarted</c>), so that a message that reaches it meanwhile waits for it, and runs the
     /// constructor, the defaults of its body, on the stack of that code, as a <c>spawn</c> runs it (<see cref="EmitActorSpawn"/>; U3), so
-    /// that a throw there is that code's crash, which ends the actor half built, its supervisor's child; then the root becomes its
+    /// that a throw there is that code's crash, at the throw's line where T29's words name the call's (U52; assumed: T37 of issue
+    /// 519, comment 6991862214, put to the owner), which ends the actor half built, its supervisor's child; then the root becomes its
     /// supervisor (<c>PerBuilt</c>). A message to it from the code its constructor runs waits for a constructor that waits for it, the
     /// top-level code's <c>deadlock</c> on one thread (U18).
     /// </summary>
