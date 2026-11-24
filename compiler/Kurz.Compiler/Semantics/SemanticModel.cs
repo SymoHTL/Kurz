@@ -413,6 +413,19 @@ public sealed record LambdaInfo(IReadOnlyList<VariableSymbol> Parameters, IReadO
 public sealed record AttemptInfo(LambdaExpression Lambda, UnionType Type, IReadOnlyList<(VariableSymbol Variable, FieldSymbol Field)> Fields, VariableSymbol? This);
 
 /// <summary>
+/// N5: the value a call after <c>?.</c> or <c>?[</c> is called on, the value of <paramref name="Of"/>'s case other than <c>null</c>,
+/// which the chain reads only where it did not stop: no text writes it, and only the call a chain's call is read as names it.
+/// </summary>
+internal sealed record ChainValue(int Line, Expression Of) : Expression(Line);
+
+/// <summary>
+/// N5: a call after <c>?.</c> or <c>?[</c>, read as <paramref name="Call"/>, the same call on <paramref name="Receiver"/>, which runs
+/// only where the chain did not stop; <paramref name="Result"/> is that call's own type, which the chain makes nullable, and
+/// <paramref name="Place"/> whether the call changes the value it is called on, in the place the chain names (M5).
+/// </summary>
+internal sealed record ChainCall(CallExpression Call, ChainValue Receiver, KurzType Result, bool Place);
+
+/// <summary>
 /// What the checker found out about a program, by node, for a code generator: the type and constant
 /// of every expression, the variable or function every name means, the variable every declaration
 /// makes, what every call calls, what every lambda captures, the type every arm pattern names, and
@@ -455,6 +468,7 @@ public sealed class SemanticModel
     private readonly Dictionary<ExternFunction, FunctionSymbol> cFunctions = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypeDeclaration, DataSymbol> dataTypes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<CallExpression, ChainCall> chainCalls = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TestDeclaration, FunctionSymbol> tests = new(ReferenceEqualityComparer.Instance);
     private readonly List<TestDeclaration> testOrder = [];
     private readonly Dictionary<AssertionStatement, Assertion> assertions = new(ReferenceEqualityComparer.Instance);
@@ -658,6 +672,9 @@ public sealed class SemanticModel
     /// </summary>
     public bool IsChainMember(MemberAccess access, out KurzType member) => chainMembers.TryGetValue(access, out member!);
 
+    /// <summary>Whether the call stands after <c>?.</c> or <c>?[</c> (N5), and the call it is read as.</summary>
+    internal bool IsChainCall(CallExpression call, out ChainCall chain) => chainCalls.TryGetValue(call, out chain!);
+
     /// <summary>
     /// K7: the call a read of a property is, <c>h.Count</c> or <c>Count</c> inside its class, whose callee is the read itself and which
     /// takes no arguments; null for any other expression.
@@ -824,6 +841,8 @@ public sealed class SemanticModel
     internal void RecordDataType(TypeDeclaration declaration, DataSymbol symbol) => dataTypes[declaration] = symbol;
 
     internal void RecordChainMember(MemberAccess access, KurzType member) => chainMembers[access] = member;
+
+    internal void RecordChainCall(CallExpression call, ChainCall chain) => chainCalls[call] = chain;
 
     internal void RecordPropertyRead(Expression read, CallExpression call) => propertyReads[read] = call;
 

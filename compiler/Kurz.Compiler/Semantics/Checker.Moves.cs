@@ -182,6 +182,7 @@ public sealed partial class Checker
             ThisExpression => Outside,
             MemberAccess m => Through(m.Target), // section 6: a field read is in the region of what it is read from (SE-0414), a fresh value's a fresh one (U12, assumed)
             IndexExpression i => Through(i.Target), // section 6: a list reaches each value it holds
+            CallExpression c when model.IsChainCall(c, out var chain) => model.CallOf(chain.Call).Kind is CallKind.ActorCall or CallKind.ActorSend ? [] : Union(CallRegions(c)), // N5: the call the chain's call is read as
             CallExpression c => !model.HasCall(c) ? Outside : model.CallOf(c).Kind is CallKind.ActorCall or CallKind.ActorSend ? [] : Union(CallRegions(c)), // U12 (assumed): an actor's call gives a region of its own, what it gives having crossed
             LambdaExpression l => model.HasLambda(l) ? Union(model.LambdaOf(l).Captures.Select(TagsOf)) : Outside, // a lambda joins what it captures
             ListLiteral l => Union(l.Items.Select(RegionOf)),

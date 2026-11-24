@@ -76,7 +76,8 @@ public sealed class ThrowSets
         [typeof(ThisExpression)] = "no code",
         [typeof(MemberAccess)] = "its target, and a property's read",
         [typeof(TypeMemberAccess)] = "a property's read",
-        [typeof(CallExpression)] = "its callee, its arguments, the bound of its clause and what it calls",
+        [typeof(CallExpression)] = "its callee, its arguments, the bound of its clause and what it calls, after `?.` what the call it is read as calls",
+        [typeof(ChainValue)] = "no code: the value of the chain before a call after `?.`, which the chain's target ran (N5)",
         [typeof(ListLiteral)] = "its items",
         [typeof(IndexExpression)] = "its target and its index",
         [typeof(UnaryExpression)] = "its operand",
@@ -1091,6 +1092,12 @@ public sealed class ThrowSets
                     Call(construction); // T33: `T.Make(f => ...)` in a copy is the construction it became, its arguments the body for each field
                 }
 
+                return;
+            }
+
+            if (model.IsChainCall(c, out var chain))
+            {
+                Calls(chain.Call); // N5: what the call after `?.` runs where the chain did not stop
                 return;
             }
 

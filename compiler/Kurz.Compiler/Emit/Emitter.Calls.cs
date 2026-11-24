@@ -18,6 +18,11 @@ public sealed partial class Emitter
             return construction is null ? null : EmitCall(construction); // T33: `T.Make` is the constructor's call it became; a type with no fields, its constant
         }
 
+        if (Model.IsChainCall(c, out var chain))
+        {
+            return EmitChainCall(c, chain); // N5
+        }
+
         var info = Model.CallOf(c);
         var result = Sub(info.Result);
         var copied = c.Arguments.Where(a => Model.IsCopied(a.Value) && ReachesInstance(Sub(Model.TypeOf(a.Value).Type))).ToList();
