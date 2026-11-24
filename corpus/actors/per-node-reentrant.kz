@@ -1,6 +1,6 @@
-// expect: throws deadlock at 12
+// expect: error call-loop at 12
 // threads: 1
-// rules: U52
+// rules: U52, U56
 
 actor Cache per node {
     int size = Measured()

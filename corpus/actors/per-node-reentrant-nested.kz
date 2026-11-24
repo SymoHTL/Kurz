@@ -1,9 +1,9 @@
-// expect: throws deadlock at 9
+// expect: error call-loop at 9
 // threads: 1
-// rules: U52
+// rules: U52, U56
 
 // `Outer`'s start, which the top-level code runs, starts `Inner`, whose default waits on `Helper.Ask`, whose call of `Outer.Size`
-// waits in `Outer`'s inbox for the start that waits on it, and the error names that call, not the top-level code's call that waits
+// would wait in `Outer`'s inbox for the start that waits on it: a loop through `Outer`'s type, which layer 2 refuses at that call
 
 actor Helper {
     pub int Ask() => Outer.Size()

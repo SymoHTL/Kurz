@@ -58,7 +58,9 @@ COMMAND = ["dotnet", "test", SOLUTION, "--nologo", "-c", "Release", "-p:RestoreL
 # section 2; the owner, 2026-11-15, #519, comment 6892835500, Q8, "GitHub Arm runner job"): the actors, the check of the runtime
 # for every target and architecture, the naked function and the switch of every pair, and the actors' corpus cases; the floor is
 # the count of those tests, taken on x86-64 on 2026-11-19, which no test of them skips on Arm: the compiler-arm run 44440771989
-# of pull request 592, on its commit 8222f973, printed "compiler tests: 347 passed, 0 failed, 0 skipped, 347 total, 0 errors"
+# of pull request 592, on its commit 8222f973, printed "compiler tests: 347 passed, 0 failed, 0 skipped, 347 total, 0 errors", and the twelve cases
+# of layer 2 that expect a run (U56 to U58) add 24 rows of RunTests, counted in the suite's log on x86-64 on 2026-11-20, which no
+# run on Arm has read
 ARM_FILTER = ("FullyQualifiedName~ActorTests|FullyQualifiedName~RuntimeTests|FullyQualifiedName~EmitterTests.On_an_arm"
               "|FullyQualifiedName~EmitterTests.The_switch|(FullyQualifiedName~RunTests&DisplayName~actors/)")
 ARM_FLOOR = 474  # 160 of ActorTests, 32 of RuntimeTests, 2 of EmitterTests and 280 rows of the actors' cases of RunTests, each case run twice

@@ -1,0 +1,26 @@
+// expect: error call-loop at 9
+// rules: U56
+
+interface Getter {
+    int Get()
+}
+
+class Via(Right Peer, Left Back) : Getter {
+    pub int Get() => Peer.Ask(Back)
+}
+
+int Read(Getter g) => g.Get()
+
+actor Left {
+    pub int Ask(Right other, Left back) => Read(Via(other, back)) + 1
+
+    pub int Value() => 1
+}
+
+actor Right {
+    pub int Ask(Left other) => other.Value() + 2
+}
+
+l = spawn Left()
+r = spawn Right()
+print(l.Ask(r, l))

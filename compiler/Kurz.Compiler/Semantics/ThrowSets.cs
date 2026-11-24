@@ -23,6 +23,10 @@ namespace Kurz.Compiler.Semantics;
 /// adds nothing, since a raise while it is made ends the process (section 6), and <c>==</c>, <c>equal by</c> and a hash run no code of the program, which declares no <c>Equals</c> and no
 /// <c>GetHashCode</c> (K5, K8, D16). A set is in the order of the first <c>throw</c> of each type that the code reaches, the program's
 /// file before <c>std/</c> and by line, with the runtime's type last (section 5, assumed there). No build reads the sets; the tests do.
+/// The same walk is what layer 2 of section 6's deadlocks reads of what the code of an actor reaches (U56, <see cref="ActorsCode"/>):
+/// each unit holds the calls through an actor's reference and the <c>spawn</c>s its own code makes, with where each receiver and
+/// argument comes from, and every edge into a function or a method where each argument comes from, so that the code an actor's
+/// message runs is one definition for the sets and for the loops.
 /// </summary>
 public sealed class ThrowSets
 {
@@ -31,22 +35,26 @@ public sealed class ThrowSets
     private readonly bool blocks;
     private readonly IReadOnlySet<CrashPolicy>? skipped;
     private readonly IReadOnlySet<AttemptExpression>? skippedArms;
+    private readonly bool reach;
     private readonly Dictionary<object, Unit> units = new(new UnitKeys());
     private readonly List<Unit> order = [];
-    private readonly KurzType runtimeError;
+    private KurzType? runtimeError;
     private List<(LambdaExpression Lambda, FunctionType Type, SemanticModel Model, int File)>? lambdas;
     private Dictionary<FunctionSymbol, List<FunctionSymbol>>? overrides;
     private List<DataType>? instantiations;
     private List<(object Key, Unit Unit)>? waiting;
+    private Dictionary<ActorSite, Unit>? owners;
 
     /// <summary>
     /// The sets of the code of <paramref name="program"/>, which sees the types of <paramref name="std"/> (W1); null where the program is
     /// <c>std/</c> itself. Where <paramref name="blocks"/> does not hold, the bodies of the blocks of <c>on crash</c> are left out, as at the
     /// checker's first reading of such a program, which reads them with no <c>Reason</c> found yet (U30), and so are those of the blocks
     /// <paramref name="skipped"/> names, which reported errors at a reading whose <c>Reason</c>s may not have settled; so are the arms of
-    /// the <c>else</c> of every <c>attempt</c> there, and of those <paramref name="skippedArms"/> names, for the same reasons (U46).
+    /// the <c>else</c> of every <c>attempt</c> there, and of those <paramref name="skippedArms"/> names, for the same reasons (U46). Where
+    /// <paramref name="reach"/> holds, the walk reads what the code reaches and no throw, for <see cref="ActorsCode"/>, on a program that
+    /// may have reported errors: a node the checker did not record, a call that reported its own error among them, reaches nothing.
     /// </summary>
-    public ThrowSets(Checker program, Checker? std, bool blocks = true, IReadOnlySet<CrashPolicy>? skipped = null, IReadOnlySet<AttemptExpression>? skippedArms = null)
+    public ThrowSets(Checker program, Checker? std, bool blocks = true, IReadOnlySet<CrashPolicy>? skipped = null, IReadOnlySet<AttemptExpression>? skippedArms = null, bool reach = false)
     {
         ArgumentNullException.ThrowIfNull(program);
         this.program = program;
@@ -54,9 +62,23 @@ public sealed class ThrowSets
         this.blocks = blocks;
         this.skipped = skipped;
         this.skippedArms = skippedArms;
-        var error = (std ?? program).Model.DataTypes.FirstOrDefault(d => d.Name == "RuntimeError")
-            ?? throw new InvalidOperationException("std/ declares no `RuntimeError`, the runtime's error type of section 5");
-        runtimeError = new DataType(error, []);
+        this.reach = reach;
+    }
+
+    // the runtime's error type, which only the sets read
+    private KurzType RuntimeError
+    {
+        get
+        {
+            if (runtimeError is null)
+            {
+                var error = (std ?? program).Model.DataTypes.FirstOrDefault(d => d.Name == "RuntimeError")
+                    ?? throw new InvalidOperationException("std/ declares no `RuntimeError`, the runtime's error type of section 5");
+                runtimeError = new DataType(error, []);
+            }
+
+            return runtimeError;
+        }
     }
 
     /// <summary>
@@ -76,7 +98,7 @@ public sealed class ThrowSets
         [typeof(ThisExpression)] = "no code",
         [typeof(MemberAccess)] = "its target, and a property's read",
         [typeof(TypeMemberAccess)] = "a property's read",
-        [typeof(CallExpression)] = "its callee, its arguments, the bound of its clause and what it calls",
+        [typeof(CallExpression)] = "its callee, its arguments, the bound of its clause and what it calls; through an actor's reference none of the callee's code, and the call or the send it is, its word vouch running nothing (U56)",
         [typeof(ListLiteral)] = "its items",
         [typeof(IndexExpression)] = "its target and its index",
         [typeof(UnaryExpression)] = "its operand",
@@ -87,8 +109,8 @@ public sealed class ThrowSets
         [typeof(WithExpression)] = "its target, its values, and the fields of the data type's body",
         [typeof(ElseExpression)] = "its call and its arms",
         [typeof(ParenthesizedExpression)] = "its inner expression",
-        [typeof(SpawnExpression)] = "the actor's construction, its code under escalate or a block, and the block's body",
-        [typeof(AttemptExpression)] = "nothing where it runs but what its block builds, whose throws its child's crash holds; `retry`: no code, the checker refuses it",
+        [typeof(SpawnExpression)] = "the actor's construction, its code under escalate or a block, and the block's body; for the loops the spawn it is, the construction being the spawned actor's code (U56)",
+        [typeof(AttemptExpression)] = "nothing where it runs but what its block builds, whose throws its child's crash holds; for the loops its block, as the code that runs it (U49, U56); `retry`: no code, the checker refuses it",
         [typeof(Block)] = "its statements",
         [typeof(VariableDeclaration)] = "its value",
         [typeof(AssignOrDeclare)] = "its value",
@@ -165,14 +187,159 @@ public sealed class ThrowSets
             .OrderBy(f => f.Line);
     }
 
+    /// <summary>
+    /// Section 6, "Deadlocks", layer 2 (U56, U57): the code of each actor of the program, by its entries, the construction first, then
+    /// each method it declares, with each call through an actor's reference and each <c>spawn</c> that entry's code reaches by the walk of
+    /// the sets, and the origins the receiver of each, and each of its arguments, can have in the entry's terms: a call of a function or a method passes each origin
+    /// of an argument to the parameter it fills, through a local without <c>mut</c> too, to the method it picks and to each of its
+    /// overrides and of the methods that implement it, a data type's method taking the value it is called on first (D16), and any other
+    /// edge, a lambda's or a construction's among them, passes none, which reads as no callback. A <c>spawn</c> reaches the
+    /// construction of the actor it makes, whose code is that actor's, and the code under <c>escalate</c> is the child's: neither is the
+    /// spawner's; a message to the name of a <c>per node</c> actor reaches its construction as a <c>spawn</c> does (U52), and its receiver is
+    /// that actor, named, which passes through every edge as the actor itself does, so that in the code of its own messages, a function's and
+    /// a lambda's they run among it, it reads as through <c>this</c> (U55), and the block of an <c>attempt</c> is the code of the code that
+    /// runs it, which waits on it as on a call (U49) (the owner, 2026-11-21, #519, comment 7068198309, per node 1 and attempt 1, and
+    /// comment 7069702044). Each entry holds too the writes of its actor's fields that its code reaches, with the origins each value can have in
+    /// its terms, passed as an argument's are (T49 (c)). The walk reads each unit once over all the actors, from the roots of the sets and
+    /// every actor's code, and the reach of each unit is its own sites and writes and those of the units it runs, read again as long as one
+    /// grows.
+    /// </summary>
+    public IReadOnlyList<ActorCode> ActorsCode()
+    {
+        Instantiations();
+        var actors = Checkers().SelectMany(c => c.Checker.Model.Classes).Where(c => c.IsActor).ToList();
+        foreach (var actor in actors)
+        {
+            Discover(new Root(actor));
+        }
+
+        Close();
+        var direct = units.Where(u => u.Key is not Root).SelectMany(u => u.Value.Edges).Where(e => e.Runs).Select(e => e.Unit).ToHashSet(new UnitKeys());
+        return actors.Select(actor => new ActorCode(actor, units[new Root(actor)].Edges.Select(e => Entry(e, direct.Contains(e.Unit))).ToList())).ToList();
+    }
+
+    /// <summary>Every call through an actor's reference and every <c>spawn</c> of every unit the walk read, in the order it read them.</summary>
+    public IReadOnlyList<ActorSite> Sites() => order.SelectMany(u => u.Sites).ToList();
+
+    /// <summary>Every write of a field of an actor that a unit the walk read makes, a lambda's that no code runs among them (T49 (c)).</summary>
+    public IReadOnlyList<FieldWrite> Writes() => order.SelectMany(u => u.Writes).ToList();
+
+    /// <summary>
+    /// U57, T74 (b): every site that code outside the messages of the program's actor types reaches after <see cref="ActorsCode"/>: the
+    /// top-level code, and each root of the sets that no code of an actor reaches, a <c>pub</c> function or a <c>pub</c> method of a class or
+    /// a data type that only a caller outside the program could call (assumed: a reading of T74 (b) of comment 7051071630), through every
+    /// function, method and lambda they run; a method of a class, an interface or a data type that the actors' code alone calls runs in
+    /// their messages, as their own methods do.
+    /// </summary>
+    public IReadOnlySet<ActorSite> Outside()
+    {
+        var inside = new HashSet<object>(new UnitKeys());
+        var pending = new Queue<object>(units.Where(u => u.Key is Root).SelectMany(u => u.Value.Edges).Select(e => e.Unit).Where(k => k is not FunctionSymbol { IsStatic: true }));
+        while (pending.TryDequeue(out var key))
+        {
+            if (inside.Add(key))
+            {
+                foreach (var edge in units[key].Edges.Where(e => e.Runs && !e.Crosses))
+                {
+                    pending.Enqueue(edge.Unit);
+                }
+            }
+        }
+
+        return Roots().Where(r => r is not FunctionSymbol { Owner.IsActor: true, IsStatic: false } && !inside.Contains(r))
+            .SelectMany(r => units[r].Reach.Keys).ToHashSet(ReferenceEqualityComparer.Instance as IEqualityComparer<ActorSite>);
+    }
+
+    // an entry of an actor's code: its construction, or a method; a site that stands in another unit names it
+    private ActorEntry Entry(Edge edge, bool direct)
+    {
+        var unit = units[edge.Unit];
+        var sites = unit.Reach.Select(p => new ReachedSite(p.Key, ReferenceEquals(owners![p.Key], unit) ? null : owners[p.Key].Name, p.Value[0], p.Value[1..])).ToList();
+        var writes = unit.Written.Select(p => new ReachedWrite(p.Key, p.Value)).ToList();
+        return new ActorEntry(unit.Name, edge.Unit as FunctionSymbol, sites, writes, direct);
+    }
+
+    // each unit's reach: its own sites, then those of every unit it runs through an edge that does not cross into another actor's code (U56), each origin of the receiver and
+    // of each argument passed through the edge, as long as one grows; the units were found from the callers to the callees, so the
+    // reverse order reads most callees first
+    private void Close()
+    {
+        if (owners is not null)
+        {
+            return;
+        }
+
+        owners = new Dictionary<ActorSite, Unit>(ReferenceEqualityComparer.Instance);
+        foreach (var unit in order)
+        {
+            foreach (var site in unit.Sites)
+            {
+                unit.Reach[site] = [[site.Receiver], .. site.Arguments.Select(a => new HashSet<Origin> { a })];
+                owners[site] = unit;
+            }
+
+            foreach (var write in unit.Writes)
+            {
+                unit.Written[write] = [write.Value];
+            }
+        }
+
+        for (var grew = true; grew;)
+        {
+            grew = false;
+            for (var i = order.Count - 1; i >= 0; i--)
+            {
+                var unit = order[i];
+                foreach (var edge in unit.Edges.Where(e => e.Runs && !e.Crosses))
+                {
+                    foreach (var (site, origins) in units[edge.Unit].Reach.ToList())
+                    {
+                        if (!unit.Reach.TryGetValue(site, out var into))
+                        {
+                            unit.Reach[site] = into = origins.Select(_ => new HashSet<Origin>()).ToArray();
+                        }
+
+                        for (var k = 0; k < origins.Length; k++)
+                        {
+                            foreach (var origin in origins[k].ToList())
+                            {
+                                grew |= into[k].Add(Passed(edge, origin));
+                            }
+                        }
+                    }
+
+                    foreach (var (write, values) in units[edge.Unit].Written.ToList())
+                    {
+                        if (!unit.Written.TryGetValue(write, out var into))
+                        {
+                            unit.Written[write] = into = [];
+                        }
+
+                        foreach (var value in values.ToList())
+                        {
+                            grew |= into.Add(Passed(edge, value));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // U57: an origin of the unit an edge reaches in the terms of the unit it leaves: a parameter takes its argument's, and the actor
+    // itself, a field of it, an item of a field's list and anything else stay
+    private static Origin Passed(Edge edge, Origin origin) =>
+        origin.Parameter < 0 ? origin
+        : edge.Arguments is { } arguments && origin.Parameter < arguments.Count ? arguments[origin.Parameter]
+        : Origin.Other;
+
     private List<KurzType> Solved(object root)
     {
         Instantiations();
         var unit = Discover(root);
         Solve();
         var types = unit.Set.OrderBy(t => (t.File, t.Line)).Select(t => t.Type).ToList();
-        types.RemoveAll(t => Types.Same(t, runtimeError));
-        types.Add(runtimeError);
+        types.RemoveAll(t => Types.Same(t, RuntimeError));
+        types.Add(RuntimeError);
         return types;
     }
 
@@ -185,8 +352,11 @@ public sealed class ThrowSets
     /// An edge from a unit to a unit it runs, with the type arguments the call gives the type parameters of that unit (T19); or, where it
     /// does not run it, from a unit to a lambda it makes, which brings what the lambda builds and nothing it throws (section 5), as Rust
     /// collects a closure's instance in the instance of the function that makes it.
+    /// <c>Arguments</c> says where each argument of a call of a function or a method comes from, by the callee's parameter, null where the
+    /// edge passes none that the loops follow (U57); an edge that <c>Crosses</c> runs the code of another actor, the construction of one
+    /// that a <c>spawn</c> makes or its code under <c>escalate</c>, which its crash brings and no loop of the spawner holds (U56).
     /// </summary>
-    private sealed record Edge(object Unit, IReadOnlyDictionary<TypeParameterSymbol, KurzType>? Map, bool Runs = true);
+    private sealed record Edge(object Unit, IReadOnlyDictionary<TypeParameterSymbol, KurzType>? Map, bool Runs = true, IReadOnlyList<Origin>? Arguments = null, bool Crosses = false);
 
     /// <summary>The code of an actor (section 5): its construction, its constructors and every method it declares.</summary>
     private sealed record Root(ClassSymbol Actor);
@@ -215,7 +385,22 @@ public sealed class ThrowSets
     /// </summary>
     private sealed class Unit
     {
+        /// <summary>What the unit is, as a text of <c>call-loop</c> names the code a call stands in: a function's name, <c>a lambda</c>.</summary>
+        public string Name { get; set; } = "";
+
         public List<Thrown> Own { get; } = [];
+
+        /// <summary>The calls through an actor's reference and the <c>spawn</c>s the unit's own code makes (U56).</summary>
+        public List<ActorSite> Sites { get; } = [];
+
+        /// <summary>Each site the unit's code reaches, its own and those of the units it runs, with the origins its receiver, then each of its arguments by the parameter it fills, can have in the unit's terms (U57).</summary>
+        public Dictionary<ActorSite, HashSet<Origin>[]> Reach { get; } = new(ReferenceEqualityComparer.Instance);
+
+        /// <summary>The writes of an actor's fields the unit's own code makes (U57, T49 (c)).</summary>
+        public List<FieldWrite> Writes { get; } = [];
+
+        /// <summary>Each write the unit's code reaches, its own and those of the units it runs, with the origins its value can have in the unit's terms (U57, T49 (c)).</summary>
+        public Dictionary<FieldWrite, HashSet<Origin>> Written { get; } = new(ReferenceEqualityComparer.Instance);
 
         public List<Edge> Edges { get; } = [];
 
@@ -446,6 +631,7 @@ public sealed class ThrowSets
 
     private void Scan(object key, Unit unit)
     {
+        unit.Name = NameOf(key);
         switch (key)
         {
             case Root r:
@@ -464,6 +650,10 @@ public sealed class ThrowSets
                     foreach (var field in c.Class.Fields.Where(f => f.Body is { } body && (c.Class.Declaration.Members ?? []).Any(m => ReferenceEquals(m, body))))
                     {
                         walk.Optional(field.Body!.Value);
+                        if (field.Body.Value is { } value)
+                        {
+                            walk.Default(c.Class, field, value);
+                        }
                     }
 
                     if (c.Class.BaseCall is { } call)
@@ -528,7 +718,7 @@ public sealed class ThrowSets
             case LambdaExpression l:
                 {
                     var (_, _, model, file) = Lambdas().First(x => ReferenceEquals(x.Lambda, l));
-                    var walk = new Walk(this, model, file, unit);
+                    var walk = new Walk(this, model, file, unit, lambda: true);
                     walk.Optional(l.ExpressionBody);
                     if (l.BlockBody is { } block)
                     {
@@ -610,7 +800,9 @@ public sealed class ThrowSets
             return;
         }
 
-        var walk = new Walk(this, site.Model, site.File, unit, f.Owner);
+        // U57: the parameters the arguments of a call of the function fill, each by its place, where the checker read it
+        var parameters = declaration.Parameters.Select(p => site.Model.Declares(p) ? site.Model.DeclarationOf(p) : null).ToList();
+        var walk = new Walk(this, site.Model, site.File, unit, parameters, inside: f.Owner);
         foreach (var parameter in declaration.Parameters)
         {
             walk.Optional(parameter.Default);
@@ -622,6 +814,20 @@ public sealed class ThrowSets
             walk.Statement(block);
         }
     }
+
+    // what a unit of code is, as a text of `call-loop` names where a call stands (U56)
+    private static string NameOf(object key) => key switch
+    {
+        FunctionSymbol { Owner: { } owner } f => $"`{owner.Name}.{f.Name}`",
+        FunctionSymbol f => $"`{f.Name}`",
+        LambdaExpression => "a lambda",
+        Construction c => $"the construction of `{c.Class.Name}`",
+        ConstructorSymbol k => $"a constructor of `{k.Owner.Name}`",
+        Made m => $"the construction of `{m.Data.Name}`",
+        Each e => $"the text of `{e.Data.Name}`",
+        TopLevel => "the top-level code",
+        _ => "",
+    };
 
     // the model that read the function's body, and the file's place in the order of a set; null for a function of neither file
     private (SemanticModel Model, int File)? Site(FunctionSymbol f)
@@ -745,10 +951,18 @@ public sealed class ThrowSets
     // ---- the walk of a unit's code ------------------------------------------------------------------------------------------
 
     // `inside`: the type whose method the walk reads, null for any other code (U55)
-    private sealed class Walk(ThrowSets sets, SemanticModel model, int file, Unit unit, ClassSymbol? inside = null)
+    /// <summary>
+    /// The walk of one unit's code: <paramref name="parameters"/> are those of the function it is, by their place, null for any other
+    /// unit, and <paramref name="lambda"/> holds for a lambda's body, whose <c>this</c> and parameters are no origin the loops follow
+    /// (U57).
+    /// </summary>
+    private sealed class Walk(ThrowSets sets, SemanticModel model, int file, Unit unit, List<VariableSymbol?>? parameters = null, bool lambda = false, ClassSymbol? inside = null)
     {
         // O7: the cases a bare `throw` throws in the arm of `else` being walked, innermost on top
         private readonly Stack<IReadOnlyList<KurzType>> bare = new();
+
+        // U57: each local without `mut` the walk declared so far, with where its value comes from
+        private readonly Dictionary<VariableSymbol, Origin> locals = new(ReferenceEqualityComparer.Instance);
 
         public void Optional(Expression? e)
         {
@@ -775,7 +989,10 @@ public sealed class ThrowSets
                     foreach (var hole in s.Segments.OfType<HoleSegment>())
                     {
                         Expression(hole.Expression);
-                        Text(model.TypeOf(hole.Expression).Type); // L6, A1: the text of a hole
+                        if (Typed(hole.Expression) is { } type)
+                        {
+                            Text(type); // L6, A1: the text of a hole
+                        }
                     }
 
                     break;
@@ -821,7 +1038,7 @@ public sealed class ThrowSets
                         Expression(assignment.Value);
                     }
 
-                    if (model.TypeOf(w).Type is DataType d)
+                    if (Typed(w) is DataType d)
                     {
                         // D16: the fields of the body, computed again for the new value, of its type or of a type derived from it
                         foreach (var x in sets.AllData().Where(x => x.Chain.Contains(d.Symbol)).SelectMany(x => x.Chain).Distinct())
@@ -846,6 +1063,20 @@ public sealed class ThrowSets
                 case ParenthesizedExpression p:
                     Expression(p.Inner);
                     break;
+                case AttemptExpression a when sets.reach:
+                    // U49, U56: the block's code, its calls that wait among it, is the code of the unit that runs the `attempt`, which waits on
+                    // its child as on a call (the owner, 2026-11-21, #519, comment 7068198309, attempt 1)
+                    if (model.HasAttempt(a))
+                    {
+                        var block = model.AttemptOf(a).Lambda;
+                        Optional(block.ExpressionBody);
+                        if (block.BlockBody is { } body)
+                        {
+                            Statement(body);
+                        }
+                    }
+
+                    break;
                 case AttemptExpression a:
                     if (model.HasAttempt(a))
                     {
@@ -855,9 +1086,16 @@ public sealed class ThrowSets
                     break;
                 case SpawnExpression s:
                     Call(s.Call);
-                    if (model.CallOf(s.Call).Target is ClassType { Symbol: var actor } && Policy(s, actor) is { Word: "escalate" or "block" } policy)
+                    if ((sets.reach && !model.HasCall(s.Call)) || model.CallOf(s.Call).Target is not ClassType { Symbol: var actor })
                     {
-                        unit.Edges.Add(new Edge(new Root(actor), null)); // U25, U28: the child's crash passes up whole, as a block can pass it up
+                        break; // in the reach mode, a spawn that reported its own error
+                    }
+
+                    // U56: the spawn's edge; T75 1: each argument by the parameter of the primary constructor it fills, which gives its field
+                    unit.Sites.Add(new ActorSite(s.Call, actor, null, SiteKind.Spawn, Origin.Other, Slots(s.Call, model.CallOf(s.Call)), file, s.Line));
+                    if (Policy(s, actor) is { Word: "escalate" or "block" } policy)
+                    {
+                        unit.Edges.Add(new Edge(new Root(actor), null, Crosses: true)); // U25, U28: the child's crash passes up whole, as a block can pass it up
                         if (policy.Block is { } block && sets.blocks && sets.skipped?.Contains(policy) != true)
                         {
                             Statement(block.BlockBody!); // U32: the block runs as a message of the actor whose code spawns, and its throw is that actor's crash
@@ -883,13 +1121,33 @@ public sealed class ThrowSets
                     break;
                 case VariableDeclaration v:
                     Optional(v.Value);
+                    if (v.Value is { } value)
+                    {
+                        Local(v, value);
+                    }
+
                     break;
                 case AssignOrDeclare a:
                     Expression(a.Value);
+                    Local(a, a.Value);
+                    if (model.IsImplicitField(a, out var self, out var assigned) && assigned is not null && ActorOf(self.Type) is not null)
+                    {
+                        Write(assigned, a.Value); // T49 (c)
+                    }
+
                     break;
                 case Assignment a:
                     Expression(a.Target);
                     Expression(a.Value);
+                    if (a.Target is IndexExpression { Target: var list } && FieldOf(list) is { Type: ListType } held)
+                    {
+                        Record(held, item: true, a.Value); // T49 (c): an item of the list a field holds
+                    }
+                    else
+                    {
+                        Write(FieldOf(a.Target), a.Value); // T49 (c): a field through `this`
+                    }
+
                     break;
                 case ExpressionStatement x:
                     Expression(x.Expression);
@@ -909,6 +1167,11 @@ public sealed class ThrowSets
                     break;
                 case ForInStatement f:
                     Expression(f.Collection);
+                    if (sets.reach && model.Declares(f))
+                    {
+                        locals[model.DeclarationOf(f)] = ItemOf(OriginOf(f.Collection)); // T49 (c): the variable of a loop over a field's list holds its items
+                    }
+
                     foreach (var body in model.PassesOf(f) ?? new[] { f.Body })
                     {
                         Statement(body); // T33: in a copy, a pass of the body for each field of the type
@@ -994,7 +1257,7 @@ public sealed class ThrowSets
                         Expression(v.Value);
                         break;
                     case TypePattern tp:
-                        if (result is not null)
+                        if (result is not null && !sets.reach)
                         {
                             cases = [model.PatternTypeOf(tp)];
                             taken.Add(model.PatternTypeOf(tp));
@@ -1002,7 +1265,7 @@ public sealed class ThrowSets
 
                         break;
                     case ElsePattern:
-                        if (result is not null)
+                        if (result is not null && !sets.reach)
                         {
                             cases = result.Cases.Skip(1).Where(c => !taken.Any(t => Types.Same(t, c))).ToList();
                         }
@@ -1028,6 +1291,12 @@ public sealed class ThrowSets
         // O6, O7: the type a `throw` throws, or for a bare one the case its arm took; the text of the value adds nothing (section 6)
         private void Throw(ThrowStatement t)
         {
+            if (sets.reach)
+            {
+                Optional(t.Value); // what the value's code reaches, and no throw
+                return;
+            }
+
             if (t.Value is { } value)
             {
                 Expression(value);
@@ -1072,6 +1341,10 @@ public sealed class ThrowSets
             foreach (var argument in c.Arguments)
             {
                 Expression(argument.Value);
+                if (sets.reach && argument.Word == ArgumentWord.Mut && FieldOf(argument.Value) is { } field)
+                {
+                    unit.Writes.Add(new FieldWrite(field, false, Origin.Other, argument.Value.Line)); // T49 (c): a field the callee can write
+                }
             }
 
             foreach (var bound in c.Clause())
@@ -1095,15 +1368,25 @@ public sealed class ThrowSets
                 return;
             }
 
+            if (sets.reach && !model.HasCall(c))
+            {
+                return; // a call that reported its own error
+            }
+
             var info = model.CallOf(c);
             var map = info.Map.Count > 0 ? info.Map : null;
             switch (info.Kind)
             {
                 case CallKind.Function:
-                    unit.Edges.Add(new Edge(info.Function!, map));
+                    unit.Edges.Add(new Edge(info.Function!, map, Arguments: Slots(c, info)));
                     break;
                 case CallKind.Method or CallKind.DataMethod:
                     {
+                        if (sets.reach && info.Kind == CallKind.Method && c.Callee is MemberAccess { Target: var through } && Typed(through) is ActorType)
+                        {
+                            break; // a call through an actor's reference that reported its own error, recorded as the method it picked
+                        }
+
                         if (info.Target is DataType { TypeArguments.Count: > 0 } d)
                         {
                             map = Merged(map, d);
@@ -1118,21 +1401,27 @@ public sealed class ThrowSets
                         var targets = sets.Overrides(method).Prepend(method)
                             .Concat(sets.Implementers(method).SelectMany(g => sets.Overrides(g).Prepend(g)))
                             .Distinct();
-                        unit.Edges.AddRange(targets.Select(target => new Edge(target, map)));
+                        // D16: a data method's function takes the value first, a value of a data type, which is no actor's reference
+                        Origin[] arguments = info.Kind == CallKind.Method ? Slots(c, info) : [Origin.Other, .. Slots(c, info)];
+                        unit.Edges.AddRange(targets.Select(target => new Edge(target, map, Arguments: arguments)));
                         break;
                     }
 
                 case CallKind.ClassNew:
-                    unit.Edges.Add(new Edge(new Construction(((ClassType)info.Target!).Symbol), null));
-                    if (info.Constructor is { } constructor)
                     {
-                        unit.Edges.Add(new Edge(constructor, null));
+                        var made = ((ClassType)info.Target!).Symbol;
+                        unit.Edges.Add(new Edge(new Construction(made), null, Crosses: made.IsActor)); // U56: an actor's construction is the spawned actor's code
+                        if (info.Constructor is { } constructor)
+                        {
+                            unit.Edges.Add(new Edge(constructor, null, Crosses: made.IsActor));
+                        }
+
+                        break;
                     }
 
-                    break;
                 case CallKind.DataNew:
                     {
-                        var made = model.TypeOf(c).Type as DataType ?? new DataType(info.Data!, []);
+                        var made = Typed(c) as DataType ?? new DataType(info.Data!, []);
                         unit.Edges.Add(new Edge(new Made(made.Symbol), MapOf(made)));
                         if (made.Symbol.IsGeneric)
                         {
@@ -1143,20 +1432,27 @@ public sealed class ThrowSets
                     }
 
                 case CallKind.Value:
-                    unit.Edges.AddRange(Functions(model.TypeOf(c.Callee).Type).Select(type => new Edge(new Valued(type), null)));
-                    unit.Edges.AddRange(CFunctions(model.TypeOf(c.Callee).Type).Select(type => new Edge(new Native(type), null))); // R17
+                    if (Typed(c.Callee) is { } callee)
+                    {
+                        unit.Edges.AddRange(Functions(callee).Select(type => new Edge(new Valued(type), null)));
+                        unit.Edges.AddRange(CFunctions(callee).Select(type => new Edge(new Native(type), null))); // R17
+                    }
+
                     break;
                 case CallKind.Print or CallKind.ErrorPrint:
                     foreach (var argument in c.Arguments)
                     {
-                        Text(model.TypeOf(argument.Value).Type); // A1, A17
+                        if (Typed(argument.Value) is { } type)
+                        {
+                            Text(type); // A1, A17
+                        }
                     }
 
                     break;
                 case CallKind.StringJoin:
                     foreach (var argument in c.Arguments)
                     {
-                        if (model.TypeOf(argument.Value).Type is ListType list)
+                        if (Typed(argument.Value) is ListType list)
                         {
                             Text(list.Element); // X6: the text of each item
                         }
@@ -1164,19 +1460,43 @@ public sealed class ThrowSets
 
                     break;
                 case CallKind.ActorCall or CallKind.ActorSend:
+                    var target = ((ActorType)info.Target!).Symbol;
                     if (info.ByName && !ReferenceEquals(((ActorType)info.Target!).Symbol, inside))
                     {
                         // U52: a message to the name of a `per node` actor starts it where none stands, its constructor run on the caller's
                         // stack, whose throw is the caller's crash, as at a `spawn`; a method of that actor runs in it while it stands, so
-                        // that a message to its own name there starts none (U55, U17)
-                        unit.Edges.Add(new Edge(new Construction(((ActorType)info.Target!).Symbol), null));
+                        // that a message to its own name there starts none (U55, U17); for the loops the construction is the started actor's code,
+                        // which no loop of the caller holds, and the start an edge into it, as a `spawn`'s (U56; the owner, 2026-11-21, #519,
+                        // comment 7068198309, per node 1), from the actor named, which the code of its own messages is (U55, U57)
+                        unit.Edges.Add(new Edge(new Construction(target), null, Crosses: true));
+                        if (sets.reach && c.Vouch > 0)
+                        {
+                            break; // U58: `vouch` before it is `syntax`, the call's own error, which makes no edge
+                        }
+
+                        unit.Sites.Add(new ActorSite(c, target, null, SiteKind.Start, Origin.Named(target), [], file, c.Line));
                     }
 
-                    break; // U20: the callee's code runs in the callee, whose crash its caller gets as `callee-crashed`
+                    // U20: the callee's code runs in the callee, whose crash its caller gets as `callee-crashed`; U56: the call's edge, with where
+                    // its receiver comes from, the actor's own for a `send` of its own method (U11), the actor named for a call through the name
+                    // of a `per node` actor, in a lambda too, which reaches that actor wherever it stands (U55; the owner, 2026-11-21, #519,
+                    // comment 7069702044), and each argument by its parameter
+                    unit.Sites.Add(new ActorSite(c, target, info.Function, info.Kind == CallKind.ActorCall ? SiteKind.Wait : SiteKind.Send,
+                        info.ByName ? Origin.Named(target) : c.Callee is MemberAccess m ? OriginOf(m.Target) : Origin.Self, Slots(c, info), file, c.Line));
+                    break;
                 case CallKind.ListAdd or CallKind.ListInsert:
                     // M9, X11: `Add` and `Insert` keep the function value they take and run none of it, so a lambda there brings what its
-                    // walk gave it, what it builds and nothing it throws, and a call of the value it became reaches the lambda
+                    // walk gave it, what it builds and nothing it throws, and a call of the value it became reaches the lambda; T49 (c): the
+                    // item they put into the list a field holds, the last argument
+                    if (sets.reach && c.Callee is MemberAccess { Target: var addedTo } && FieldOf(addedTo) is { } added && c.Arguments.Count > 0)
+                    {
+                        Record(added, item: true, c.Arguments[^1].Value);
+                    }
+
                     break;
+                case CallKind.ListAddRange when sets.reach && c.Callee is MemberAccess { Target: var rangedTo } && FieldOf(rangedTo) is { } ranged:
+                    unit.Writes.Add(new FieldWrite(ranged, true, Origin.Other, c.Line)); // T49 (c): the items of another list
+                    goto default;
                 default:
                     // M9, X8: a built-in call that takes a function value calls it, as `Where` calls its test and `SortBy` its key for each
                     // item, but `Add` and `Insert` above, so that a kind no arm names counts what the function throws, too much rather than
@@ -1195,6 +1515,139 @@ public sealed class ThrowSets
 
                     break;
             }
+        }
+
+        // the type the checker gave an expression; in the reach mode null where it gave none, a node of a reported error
+        private KurzType? Typed(Expression e) => !sets.reach || model.HasType(e) ? model.TypeOf(e).Type : null;
+
+        // U57: a local that a declaration makes holds its value's origin, which a read of it takes where it has no `mut` (OriginOf)
+        private void Local(object declaration, Expression value)
+        {
+            if (model.Declares(declaration) && model.DeclarationOf(declaration) is { Kind: VariableKind.Local } variable)
+            {
+                locals[variable] = OriginOf(value);
+            }
+        }
+
+        /// <summary>
+        /// U57: where a reference comes from: <c>this</c> as a value inside an actor, its own reference (U10), or a local without
+        /// <c>mut</c> that holds it, is the actor itself; a parameter of the function, which no <c>mut</c> lets change, is that
+        /// parameter, by its place; a field of the actor, read by its name or through <c>this</c>, is that field, and an item of the
+        /// list it holds, read by an index or as the variable of a <c>for</c> over it, an item of it (T49 (c)); anything else, a field of
+        /// a class, a capture in a lambda, a call's result, is other. In a lambda nothing is the actor's, a parameter, a field or a local of the code around it, since its body
+        /// is a unit read by a walk of its own, whose locals hold none of that code's: <c>this</c> inside a lambda and a capture are none
+        /// (the owner, 2026-11-20, #519, comment 7051071630: T61 (a) and T49 (c)), and so are a parameter and a field read in a lambda
+        /// (assumed: a reading of T61 (a) of comment 7051071630).
+        /// </summary>
+        private Origin OriginOf(Expression e)
+        {
+            switch (e)
+            {
+                case ParenthesizedExpression p:
+                    return OriginOf(p.Inner);
+                case ThisExpression t when !lambda && Typed(t) is ActorType:
+                    return Origin.Self;
+                case NameExpression n when model.IsVariable(n) && model.VariableOf(n) is { Mut: false } v:
+                    var at = parameters?.IndexOf(v) ?? -1;
+                    return at >= 0 && !lambda ? new Origin(at) : locals.TryGetValue(v, out var held) ? held : Origin.Other;
+                case NameExpression or MemberAccess when !lambda && FieldOf(e) is { } field:
+                    return Origin.Of(field);
+                case IndexExpression i:
+                    return ItemOf(OriginOf(i.Target));
+                default:
+                    return Origin.Other;
+            }
+        }
+
+        // T49 (c): an item of the list a field of the actor's body holds, other for anything else
+        private static Origin ItemOf(Origin list) => list is { Field.Type: ListType, Item: false } ? Origin.Of(list.Field!, item: true) : Origin.Other;
+
+        // T49 (c): the field of the actor an expression names, by its name inside a method or through `this`, in a lambda too; null for any
+        // other expression, a field of a class among them
+        private FieldSymbol? FieldOf(Expression e)
+        {
+            switch (e)
+            {
+                case ParenthesizedExpression p:
+                    return FieldOf(p.Inner);
+                case NameExpression n when model.IsImplicitField(n, out var self, out var field) && field is not null && ActorOf(self.Type) is not null:
+                    return field;
+                case MemberAccess { Target: ThisExpression t } m when Typed(t) is { } type && ActorOf(type)?.Field(m.Member) is { } field:
+                    return field;
+                default:
+                    return null;
+            }
+        }
+
+        private static ClassSymbol? ActorOf(KurzType type) => type switch
+        {
+            ActorType a => a.Symbol,
+            ClassType { Symbol.IsActor: true } c => c.Symbol,
+            _ => null,
+        };
+
+        /// <summary>
+        /// T49 (c): the default of a field of an actor's body, a write of it in the construction, which reads no <c>this</c> (V10).
+        /// </summary>
+        public void Default(ClassSymbol owner, FieldSymbol field, Expression value)
+        {
+            if (owner.IsActor && field.Body is not null)
+            {
+                Write(field, value);
+            }
+        }
+
+        // T49 (c): a write of a field of the actor with the value: a list literal puts each of its items into the list, an empty list
+        // and `null` hold no reference, and a list of another origin is other; in a lambda every value is other
+        private void Write(FieldSymbol? field, Expression value)
+        {
+            if (!sets.reach || field is null)
+            {
+                return;
+            }
+
+            if (field.Type is ListType)
+            {
+                switch (value)
+                {
+                    case ListLiteral l:
+                        foreach (var item in l.Items)
+                        {
+                            Record(field, item: true, item);
+                        }
+
+                        return;
+                    case CallExpression c when model.HasCall(c) && model.CallOf(c).Kind == CallKind.ListNew && c.Arguments.Count == 0:
+                        return;
+                    default:
+                        unit.Writes.Add(new FieldWrite(field, false, Origin.Other, value.Line));
+                        return;
+                }
+            }
+
+            if (value is not NullLiteral)
+            {
+                Record(field, item: false, value);
+            }
+        }
+
+        // T49 (c): a write of the field or of an item of its list, with where the value comes from; in a lambda, other
+        private void Record(FieldSymbol field, bool item, Expression value) =>
+            unit.Writes.Add(new FieldWrite(field, item, lambda ? Origin.Other : OriginOf(value), value.Line));
+
+        // U57: where each argument of the call comes from, by the parameter it fills (D11), other for a parameter it leaves to its default
+        private Origin[] Slots(CallExpression c, CallInfo info)
+        {
+            var slots = Enumerable.Repeat(Origin.Other, info.SlotCount).ToArray();
+            for (var i = 0; i < c.Arguments.Count && i < info.Binding.Count; i++)
+            {
+                if (info.Binding[i] is var slot && slot >= 0 && slot < slots.Length)
+                {
+                    slots[slot] = OriginOf(c.Arguments[i].Value);
+                }
+            }
+
+            return slots;
         }
 
         private static IEnumerable<FunctionType> Functions(KurzType type) => type switch
@@ -1305,6 +1758,8 @@ public sealed class ThrowSets
                     }
 
                     break;
+                case TypeParameterType when sets.reach:
+                    break; // A10: `no-text`, which the checker reported
                 case TypeParameterType p:
                     throw new InvalidOperationException($"the text of the type parameter `{p.Symbol.Name}`, whose argument the walk does not see: no program the checker reads reaches it, since the checker reports the text of a type parameter whose limits declare no `string Text()` as `no-text` (A10), and the walk reads a generic data type derived from the type it makes text of only for each instantiation the program builds, which names every type argument (section 5)");
                 default:
@@ -1320,3 +1775,76 @@ public sealed class ThrowSets
             s.Policy ?? actor.Declaration.Clauses?.FirstOrDefault(c => c.Policy is not null)?.Policy;
     }
 }
+
+/// <summary>
+/// U57: where the reference a call goes through, or an argument it passes, comes from in the unit of code that holds it: the actor
+/// itself (<see cref="Self"/>), a parameter of the unit's function by its place, a field of the actor or an item of the list
+/// such a field holds (<see cref="Of"/>), the one actor of a <c>per node</c> type through its name (<see cref="Named"/>), or anything
+/// else (<see cref="Other"/>).
+/// </summary>
+public readonly record struct Origin(int Parameter, FieldSymbol? Field = null, bool Item = false, ClassSymbol? Actor = null)
+{
+    /// <summary><c>this</c> as a value inside an actor, its own reference (U10), or a local without <c>mut</c> that holds it.</summary>
+    public static readonly Origin Self = new(-1);
+
+    /// <summary>A field of a class or a data type, an item of a collection a field of an actor does not hold, a capture in a lambda, a call's result, or a local with <c>mut</c>.</summary>
+    public static readonly Origin Other = new(-2);
+
+    /// <summary>A field of the actor (T49 (c)), or with <paramref name="item"/> an item of the list it holds.</summary>
+    public static Origin Of(FieldSymbol field, bool item = false) => new(-3, field, item);
+
+    /// <summary>
+    /// U55: the one actor of a <c>per node</c> type, named through its name, the same in every unit, so that it passes through every edge
+    /// as <see cref="Self"/> does, a lambda's among them, and is the actor itself in the code of that actor's messages (the owner,
+    /// 2026-11-21, #519, comment 7069702044).
+    /// </summary>
+    public static Origin Named(ClassSymbol actor) => new(-4, Actor: actor);
+}
+
+/// <summary>
+/// U57, T49 (c): a write of a field of an actor that the actor's code makes: an assignment of the field, or with
+/// <see cref="Item"/> an item put into the list it holds, by <c>Add</c>, <c>Insert</c>, an assignment of an item or a list literal
+/// assigned to it, and where the value comes from in the unit's terms; a write the loops cannot follow, a field passed to a <c>mut</c>
+/// parameter or <c>AddRange</c> among them, takes <see cref="Origin.Other"/>.
+/// </summary>
+public sealed record FieldWrite(FieldSymbol Field, bool Item, Origin Value, int Line);
+
+/// <summary>
+/// What a site of an actor's code is (U56): a call that waits (U4), a <c>send</c> (U6), a <c>spawn</c> (U2) or the start of a
+/// <c>per node</c> actor that a message to its name can make (U52), an edge into its construction as a <c>spawn</c>'s is.
+/// </summary>
+public enum SiteKind
+{
+    Wait,
+    Send,
+    Spawn,
+    Start,
+}
+
+/// <summary>
+/// A call through an actor's reference, or a <c>spawn</c>, as the walk met it in a unit of code (U56): the call, the actor it reaches or
+/// makes, the method it calls (null for a <c>spawn</c> and a start), where its receiver and each of its arguments, by the parameter it fills, of the
+/// primary constructor for a <c>spawn</c> (T75 1), come from in that unit (U57), the file it stands in, 0 for the program's and 1 for
+/// <c>std/</c>, and its line.
+/// </summary>
+public sealed record ActorSite(CallExpression Call, ClassSymbol Actor, FunctionSymbol? Method, SiteKind Kind, Origin Receiver, IReadOnlyList<Origin> Arguments, int File, int Line)
+{
+    /// <summary>U58: the line of the word <c>vouch</c> before the call, 0 where none stands.</summary>
+    public int Vouch => Call.Vouch;
+}
+
+/// <summary>A site an entry of an actor's code reaches: <see cref="Through"/> names the unit it stands in where that is not the entry itself, <see cref="Receivers"/> holds the origins its receiver can have in the entry's terms, and <see cref="Arguments"/> those of each of its arguments, by the parameter it fills (U57).</summary>
+public sealed record ReachedSite(ActorSite Site, string? Through, IReadOnlyCollection<Origin> Receivers, IReadOnlyList<IReadOnlyCollection<Origin>> Arguments);
+
+/// <summary>A write of a field an entry reaches, with the origins its value can have in the entry's terms (U57, T49 (c)).</summary>
+public sealed record ReachedWrite(FieldWrite Write, IReadOnlyCollection<Origin> Values);
+
+/// <summary>
+/// An entry of an actor's code (U56): its construction, whose <see cref="Method"/> is null, or a method it declares, with the sites its code
+/// reaches, the writes of its actor's fields it reaches, and whether code of the program calls it directly, as its own actor's code calls
+/// its method (U10).
+/// </summary>
+public sealed record ActorEntry(string Name, FunctionSymbol? Method, IReadOnlyList<ReachedSite> Sites, IReadOnlyList<ReachedWrite> Writes, bool Direct);
+
+/// <summary>The code of an actor by its entries (U56).</summary>
+public sealed record ActorCode(ClassSymbol Actor, IReadOnlyList<ActorEntry> Entries);
