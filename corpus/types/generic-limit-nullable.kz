@@ -1,0 +1,16 @@
+// expect: error type-mismatch at 14
+// rules: T19
+
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Use(Square? s) => AreaOf(s)
+
+print(Use(Square(3)))

@@ -1061,7 +1061,9 @@ public sealed partial class Emitter
             case ClassType c:
                 return InstanceText(value, c); // A5
             case InterfaceType face:
-                return CallThrough(face.Symbol.TextMethod ?? throw new InvalidOperationException($"`{face}` declares no `Text()`: `no-text`, which the checker reports (A10)"), value, face.Symbol, []); // A10
+                return face.Symbol.TextMethod is { } faceText ? CallThrough(faceText, value, face.Symbol, []) // A10
+                    : namesClasses ? FaceText(value, face.Symbol) // O7: in the text of a thrown value, that of the instance's class
+                    : throw new InvalidOperationException($"`{face}` declares no `Text()`: `no-text`, which the checker reports (A10)");
             case WeakRefType w:
                 {
                     // A4 with R3: the text of what its read gives, the target's `Text()` or `null`

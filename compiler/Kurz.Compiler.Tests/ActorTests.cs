@@ -899,7 +899,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // function value's, as R1 states for a jump out of a construction or a call (assumed: a reading of the build), as Rust drops
         // the operands of an expression that one of its operands leaves (the Rust Reference, "Destructors", drop scopes, operands;
         // issue 569): the instance of the larger class, made second, is freed before the smaller one, made first, a copy where the
-        // call makes two, and no other block is freed while the program records but the tables of the session of those two copies,
+        // call makes two, and in the rows of a call of two copies no other block is freed while the program records but the tables
+        // of the session of those two copies,
         // which its end frees first (`CopyAbort`), before the instance made after the first copy, the tables larger than the instances
         // of `Small` (24 bytes) and of `Large` (32); a call's one copy is let go of among the values its arguments made, the last made
         // first, so that the copy, made second, goes before the instance made first, and the instance, made second, before the copy
@@ -4435,6 +4436,56 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_block_reads_the_case_a_bare_throw_of_the_arm_else_over_a_void_success_threw()
+    {
+        // O7 with U28, U30: the arm `else` over a union whose success is `void` throws the case that reached it (issue 612), which the
+        // block reads as its case of `Reason`, each of two cases by its tag, as it reads a case the arm of its type threw; the child
+        // restarts after each
+        const string text = """
+            data Lost(int Code)
+            data Gone(string Why)
+
+            void | Lost | Gone Find(int id) {
+                if id == 1 {
+                    return Lost(7)
+                }
+                if id == 2 {
+                    return Gone("away")
+                }
+            }
+
+            actor Worker(string Name) {
+                pub void Fail(int id) {
+                    Find(id) else {
+                        else => throw
+                    }
+                }
+
+                pub string Ping() => Name
+            }
+
+            w = spawn Worker("kept") on crash (c) {
+                match c.Reason {
+                    Lost l => print("lost {l.Code} at {c.Place.Line}")
+                    Gone g => print("gone {g.Why} at {c.Place.Line}")
+                    RuntimeError e => print("runtime {e.Detail}")
+                }
+
+                restart
+            }
+            send w.Fail(1)
+            print(w.Ping())
+            send w.Fail(2)
+            print(w.Ping())
+
+            """;
+        var run = BuildAndRun(text, toolchain.Runtime, "actor-block-else-void-reason");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(["Worker#1 crashed: thrown \"Lost { Code = 7 }\" at program.kz:16", "Worker#1 crashed: thrown \"Gone { Why = away }\" at program.kz:16"], crashes);
+        Ran((run.Code, run.Output, rest), 0, ["lost 7 at 16", "kept", "gone away at 16", "kept"], "");
+    }
+
+    [Fact]
     public void A_block_runs_after_the_supervisors_current_message_and_before_its_queued_ones_in_crash_order()
     {
         // U28, U31, U34: each block is a message of `Boss`, which runs once `Go`, parked in its call to `Other`, ended, before the
@@ -7025,10 +7076,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void A_test_has_no_bound_of_time_while_each_call_it_makes_keeps_its_own()
+    public void A_test_has_no_bound_of_time_so_that_it_calls_on_past_the_default_bound_of_a_call()
     {
-        // D6, Y7: the test's message carries no deadline, so a test that holds its thread past the default bound of a call calls on, the
-        // call with that bound of its own, here 10 ms for the run; a read of the clock is `not supported` in a build for Windows (S11)
+        // D6, Y5: the test's message carries no deadline, so a test that holds its thread past the default bound of a call, here 10 ms
+        // for the run, calls on and its call is answered; a read of the clock is `not supported` in a build for Windows (S11)
         if (!OperatingSystem.IsLinux())
         {
             return;

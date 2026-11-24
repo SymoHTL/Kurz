@@ -311,6 +311,114 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(text, "else-statement"), 0, ["done"], "");
     }
 
+    /// <summary>The functions whose arm <c>else</c> holds a bare <c>throw</c>, over a union of one case beside a <c>void</c> success, of three, of three after an arm that took one, of a success with a value, and of two classes, whose values have one IR type.</summary>
+    private const string ElseThrows = """
+        data NotFound
+        data A(int N)
+        data B(string S)
+        data C(int Id) {
+            pub string Text() => "C #{Id}"
+        }
+
+        void | NotFound Find(int id) {
+            if id == 1 {
+                return NotFound
+            }
+        }
+
+        void | A | B | C Pick(string w) {
+            if w == "a" {
+                return A(1)
+            }
+            if w == "b" {
+                return B("got {w}")
+            }
+            if w == "c" {
+                return C(3)
+            }
+        }
+
+        int | A | B Valued(string w) {
+            if w == "b" {
+                return B("got {w}")
+            }
+            return 0
+        }
+
+        void One(int id) {
+            Find(id) else {
+                else => throw
+            }
+        }
+
+        void Three(string w) {
+            Pick(w) else {
+                else => throw
+            }
+        }
+
+        void AfterA(string w) {
+            Pick(w) else {
+                A a => print("took {a}")
+                else => throw
+            }
+        }
+
+        int Kept(string w) {
+            v = Valued(w) else {
+                else => throw
+            }
+            return v
+        }
+
+        class Note(string Body) {
+            pub string Text() => "note {Body}"
+        }
+
+        class Memo(int Id) {
+            pub string Text() => "memo {Id}"
+        }
+
+        void | Note | Memo Write(string w) {
+            if w == "n" {
+                return Note("got {w}")
+            }
+            if w == "m" {
+                return Memo(4)
+            }
+        }
+
+        void Classes(string w) {
+            Write(w) else {
+                else => throw
+            }
+        }
+        """;
+
+    [Theory]
+    [InlineData("else-throw-one", "One(2)\nprint(\"ok\")\nOne(1)", new[] { "ok" }, 35, "NotFound")]
+    [InlineData("else-throw-a", "Three(\"none\")\nprint(\"ok\")\nThree(\"a\")", new[] { "ok" }, 41, "A { N = 1 }")]
+    [InlineData("else-throw-b", "Three(\"b\")", new string[0], 41, "B { S = got b }")]
+    [InlineData("else-throw-c", "Three(\"c\")", new string[0], 41, "C #3")]
+    [InlineData("else-throw-after-a", "AfterA(\"a\")\nAfterA(\"b\")", new[] { "took A { N = 1 }" }, 48, "B { S = got b }")]
+    [InlineData("else-throw-valued", "print(Kept(\"a\"))\nprint(Kept(\"b\"))", new[] { "0" }, 54, "B { S = got b }")]
+    [InlineData("else-throw-note", "Classes(\"none\")\nprint(\"ok\")\nClasses(\"n\")", new[] { "ok" }, 78, "note got n")]
+    [InlineData("else-throw-memo", "Classes(\"m\")", new string[0], 78, "memo 4")]
+    public void A_bare_throw_in_the_arm_else_throws_the_text_of_the_case_that_reached_it(string name, string calls, string[] lines, int line, string thrown)
+    {
+        // O7 with A7: a union whose success is `void` has no text, so the arm `else` over it throws the case that reached it, as the arm
+        // of that case's type does (issue 612): of one case beside the success, that case's value; of more, each case by its own text, a
+        // `Text()` of its own among them, and after an arm that took another case; a union whose success has a value is thrown as it is,
+        // the text of its case; two classes, each by its own `Text()`, whose values clang cannot tell apart, so that only the tag tells
+        // which case it is; under the allocator that makes every freed block inaccessible, with a string the run made
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", $"{ElseThrows}\n\n{calls}\n"), [], ListTests.Fenced, testBuild: true);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, name));
+        var expected = $"error: thrown at program.kz:{line}:\n{thrown}\n";
+        Assert.True(code == 1 && output.SequenceEqual(lines) && error == expected,
+            $"exit {code}, output [{string.Join(", ", output)}], error [{error}] where exit 1, output [{string.Join(", ", lines)}], error [{expected}]");
+    }
+
     [Fact]
     public void A_thrown_data_value_and_the_case_a_bare_throw_throws_write_their_texts_below_the_error_line()
     {
@@ -326,6 +434,55 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(value)
             """;
         Ran(BuildAndRun(bare, "throw-bare"), 1, [], "error: thrown at program.kz:6:\nNotFound { Id = 4 }\n");
+    }
+
+    [Fact]
+    public void A_thrown_instance_of_a_class_without_a_text_writes_its_class_s_name_below_the_error_line()
+    {
+        // O7: an instance of a class that neither declares nor inherits a `Text()`, thrown by `throw` or by a bare `throw`, has its class's
+        // name below the error line (the owner, 2026-11-20, issue 598, comment 7051500939): the bare name of the instance's own class, a
+        // derived one thrown as its base (2026-11-21, comment 7060156252, Q2 and Q3 of comment 7055011193), and that name where the instance
+        // stands in a `data` value or a list that is thrown (the same answer, Q8 of comment 7055578588)
+        const string Note = "data Missing\n\nclass Note(string Body)\n\nint | Note | Missing Find(int id) {\n    if id == 1 {\n        return Note(\"a\")\n    }\n\n    return Missing\n}\n\nv = Find(1) else {\n";
+        Ran(BuildAndRun(Note + "    Note n => throw n\n    Missing => 0\n}\nprint(v)\n", "throw-class"), 1, [], "error: thrown at program.kz:14:\nNote\n");
+        Ran(BuildAndRun(Note + "    Note => throw\n    Missing => 0\n}\nprint(v)\n", "throw-class-bare"), 1, [], "error: thrown at program.kz:14:\nNote\n");
+        Ran(BuildAndRun(Note + "    else => throw\n}\nprint(v)\n", "throw-class-union"), 1, [], "error: thrown at program.kz:14:\nNote\n");
+        const string Animals = "class Animal(string Name)\n\nclass Dog(int Legs) : Animal\n\nvoid Fail(Animal a) {\n    throw a\n}\n\n";
+        Ran(BuildAndRun(Animals + "Fail(Dog(\"rex\", 4))\n", "throw-class-derived"), 1, [], "error: thrown at program.kz:6:\nDog\n");
+        Ran(BuildAndRun(Animals + "Fail(Animal(\"tom\"))\n", "throw-class-base"), 1, [], "error: thrown at program.kz:6:\nAnimal\n");
+
+        // an instance thrown as a base that has no `Text()` shows what the `Text()` of its own class gives, found when the program runs, its
+        // class's own or that of a base between the two, a `virtual` one's override among them, as C#'s virtual `ToString()` (the owner,
+        // 2026-11-21, issue 598, comment 7060156252, Q9 of comment 7055578588); an instance whose class's chain declares none keeps its name,
+        // a sibling class's `Text()` aside; an instance a thrown `data` value holds as such a base takes the text by the same rule (F1),
+        // and a `Text()` without `pub` is called as one with it (F2) (the owner, 2026-11-21, issue 598, comment 7063693020)
+        const string Texted = "class Animal(string Name)\n\nclass Dog(int Legs) : Animal {\n    pub string Text() => \"dog {Name}\"\n}\n\nvoid Fail(Animal a) {\n    throw a\n}\n\n";
+        Ran(BuildAndRun(Texted + "print(Dog(\"rex\", 4))\nFail(Dog(\"rex\", 4))\n", "throw-class-derived-text"), 1, ["dog rex"], "error: thrown at program.kz:8:\ndog rex\n");
+        const string Kinds = Texted + "class Puppy(int Age) : Dog\n\nclass Cat(int Lives) : Animal\n\n";
+        Ran(BuildAndRun(Kinds + "Fail(Puppy(\"pip\", 4, 1))\n", "throw-class-inherited-text"), 1, [], "error: thrown at program.kz:8:\ndog pip\n");
+        Ran(BuildAndRun(Kinds + "Fail(Cat(\"tom\", 9))\n", "throw-class-sibling-text"), 1, [], "error: thrown at program.kz:8:\nCat\n");
+        Ran(BuildAndRun(Kinds + "Fail(Animal(\"any\"))\n", "throw-class-base-of-text"), 1, [], "error: thrown at program.kz:8:\nAnimal\n");
+        Ran(BuildAndRun(Texted.Replace("pub string", "pub virtual string") + "class Puppy(int Age) : Dog {\n    pub override string Text() => \"puppy {Name}\"\n}\n\nFail(Puppy(\"pip\", 4, 1))\n", "throw-class-override-text"), 1, [], "error: thrown at program.kz:8:\npuppy pip\n");
+        Ran(BuildAndRun(Texted + "data Pen(Animal Item)\n\nthrow Pen(Dog(\"rex\", 4))\n", "throw-class-held-text"), 1, [], "error: thrown at program.kz:13:\nPen { Item = dog rex }\n");
+        Ran(BuildAndRun(Texted.Replace("pub string", "string") + "Fail(Dog(\"rex\", 4))\n", "throw-class-private-text"), 1, [], "error: thrown at program.kz:8:\ndog rex\n");
+        Ran(BuildAndRun("class Counter(mut int Count)\ndata Box(Counter Item)\n\nthrow Box(Counter(1))\n", "throw-class-held"), 1, [], "error: thrown at program.kz:4:\nBox { Item = Counter }\n");
+        Ran(BuildAndRun("class Counter(mut int Count)\n\nthrow [Counter(1), Counter(2)]\n", "throw-class-list"), 1, [], "error: thrown at program.kz:3:\n[Counter, Counter]\n");
+    }
+
+    [Fact]
+    public void A_thrown_value_of_an_interface_without_a_text_writes_the_text_of_its_instance_s_class()
+    {
+        // O7: a value thrown as an interface that declares no `Text()` takes the text of a thrown class instance: what the `Text()` of the
+        // instance's own class gives, found when the program runs, its own or a base's, else that class's name (the owner, 2026-11-21, issue
+        // 621, comment 7067091007); one that a thrown `data` value holds takes it by the same rule, and a `Text()` without `pub` is called
+        // as one with it (assumed: F1 and F2 of issue 598, comment 7063693020, read for such a value)
+        const string Sized = "interface Sized {\n    int Size()\n}\n\nclass Dot : Sized {\n    pub int Size() => 1\n}\n\nclass Ring(int Width) : Sized {\n    pub int Size() => Width\n    pub string Text() => \"ring {Width}\"\n}\n\nvoid Fail(Sized s) {\n    throw s\n}\n\n";
+        Ran(BuildAndRun(Sized + "Fail(Ring(2))\n", "throw-face-text"), 1, [], "error: thrown at program.kz:15:\nring 2\n");
+        Ran(BuildAndRun(Sized + "Fail(Dot())\n", "throw-face-name"), 1, [], "error: thrown at program.kz:15:\nDot\n");
+        Ran(BuildAndRun(Sized + "class Band(int More) : Ring\n\nclass Spot : Dot\n\nFail(Band(3, 4))\n", "throw-face-inherited-text"), 1, [], "error: thrown at program.kz:15:\nring 3\n");
+        Ran(BuildAndRun(Sized + "class Band(int More) : Ring\n\nclass Spot : Dot\n\nFail(Spot())\n", "throw-face-derived-name"), 1, [], "error: thrown at program.kz:15:\nSpot\n");
+        Ran(BuildAndRun(Sized + "data Pen(Sized Item)\n\nthrow Pen(Ring(2))\n", "throw-face-held"), 1, [], "error: thrown at program.kz:20:\nPen { Item = ring 2 }\n");
+        Ran(BuildAndRun(Sized.Replace("pub string", "string") + "Fail(Ring(2))\n", "throw-face-private-text"), 1, [], "error: thrown at program.kz:15:\nring 2\n");
     }
 
     [Fact]

@@ -38,8 +38,8 @@ its operands leaves (the Rust Reference, "Destructors", `destructors.scope.opera
 2026-11-19: "Tuple expression doesn't finish evaluating so operands drop in reverse order"), the callee
 and the receiver being operands of the call as Rust's function operand and receiver are
 (`expr.call.intro`, "an expression, called the *function operand*", and `expr.method.intro`, "an
-expression (the *receiver*)", read the same day). The memo of a call's one copy ends when that copy is made,
-and the memo of a call of more than one copy once its last copy is made; where a jump out of the call comes
+expression (the *receiver*)", read the same day). The memo of the one copy of a call that is no message ends when that copy is made,
+and the memo of such a call of more than one copy once its last copy is made; where a jump out of such a call comes
 after its first copy and before its last, the memo ends before the jump lets go of anything, the values made
 after the first copy among them; so each copy goes after the end of its call's memo, which points the `weak`
 references of the call's copies (U12) *(assumed: a reading of the build, proposed with `kurz-design.md`
@@ -53,8 +53,8 @@ made before the raise (U21; §6, the owner, 2026-11-21, #519, comment 7060155980
 a `spawn`'s arguments made before such a raise are freed with the heap of the actor it was making, which
 the crash of its spawner frees where an argument after one that crosses can raise or any argument can
 wait (U21; §6, the same comment, "T82 1") *(assumed: a reading of T82 1, the heap freed whole)*. No case shows
-that order either: nothing of the program runs at a release, nor between the end of a memo and the release
-of the copies.
+that order either: nothing of the program runs at a release, nor between a jump
+and the releases it makes.
 
 Case: [memory/long-chain-freed.kz](../corpus/memory/long-chain-freed.kz)
 ```kurz

@@ -911,7 +911,9 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// A <c>throw</c> (O6): the text of the value and the place of the throw to the runtime's <c>Throw</c>, which ends the process; a bare
+    /// A <c>throw</c> (O6): the text of the value, in which an instance held as a class with no <c>Text()</c> has the text of its own class,
+    /// or its class's name where that class has none (O7), and the
+    /// place of the throw to the runtime's <c>Throw</c>, which ends the process; a bare
     /// <c>throw</c> in an arm of <c>else</c> throws the case value that reached the arm (O7). Where a block of <c>on crash</c> of the program
     /// reads a <c>Reason</c> with the value's type, or with the type of its case, the value, its type's number and its copy go to the
     /// runtime first (the runtime's <c>Thrown</c>; U30).
@@ -921,7 +923,17 @@ public sealed partial class Emitter
         var (value, type) = t.Value is null
             ? elseCase ?? throw new InvalidOperationException($"a bare `throw` outside an arm of `else` at line {t.Line}: the checker reports it")
             : (EmitExpression(t.Value), TypeOf(t.Value));
-        var text = TextOf(value, type, t.Line);
+        namesClasses = true; // O7: an instance held as a class with no `Text()` has its own class's text, or its class's name, here
+        string text;
+        try
+        {
+            text = TextOf(value, type, t.Line);
+        }
+        finally
+        {
+            namesClasses = false;
+        }
+
         if (program.Model.CrashReasons.Count > 0)
         {
             EmitThrown(value, type);
