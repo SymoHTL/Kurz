@@ -61,7 +61,7 @@ COMMAND = ["dotnet", "test", SOLUTION, "--nologo", "-c", "Release", "-p:RestoreL
 # of pull request 592, on its commit 8222f973, printed "compiler tests: 347 passed, 0 failed, 0 skipped, 347 total, 0 errors"
 ARM_FILTER = ("FullyQualifiedName~ActorTests|FullyQualifiedName~RuntimeTests|FullyQualifiedName~EmitterTests.On_an_arm"
               "|FullyQualifiedName~EmitterTests.The_switch|(FullyQualifiedName~RunTests&DisplayName~actors/)")
-ARM_FLOOR = 454  # 160 of ActorTests, 32 of RuntimeTests, 2 of EmitterTests and 260 rows of the actors' cases of RunTests, each case run twice
+ARM_FLOOR = 474  # 160 of ActorTests, 32 of RuntimeTests, 2 of EmitterTests and 280 rows of the actors' cases of RunTests, each case run twice
 ARM_COMMAND = COMMAND + ["--filter", ARM_FILTER]
 # the command the test run built, run without a build of its own; the dotnet host reads global.json from CWD as for the tests
 VERSION_COMMAND = ["dotnet", "run", "--project", "Kurz", "-c", "Release", "--no-build", "--", "--version"]
@@ -345,7 +345,7 @@ def self_test():
     cases.append(("the Arm run is the gate's command with the actors' filter alone",
                   ARM_COMMAND == COMMAND + ["--filter", ARM_FILTER] and "ActorTests" in ARM_FILTER and "RunTests&DisplayName~actors/" in ARM_FILTER,
                   ARM_COMMAND))
-    cases.append(("the Arm floor is at least 454 tests", ARM_FLOOR >= 454, ARM_FLOOR))
+    cases.append(("the Arm floor is at least 474 tests", ARM_FLOOR >= 474, ARM_FLOOR))
     with kit.scratch("compiler-gate-arm-") as root:
         os.makedirs(os.path.join(root, "compiler"))
         with open(os.path.join(root, CONFIG), "w", encoding="utf-8") as f:
