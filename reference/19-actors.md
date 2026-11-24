@@ -2750,15 +2750,21 @@ for the messages T24 (1) built in a heap of their own and no other)*. A message 
 can wait after one that crosses is built in a heap of its own, as any message with an argument that
 can wait is, and its crossing arguments are copied into that heap where they are evaluated *(assumed:
 a reading of T83 1, whose words keep that heap and do not say where its copies are made)*. A `spawn`
-whose argument can raise after one that crosses takes the same rule: the heap it made before its
-arguments, which they cross into, is freed with their copies where its spawner crashes at that raise,
-and so is the heap of a `spawn` any of whose arguments can wait; its actor takes its number, its slot
-and its place under its supervisor once its last argument is evaluated, so that such a raise takes
-none of them (§6, the owner, 2026-11-21, #519, comment 7060155980, "T82 1") *(assumed: a reading of
-T82 1, the heap freed whole, and the readings of the product pass, #519, comment 7071789394, Q2 and
-Q3)*. A `spawn` whose argument that can raise comes before every argument that crosses, or none of
-whose arguments crosses, leaves its heap at such a raise, and no copy (§6) *(assumed: a reading of T82 1,
-whose words name the copies a raise leaves behind and not the heap they cross into)*.
+makes the new actor's heap after its last argument where no argument crosses, and just before its first
+crossing argument otherwise, so that a raise before that point finds no heap; where the heap cannot be
+made (`allocation-failed`), the arguments before that point have run (§6, the owner, 2026-11-23, #519,
+comment 7095825398, "T87 3"). A `spawn` whose first crossing argument, or an argument after it, can
+raise takes the same rule as a message: the heap, which the arguments cross into, is freed with their
+copies where its spawner crashes at that raise, and so where one of those arguments can wait; its actor
+takes its number, its slot and its place under its supervisor once its last argument is evaluated, so
+that such a raise takes none of them (§6, the owner, 2026-11-21, #519, comment 7060155980, "T82 1")
+*(assumed: a reading of T82 1, the heap freed whole, and the readings of the product pass, #519, comment
+7071789394, Q2 and Q3; a reading of T87 3, the first crossing argument evaluated after the heap is made,
+an index or a list literal whose item raises among them, and a wait from that point on listed as T82 1's
+reading lists it)*. Retired by that answer, T87 3: a `spawn` whose argument that can raise comes before
+every argument that crosses, or none of whose arguments crosses, leaving its heap at such a raise, which
+was assumed until then as a reading of T82 1 whose words name the copies a raise leaves behind and not
+the heap they cross into.
 
 Case: [actors/crash-inbox-kept.kz](../corpus/actors/crash-inbox-kept.kz)
 ```kurz
@@ -2952,6 +2958,35 @@ actor Spawner {
     pub void Go(List<int> xs, int at) {
         ys = [1, 2]
         h = spawn Holder(xs, ys[at])
+        made = made + 1
+        print("{h} {h.Count()}")
+    }
+
+    pub int Made() => made
+}
+
+s = spawn Spawner()
+send s.Go([10, 20, 30], 5)
+s.Go([10, 20, 30], 1)
+print(s.Made())
+```
+
+Case: [actors/crash-spawn-before-copy.kz](../corpus/actors/crash-spawn-before-copy.kz)
+```kurz
+// the first `Go` crashes `Spawner` at the index, which comes before the list that crosses into the heap of the actor its `spawn`
+// makes: that heap is made just before the list, so that the crash finds none, and no actor was made, so that the restarted
+// `Spawner`'s `spawn` makes `Holder#2`
+
+actor Holder(int N, List<int> Items) {
+    pub int Count() => Items.Count + N
+}
+
+actor Spawner {
+    mut int made = 0
+
+    pub void Go(List<int> xs, int at) {
+        ys = [1, 2]
+        h = spawn Holder(ys[at], xs)
         made = made + 1
         print("{h} {h.Count()}")
     }
