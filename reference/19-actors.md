@@ -402,6 +402,11 @@ the `spawn` is the spawner's crash (§6, the owner, 2026-11-14, #519, comment 68
 while a throw in its run at a restart is the actor's own crash under its policy (§6, the owner,
 2026-11-14, #519, comment 6882624606, Q28, "All six leans (Recommended)").
 
+A call that reaches the actor while this constructor runs at its `spawn` waits in its inbox, as at a
+restart (U22), one rule for every start of an actor (§6, the owner, 2026-11-21, #599, comment
+7060156109, Q3 1), and no program can make one: no code holds the reference before `spawn` returns,
+since a field's default reads no `this` (K7) and a constructor in an actor's body is `syntax` (U2).
+
 Case: [actors/constructor-arguments.kz](../corpus/actors/constructor-arguments.kz)
 
 Case: [actors/constructor-waits.kz](../corpus/actors/constructor-waits.kz)
@@ -423,6 +428,22 @@ s = spawn Config()
 p = spawn Pool(s)
 print("spawned")
 print(p.Count())
+```
+
+Case: [actors/constructor-this-refused.kz](../corpus/actors/constructor-this-refused.kz)
+```kurz
+actor B {
+    pub int Ask(A x) => x.Peek()
+}
+
+actor A(B Other) {
+    int first = Other.Ask(this)
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+}
+
+print(spawn A(spawn B()).Peek())
 ```
 
 ### U4 (decided, §5, §6) A call through a reference waits
@@ -2325,7 +2346,9 @@ starts, and the parked message resumes once the calls above it end (§6, the own
 it is queued, the newest message its target has started and not ended, running or parked in a wait,
 carries its chain, so that a call that a message makes through a reference to its own actor gets in
 too *(assumed in §6)*. An actor under construction takes no
-message until its `spawn` returns, one of its chain neither *(assumed in §6)*. The chain ID is 16 bytes,
+message until its `spawn` returns, one of its chain neither *(assumed in §6)*, and an actor whose
+restart runs its constructor takes no call of the restart's chain, which waits in its inbox for the
+constructor's end (U22; §6, the owner, 2026-11-20, #599, comment 7051501153, "Option 1"). The chain ID is 16 bytes,
 drawn at random from a generator of its thread that the system's randomness seeds once, and a system
 that gives no randomness when a thread starts its first chain ends the program with `random-failed`,
 as a thread's first map does (M9) *(assumed in §6)*.
@@ -2414,6 +2437,36 @@ print(a.Ping())
 print(b.Get(2))
 ```
 
+Case: [actors/restart-then-callback.kz](../corpus/actors/restart-then-callback.kz)
+```kurz
+// after a restart whose constructor ended, `B.Check`'s call of `Load` gets into `A`, which waits in `Save` on that chain
+
+actor B {
+    pub int Check(A x) => x.Load() * 10
+}
+
+actor A(B Other) {
+    mut int saved = 0
+
+    pub int Save(int n) {
+        saved = n
+        return Other.Check(this) + 1
+    }
+
+    pub int Load() => saved
+
+    pub void Fail() {
+        throw "a fails"
+    }
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Save(4))
+send a.Fail()
+print(a.Save(5))
+```
+
 ### U18 (decided, §6) A wait of the top-level code that nothing can end
 
 The top-level code's call that waits sleeps on the main thread until its reply is set, while the
@@ -2426,7 +2479,13 @@ actor left to run on any thread, no timer pending and nothing registered with th
 call each other from different chains and wait for each other do not hang silently
 (§6, "Deadlocks"; the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level
 wait"). A call that waits in a function the top-level code called is the top-level code's, at its
-own line. A deadline of a call that waits in a message is nothing left to run (U42) *(assumed: T6 of comment 6967625156)*. A loop of actors the top-level code never waits on stays until the end of the program,
+own line. Where a call that an actor's start keeps out closes the loop, the error names that call's
+line (U22, U52) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and where more than one
+such call closes it, the error line names the first place in source order and ends with a colon, and
+each further place stands under it on a line `kept out at <file>:<n>`, before the trace (U22) (§6, the
+owner, 2026-11-21, #599, comment 7067131310, several 2; comment 7067139953, the form 1), a place with
+the count of its calls where more than one, at most 10 such lines and then `... and K more` (U22)
+(§6, the owner, 2026-11-21, #599, comment 7067639209, the order 1, the same place 1, the cap 1). A deadline of a call that waits in a message is nothing left to run (U42) *(assumed: T6 of comment 6967625156)*. A loop of actors the top-level code never waits on stays until the end of the program,
 where U13 drops it.
 
 Case: [actors/deadlock.kz](../corpus/actors/deadlock.kz)
@@ -3137,6 +3196,30 @@ supervisor *(assumed, §6)*. The new instance has its state from the constructor
 defaults alone, as a new actor has it; a throw in the constructor at a restart is the actor's own
 crash, which restarts it again (U3).
 
+A call that reaches the actor while its restart runs its constructor, a call of the chain the restart
+starts, waits in its inbox and is not let in by that chain (U17), so that a constructor that waits on
+it waits on a call that waits for that constructor, as a message to a `per node` actor from its own
+start does (U52), which the top-level code's wait on one thread reads as `deadlock` (U18) (§6, the
+owner, 2026-11-20, #599, comment 7051501153, "Option 1"). No actor crashes on it, so that no restart
+loops on it, and a `send` of that chain to the actor waits in its inbox behind the restart and is no
+`deadlock` *(assumed: the reading of "as T29 option 1 reads", #599, comment 7056452417)*. The error
+names the line of the call the inbox holds, the call that closes the loop, not the line of the
+top-level code's call that waits (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and the
+trace below it is the top-level code's where it waits, the stack that raises (§6, the owner,
+2026-11-21, #599, comment 7063693195, the trace 1). Where more than one call is kept out, one by each
+of several actors' starts, the error names every one: its line names the first place in source order
+and ends with a colon, and one line `kept out at <file>:<n>` for each further place stands under it,
+before the trace, while one kept-out call keeps the error line of U18 (§6, the owner,
+2026-11-21, #599, comment 7067131310, several 2; comment 7067139953, the form 1). The places stand
+in source order, by file and then line, not in the order the runtime meets the actors; a place that
+keeps out more than one call, as two actors that run the same code do, takes one line with the count
+of its calls, `kept out at kept-same.kz:12 (2 calls)`, and on the error line
+`deadlock at kept-same.kz:12 (2 calls):`, so also where it is the one place kept out, while a place
+kept out once keeps its text with no count; at most 10 `kept out at` lines stand under the error
+line, then one line `... and K more` (§6, the owner, 2026-11-21, #599, comment 7067639209, the
+order 1, the same place 1, the cap 1). A path sorts as the error line writes it, byte for byte as
+`<` compares two strings (T32), and K counts places, not calls *(assumed in §6)*.
+
 Case: [actors/crash-in-constructor-at-restart.kz](../corpus/actors/crash-in-constructor-at-restart.kz)
 ```kurz
 actor Tally {
@@ -3302,6 +3385,592 @@ send Counter.Fail()
 send Counter.Add(5)
 print(Counter.Get())
 ```
+
+Case: [actors/restart-reentrant.kz](../corpus/actors/restart-reentrant.kz)
+```kurz
+// at its restart `A`'s constructor waits on `B.Ask`, whose call of `Peek` waits in `A`'s inbox for that constructor, so that the
+// top-level code's wait on `Get` finds nothing left to run, and the error names that call of `Peek`, which closes the loop
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Get())
+b.Set(a)
+send a.Fail()
+print(a.Get())
+```
+
+Case: [tests/test-restart-reentrant.kz](../corpus/tests/test-restart-reentrant.kz)
+```kurz
+// at its restart `A`'s constructor waits on `B.Ask`, whose call of `Peek` waits in `A`'s inbox for that constructor, so that the
+// runner's wait for the test finds nothing left to run, and the words under its `FAILED` line name that call of `Peek`, not the test
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+test "restarts into a call it keeps out" {
+    b = spawn B()
+    a = spawn A(b)
+    print(a.Get())
+    b.Set(a)
+    send a.Fail()
+    print(a.Get())
+}
+```
+
+Case: [actors/restart-reentrant-two.kz](../corpus/actors/restart-reentrant-two.kz)
+```kurz
+// at their restarts `A`'s and `C`'s constructors each wait on a call whose call back waits in the inbox for that constructor, so
+// that the top-level code's wait on `Get` finds nothing left to run, and the error names both calls kept out, `A`'s on its line and
+// `C`'s on a line of its own under it
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor D {
+    mut C? c = null
+
+    pub void Set(C x) {
+        c = x
+    }
+
+    pub int Ask() {
+        x = c
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+actor C(D Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "c fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+d = spawn D()
+c = spawn C(d)
+print(a.Get())
+print(c.Get())
+b.Set(a)
+d.Set(c)
+send a.Fail()
+send c.Fail()
+print(a.Get())
+```
+
+Case: [tests/test-restart-reentrant-two.kz](../corpus/tests/test-restart-reentrant-two.kz)
+```kurz
+// at their restarts `A`'s and `C`'s constructors each wait on a call whose call back waits in the inbox for that constructor, so
+// that the runner's wait for the test finds nothing left to run, and the words under its `FAILED` line name both calls, `A`'s first
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor D {
+    mut C? c = null
+
+    pub void Set(C x) {
+        c = x
+    }
+
+    pub int Ask() {
+        x = c
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+actor C(D Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "c fails"
+    }
+
+    pub int Get() => first
+}
+
+test "restarts two actors into calls they keep out" {
+    b = spawn B()
+    a = spawn A(b)
+    d = spawn D()
+    c = spawn C(d)
+    print(a.Get())
+    print(c.Get())
+    b.Set(a)
+    d.Set(c)
+    send a.Fail()
+    send c.Fail()
+    print(a.Get())
+}
+```
+
+Case: [actors/restart-reentrant-places.kz](../corpus/actors/restart-reentrant-places.kz)
+```kurz
+// at their restarts five `A`s' constructors each wait on `B.Ask`, whose call back waits in the inbox for that constructor, from
+// three places of `Ask`, spawned so that the runtime's walk of the actors meets the places in another order than the file's: the
+// error names them in the file's order, the first on its line, and each place that keeps out two calls with their count
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask(int k) {
+        x = a
+        if x == null {
+            return 0
+        }
+
+        return match k {
+            0 => x.Peek()
+            1 => x.Peek()
+            else => x.Peek()
+        }
+    }
+}
+
+actor A(B Other, int K) {
+    int first = Other.Ask(K)
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+mut sum = 0
+mut all = List<A>()
+for k in [2, 1, 0, 1, 0] {
+    b = spawn B()
+    a = spawn A(b, k)
+    sum = sum + a.Get()
+    b.Set(a)
+    all.Add(a)
+}
+
+print(sum)
+for target in all {
+    send target.Fail()
+}
+
+print(all[0].Get())
+```
+
+Case: [actors/restart-reentrant-one-place.kz](../corpus/actors/restart-reentrant-one-place.kz)
+```kurz
+// at their restarts two `A`s' constructors each wait on `B.Ask`, whose call back waits in the inbox for that constructor, both from
+// one place of `Ask`: the error line names that place with the count of its calls and ends with a colon, and no line stands under it
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+d = spawn B()
+c = spawn A(d)
+print(a.Get() + c.Get())
+b.Set(a)
+d.Set(c)
+send a.Fail()
+send c.Fail()
+print(a.Get())
+```
+
+Case: [actors/restart-reentrant-cap.kz](../corpus/actors/restart-reentrant-cap.kz)
+```kurz
+// at their restarts fourteen `A`s' constructors each wait on `B.Ask`, whose call back waits in the inbox for that constructor, from
+// thirteen places of `Ask`, spawned in the reverse of the file's order, the last place twice: the error line names the first place
+// in the file, ten lines `kept out at` the ten after it, and one line the two places past those
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask(int k) {
+        x = a
+        if x == null {
+            return 0
+        }
+
+        return match k {
+            0 => x.Peek()
+            1 => x.Peek()
+            2 => x.Peek()
+            3 => x.Peek()
+            4 => x.Peek()
+            5 => x.Peek()
+            6 => x.Peek()
+            7 => x.Peek()
+            8 => x.Peek()
+            9 => x.Peek()
+            10 => x.Peek()
+            11 => x.Peek()
+            else => x.Peek()
+        }
+    }
+}
+
+actor A(B Other, int K) {
+    int first = Other.Ask(K)
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+mut sum = 0
+mut all = List<A>()
+for k in [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 12] {
+    b = spawn B()
+    a = spawn A(b, k)
+    sum = sum + a.Get()
+    b.Set(a)
+    all.Add(a)
+}
+
+print(sum)
+for target in all {
+    send target.Fail()
+}
+
+print(all[0].Get())
+```
+
+Case: [tests/test-restart-reentrant-places.kz](../corpus/tests/test-restart-reentrant-places.kz)
+```kurz
+// each test restarts `A`s whose constructors wait on `B.Ask`, whose call back waits in the inbox for that constructor, from places
+// of `Ask` in the order the list gives, so that the runner's wait for the test finds nothing left to run; the words under its
+// `FAILED` line name the places in the file's order, each place that keeps out two calls with their count, at most ten lines
+// `kept out at` and then one line for the places past those
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask(int k) {
+        x = a
+        if x == null {
+            return 0
+        }
+
+        return match k {
+            0 => x.Peek()
+            1 => x.Peek()
+            2 => x.Peek()
+            3 => x.Peek()
+            4 => x.Peek()
+            5 => x.Peek()
+            6 => x.Peek()
+            7 => x.Peek()
+            8 => x.Peek()
+            9 => x.Peek()
+            10 => x.Peek()
+            11 => x.Peek()
+            else => x.Peek()
+        }
+    }
+}
+
+actor A(B Other, int K) {
+    int first = Other.Ask(K)
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+int KeepOut(List<int> places) {
+    mut sum = 0
+    mut all = List<A>()
+    for k in places {
+        b = spawn B()
+        a = spawn A(b, k)
+        sum = sum + a.Get()
+        b.Set(a)
+        all.Add(a)
+    }
+
+    print(sum)
+    for target in all {
+        send target.Fail()
+    }
+
+    return all[0].Get()
+}
+
+test "keeps out calls of thirteen places" {
+    print(KeepOut([12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 12]))
+}
+
+test "keeps out calls of three places, two of them twice" {
+    print(KeepOut([12, 1, 0, 1, 0]))
+}
+
+test "keeps out two calls of one place" {
+    print(KeepOut([0, 0]))
+}
+```
+
+Case: [actors/restart-no-call-back.kz](../corpus/actors/restart-no-call-back.kz)
+```kurz
+// the program of `actors/restart-reentrant.kz` with `B` given no `A`: at the restart `B.Ask` calls nothing back, and the constructor
+// ends
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Get())
+send a.Fail()
+print(a.Get())
+```
+
+Case: [actors/restart-send-waits.kz](../corpus/actors/restart-send-waits.kz)
+```kurz
+// at its restart `A`'s constructor waits on `B.Ask`, whose `send` of `Note` waits in `A`'s inbox behind that constructor and behind the
+// top-level code's `Get`, and runs on the new instance
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            send x.Note()
+            return 5
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+    List<int> items = [1, 2, 3]
+
+    pub void Note() {
+        print("note {items.Count}")
+    }
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Get())
+b.Set(a)
+send a.Fail()
+print(a.Get())
+print(a.Get())
+```
+
+Case: [actors/restart-then-callback.kz](../corpus/actors/restart-then-callback.kz)
 
 ### U23 (decided, §6) The pause before a restart grows
 
@@ -5418,10 +6087,17 @@ reading said back in comment 6986934971 states *(assumed: a reading of the build
 inbox for its start, and the first caller's own message joins that inbox after the call's arguments, behind them
 *(assumed: a reading of the build, proposed with this record and not put to the owner)*. A call that waits from the code its own start runs, a default that calls a
 function that calls `Cache.Get()`, waits for a start that waits for it, which the top-level code's
-wait that finds nothing left to run reads as `deadlock` (U18) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*: at that call's line where the top-level
-code ran the start, a call in a function it called being its own (U18), and, where an actor's message runs the start, at
-the line of the top-level code's own call that waits, or, where the top-level code waits on nothing, the end of the program
+wait that finds nothing left to run reads as `deadlock` (U18) *(assumed: T27 to T33 of comment 6983903100, built at the default while it waits for the owner)*, at that message's line, the call that closes the loop,
+wherever the code that runs the start stands, the top-level code, an actor's message or another
+actor's constructor, as at a restart (U22) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1): at that call's line where the top-level
+code ran the start, a call in a function it called being its own (U18), and, where an actor's message runs the start,
+where the top-level code waits on nothing, the end of the program
 drops the loop (U13) *(assumed: a reading of the build, proposed with this record and not put to the owner)*; a `send` from that code waits in the inbox behind the start *(assumed: a reading of the build, proposed with this record and not put to the owner)*.
+Where more than one call is kept out, a `per node` actor's start among the starts that keep them, the
+error names every one, the first place in source order on its line and each further place under it,
+with the counts and the cap of U22, as at a restart (U22) (§6, the owner, 2026-11-21, #599, comment
+7067131310, several 2; comment 7067139953, the form 1; comment 7067639209, the order 1, the same
+place 1, the cap 1).
 
 Case: [actors/per-node-first-message.kz](../corpus/actors/per-node-first-message.kz)
 ```kurz
@@ -5525,6 +6201,58 @@ int Measured() {
 }
 
 print(Cache.Size())
+```
+
+Case: [actors/per-node-reentrant-in-message.kz](../corpus/actors/per-node-reentrant-in-message.kz)
+```kurz
+// `User`'s `Use` starts `Cache`, whose default calls `Cache.Size` in the chain of `Use`, so that the call waits in `Cache`'s inbox
+// for the start that waits on it, and the error names that call, not the top-level code's call that waits
+
+actor Cache per node {
+    int size = Measured()
+
+    pub int Size() => size
+}
+
+int Measured() {
+    return Cache.Size() + 1
+}
+
+actor User {
+    pub int Use() => Cache.Size()
+}
+
+u = spawn User()
+print(u.Use())
+```
+
+Case: [actors/per-node-reentrant-nested.kz](../corpus/actors/per-node-reentrant-nested.kz)
+```kurz
+// `Outer`'s start, which the top-level code runs, starts `Inner`, whose default waits on `Helper.Ask`, whose call of `Outer.Size`
+// waits in `Outer`'s inbox for the start that waits on it, and the error names that call, not the top-level code's call that waits
+
+actor Helper {
+    pub int Ask() => Outer.Size()
+}
+
+actor Inner per node {
+    int value = Asked()
+
+    pub int Get() => value
+}
+
+actor Outer per node {
+    int size = Inner.Get()
+
+    pub int Size() => size
+}
+
+int Asked() {
+    h = spawn Helper()
+    return h.Ask()
+}
+
+print(Outer.Size())
 ```
 
 Case: [actors/per-node-child.kz](../corpus/actors/per-node-child.kz)

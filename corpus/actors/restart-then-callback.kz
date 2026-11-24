@@ -1,0 +1,32 @@
+// expect: output
+// | 41
+// | 51
+// threads: 1
+// rules: U17, U22
+
+// after a restart whose constructor ended, `B.Check`'s call of `Load` gets into `A`, which waits in `Save` on that chain
+
+actor B {
+    pub int Check(A x) => x.Load() * 10
+}
+
+actor A(B Other) {
+    mut int saved = 0
+
+    pub int Save(int n) {
+        saved = n
+        return Other.Check(this) + 1
+    }
+
+    pub int Load() => saved
+
+    pub void Fail() {
+        throw "a fails"
+    }
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Save(4))
+send a.Fail()
+print(a.Save(5))

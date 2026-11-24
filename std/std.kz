@@ -47,6 +47,20 @@ thread static mut long* pools = null
 thread static mut byte* own = null
 thread static mut byte* current = null
 
+// The heap the allocation entry serves, `current`, else `own`, null only while both are, and that heap's
+// table of size classes (`Heads`), null where it has none, as mimalloc's thread-local `_mi_heap_default`
+// names the heap that serves: set where `current` or `own` changes (`HeapUse`, `HeapCurrent`) and where a
+// heap's table is written while that heap serves (`HeapNew`, `HeapReset`, `Heads`), so that `Allocate`
+// finds a free block of its size class by one load of the thread, where it loaded `current`, then `own`,
+// then that heap's table. Issue 157's row `hex-decode-64-digits`, an `Allocate` of 48 bytes and a `Free`
+// for each decode, took 25.45 and 25.50 ms with those three loads, 24.56 and 25.33 with the heap that
+// serves loaded once and its table from it, and 19.56 and 19.79 with the table loaded once; its row
+// `substring` 13.11 and 13.19, 12.83 and 12.89, and 12.39 and 12.54 ms (2026-11-19, the best of 11 of
+// each of two builds of each form in one run, clang 23.1.4). The owner took it on 2026-11-20 (issue 157,
+// comment 7051500158, S4), with the rows it makes slower named in compiler/README.md.
+thread static mut byte* serving = null
+thread static mut long* servingHeads = null
+
 // The blocks of more than 262144 bytes that each thread freed and keeps (the owner, 2026-10-30, "Keep
 // them, as glibc"): the first of them, null where it keeps none, and the bytes they take, at most
 // 33554432, 32 mebibytes, as glibc's malloc serves from its heap, where it keeps what is freed, the
@@ -225,6 +239,10 @@ pub byte* HeapNew(long first) {
         *Ptr<byte*>(heap + 24) = null
         *Ptr<byte*>(heap + 32) = null
         *Ptr<long>(heap + 40) = 0
+        // a heap made where the heap that serves stood, freed while it served, has no table yet
+        if heap == serving {
+            servingHeads = null
+        }
     }
 
     sys.Left()
@@ -248,6 +266,17 @@ pub byte* HeapUse(byte* heap) {
     raw {
         before = current
         current = heap
+        if heap == null {
+            serving = own
+        } else {
+            serving = heap
+        }
+
+        if serving == null {
+            servingHeads = null
+        } else {
+            servingHeads = *Ptr<long*>(serving + 32)
+        }
     }
 
     return before
@@ -258,12 +287,10 @@ pub byte* HeapUse(byte* heap) {
 pub byte* HeapCurrent() {
     mut byte* heap = null
     raw {
-        heap = current
+        heap = serving
         if heap == null {
-            if own == null {
-                own = HeapNew(0)
-            }
-
+            own = HeapNew(0)
+            serving = own
             heap = own
         }
     }
@@ -321,6 +348,9 @@ pub void HeapReset(byte* heap) {
         *Ptr<byte*>(heap + 16) = first
         *Ptr<byte*>(heap + 24) = null
         *Ptr<byte*>(heap + 32) = null
+        if heap == serving {
+            servingHeads = null
+        }
     }
 
     sys.Left()
@@ -381,6 +411,9 @@ long* Heads(byte* heap) {
                 }
 
                 *Ptr<long*>(heap + 32) = table
+                if heap == serving {
+                    servingHeads = table
+                }
             }
         }
     }
@@ -500,13 +533,13 @@ byte* Reused(long bytes) {
 pub byte* Allocate(long size) {
     mut byte* p = null
     sys.Entered()
-    byte* heap = HeapCurrent()
-    if heap == null {
-        sys.Left()
-        return null
-    }
-
     if size > 262144 {
+        byte* heap = HeapCurrent()
+        if heap == null {
+            sys.Left()
+            return null
+        }
+
         long bytes = (size + 15) / 16 * 16 + 48
         p = Reused(bytes)
         raw {
@@ -529,19 +562,22 @@ pub byte* Allocate(long size) {
 
     raw {
         long k = Class(size)
-        long* table = *Ptr<long*>(heap + 32)
+        long* table = servingHeads
         if table != null && table[k] != 0 {
             p = Ptr<byte>(table[k])
             table[k] = *Ptr<long>(p)
         } else {
-            mut long room = 16
-            mut long i = 0
-            while i < k {
-                room = room * 2
-                i = i + 1
-            }
+            byte* heap = HeapCurrent()
+            if heap != null {
+                mut long room = 16
+                mut long i = 0
+                while i < k {
+                    room = room * 2
+                    i = i + 1
+                }
 
-            p = Bumped(heap, room)
+                p = Bumped(heap, room)
+            }
         }
     }
 
@@ -581,8 +617,14 @@ pub void Free(byte* p, long size) {
         return
     }
 
-    long* table = Heads(Owner(p, size))
+    byte* heap = Owner(p, size)
+    mut long* table = null
     raw {
+        table = servingHeads
+        if heap != serving || table == null {
+            table = Heads(heap)
+        }
+
         if table != null {
             long k = Class(size)
             *Ptr<long>(p) = table[k]
