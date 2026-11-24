@@ -589,10 +589,11 @@ variable, a path of fields from one, or an item of a list or an entry of a map s
 that `groups[key]?.Add(n)` adds to the map's list, as Rust's `get_mut` and `push`; on a value that is
 no place, a call's result, it is the error the same call gets without `?.`, `mut-required` (M5) (§4,
 the owner, 2026-11-24). A path through the chain's value, `cfg?.Items.Add(1)`, is what the same call
-in a test's branch is, `not supported` (N3, M5) *(the record marks this as assumed)*. Such a call on a
-path a call can change (N9), whose arguments run a call, is `nullable-unchecked`, the error the same
-call gets with that call on the line before it (§4, the owner, 2026-11-24); a local variable, a path
-of `data` fields from one and a map one holds stay allowed.
+in a test's branch is, `not supported` (N3, M5) (§4, the owner, 2026-11-24, issue 624, comment
+7135538740); issue 630 holds the gap for both forms. Such a call on a path a call can change (N9),
+whose arguments run a call, is `nullable-unchecked`, the error the same call gets with that call on
+the line before it, with the help line N9 gives it (§4, the owner, 2026-11-24); a local variable, a
+path of `data` fields from one and a map one holds stay allowed.
 
 Case: [null/conditional-access.kz](../corpus/null/conditional-access.kz)
 ```kurz
@@ -1020,7 +1021,12 @@ A write into such a path whose arguments or value run a call, a `mut` method on 
 the narrowing for it: `nullable-unchecked`, the error it gets with `Drop(c)` on the line before it, as N5 reads the same call after `?.` (§4, the owner, 2026-11-24,
 issue 628), where the build wrote into the `null` the call left. An item or an entry written into such a
 path, `x.L[0] = Clear(x)` and `x.M["k"] = Clear(x)`, is read so too *(the record marks this as
-assumed)*.
+assumed)*. The help line of that error, and of the same call after `?.` (N5), says that the call can set
+the path to `null` and to run it into a variable first, ``help: `Drop(c)` can set `c.Items` to `null`:
+run it into a variable before this line``, in place of N2's (§4, the owner, 2026-11-24, issue 624,
+comment 7135538740); a call that is no call of a function or a method, an interpolation or an `==`, is
+"a call in this line" there *(the record marks the words as assumed)*. A case pins an error's id and
+line (E2), so the help line has no case here.
 
 Case: [null/narrowed-field.kz](../corpus/null/narrowed-field.kz)
 ```kurz
