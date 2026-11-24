@@ -89,17 +89,15 @@ this cache does not have; so that a search's time stays in proportion to the pat
 the text's length. The cache and the Pike VM's lists of threads are lists, and one that cannot grow
 ends the process with `allocation-failed`, as a list's does (M9). The DFA costs `Regex.New` the
 making of its classes, once for each pattern; a call the making of the states its cache holds, which
-the build has a short text pay too, before the Pike VM runs, where the length Q3 of comment
-6813110851 chose, which is not built, has it pay none; and a call up to 2 MiB for its cache (§12, the owner, 2026-11-12, issue 176, comment 6819137493,
+a short text pays too, before the Pike VM runs; and a call up to 2 MiB for its cache (§12, the owner, 2026-11-12, issue 176, comment 6819137493,
 Q1, Q2 and Q4 of comment 6813110851). *(assumed, §12: the count of a state, the members a state
 keeps, the cache the searches of one call share, the checks at an emptying and of the capacity, and
-the end of a list that cannot grow)* Below a text length measured on a benchmark the Pike VM runs
-alone, without the DFA (§12, the owner, 2026-11-12, issue 176, comment 6819137493, Q3 of comment
-6813110851); the compiler does not build that length, and its DFA runs first at every length.
-*(assumed, §12, readings of that answer not put to the owner: the benchmark, the programs that
-measured the DFA's cost for pull request 491, the length found on it; what is measured, the bytes
-from a search's start to the text's end, so that a later search of `Matches` measures what is left;
-and the calls, every member that searches, `IsMatch` among them)*
+the end of a list that cannot grow)* The DFA runs first at every length of the text (§12, the owner,
+2026-11-20, issue 176, comment 7051500478, R1 of comment 7007321718, which replaces Q3 of comment
+6813110851): on the measurement §12 states, at one length whether the text holds a match decides
+which engine is faster, so that the Pike VM alone gains only under 4 to 12 bytes, and each length
+built, 8 bytes and 3, left rows slower, by up to 11% at 3 bytes; a short `Match` with a match at
+its start stays 28% slower than the Pike VM alone would make it.
 
 The backtracking engine reads its constructs as .NET's does: a lookbehind of any length; a
 backreference of a group that did not take part fails; under `(?i)` a backreference compares by the

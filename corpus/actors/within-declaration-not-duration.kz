@@ -1,0 +1,9 @@
+// expect: error type-mismatch at 5
+// rules: U41
+
+actor Store {
+    pub int Get() within 2 => 1
+}
+
+s = spawn Store()
+print(s.Get())

@@ -173,11 +173,15 @@ public static class SyntaxCopy
             ThrowStatement t => t with { Value = Optional(t.Value) },
             RawBlock r => r with { Body = Block(r.Body) },
             ConstAssertStatement c => c with { Condition = Expression(c.Condition), Text = (StringLiteral)Expression(c.Text) },
+            AssertionStatement a => a with { Condition = Expression(a.Condition) },
+            AdvanceStatement a => a with { Duration = Expression(a.Duration) },
+            MockStatement m => m with { Target = Type(m.Target), Replacement = Type(m.Replacement) },
             AsmStatement a => a with
             {
                 Operands = a.Operands.Select(o => o with { Value = Optional(o.Value), Output = Optional(o.Output), Body = o.Body is null ? null : Block(o.Body) }).ToList(),
             },
             FunctionDeclaration or TypeDeclaration or ExternBlock or UseStatement or FieldDeclaration or ConstructorDeclaration => s, // not supported in a body (F1)
+            TestDeclaration => s, // `syntax` in a body (Y1)
             _ => throw new InvalidOperationException($"the statement `{s.GetType().Name}` has no copy"),
         };
 

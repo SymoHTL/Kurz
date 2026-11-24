@@ -1,0 +1,9 @@
+// expect: error type-mismatch at 9
+// rules: U39
+
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+print(s.Get() within 2)
