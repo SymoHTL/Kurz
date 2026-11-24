@@ -1,5 +1,6 @@
-// expect: throws actor-gone at 25
+// expect: throws actor-gone at 26
 // | 2
+// threads: 1
 // rules: U43, U25
 
 // `Store` crashed and its policy stopped it in the wait of `o.Ping()`, before the call of `Get` is queued past its deadline:

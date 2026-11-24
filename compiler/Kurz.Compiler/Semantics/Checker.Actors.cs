@@ -1056,8 +1056,8 @@ public sealed partial class Checker
     /// as a block's is (U40, <see cref="CheckBound"/>), after the call's arguments, and recorded as one that can wait where it runs a call,
     /// as an argument is (<see cref="RecordWaits"/>); on any other call, a <c>send</c>'s (U6), a function's, a class's method's or an
     /// actor's own method called inside it, it is <c>syntax</c>, as <c>send</c> before what is no call of an actor's method is (U14) (U41;
-    /// assumed: T11 of comment 6967625156), the bound then read with no diagnostic, as is that of a call that reported its own error (U41;
-    /// E1), so that a variable it reads counts as read.
+    /// assumed: T11 of comment 6967625156), the bound then read with no diagnostic, as is that of a call that reported its own error (U41,
+    /// E1; assumed: a reading of the build), so that a variable it reads counts as read.
     /// </summary>
     private void CallClause(CallExpression c, Expression bound, Typed result)
     {
@@ -1089,8 +1089,8 @@ public sealed partial class Checker
     /// actor (U4, U9), its number literal, its sign included, read as a block's bound is (U40, <see cref="CheckBound"/>; U41, assumed: a
     /// reading of the build); on any other declaration, a function's, a class's, a data type's or an interface's method, or an actor's
     /// method without <c>pub</c>, it is <c>syntax</c>, as <c>send</c> before what is no call of an actor's method is (U14) (U41; assumed:
-    /// T11 of comment 6967625156). An actor the checker does not read has its one diagnostic (<see cref="RefuseUnreadActors"/>; U41, E1),
-    /// and a <c>static</c> method of an actor its <c>not supported</c> (U1).
+    /// T11 of comment 6967625156). An actor the checker does not read has its one diagnostic (<see cref="RefuseUnreadActors"/>; U41, E1;
+    /// assumed: a reading of the build), and a <c>static</c> method of an actor its <c>not supported</c> (U1).
     /// </summary>
     private void CheckDeclarationClauses(IReadOnlyList<Statement> statements)
     {

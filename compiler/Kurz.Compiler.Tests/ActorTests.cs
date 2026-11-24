@@ -6475,6 +6475,71 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_bound_that_gives_the_field_its_callee_was_read_from_another_actor_through_its_instance_leaves_the_call_with_the_actor_read_before_it()
+    {
+        // U39, F12, U2: the callee's reference, two words, is read before the arguments and the bound, as a receiver is, so that a bound
+        // that gives the field it was read from another actor, through its instance passed as `mut`, leaves the call with the actor read
+        // before it, which answers `1`, and the next read of the field the other actor, which answers `2`; M7 refuses no such bound, as
+        // it refuses one that changes the callee's variable or its list
+        // (`CheckerTests.The_bound_of_a_calls_clause_changes_nothing_its_callee_was_read_from`); under the allocator that makes every
+        // freed block inaccessible
+        const string swap = """
+            actor Store(int N) {
+                pub int Get() => N
+            }
+
+            class Box {
+                pub mut Store s = spawn Store(1)
+            }
+
+            duration Swap(mut Box held) {
+                held.s = spawn Store(2)
+                return 1s
+            }
+
+            mut b = Box()
+            print(b.s.Get() within Swap(mut b))
+            print(b.s.Get())
+
+            """;
+        Ran(BuildAndRun(swap, ListTests.Fenced, "actor-callee-field-swap"), 0, ["1", "2"], "");
+    }
+
+    [Fact]
+    public void A_bound_that_gives_the_actors_field_its_callee_was_read_from_another_actor_in_its_method_leaves_the_call_with_the_actor_read_before_it()
+    {
+        // U39, F12, U2: as through an instance passed as `mut`
+        // (`A_bound_that_gives_the_field_its_callee_was_read_from_another_actor_through_its_instance_leaves_the_call_with_the_actor_read_before_it`),
+        // a bound that calls a method of the actor that holds the field, which gives the field another actor, leaves the call with the
+        // actor read before it, which answers `1`, and the next read of the field the other actor, which answers `2`; under the
+        // allocator that makes every freed block inaccessible
+        const string reset = """
+            actor Store(int N) {
+                pub int Get() => N
+            }
+
+            actor Front {
+                mut Store helper = spawn Store(1)
+
+                duration Reset() {
+                    helper = spawn Store(2)
+                    return 1s
+                }
+
+                pub int Ask() => helper.Get() within Reset()
+
+                pub int Now() => helper.Get()
+            }
+
+            f = spawn Front()
+            print(f.Ask())
+            print(f.Now())
+
+            """;
+        Ran(BuildAndRun(reset, ListTests.Fenced, "actor-callee-field-reset"), 0, ["1", "2"], "");
+    }
+
+    [Fact]
     public void A_message_whose_callee_ends_while_its_clauses_bound_waits_holds_no_block_of_the_heap_the_end_freed()
     {
         // U39, U12, U21: the bound of the clause waits after the arguments ran, as an argument that waits does (`A_message_whose_callee_
