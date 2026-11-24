@@ -3695,7 +3695,11 @@ round can ask about it by the rule's id.
   ends it as a call, since it runs that `==` and the key's hash (the owner, 2026-11-02, #110, comment 6586836827).
   A `mut` method on such a path, and an item or an entry written into it, read where the path was narrowed and after a
   call in the arguments or the value ended that, is `nullable-unchecked`, the error it gets with that call on the line
-  before it (the owner, 2026-11-24, #628, comment 7131654741), where the build wrote into the `null` the call left.
+  before it (the owner, 2026-11-24, #628, comment 7131654741), where the build wrote into the `null` the call left. Its
+  help line, and that of the same call after `?.`, says that the call can set the path to `null` and to run it into a
+  variable first, ``help: `Drop(c)` can set `c.Items` to `null`: run it into a variable before this line``, the call
+  as its source writes it, or "a call in this line" where the call is no call of a function or a method (the owner,
+  2026-11-24, #624, comment 7135538740).
 - R2 with R4: a ring of classes is reported once, at the line of its class declared first, with the
   path of fields that closes it; a field holds a class through a list, a map's key or value, a union's
   case and a `data` value's fields, at any depth, and a field of a class some class derives from holds
