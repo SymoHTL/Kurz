@@ -228,7 +228,16 @@ one chain (U17), and the runner's wait meets `deadlock` where the test's actor w
 can run, a block of its child's policy among them, as `tests/test-deadlock.kz` shows. *(assumed: a reading of U17 and U18, proposed with the reading of comment 6998754650 and not put to the owner)* The runner is the
 root actor, which runs the tests in place of the program's statements, and each test's actor is its child
 with the policy `stop` (U25), so that a crash of the test's actor fails that test and nothing restarts
-(§11, the owner, 2026-11-20, comment 7051499099, Q13 (a) of comment 6998786049 at its lean). An error that
+(§11, the owner, 2026-11-20, comment 7051499099, Q13 (a) of comment 6998786049 at its lean). A `deadlock` that a call an actor's start keeps out closes (U22, U52) names that
+call's line in place of the test's, the line the top-level code's error names for that loop (U18) (§11,
+the owner, 2026-11-21, #599, comment 7063693195, Y5's line 1), in any file, the test's or a file the
+test's file `use`s or the standard library (§11, the owner, 2026-11-21, #599, comment 7067131310, the
+file 1); where more than one call is kept out, the words name every one, the first place in source
+order as `deadlock at <file>:<n>` and each further place on a line `kept out at <file>:<n>` under it,
+as the top-level code's error does (U22) (§11, the owner, 2026-11-21, #599, comment 7067131310,
+several 2; comment 7067139953, the form 1), in the order, with the counts and with the cap of U22,
+each line indented by four spaces as every word under a `FAILED` line (Y3) (§11, the owner,
+2026-11-21, #599, comment 7067639209, the order 1, the same place 1, the cap 1, the indent 1). An error that
 ends the process wherever it happens (U19), `allocation-failed` among them, and on Windows an overflow of
 an actor's stack, at which the build ends the process as the system ends it (U19), ends the run inside a
 test too: its error line stands on standard error, and neither that test's line, nor the tests after it,
@@ -286,6 +295,211 @@ test "waits on its own block" {
 
 test "after" {
     print("after")
+}
+```
+
+Case: [tests/test-restart-reentrant.kz](../corpus/tests/test-restart-reentrant.kz)
+```kurz
+// at its restart `A`'s constructor waits on `B.Ask`, whose call of `Peek` waits in `A`'s inbox for that constructor, so that the
+// runner's wait for the test finds nothing left to run, and the words under its `FAILED` line name that call of `Peek`, not the test
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+test "restarts into a call it keeps out" {
+    b = spawn B()
+    a = spawn A(b)
+    print(a.Get())
+    b.Set(a)
+    send a.Fail()
+    print(a.Get())
+}
+```
+
+Case: [tests/test-restart-reentrant-two.kz](../corpus/tests/test-restart-reentrant-two.kz)
+```kurz
+// at their restarts `A`'s and `C`'s constructors each wait on a call whose call back waits in the inbox for that constructor, so
+// that the runner's wait for the test finds nothing left to run, and the words under its `FAILED` line name both calls, `A`'s first
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor D {
+    mut C? c = null
+
+    pub void Set(C x) {
+        c = x
+    }
+
+    pub int Ask() {
+        x = c
+        if x != null {
+            return x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+actor C(D Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "c fails"
+    }
+
+    pub int Get() => first
+}
+
+test "restarts two actors into calls they keep out" {
+    b = spawn B()
+    a = spawn A(b)
+    d = spawn D()
+    c = spawn C(d)
+    print(a.Get())
+    print(c.Get())
+    b.Set(a)
+    d.Set(c)
+    send a.Fail()
+    send c.Fail()
+    print(a.Get())
+}
+```
+
+Case: [tests/test-restart-reentrant-places.kz](../corpus/tests/test-restart-reentrant-places.kz)
+```kurz
+// each test restarts `A`s whose constructors wait on `B.Ask`, whose call back waits in the inbox for that constructor, from places
+// of `Ask` in the order the list gives, so that the runner's wait for the test finds nothing left to run; the words under its
+// `FAILED` line name the places in the file's order, each place that keeps out two calls with their count, at most ten lines
+// `kept out at` and then one line for the places past those
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask(int k) {
+        x = a
+        if x == null {
+            return 0
+        }
+
+        return match k {
+            0 => x.Peek()
+            1 => x.Peek()
+            2 => x.Peek()
+            3 => x.Peek()
+            4 => x.Peek()
+            5 => x.Peek()
+            6 => x.Peek()
+            7 => x.Peek()
+            8 => x.Peek()
+            9 => x.Peek()
+            10 => x.Peek()
+            11 => x.Peek()
+            else => x.Peek()
+        }
+    }
+}
+
+actor A(B Other, int K) {
+    int first = Other.Ask(K)
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+int KeepOut(List<int> places) {
+    mut sum = 0
+    mut all = List<A>()
+    for k in places {
+        b = spawn B()
+        a = spawn A(b, k)
+        sum = sum + a.Get()
+        b.Set(a)
+        all.Add(a)
+    }
+
+    print(sum)
+    for target in all {
+        send target.Fail()
+    }
+
+    return all[0].Get()
+}
+
+test "keeps out calls of thirteen places" {
+    print(KeepOut([12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 12]))
+}
+
+test "keeps out calls of three places, two of them twice" {
+    print(KeepOut([12, 1, 0, 1, 0]))
+}
+
+test "keeps out two calls of one place" {
+    print(KeepOut([0, 0]))
 }
 ```
 

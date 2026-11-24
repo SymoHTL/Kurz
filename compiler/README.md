@@ -1208,7 +1208,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   in a loop until the word is set, as tokio's `block_on` runs its queue until its future is ready, so
   that a call behind any count of messages takes the stack of one, and ends the process with
   `deadlock` at the call's line where the queue is empty, no restart's pause runs and the word is not set
-  (U18, U42), and with `call-timeout` there once its deadline passes (U36); inside a
+  (U18, U42), or at the line of a call that an actor's start keeps out where one closes the loop, a place
+  `Enqueue` stores in that call's reply (U22, U52), the first place's in source order where more than one closes it
+  (`KeptSorted`), with a line `kept out at <file>:<n>` for each further place under the error line, a place with the
+  count of its calls where more than one, at most 10 such lines and then `... and K more` (`KeptLines`,
+  `DeadlockKept`), and with `call-timeout` there once its deadline passes (U36); inside a
   message it parks the activation, switching to the thread's side until the word is set or a timer of the
   thread, the timers kept in the order of their deadlines, wakes it at its deadline (U37, U38), and the scheduler drops
   a message whose deadline passed before it starts it, its reply's word set to 4 (`ActorTests`).
@@ -2159,7 +2163,10 @@ table of the tests, each test's function, its name as written and its line, and 
 `stop`, by one message with no deadline (D6), and waits for it as the top-level code waits for a call
 (`RootWait`, the loop `Wait` runs). The test passes where the actor answered, and fails where it crashed,
 the words of its crash kept for the line under `FAILED` and no log line written for it (F1, F3), or where
-the wait found nothing left to run, `deadlock at <file>:<the test's line>` (F5). Then every actor the
+the wait found nothing left to run, `deadlock at <file>:<the test's line>` (F5), or the place of the
+call an actor's start keeps out where that call closes the loop, which `TestRan` looks for as `Wait`
+does (`Kept`, U22, U52) and `RunTests` names (Y5), and where more than one closes it, the lines of
+`KeptLines` as the top-level code's error writes them, each indented by four spaces. Then every actor the
 test made ends at once, parked ones too (F6): the records of the run queue, each activation's stack back
 in the pool with its open copy sessions ended, the stack a pending block keeps, every heap, the heaps of
 messages, the timers, the pauses and the deadline of the top-level code's `within`, so that no timer and
