@@ -37,6 +37,9 @@ public sealed class SyntaxCopyTests
             r = 0..3
             s = 0..<3
             p = (a)
+            check a == (1)
+            advance 1s
+            mock Point with Point
             int? maybe = null
             List<int?> list = [1, null]
             Map<string, int | bool> map = Map<string, int | bool>()

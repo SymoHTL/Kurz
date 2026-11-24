@@ -20,7 +20,7 @@ raw {
     print(counter.FetchAdd(3, MemoryOrder.Relaxed))
     print(counter.FetchSub(2, MemoryOrder.Acquire))
     print(counter.FetchAnd(6, MemoryOrder.SeqCst))
-    print(counter.FetchOr(1, MemoryOrder.SeqCst))
+    print(counter.FetchOr(3, MemoryOrder.SeqCst))
     print(counter.FetchXor(15, MemoryOrder.SeqCst))
     Fence(MemoryOrder.SeqCst)
 }

@@ -1,0 +1,30 @@
+// expect: output
+// | 2
+// | crashed at 20
+// | -1
+// rules: U49
+
+actor Store {
+    pub int Get() => 1
+}
+
+// the top-level code supervises the child of each `attempt` and waits for it, as it waits for a call
+s = spawn Store()
+v = attempt { s.Get() + 1 } else {
+    Crashed c => -1
+}
+print(v)
+w = attempt {
+    n = s.Get()
+    if n > 0 {
+        throw "top"
+    }
+
+    return n
+} else {
+    Crashed c => {
+        print("crashed at {c.Place.Line}")
+        -1
+    }
+}
+print(w)

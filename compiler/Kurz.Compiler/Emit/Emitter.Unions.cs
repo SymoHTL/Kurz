@@ -143,12 +143,7 @@ public sealed partial class Emitter
                 if (arm.Pattern is TypePattern { Binding: not null } tp)
                 {
                     // the name holds the value as a variable does, so that the arm can change the subject's variable (M3)
-                    var bindingType = Sub(Model.PatternTypeOf(tp));
-                    if (Counted(bindingType))
-                    {
-                        Retain(fn.Value($"load {Ir(bindingType)}, ptr {bound}"), bindingType);
-                        Declare(bound!, bindingType);
-                    }
+                    HeldByArm(bound!, Sub(Model.PatternTypeOf(tp)), counted: true);
                 }
 
                 if (slot is null)
@@ -172,6 +167,31 @@ public sealed partial class Emitter
         fn.Unreachable();
         fn.Block(done);
         return slot is null ? null : fn.Value($"load {Ir(result!)}, ptr {slot}");
+    }
+
+    /// <summary>
+    /// C4, O5: the value an arm took, in <paramref name="slot"/>, held as a variable of the arm's block, which the block's end and every
+    /// jump out of it let go of, through the test for the empty value where a <c>move</c> of the name emptied the place
+    /// (<see cref="LetGoOf"/>), as Rust drops the variables a <c>match</c> arm's pattern binds when the arm's scope ends and drops none a
+    /// move left uninitialized (the Rust Reference, "Destructors", <c>destructors.scope.bindings.match-arm</c> and
+    /// <c>destructors.intro</c>). A <c>match</c> binds a count of its own, <paramref name="counted"/>, since its subject's place keeps
+    /// the one it holds (M3); the arm of a postfix <c>else</c> takes over the count of the call's result, which no place holds, as a
+    /// binding by value moves out of the temporary a <c>match</c> evaluates its value into (the Rust Reference, "Match expressions",
+    /// <c>expr.match.scrutinee-value</c>).
+    /// </summary>
+    private void HeldByArm(string slot, KurzType type, bool counted)
+    {
+        if (!Counted(type))
+        {
+            return;
+        }
+
+        if (counted)
+        {
+            Retain(fn.Value($"load {Ir(type)}, ptr {slot}"), type);
+        }
+
+        Declare(slot, type);
     }
 
     /// <summary>C9: an arm of a <c>match</c> used as a value: its value converted to the match's type, which the match's value holds, or its <c>throw</c>.</summary>
@@ -340,9 +360,20 @@ public sealed partial class Emitter
     /// </summary>
     private string? EmitElse(ElseExpression e, bool asValue)
     {
-        var call = (CallExpression)Unwrap(e.Call);
-        var union = Sub(Model.CallOf(call).Result) as UnionType ?? throw new InvalidOperationException($"`else` after a call whose result is no union at line {e.Line}: the checker reports it (O5)");
-        var value = EmitCall(call) ?? throw new InvalidOperationException($"the call before `else` at line {e.Line} has no value");
+        UnionType union;
+        string value;
+        if (Unwrap(e.Call) is AttemptExpression attempt)
+        {
+            union = (UnionType)Sub(Model.AttemptOf(attempt).Type); // U46: the whole value of the `attempt`, its block's value and `Crashed`
+            value = EmitAttemptValue(attempt);
+        }
+        else
+        {
+            var call = (CallExpression)Unwrap(e.Call);
+            union = Sub(Model.CallOf(call).Result) as UnionType ?? throw new InvalidOperationException($"`else` after a call whose result is no union at line {e.Line}: the checker reports it (O5)");
+            value = EmitCall(call) ?? throw new InvalidOperationException($"the call before `else` at line {e.Line} has no value");
+        }
+
         var success = union.Cases[0];
         var tag = Tag(value, union);
         var slot = asValue && success is not VoidType ? fn.Alloca(Ir(success), "recovered") : null;
@@ -369,7 +400,8 @@ public sealed partial class Emitter
 
     /// <summary>
     /// O5: the arms of an <c>else</c> over the union's value, whose case is not its success, of a call or of a loop's collection (S16): each
-    /// arm takes the cases its pattern takes and recovers into <paramref name="slot"/>, returns or throws, and goes on at
+    /// arm takes the cases its pattern takes, holds the case it took as a variable of its block, which its end lets go of
+    /// (<see cref="HeldByArm"/>), and recovers into <paramref name="slot"/>, returns or throws, and goes on at
     /// <paramref name="done"/>; a case no arm takes leaves the function (O2, O3).
     /// </summary>
     private void ElseArms(IReadOnlyList<MatchArm> arms, string value, UnionType union, string? slot, string done, int line)
@@ -386,23 +418,38 @@ public sealed partial class Emitter
             var caseSlot = Test(arm.Pattern, value, union, tag, rest, body, next);
             fn.Block(body);
             var outer = elseCase;
+            (string Slot, KurzType Type)? held = null;
             if (arm.Pattern is TypePattern tp)
             {
                 var armType = Sub(Model.PatternTypeOf(tp));
                 taken.Add(armType);
                 elseCase = (fn.Value($"load {Ir(armType)}, ptr {caseSlot}"), armType);
+                held = (caseSlot!, armType);
             }
             else if (arm.Pattern is ElsePattern)
             {
                 hasElse = true;
-                elseCase = (value, union);
+                elseCase = success is VoidType ? Reached(value, union, tag, rest) : (value, union);
+                if (Counted(union))
+                {
+                    held = (fn.Alloca(Ir(union), "case"), union);
+                    fn.Emit($"store {Ir(union)} {value}, ptr {held.Value.Slot}");
+                }
             }
             else
             {
                 throw new InvalidOperationException($"an arm of `else` that names no case type at line {arm.Line}: the checker reports it (O5)");
             }
 
-            InScope(() => InRegion(() => ElseArm(arm.Body, success, slot)));
+            InScope(() =>
+            {
+                if (held is { } h)
+                {
+                    HeldByArm(h.Slot, h.Type, counted: false); // the case the result gave, which the arm holds, a name bound or not
+                }
+
+                InRegion(() => ElseArm(arm.Body, success, slot));
+            });
             elseCase = outer;
             if (!fn.Terminated)
             {
@@ -421,6 +468,30 @@ public sealed partial class Emitter
         {
             Leave(value, union, left, line);
         }
+    }
+
+    /// <summary>
+    /// O7 with A7: the case value that reached the arm <c>else</c> over a union whose success is <c>void</c>, which has no text, as a value
+    /// of the cases beside the success, which a bare <c>throw</c> there throws: of one case, its value; of more, a union of them, by the
+    /// tag. A union whose success has a value has a text, the text of its case, and is thrown as it is.
+    /// </summary>
+    private (string Value, KurzType Type) Reached(string value, UnionType union, string tag, List<KurzType> rest)
+    {
+        if (rest.Count == 1)
+        {
+            return (Payload(value, union, rest[0]), rest[0]);
+        }
+
+        var cases = new UnionType(rest);
+        var slot = fn.Alloca(Ir(cases), "case");
+        var done = fn.Label("reached");
+        ByCase(tag, union, rest, c =>
+        {
+            fn.Emit($"store {Ir(cases)} {MakeUnion(cases, c, Payload(value, union, c))}, ptr {slot}");
+            fn.Branch(done);
+        });
+        fn.Block(done);
+        return (fn.Value($"load {Ir(cases)}, ptr {slot}"), cases);
     }
 
     /// <summary>O5: what an arm of <c>else</c> does; in a block, its last statement: the value it recovers with, or what it does.</summary>

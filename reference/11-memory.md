@@ -1671,7 +1671,11 @@ then zeros *(assumed: as §13 marks them)*. What such a parameter takes
 from a value that is not a constant is open (§14): refused, as Rust refuses it, or chosen at run time
 among the instruction's forms. `Vector128.Create` and `Vector256.Create` take one value, which every
 lane takes, or one for each lane, another count being `argument-mismatch`, its lane type picked as a call's function is (F13, F14), and `GetElement` of an
-index below 0 or past the lanes raises `index-out-of-range` *(assumed: as §13 marks them)*. A file's
+index below 0 or past the lanes raises `index-out-of-range` *(assumed: as §13 marks them)*.
+`Vector128.Create` read as a value is `syntax`, as every function of a type read so is, a name that
+cannot stand as a value (F11), R19's `AtomicLong.FromPtr` and D18's `Plan.From` among them (§6, the
+owner, 2026-11-17, #572, comment 6961064484, Q3, "syntax for all (Recommended)"), and so is an
+intrinsic read as a value, `X86.Sse41.Extract`, a function of its class *(assumed in §6)*. A file's
 own declaration of `X86`, `Arm`, `Vector128` or `Vector256`, at any level, is `redeclared`, as a file's
 own `EnvError` is (S14), while a field takes the name (§13, the owner, 2026-11-01, "redeclared, as
 File").
@@ -1805,6 +1809,12 @@ Case: [memory/intrinsic-create-count.kz](../corpus/memory/intrinsic-create-count
 ```kurz
 // `Create` takes one value, or one for each of the four lanes of an `int` vector (R18)
 print(Vector128.Create(1, 2, 3).GetElement(0))
+```
+
+Case: [memory/intrinsic-function-value.kz](../corpus/memory/intrinsic-function-value.kz)
+```kurz
+// a function of a type is called, and no value (R18, F11)
+print(Vector128.Create)
 ```
 
 Case: [memory/intrinsic-redeclared.kz](../corpus/memory/intrinsic-redeclared.kz)
@@ -1993,9 +2003,22 @@ C++'s `std::atomic_ref` is: `AtomicLong.FromPtr(p)` of a `long*`, `AtomicPtr<T>.
 `T**`, `T` a type a pointer points to (R10), and the word it reads is a plain value of the program's
 memory (§6, the owner, 2026-11-17, #519, comment 6948910734, Q6, "View only (Recommended)"),
 aligned to its size, as Rust's `from_ptr` requires; `FromPtr` reads nothing, so it needs no `raw`
-block, as `Ptr<T>(x)` needs none (R14) *(assumed in §6)*.
+block, as `Ptr<T>(x)` needs none (R14) *(assumed in §6)*. A member on a word not aligned to its
+size is a misuse of `raw` code, as a read through `null` is (R10), and so is a member of an
+`AtomicBool` on a byte that holds neither 0 nor 1, which no Rust `bool` holds *(assumed in §6)*.
+`AtomicPtr` with no type argument is `cannot-infer` where it stands as a type, as `List` is (M9),
+and `AtomicPtr.FromPtr(p)` takes its `T` from `p`, a `T**`, as T27 infers a type argument a call
+does not write, a `p` of another type giving `T` nothing and the call `cannot-infer`; a type
+argument on `AtomicBool`, `AtomicInt`, `AtomicLong` or `Fence`, and a count other than one on
+`AtomicPtr`, is `syntax` (T17, T19, E4); the name of an atomic type or of `Fence` where a value
+stands is `syntax`, as a type's (T10) and a function's (F11) are *(assumed in §6)*.
+`AtomicLong.FromPtr` read as a value is `syntax` too, as every function of a type read so is, a name
+that cannot stand as a value (F11), R18's `Vector128.Create` and D18's `Plan.From` among them (§6, the
+owner, 2026-11-17, #572, comment 6961064484, Q3, "syntax for all (Recommended)"). A view crosses into no actor, as a pointer does not (U12; §6, the owner,
+2026-11-17, #572, comment 6961064484, Q1, "Refuse with an id (Recommended)"), and either is
+`pointer-crosses`, with a word or with none *(assumed in §6: the id and the words)*.
 
-The members are Rust's where Rust gives them to the type (§6, Q1), with Rust's parameters: `Load(order)`,
+The members are a set chosen from Rust's, where Rust gives them to the type (§6, Q1), with Rust's parameters: `Load(order)`,
 `Store(val, order)`, `Swap(val, order)`, `CompareExchange(current, new, success, failure)` and
 `CompareExchangeWeak(current, new, success, failure)` on all four, `FetchAdd(val, order)` and
 `FetchSub(val, order)` on `AtomicInt` and `AtomicLong`, and `FetchAnd`, `FetchOr` and `FetchXor` on all
@@ -2003,23 +2026,26 @@ four, an `AtomicPtr<T>`'s taking a `long` of bits for the address, as Rust's tak
 *(assumed in §6: the parameters, and no `FetchAdd` or `FetchSub` on `AtomicBool` or `AtomicPtr<T>`, as Rust
 has none of those names there)*; another member is `unknown-name`. `Load` gives the word, `Swap` and the
 `Fetch` members the value it held before, `FetchAdd` and `FetchSub` wrapping as Rust's do, and `Store`
-nothing *(assumed in §6)*. `CompareExchange` gives
+and `Fence` nothing *(assumed in §6)*. `CompareExchange` gives
 a union (O1), the value it found where it stored, or the case `NotExchanged<T>(T Value)` with the value
 it found where it did not, as Rust's `Result<T, T>`, and `CompareExchangeWeak` may not store where the
 word holds `current`, as Rust's may fail spuriously *(assumed in §6)*. A member and `Fence` stand in a
 `raw` block, and anywhere else are `raw-required`, as a read through a pointer is (R10)
 *(assumed in §6)*.
 
-An order written at the call as a value of `MemoryOrder`, `MemoryOrder.Release`, that Rust's lint
+An order written at the call as a value of `MemoryOrder`, `MemoryOrder.Release`, in parentheses or not, that Rust's lint
 `invalid_atomic_ordering` refuses is the compile error `invalid-ordering` at its argument: `Release`
 or `AcqRel` for a `Load`, `Acquire` or `AcqRel` for a `Store`, `Release` or `AcqRel` for the failure
 order of a compare-exchange, and `Relaxed` for `Fence`; any other order is read when the call runs,
-and one that Rust refuses there ends the program with `invalid-ordering-at-run-time` at the call's
-line, as Rust's `load` panics on it *(assumed in §6)*. A file's own declaration of a type or a
-function named `AtomicBool`, `AtomicInt`, `AtomicLong`, `AtomicPtr`, `Fence`, `MemoryOrder` or
-`NotExchanged` is `redeclared`, as R18's names are, and `Ordering` stays free for a program's own
-type (§6, Q7); a view has no text (`no-text`), and `==` does not take it (`type-mismatch`), as Rust's
-atomic types implement neither `Display` nor `PartialEq` *(assumed in §6)*.
+and an order this rule refuses for the call, read there, is the exception
+`invalid-ordering-at-run-time` at the call's line (E3), which in a message is the crash of its actor
+(U19), as Rust's `load` panics on it *(assumed in §6)*. A file's own type or function named
+`AtomicBool`, `AtomicInt`, `AtomicLong`, `AtomicPtr`, `Fence`, `MemoryOrder` or `NotExchanged` is
+`redeclared`, as R18's names are, and `Ordering` stays free for a program's own type (§6, Q7); a
+variable or a parameter so named is `redeclared` too, and a field so named, a parameter of a primary
+constructor among them, excepted *(assumed in §6)*; a view has no text (`no-text`), and neither `==` nor `!=` takes it
+(`type-mismatch`), as Rust's atomic types implement neither `Display` nor `PartialEq` *(assumed in
+§6)*.
 
 Case: [memory/atomic-long.kz](../corpus/memory/atomic-long.kz)
 ```kurz
@@ -2033,7 +2059,7 @@ raw {
     print(counter.FetchAdd(3, MemoryOrder.Relaxed))
     print(counter.FetchSub(2, MemoryOrder.Acquire))
     print(counter.FetchAnd(6, MemoryOrder.SeqCst))
-    print(counter.FetchOr(1, MemoryOrder.SeqCst))
+    print(counter.FetchOr(3, MemoryOrder.SeqCst))
     print(counter.FetchXor(15, MemoryOrder.SeqCst))
     Fence(MemoryOrder.SeqCst)
 }
@@ -2044,16 +2070,20 @@ Case: [memory/atomic-kinds.kz](../corpus/memory/atomic-kinds.kz)
 ```kurz
 mut bool flag = false
 mut int count = 2147483647
+mut long least = -9223372036854775808
 mut long cell = 7
 mut long* slot = &cell
 done = AtomicBool.FromPtr(&flag)
 total = AtomicInt.FromPtr(&count)
+bottom = AtomicLong.FromPtr(&least)
 head = AtomicPtr<long>.FromPtr(&slot)
 raw {
     print(done.Swap(true, MemoryOrder.AcqRel))
     print(done.Load(MemoryOrder.Acquire))
     print(total.FetchAdd(1, MemoryOrder.Relaxed))
     print(total.Load(MemoryOrder.Relaxed))
+    print(bottom.FetchSub(1, MemoryOrder.Relaxed))
+    print(bottom.Load(MemoryOrder.Relaxed))
     print(long(head.FetchOr(1, MemoryOrder.SeqCst)) - long(&cell))
     print(long(head.FetchAnd(-2, MemoryOrder.SeqCst)) - long(&cell))
     print(*head.Load(MemoryOrder.SeqCst))
@@ -2149,4 +2179,121 @@ mut long word = 5
 first = AtomicLong.FromPtr(&word)
 second = AtomicLong.FromPtr(&word)
 print(first == second)
+```
+
+Case: [memory/atomic-ptr-inferred.kz](../corpus/memory/atomic-ptr-inferred.kz)
+```kurz
+// `&slot`, a `long**`, gives the `T` of `AtomicPtr<T>.FromPtr`, which the call does not write, its `long` (T27)
+mut long cell = 7
+mut long* slot = &cell
+head = AtomicPtr.FromPtr(&slot)
+raw {
+    print(*head.Load(MemoryOrder.SeqCst))
+}
+```
+
+Case: [memory/atomic-ptr-no-type-argument.kz](../corpus/memory/atomic-ptr-no-type-argument.kz)
+```kurz
+void Take(AtomicPtr cell) {
+    print(1)
+}
+
+print(2)
+```
+
+Case: [memory/atomic-type-argument.kz](../corpus/memory/atomic-type-argument.kz)
+```kurz
+void Take(AtomicLong<int> cell) {
+    print(1)
+}
+
+print(2)
+```
+
+Case: [memory/atomic-function-value.kz](../corpus/memory/atomic-function-value.kz)
+```kurz
+// a function of a type is called, and no value (R19, F11)
+print(AtomicLong.FromPtr)
+```
+
+Case: [memory/atomic-crosses.kz](../corpus/memory/atomic-crosses.kz)
+```kurz
+actor Counter(AtomicLong Word) {
+    pub void Show() {
+        print(1)
+    }
+}
+
+mut long word = 5
+// a view crosses into no actor, as the pointer it holds does not (R19, U12)
+c = spawn Counter(AtomicLong.FromPtr(&word))
+c.Show()
+```
+
+Case: [memory/atomic-invalid-store.kz](../corpus/memory/atomic-invalid-store.kz)
+```kurz
+mut long word = 5
+counter = AtomicLong.FromPtr(&word)
+raw {
+    counter.Store(6, MemoryOrder.Release)
+    counter.Store(7, MemoryOrder.Acquire)
+}
+```
+
+Case: [memory/atomic-invalid-fence.kz](../corpus/memory/atomic-invalid-fence.kz)
+```kurz
+raw {
+    Fence(MemoryOrder.SeqCst)
+    Fence(MemoryOrder.Relaxed)
+}
+```
+
+Case: [memory/atomic-invalid-failure.kz](../corpus/memory/atomic-invalid-failure.kz)
+```kurz
+mut long word = 8
+cell = AtomicLong.FromPtr(&word)
+raw {
+    match cell.CompareExchange(8, 9, MemoryOrder.AcqRel,
+        MemoryOrder.Release) {
+        long found => print(found)
+        NotExchanged<long> missed => print(missed.Value)
+    }
+}
+```
+
+Case: [memory/atomic-invalid-parentheses.kz](../corpus/memory/atomic-invalid-parentheses.kz)
+```kurz
+// an order in parentheses is still written at the call
+mut long word = 5
+counter = AtomicLong.FromPtr(&word)
+raw {
+    print(counter.Load((MemoryOrder.Acquire)))
+    print(counter.Load((MemoryOrder.AcqRel)))
+}
+```
+
+Case: [actors/block-reason-atomic-order.kz](../corpus/actors/block-reason-atomic-order.kz)
+```kurz
+actor Reader {
+    pub void Show(MemoryOrder order) {
+        mut long word = 5
+        cell = AtomicLong.FromPtr(&word)
+        raw {
+            print(cell.Load(order))
+        }
+    }
+
+    pub int Half(int n) => n / 2
+}
+
+r = spawn Reader() on crash (c) {
+    match c.Reason {
+        RuntimeError e => print("{e.Kind} at {c.Place.Line}")
+    }
+
+    restart
+}
+send r.Show(MemoryOrder.Release)
+send r.Show(MemoryOrder.Acquire)
+print(r.Half(4))
 ```

@@ -87,7 +87,7 @@ flowchart TD
         a case on an open rule; a sample that differs from its corpus file;
         a code block that is neither a case sample nor marked text, or that is never closed;
         a fence indented or made of tildes outside a code block, which the lint would not read (inside one it is content);
-        a corpus header that cannot be read or names an unknown rule;
+        a corpus header that cannot be read, a command line other than `// command: test` among them, or names an unknown rule;
         an error id its table (compile or run-time) does not list, or lists for other rules;
         a table row whose id no case expects, unless it is a run-time row whose no-case note gives the reason none can,
         and such a note on a compile-error row or on a row that a case does expect;

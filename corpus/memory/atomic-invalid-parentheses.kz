@@ -1,0 +1,11 @@
+// expect: error invalid-ordering at 10
+// allow: raw
+// rules: R19
+
+// an order in parentheses is still written at the call
+mut long word = 5
+counter = AtomicLong.FromPtr(&word)
+raw {
+    print(counter.Load((MemoryOrder.Acquire)))
+    print(counter.Load((MemoryOrder.AcqRel)))
+}

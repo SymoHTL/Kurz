@@ -142,7 +142,7 @@ public sealed partial class Checker
         {
             if (a.Word == ArgumentWord.Copy)
             {
-                var (kind, why, limit) = CrossingOf(model.TypeOf(a.Value).Type);
+                var (kind, why, limit, _) = CrossingOf(model.TypeOf(a.Value).Type);
                 if ((limit ?? (kind == ActorCrossing.Never ? why : null)) is { } refused)
                 {
                     NotSupported(a.Line, $"`copy` of {refused} (U12)");
@@ -1630,7 +1630,9 @@ public sealed partial class Checker
 
             if (classes.TryGetValue(n.Name, out var classSymbol) && ImplicitField(n.Name) is null)
             {
-                return CallStatic(classSymbol, m, c, null); // K7: `T.M(args)`, as a method on an instance is read (CallMethod)
+                return classSymbol.PerNode
+                    ? CallByName(classSymbol, m, c, null) // U51: `Cache.Get(1)`, a message to the one actor of a `per node` type
+                    : CallStatic(classSymbol, m, c, null); // K7: `T.M(args)`, as a method on an instance is read (CallMethod)
             }
 
             if ((data is not null && data.HasFields) || IsBuiltInName(n.Name) || functions.ContainsKey(n.Name))

@@ -1,0 +1,42 @@
+// expect: output
+// | started
+// | started
+// | 1
+// | 9
+// | started
+// | 0
+// threads: 1
+// rules: U54, U26
+
+// `Counter`'s second `Fail` runs before `Probe`'s `Ping`, as one thread runs the ready actors first in, first out (U35)
+
+actor Counter per node on crash restart after 1ms max 1 in 1min {
+    mut int count = Started()
+
+    pub void Add() {
+        count = count + 1
+    }
+
+    pub void Fail() {
+        throw "counter fails"
+    }
+
+    pub int Get() => count
+}
+
+int Started() {
+    print("started")
+    return 0
+}
+
+actor Probe {
+    pub int Ping() => 9
+}
+
+p = spawn Probe()
+send Counter.Fail()
+send Counter.Add()
+print(Counter.Get())
+send Counter.Fail()
+print(p.Ping())
+print(Counter.Get())

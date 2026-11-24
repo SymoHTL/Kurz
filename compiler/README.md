@@ -283,12 +283,23 @@ words (the owner, 2026-10-29, "Keep these words"), the first on Linux and the se
 no child inherits the lock file, they check on Linux alone, reading `/proc`: on Windows nothing
 checks either.
 
+`kurz test [--release] [--lines] [--cpu <name>] <file.kz>` builds the file's tests in place of its
+top-level code, which does not run, and runs them in a place of its own as `kurz run` runs a program,
+with no word for the program: `--` and an argument after the file are the usage's, since a test reads no
+`args` (Y2, F17). It writes `test "name" ... ok` or `test "name" ... FAILED` for each test, in the order of
+the file, after the lines the test printed, the words of a failed test's crash indented under its
+`FAILED` line, and then the counts, `2 tests: 1 passed, 1 failed`, `1 test:` for one (Y3), and ends with
+0 where every test passed and 1 where one failed (Q4). A program the checker accepts with no test gets
+`error: no test in <file>` and a `help:` line naming the form, and the exit code 1 (Y4, Q6).
+`CommandTests` holds each of these.
+
 Any other command line gets the usage on standard error and the exit code 1:
 
     usage: kurz --version [--verbose]
            kurz build [--release] [--lines] [--cpu <name>] <file.kz> [-o <output>]
            kurz run [--release] [--lines] [--cpu <name>] <file.kz> [-- <argument>...]
            kurz exec [--release] [--lines] [--cpu <name>] "<program text>" [-- <argument>...]
+           kurz test [--release] [--lines] [--cpu <name>] <file.kz>
            run and exec pass the words after -- to the program
 
 ### Readings the record leaves open to the command
@@ -1079,13 +1090,17 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   end of the run queue, so that an inbox keeps the order its messages were sent in
   (U5, U15, U17). The function of a method's messages, made at its first use and named outside the
   program's functions, so that a trace leaves its frame out with the runtime's, calls the method on
-  the state, lets go of the arguments, takes the reply off the message by the runtime's `ReplyTaken`,
+  the state, lets go of the arguments, so that a crash in that release, an overflow of the actor's
+  stack among it, finds the reply still on the message and is answered `callee crashed` (U20), takes
+  the reply off the message by the runtime's `ReplyTaken`,
   one atomic swap that leaves null there, so that of it and the crash of the waiter's actor, which
   unhooks the reply by the same swap, exactly one owns the reply, as tokio's `oneshot` decides
   between its two ends by one word (not checked at source), and where it owns the reply moves the
   result beside it and calls the runtime's `Replied`, which reads the reply's waiter, then stores the
   reply's word with release, then wakes the actor where the activation that waits on it is its top,
-  as tokio's `oneshot` stores its value and wakes its receiver, and frees the message. An argument of a message or of `spawn` crosses as the type of its parameter says,
+  as tokio's `oneshot` stores its value and wakes its receiver, lets go of the method's own result
+  once the reply is set, so that no code whose fault is the actor's crash stands between the swap and
+  `Replied`, and frees the message. An argument of a message or of `spawn` crosses as the type of its parameter says,
   where it is evaluated, before a later argument's call that waits can change what it reads, and a
   result crosses before it moves beside the reply, while the method's count of it still holds it
   (U12): a value that holds a block is copied deep into the receiver's heap, the actor's or, for a
@@ -1550,7 +1565,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   what it gathered of each pipe, the bytes its `File` read ahead first, back to that `File`'s buffer, which is made again with
   more room than its 8 KiB where they need it, so that a later read takes them before the rest of the pipe. The wait never
   waits on a reader's lock: at each wake of its poll `Drive` tries each lock it does not hold yet through the emitter's
-  `try.reader`, which it gets as a C function (R17), since the runtime's code tries no lock through an atomic type (R19), and which reads the bytes ahead only once it
+  `try.reader`, which it gets as a C function (R17), the runtime's code reaching the lock through none of R19's types, and which reads the bytes ahead only once it
   took the lock; a pipe is polled from the wake that took its lock, the next wake comes within 4 ms while another holder holds
   one, and the emitter lets go of each lock the runtime took once the bytes are taken or given back, so that `Timeout(d)`
   bounds the whole call and a read through the `File` on another thread waits for the call only while the call holds its lock
@@ -1626,7 +1641,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the line together in a buffer of its thread and hands it to one write call on standard error, the
   line of the lines dropped before it in the same write; a refused write counts the line as dropped,
   and after a line the system took in part, the next write starts with a line feed. The count of the
-  lines dropped and the flag of a line cut short are plain `static mut`s, the runtime's code using no atomic type for them (R19),
+  lines dropped and the flag of a line cut short are plain `static mut`s,
   and the runtime starts no thread: two threads a program starts through C (R16) that log at once race on
   them, as the runtime's comment on them says. The corpus's runner
   takes `KURZ_LOG` away from every case it runs. `LogTests` pins what no case can: the layout of a line
@@ -1837,8 +1852,19 @@ made (the owner, 2026-10-25, "Copied"), and no state
 outside a function holds a list or a string, which R13 refuses, so a callee reaches a list or a
 string its caller lent it through its parameters alone. The name an arm of a `match` binds holds a count of its value, as a
 variable does, so that the arm can change the subject's variable and the name keeps its value (M3).
+The case an arm of a postfix `else` takes, after a call or after a loop over a file's lines (O5, S16), holds the count the result
+gave it, which no place holds: the arm holds it as a variable of its block, a name bound or not, and the arm of `else` the whole
+value, and lets go of it at the block's end and at a `return`, a `break` or a `continue` that leaves the block, unless a `move`
+of the name emptied its place, as Rust drops the variables a `match` arm binds when the arm ends and none a move left
+uninitialized (the Rust Reference, "Destructors", `destructors.scope.bindings.match-arm` and `destructors.intro`, and "Match
+expressions", `expr.match.scrutinee-value`, read on 2026-11-19); a `return` of the name counts it once more for the caller.
+Pinned by `ListTests` under an allocator that counts the blocks and under the fenced one, the arm of a `match` the control, and
+by `FileTests` for the loop's arms.
 Counted are a list, a string, a function value, an instance of a class, a value of a block type, a plain
-`data` value that holds one of them in a field and a union with a case that holds one. A string made while the program runs holds a block
+`data` value that holds one of them in a field and a union with a case that holds one; a plain `data` value lets go of each such
+field where it ends, a union field by the case it holds (`ListTests`, under an allocator that counts the blocks and under the
+fenced one: a plain data case, an instance and a list in a union field, at a variable's end, at its reassignment, in a list's
+item and in the copy a call makes, the same field of a class the control). A string made while the program runs holds a block
 of `std/` in front of its bytes, laid out as the block of a list of bytes: the count of the values that
 hold it, 8 bytes, then the count of its bytes, which `string.FromRaw` writes, and the room
 `string.Allocate` gave, 4 bytes each, so that `s.Bytes` and a string of a list of bytes share the
@@ -2080,15 +2106,42 @@ The atomic types of R19 (section 6), on every target: a view is the pointer `Fro
 each member is one LLVM instruction on the word it points to, aligned to the word's size, as Rust's
 `core::sync::atomic` lowers them: `Load` a `load atomic`, `Store` a `store atomic`, `Swap` an
 `atomicrmw xchg`, `FetchAdd`, `FetchSub`, `FetchAnd`, `FetchOr` and `FetchXor` an `atomicrmw` of
-`add`, `sub`, `and`, `or` and `xor`, an `AtomicPtr<T>`'s on the address as an `i64`,
+`add`, `sub`, `and`, `or` and `xor`, an `AtomicPtr<T>`'s `FetchAnd`, `FetchOr` and `FetchXor` on the address as an `i64`,
 `CompareExchange` and `CompareExchangeWeak` a `cmpxchg` and a `cmpxchg weak`, whose pair gives the
 union's case, and `Fence` a `fence`; a `bool`'s word is a byte that holds 0 or 1, as Rust's
-`AtomicBool` holds a `u8`. An order written at the call is the instruction's own, `Relaxed` LLVM's
-`monotonic`; any other is read when the call runs, by a `switch` over the five values of `MemoryOrder`
+`AtomicBool` holds a `u8`. An order written at the call, or held by a copy of a function as its constant
+(T35), is the instruction's own, `Relaxed` LLVM's `monotonic`, and a copy's constant that Rust refuses
+raises `invalid-ordering-at-run-time` at the call's line with no `switch`; any other is read when the call runs, by a `switch` over the five values of `MemoryOrder`
 to the instruction for each, as Rust's `match` on the order chooses among its intrinsics, and a
 choice Rust refuses raises `invalid-ordering-at-run-time` at the call's line (`Emit/Emitter.Atomics.cs`;
-`EmitterTests` pins the instructions and the choice). A view crossing into an actor is
-`not supported`, as a pointer's crossing is (U12).
+`EmitterTests` pins the instructions and the choice). A view crossing into an actor, or out of one as
+a waiting call's result, is the checker's `pointer-crosses`, as a pointer's crossing is (U12, R19).
+
+### The tests and `check`
+
+`check condition` (Y6) is emitted in every build: its condition, and where it is one of the six
+comparisons whose sides show their values, each side once, compared as the comparison compares them; on
+the path of its failure the runtime's `CheckFailed` gets the condition's text, the values after it in
+parentheses, `names.Count == 2 (3 == 2)`, and the file and the line as constants, and crashes the actor
+that runs it, at the top level the end of the process with `error: check-failed at <file>:<n>:` and the
+text on the line after it. That path takes a count of each counted side before it makes the texts, since
+the `Text()` of one side may assign the place the other was read through, a `mut` parameter's, whose read
+takes no count, and lets go of them once the text is joined (`ListTests`, the line `check-operands-fenced`). A `test` block emits nothing in the build of
+`kurz build`, `kurz run` and `kurz exec` (Q5). In the build of `kurz test` the top-level code is the
+table of the tests, each test's function, its name as written and its line, and a call of the runtime's
+`RunTests`, which runs each test in an actor of its own, a child of the top-level code with the policy
+`stop`, by one message with no deadline (D6), and waits for it as the top-level code waits for a call
+(`RootWait`, the loop `Wait` runs). The test passes where the actor answered, and fails where it crashed,
+the words of its crash kept for the line under `FAILED` and no log line written for it (F1, F3), or where
+the wait found nothing left to run, `deadlock at <file>:<the test's line>` (F5). Then every actor the
+test made ends at once, parked ones too (F6): the records of the run queue, each activation's stack back
+in the pool with its open copy sessions ended, the stack a pending block keeps, every heap, the heaps of
+messages, the timers, the pauses and the deadline of the top-level code's `within`, so that no timer and
+no message heap names a heap freed; the numbers of actors go on counting (U2). A socket or a file a
+test's actors hold at that end stays open, as nothing of an actor's end closes one (F22). The test's own
+actor is named `test` (F2), a name no log line shows, since its crash writes none (F3). `ActorTests`
+holds the end of a test's actors and the bound of a test's message, `CommandTests` what the command
+writes, and the corpus's `tests/` cases what a case of `kurz test` shows (E3).
 
 ### What the emitter does not emit
 
@@ -2101,7 +2154,8 @@ command line, the environment or the clock, and a log call, in a build for Windo
 map, a field or a union and a lambda that reads a variable of a vector's type, whose places are not
 aligned to it, and on a 64-bit Arm machine a test of a class under `Arm`, whose intrinsics are not
 built (R18), and an `asm`, whose operands the checker reads for x86-64 alone (R11), where a `naked` function, whose
-operands are `sym` and `const` alone, builds (R12), and a construct of the other chapters the checker does not read. The line
+operands are `sym` and `const` alone, builds (R12), and a construct of the other chapters the
+checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use"); a call on a socket or a file that a
 function of `std/` makes is refused at the line of the program's statement whose call reached that function, which the queue of
@@ -2130,10 +2184,14 @@ reads the guarantee in force on Windows and on Linux compiles the program alone.
 Of section 6 the emitter builds the actors of one thread, each message run to its end or to a wait that parks it (Q1 (a), the
 answers of 2026-11-14, issue 519, comment 6880404917), and no case shows
 where a program it builds differs from the section: every actor runs on the one thread the runtime
-runs, each message on a stack of its own ("The runtime"), its state word and the replies of its
-calls changed by atomic operations that hold on any number of threads ("What the emitter emits"), with no worker thread, no line `threads`
-and no `KURZ_THREADS` read (U35), and the top-level code's wait runs the scheduler in place on the
-main thread's stack (U18), and messages run only while the top-level
+runs, each message on a stack of its own ("The runtime"), its state word, and the choice of the one owner of
+each reply of its calls by a swap, changed by atomic operations that hold on any number of threads ("What the
+emitter emits"), while the lifetimes of the message a crash's swap reads and of the record of the waiter's actor,
+which the owner of a reply reads after its store, hold on one thread alone, with no worker thread, no line `threads`
+and no `KURZ_THREADS` read (U35), so that a program started with a `KURZ_THREADS` that U35 refuses, `0`
+among them, runs on the one thread with no error line, and the compiler reads no `project.kz`, so no line
+of one reaches it, and the top-level code's wait runs the scheduler in place on the
+main thread's stack, where U18 has the main thread sleep beside the worker threads, and messages run only while the top-level
 code waits for a call's result, one message of each actor in turn, so that a `send` made after the
 last call that waits does not run, and a message parked in a wait when the top-level code ends does
 not go on (U13); of section 6's deadlocks the build makes layer 1 (U17) and the `deadlock` of a wait
@@ -2190,11 +2248,29 @@ the child's error line and its trace; a supervisor's crash or end, and the end o
 code, drop its pending blocks and end their children. On Linux the `Crashed` value of a stack
 overflow holds an empty file and the line 0 in its `Place`, its place standing in its `Detail`, and
 an overflow escalated to the top level writes the trace of the top-level code where it waits, since
-the stack the child overflowed on, whose state the signal's stack held, is not kept. What stays `not
-supported` of section 6's supervision: `attempt { ... }` and `retry { ... }`; a block whose child can
+the stack the child overflowed on, whose state the signal's stack held, is not kept. The block
+`attempt { ... }` is built (U46 to U50): the checker reads its block as a lambda of no parameter, the
+fields of the actor whose method runs it that the block names taken through variables of their own,
+and its `Reason` as a block's child's is read, again at each reading; the emitted code makes a child
+actor (the runtime's `AttemptNew`) with a heap of its own and a pooled stack, whose policy word names
+its own state, puts one message in its heap that holds a copy of the block's function value, made as a
+message's argument crosses (U12), queues it with the chain's deadline and no bound of its own, and
+waits for its reply as a call waits (`Attempted`), with no deadline of its own; the reply holds the
+block's value, copied into the heap of the code that waits, and the child's crash, taken in `Fell` as
+a block's is, puts the copy of the crash in that heap, writes the log line, ends the child and wakes
+the waiter, whose code builds `Crashed` as a block's function does and frees the copy
+(`PendingLeft`); an arm of its `else` lets go of the case it takes. A pointer or a view of an atomic type
+that the block takes, or that its value reaches, is `pointer-crosses`, as at a message (U47, U12). What stays `not supported` of
+section 6's supervision: `retry { ... }`; of `attempt { ... }`, a block that names `this`, a method or
+a property of the class whose method runs it, a `move` in the block of a variable or a field around
+it, a block whose value is a union, a nullable value among them, or a value the crossing copy does not
+bring back, a block that takes a value no word makes cross or that the crossing copy does not copy, a
+block that can throw a type the crossing copy does not copy, one in a file read without `std/` and one
+whose `Reason` still grows at the fifth reading; a block of `on crash` whose child can
 throw a type the crossing copy does not copy (U12), a block in a file read without `std/`, and a block
-whose child's `Reason` grows by what the blocks of the program read, read five times, the first and four more; a policy after
-the name of a `per` actor with `per` itself (U1), a block there among it; the crash paths of the ESP32
+whose child's `Reason` grows by what the blocks of the program read, read five times, the first and four more; `per` with other
+words than `node`, `per cluster` with a text of its own, since it needs the directory of section 7, and a policy after such a
+name with it (U1, U51); the block `on crash (c) { ... }` after the name of a `per node` actor (U28, U54); the crash paths of the ESP32
 models, AVR and WebAssembly, for which the build has no target; and, on Windows, an actor's stack
 overflow, which ends the process as the system ends it whatever the policy (U19); a crash at the root, the top-level code, still ends
 the process with its error line, its trace and the exit code 1. A call whose caller crashed runs to its end and its result goes nowhere, which on
@@ -2203,7 +2279,10 @@ a call of its own chain; the swap by which a crash unhooks a reply reads the mes
 waits on, which the callee frees once it answered, so that on threads of their own that message has to
 stay while either can reach it, as tokio's `oneshot` keeps its state in an `Arc` (not checked at
 source), which is not built, where on the one thread the crash reads the reply's word first and no
-answer comes between; and the copies a crashed message made of the
+answer comes between; the owner of a reply reads the record of the waiter's actor after its release store, to wake
+that actor (`Replied`, `Signal`), so that on threads of their own that record has to stay by a count the owner
+takes before the store and drops after the wake, the record freed by its last holder, which is not built
+either, where on the one thread nothing runs between the store and the wake; and the copies a crashed message made of the
 arguments of a call it had not sent yet, in the callee's heap where no argument could wait, and the heap of a `spawn` whose arguments it was still
 evaluating, stay in their heaps until those are freed. A message has 2 MiB of
 stack where its clause sets no other size, where a message on Linux had the main thread's 8 MiB
@@ -2264,6 +2343,33 @@ actor joining the kept blocks at the end; the line `actor-heaps-fenced` of `List
 actors freed whole and every result of their messages read after it, from the caller's heap; and `ActorTests` the deadlines, the bound of every target, the timers kept in the order of their
 deadlines, the inbox's drop of a message past its deadline, a `within` put back at every way out of it, and a wait that its
 deadline ends while a restart's pause runs.
+
+Of section 13 the build makes the actor declared `per node`, one in the process, addressed by its name (U51 to U55). The
+checker reads `Cache.M(...)` and `send Cache.M(...)` as a call through a reference (U4, U6), inside the actor as outside it
+(U55), and marks the call (`CallInfo.ByName`), so that the throws of the defaults of the actor's fields count among the call's
+(`ThrowSets`); `spawn` of it is `type-mismatch`, a parameter of its constructor and its name as a value `syntax`, a field
+named through its name `not-visible` (U8), and a method named through it with no call and its name called as a function,
+`Cache()`, `not supported`. The emitter gets the reference before the call's arguments from a function made once for each
+such type, `actor.per.<n>`, with three globals of its own: its cell, a lock word, the slot and the number of its one actor;
+its block of a restart, with no argument kept, a null function for `escalate` and none for `stop`; and its knobs where
+`after` or `max N in` is written, their last word 1 to mark a `per node` type's. The runtime's `PerFind` reads the cell: where
+its number names an actor `Lookup` finds, it gives that actor with no lock taken; else it takes the cell's lock and reads
+again, and where no actor stands there either it gives null with the lock held, and the function makes the actor's heap and
+record as a `spawn` does, its supervisor the code that runs, and `PerStarted` sets the pause of the type's block and the
+count of its knobs' ring back to 0, stores the slot and the number in the cell, the number with release, and lets go of the
+lock. The lock is held around the read, the making of the record and that store alone,
+never around a constructor or a wait, which the one thread of the build never contends (U35). The defaults then run on the
+caller's stack in the actor's heap, the actor BUILDING, so that a message that reaches it meanwhile waits in its inbox, and
+named as the one built (`Building`), so that an actor they spawn is its child (U21), and
+at their end `PerBuilt` makes the root its supervisor and ends its building as `ActorBuilt` does (U53). A throw in the
+defaults is the caller's crash, which ends its child, the actor half built, the calls queued in it raising `actor-gone`,
+and the message after it finds no actor in the cell and starts a fresh one (U52). The crash of a `per node` actor whose knobs
+carry the mark, past `max N in`, ends it with no `restart-limit` (`Fell`), and `on crash stop` ends it as at a `spawn`,
+the calls queued in it raising `actor-gone` and the message after it starting a fresh one (U54). It ends with the process,
+freed by the end's walk over the table as every actor is (U13). `ActorTests` pins the memory of each way a `per node` actor
+is freed, a restart in place, a stop, its limit and a start that throws, flat over 10,000 rounds, the first pause and the
+window of a fresh start, its defaults' heap after a wait, its heap freed at the end, and, under the fence with the heap word
+of a freed record written 16 before its free, that nothing reads an ended one.
 
 On Linux an exception that ends the process writes the trace of the calls below its error line
 (section 6), but `allocation-failed` and `random-failed`, which write no place and no trace (O11, M9): the runtime's `Trace` (`runtime/linux/linux.kz`) walks the stack it raised on with
@@ -2390,9 +2496,9 @@ ask about it.
   match, from the last position before that match's end at which its state held no thread of an earlier start; its cache, made for each call and bounded at 2 MiB, is emptied when it fills, and after three emptyings that read
   fewer than 10 bytes a state, or where it cannot hold two states, the search goes to the Pike VM (the owner, 2026-11-12, issue 176,
   comment 6819137493, Q1, Q2 and Q4 of comment 6813110851) *(assumed, as the record and G2 keep them: the members a state
-  keeps, the cache the searches of one call share, its 2 MiB and the checks at an emptying and of the capacity)*; the text
-  length below which Q3 of that comment has the Pike VM
-  run alone is not built, and the DFA runs first at every length. The parse is
+  keeps, the cache the searches of one call share, its 2 MiB and the checks at an emptying and of the capacity)*; the DFA
+  runs first at every length of the text (the owner, 2026-11-20, issue 176, comment 7051500478, R1 of comment 7007321718,
+  which replaces Q3 of comment 6813110851 and its length). The parse is
   Rust's `ParserI`, one pass with stacks of the open groups, sequences, alternations and brackets, so that a pattern gives
   the error Rust's gives at the byte Rust's names, and the levels of Rust's `NestLimiter` are counted after it, a group, a
   sequence of two items or more, an alternation, a repetition, a bracketed class, a bracket inside one, a class's union of two
@@ -2663,7 +2769,8 @@ that sit under a rule by its id. Every one is pinned by a test.
   before what can begin one, which is `syntax` there, as a statement form's word is. After an
   actor's name and its primary constructor the parser keeps each clause's first word, `per`, `yield`,
   `inbox`, `stack` or `on crash`, with its line, passes over the words that follow it up to the body,
-  but for `stack`'s literal and the words of a policy, and reads any other word there as `syntax`.
+  but for `stack`'s literal, the words of a policy and the words after `per`, which it keeps (U51), and
+  reads any other word there as `syntax`.
   The words of a policy after `on crash`, there and after the arguments of a `spawn`, which they end,
   are `restart`, `stop` or `escalate`, and after `restart` the knobs `after <duration>` and
   `max N in <duration>`, each once, in either order, each value a number literal with its sign where it
@@ -2675,7 +2782,8 @@ that sit under a rule by its id. Every one is pinned by a test.
   `escalate` before anything but `=` are statements, and `return` is `syntax`, the words names in a
   lambda inside it; no name, a second one or a type in the parentheses, a block on a line of its own,
   a knob after `restart` and a word after a decision are `syntax` (U28, U29). `attempt` and `retry`
-  before a block are an expression of that block, which the checker says `not supported` to (section 6),
+  before a block are an expression of that block, which the checker reads for `attempt`, with a postfix
+  `else` after it as after a call (U46), and says `not supported` to for `retry` (section 6),
   but in the condition, the collection or the subject before the block of an `if`, a `while`, a `for`
   or a `match` the word is a name, as a struct literal is no condition in Rust, and inside that header's parentheses,
   brackets, arms and blocks the expression again, as Rust reads a struct literal there (U28; assumed: section 6, comment
@@ -2700,6 +2808,15 @@ that sit under a rule by its id. Every one is pinned by a test.
   that no `"""` on the same line closes, the lexer passes over the rest of the block, up to the
   closing `"""`, so that the block's text is not read as code, and reads what follows the
   closing quotes on their line as code.
+
+- Y1, Y6, Y9: where `test`, `check`, `mock` and `advance` are words, inside D2's letter (issue 586, comment
+  6992687784). `test cluster` is the cluster test only where a token that can start an expression follows
+  `cluster`, so that `test cluster = 1` declares a variable `cluster` of a type named `test`; `mock` is the
+  statement only where a type, `with` and a type follow it, so that `mock x = 1` declares a variable `x` of
+  a type named `mock`; a `test` block in a class's body is the member parser's `syntax` at its line; and
+  the text of a `check` is its tokens as the source writes them, a `>` of a `>>` that type arguments took
+  apart among them, each run of spaces, line breaks and comments between two tokens one space. Pinned by
+  `ParserTests`.
 
 Six shapes still get two errors, or an uneven one, from the front end, each low: `if x print(1)
 else print(2)` is `braces-required` twice on one line, because the postfix `else` binds to the call
@@ -2741,7 +2858,8 @@ of P3 and its category of P6), 19 (actors of one machine: U1, U2, U4, U6 to U12,
 others the run's, an actor's body read as a class's, its reference a type of its own, the calls
 through it recorded as messages that wait or not, `CallKind.ActorCall` and `CallKind.ActorSend`, and
 a `send` of its own method inside it recorded as `CallKind.ActorSend`, and of U12 what crosses, by
-the type of the parameter, with `send-needs-word` at an argument and at a waiting call's result, a
+the type of the parameter, with `send-needs-word` at an argument and at a waiting call's result, and
+`pointer-crosses` there where a value reaches a pointer or a view of an atomic type, with any word, a
 function value by the lambda its function shows, and `copy` at any call recorded for the emitter,
 `SemanticModel.IsCopied`, and `move` before an argument, before a parameter's type and in a function
 type, a lambda's parameter whose type is not written taking it from the type the lambda is given for:
@@ -2799,7 +2917,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`, `named-asm-label`, `binary-asm-label`,
 `naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `static-cycle`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, `lane-out-of-range`,
 `equal-by-unknown`, `equals-method`, `mutable-key`, `spawn-required`, `send-result`, `actor-field-public`,
-`mut-in-message`, `send-needs-word`, `used-after-move`, `move-reachable`, `move-at-call`, and
+`mut-in-message`, `send-needs-word`, `used-after-move`, `move-reachable`, `move-at-call`, `pointer-crosses`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
 Over a program the checker read without a diagnostic and the model of `std/`, `Semantics/ThrowSets.cs` computes what code can
@@ -2981,7 +3099,8 @@ may take as a class's does (U1, U9), each of which leaves the
 actor and every use of its name unread, besides what a class's body does not read, as the checker's `syntax` for a base after
 an actor's name, `equal by` and a constructor in its body (U1, U2), and its `static-state` for a `static mut` field and one
 whose type is or holds a class (U1), leave it too, while an actor after a class's `:` is `syntax` and the class is read without
-that base (U1); `attempt { ... }` and `retry { ... }` (section 6, U28); a block of `on crash` whose child can throw a type the
+that base (U1); `retry { ... }` (section 6, U28), and of `attempt { ... }` what the build does not bring into its child or
+out of it, one in a file read without `std/` and one whose `Reason` still grows at the fifth reading (U46, U47); a block of `on crash` whose child can throw a type the
 crossing copy does not copy, one in a file read without `std/` and one whose child's `Reason` still grows at the fifth reading
 (U30); `move` before a field of a primary
 constructor, a parameter of a constructor of K14, of a C function's declaration or of a `naked`
@@ -2989,12 +3108,17 @@ function, a `move` of the variable of a loop over anything but a list, and a `mo
 region the checker does not keep (U12); an argument
 or a result of a message or of an actor's constructor, and a value after `copy` at any call, that
 reaches a value of a type parameter, an instance of a class of `std/`, `HttpRequest` and
-`HttpHeaders` among them, a handle of section 12 or a pointer, an argument written `move` only where it
-reaches a handle, a hasher, a command or a child process by any path the copy follows, a lambda's capture and
-a field of any class among them, or a value of a type parameter, which the copy of its function for such a type
-argument makes one of them, whose copy would share the sender's block by its count (U12); `copy` at a call that is no message before a value that
-reaches a function value or an interface's value, which no word makes cross (U12); and a log call
-inside an actor (P8). The refusal of
+`HttpHeaders` among them, or a handle of section 12, a value after `copy` at a call that is no message
+that reaches a pointer or a view of an atomic type, which crosses into no actor (`pointer-crosses`,
+U12), an argument written `move` only where it
+reaches a handle, a hasher, a command or a child process, whose copy would share the sender's block by its count, by any
+path the copy follows, a lambda's capture and a field of any class among them, or a value of a type parameter, since the
+copy of its function for a type argument that is one of them would share that block (U12); `copy` at a call that is no message before a value that
+reaches a function value or an interface's value, which no word makes cross (U12); a log call
+inside an actor (P8); the cluster test of section 13, `test cluster N seed S { ... }`, whose words and
+block the parser passes over (Y8); and `mock X with Y` and `advance d`, whose questions are open (Y9, Y10),
+the duration of an `advance` checked as the bound of `within` is (U40) and its error reported beside the
+line. The refusal of
 the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered
 on 2026-11-14, comment 6880404917); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
@@ -3556,3 +3680,9 @@ round can ask about it by the rule's id.
 - A9 with A7 and A15: a `Text()` without `pub` makes `not-visible` every `print`, interpolation and
   `string.Join` (X6) of the instance, and of a list or a `data` value that holds one, inside the class and
   outside it.
+- Y6: a `check` tells the checker nothing after it, so that after `check x != null` the variable `x`
+  is still nullable (N2), as Rust's `assert!` narrows no type, where C#'s `Debug.Assert` tells its
+  flow analysis the condition held. A comparison shows its sides' values where it stands alone or in
+  parentheses and each side shows its value as a hole of an interpolation does; a test's name is its
+  own by its value, so that `"A"` and `"\u0041"` are one name. Pinned by
+  `CheckerTests`.

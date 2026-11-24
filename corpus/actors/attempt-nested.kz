@@ -1,0 +1,24 @@
+// expect: output
+// | inner 10
+// | outer 17
+// | -1
+// rules: U50
+
+// the inner `attempt` belongs to the outer one's child, and holds the crash of its own
+xs = [1]
+v = attempt {
+    w = attempt { xs[3] } else {
+        Crashed c => {
+            print("inner {c.Place.Line}")
+            5
+        }
+    }
+
+    return w + xs[2]
+} else {
+    Crashed c => {
+        print("outer {c.Place.Line}")
+        -1
+    }
+}
+print(v)

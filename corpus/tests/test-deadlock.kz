@@ -1,0 +1,30 @@
+// expect: throws deadlock at 19
+// | test "waits on its own block" ... FAILED
+// |     deadlock at tests/test-deadlock.kz:19
+// | after
+// | test "after" ... ok
+// | 2 tests: 1 passed, 1 failed
+// command: test
+// rules: Y5
+
+// the block of the child's policy runs in the test's actor once its message ends, and that message waits on the child
+actor Worker {
+    pub void Fail() {
+        throw "down"
+    }
+
+    pub int Get() => 1
+}
+
+test "waits on its own block" {
+    w = spawn Worker() on crash (c) {
+        restart
+    }
+
+    send w.Fail()
+    print(w.Get())
+}
+
+test "after" {
+    print("after")
+}

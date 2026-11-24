@@ -1,0 +1,23 @@
+// expect: throws thrown at 7
+// | 1
+// rules: U53, U25
+
+actor Cache per node on crash escalate {
+    pub void Fail() {
+        throw "cache fails"
+    }
+
+    pub int Ping() => 1
+}
+
+actor Worker {
+    pub void Start() {
+        print(Cache.Ping())
+    }
+}
+
+w = spawn Worker()
+w.Start()
+send Cache.Fail()
+print(Cache.Ping())
+print("after")

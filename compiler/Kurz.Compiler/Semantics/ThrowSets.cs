@@ -15,8 +15,8 @@ namespace Kurz.Compiler.Semantics;
 /// <c>string.Join</c> call on the types they make text of, and for a generic <c>data</c> type derived from such a type the text of each
 /// instantiation of it that the program builds (section 5, the owner, 2026-11-16); the construction of an actor it spawns, whose throw is
 /// its crash (U3); and the code of an actor it spawns under <c>escalate</c>, whose crash passes up whole (U25). The instantiations a
-/// program builds are found as Rust's monomorphization finds its instances: from the roots, the top-level code and every <c>pub</c>
-/// function, a generic one and each actor's <c>pub</c> methods among them, through the type arguments each call gives, with the fixed
+/// program builds are found as Rust's monomorphization finds its instances: from the roots, the top-level code, every <c>pub</c>
+/// function, a generic one and each actor's <c>pub</c> methods among them, and every test (Y5), through the type arguments each call gives, with the fixed
 /// point's edges, a lambda's in the unit that makes it, and each with no type parameter left, read again with the text of each
 /// instantiation found until they grow no more. A call through an actor's
 /// reference reaches none of the callee's code, whose crash its caller gets as <c>callee-crashed</c> (U20). The text of a thrown value
@@ -30,6 +30,7 @@ public sealed class ThrowSets
     private readonly Checker? std;
     private readonly bool blocks;
     private readonly IReadOnlySet<CrashPolicy>? skipped;
+    private readonly IReadOnlySet<AttemptExpression>? skippedArms;
     private readonly Dictionary<object, Unit> units = new(new UnitKeys());
     private readonly List<Unit> order = [];
     private readonly KurzType runtimeError;
@@ -42,15 +43,17 @@ public sealed class ThrowSets
     /// The sets of the code of <paramref name="program"/>, which sees the types of <paramref name="std"/> (W1); null where the program is
     /// <c>std/</c> itself. Where <paramref name="blocks"/> does not hold, the bodies of the blocks of <c>on crash</c> are left out, as at the
     /// checker's first reading of such a program, which reads them with no <c>Reason</c> found yet (U30), and so are those of the blocks
-    /// <paramref name="skipped"/> names, which reported errors at a reading whose <c>Reason</c>s may not have settled.
+    /// <paramref name="skipped"/> names, which reported errors at a reading whose <c>Reason</c>s may not have settled; so are the arms of
+    /// the <c>else</c> of every <c>attempt</c> there, and of those <paramref name="skippedArms"/> names, for the same reasons (U46).
     /// </summary>
-    public ThrowSets(Checker program, Checker? std, bool blocks = true, IReadOnlySet<CrashPolicy>? skipped = null)
+    public ThrowSets(Checker program, Checker? std, bool blocks = true, IReadOnlySet<CrashPolicy>? skipped = null, IReadOnlySet<AttemptExpression>? skippedArms = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         this.program = program;
         this.std = std;
         this.blocks = blocks;
         this.skipped = skipped;
+        this.skippedArms = skippedArms;
         var error = (std ?? program).Model.DataTypes.FirstOrDefault(d => d.Name == "RuntimeError")
             ?? throw new InvalidOperationException("std/ declares no `RuntimeError`, the runtime's error type of section 5");
         runtimeError = new DataType(error, []);
@@ -85,7 +88,7 @@ public sealed class ThrowSets
         [typeof(ElseExpression)] = "its call and its arms",
         [typeof(ParenthesizedExpression)] = "its inner expression",
         [typeof(SpawnExpression)] = "the actor's construction, its code under escalate or a block, and the block's body",
-        [typeof(AttemptExpression)] = "no code: the checker refuses it",
+        [typeof(AttemptExpression)] = "nothing where it runs but what its block builds, whose throws its child's crash holds; `retry`: no code, the checker refuses it",
         [typeof(Block)] = "its statements",
         [typeof(VariableDeclaration)] = "its value",
         [typeof(AssignOrDeclare)] = "its value",
@@ -106,6 +109,10 @@ public sealed class ThrowSets
         [typeof(DecisionStatement)] = "no code: the runtime acts on the decision",
         [typeof(AsmStatement)] = "its operands, and the function a sym operand names",
         [typeof(ConstAssertStatement)] = "no code: the compiler reads it",
+        [typeof(TestDeclaration)] = "no code where it stands: its body is the code of the test's own actor under kurz test",
+        [typeof(AssertionStatement)] = "its condition, and the Text() of each side of the comparison its failure shows",
+        [typeof(MockStatement)] = "no code: the checker refuses it",
+        [typeof(AdvanceStatement)] = "no code: the checker refuses it",
         [typeof(ExternBlock)] = "no code",
         [typeof(FunctionDeclaration)] = "no code where it stands: its body where it is called",
         [typeof(FieldDeclaration)] = "no code where it stands: its value where its type is made",
@@ -124,6 +131,16 @@ public sealed class ThrowSets
     {
         ArgumentNullException.ThrowIfNull(actor);
         return actor.IsActor ? Solved(new Root(actor)) : throw new ArgumentException($"`{actor.Name}` is no actor", nameof(actor));
+    }
+
+    /// <summary>
+    /// U46: the <c>Reason</c> of the <c>Crashed</c> of an <c>attempt</c> of the program's file: every type the code of its block can throw,
+    /// with what that code reaches, then the runtime's error type.
+    /// </summary>
+    public IReadOnlyList<KurzType> ReasonOf(AttemptExpression attempt)
+    {
+        ArgumentNullException.ThrowIfNull(attempt);
+        return program.Model.HasAttempt(attempt) ? Solved(attempt) : throw new ArgumentException($"no `attempt` the checker read stands at line {attempt.Line}", nameof(attempt));
     }
 
     /// <summary>What a call of the function can raise (section 5): every type its code can throw, then the runtime's error type.</summary>
@@ -209,14 +226,14 @@ public sealed class ThrowSets
         public List<DataType> Built { get; } = [];
     }
 
-    /// <summary>The keys of the units: a lambda by its node, never by its text, and every other key by its own equality.</summary>
+    /// <summary>The keys of the units: a lambda and an <c>attempt</c> by its node, never by its text, and every other key by its own equality.</summary>
     private sealed class UnitKeys : IEqualityComparer<object>
     {
         public new bool Equals(object? x, object? y) =>
-            x is LambdaExpression || y is LambdaExpression ? ReferenceEquals(x, y) : object.Equals(x, y);
+            x is LambdaExpression or AttemptExpression || y is LambdaExpression or AttemptExpression ? ReferenceEquals(x, y) : object.Equals(x, y);
 
         public int GetHashCode(object obj) =>
-            obj is LambdaExpression ? System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj) : obj.GetHashCode();
+            obj is LambdaExpression or AttemptExpression ? System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj) : obj.GetHashCode();
     }
 
     private Unit Discover(object key)
@@ -400,8 +417,11 @@ public sealed class ThrowSets
     // list holds, a generic one among them, whose instantiations with every type argument named are built whatever type argument a
     // call gives it (section 5, the owner, 2026-11-17, #560, comment 6952257456, "(b) As built (Recommended)"); the list holds each
     // actor's `pub` methods, which alone take messages (U9), so that what an actor builds is built: its other methods run from its own
-    // code alone, and its construction from a `spawn` that a root reaches
-    private IEnumerable<object> Roots() => Pub().Prepend<object>(new TopLevel(program.Model));
+    // code alone, and its construction from a `spawn` that a root reaches; and each test of the file, which the build of `kurz test`
+    // runs as a function of its own (Y5), as Rust's `cargo test` builds each `#[test]` function as a root of its harness, in every
+    // reading, since the checker reads every test whatever command the build is for (Y7), so that a `Reason` is one set under every
+    // command
+    private IEnumerable<object> Roots() => Pub().Concat(program.Model.Tests.Select(program.Model.TestOf)).Prepend<object>(new TopLevel(program.Model));
 
     // a type once, at the earliest place that throws it
     private static bool Add(List<Thrown> set, Thrown thrown)
@@ -513,6 +533,20 @@ public sealed class ThrowSets
                     if (l.BlockBody is { } block)
                     {
                         walk.Statement(block);
+                    }
+
+                    break;
+                }
+
+            case AttemptExpression a:
+                {
+                    // U46: the block's code, which its child runs; an `attempt` stands in the program's file alone, `std/` holding none
+                    var block = program.Model.AttemptOf(a).Lambda;
+                    var walk = new Walk(this, program.Model, 0, unit);
+                    walk.Optional(block.ExpressionBody);
+                    if (block.BlockBody is { } body)
+                    {
+                        walk.Statement(body);
                     }
 
                     break;
@@ -796,12 +830,27 @@ public sealed class ThrowSets
                     }
 
                     break;
+                case ElseExpression el when (el.Call is ParenthesizedExpression p ? p.Inner : el.Call) is AttemptExpression a:
+                    Expression(a);
+                    if (sets.blocks && sets.skippedArms?.Contains(a) != true && model.HasAttempt(a))
+                    {
+                        Arms(el.Arms, model.AttemptOf(a).Type); // U46: the arms are the code of the actor that waits, at a reading whose `Reason`s may settle
+                    }
+
+                    break;
                 case ElseExpression el:
                     Expression(el.Call);
                     Arms(el.Arms, Result(el.Call));
                     break;
                 case ParenthesizedExpression p:
                     Expression(p.Inner);
+                    break;
+                case AttemptExpression a:
+                    if (model.HasAttempt(a))
+                    {
+                        unit.Edges.Add(new Edge(a, null, Runs: false)); // U46: what its block builds, and nothing it throws, which `Crashed` holds
+                    }
+
                     break;
                 case SpawnExpression s:
                     Call(s.Call);
@@ -870,6 +919,17 @@ public sealed class ThrowSets
                     Match(m.Subject, m.Arms);
                     break;
                 case BreakStatement or ContinueStatement or UseStatement or ConstAssertStatement or ExternBlock or FunctionDeclaration or FieldDeclaration or ConstructorDeclaration or TypeDeclaration or DecisionStatement:
+                    break;
+                case TestDeclaration or MockStatement or AdvanceStatement:
+                    break;
+                case AssertionStatement a:
+                    Expression(a.Condition);
+                    if (model.AssertionOf(a) is { Left: { } left, Right: { } right })
+                    {
+                        Text(left); // Y6: the text of each side its failure shows, made by the actor that runs it
+                        Text(right);
+                    }
+
                     break;
                 case ReturnStatement r:
                     Optional(r.Value);
@@ -1098,6 +1158,13 @@ public sealed class ThrowSets
 
                     break;
                 case CallKind.ActorCall or CallKind.ActorSend:
+                    if (info.ByName)
+                    {
+                        // U52: a message to the name of a `per node` actor starts it where none stands, its constructor run on the caller's
+                        // stack, whose throw is the caller's crash, as at a `spawn`
+                        unit.Edges.Add(new Edge(new Construction(((ActorType)info.Target!).Symbol), null));
+                    }
+
                     break; // U20: the callee's code runs in the callee, whose crash its caller gets as `callee-crashed`
                 case CallKind.ListAdd or CallKind.ListInsert:
                     // M9, X11: `Add` and `Insert` keep the function value they take and run none of it, so a lambda there brings what its

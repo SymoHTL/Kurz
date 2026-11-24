@@ -1,0 +1,8 @@
+// expect: throws check-failed at 7
+// | before
+// rules: Y6
+
+names = ["a", "b", "c"]
+print("before")
+check names.Count == 2
+print("after")
