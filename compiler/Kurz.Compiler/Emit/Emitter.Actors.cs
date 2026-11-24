@@ -256,7 +256,9 @@ public sealed partial class Emitter
     /// (<see cref="PerStart"/>): a copy of each kept argument in the actor's heap, the one the allocation
     /// entry serves, the state's counts at one, and the constructor run on them as at the <c>spawn</c>, a constructor of the body
     /// borrowing them, since <c>move</c> before a parameter of a constructor is <c>not supported</c> (<c>Semantics/Checker.Constructors.cs</c>),
-    /// so that the copies are released after it, the primary one owning them, then the defaults of the body (K7); then the message freed. A
+    /// so that the copies are released after it, the primary one owning them, then the defaults of the body (K7); then the end of the
+    /// constructor given to the runtime (<c>Rebuilt</c>), since a call of the restart's chain that reaches the actor while the constructor
+    /// runs waits in its inbox (U22; section 6, the owner, 2026-11-20, #599, comment 7051501153, "Option 1"); then the message freed. A
     /// throw there is the actor's own crash (U3).
     /// </summary>
     private string Restarted(ClassSymbol symbol, ConstructorSymbol? constructor, List<KurzType> types, List<string?> copiesInto) =>
@@ -318,6 +320,7 @@ public sealed partial class Emitter
                 }
             }
 
+            fn.Emit($"call void {RuntimeFunction("Rebuilt")}(ptr %a0)"); // U22: the calls of its chain get in again (the runtime's `Moved`)
             fn.Emit($"call void {StdFunction("Free")}(ptr %a1, i64 56)"); // the restart's message (the runtime's `Restart`)
             fn.Return(null);
         });
@@ -882,13 +885,15 @@ public sealed partial class Emitter
     /// word set once the result stands, an <c>i32</c> that the runtime stores with release and loads with acquire, the activation that
     /// waits on it, which the runtime's <c>ReplyWaiter</c> sets, the call's deadline and the replies before and after it among the
     /// thread's timers, which the runtime's <c>Enqueue</c> and <c>Wait</c> set (U36), the clock at which a crash or an end set the word,
-    /// which the runtime's <c>Signal</c> stores and <c>Wait</c> holds to the deadline (U43), then, for a method with a result, the heap of
-    /// the caller, which the result is copied into (U12), the field <see cref="ReplyHeap"/>, and the result after it.
+    /// which the runtime's <c>Signal</c> stores and <c>Wait</c> holds to the deadline (U43), the call's place, its file's bytes, their count
+    /// and its line, which the runtime's <c>Enqueue</c> stores and the top-level code's <c>deadlock</c> names where an actor's start keeps the
+    /// call out (the runtime's <c>Kept</c>; U22, U52; section 6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), then, for a method
+    /// with a result, the heap of the caller, which the result is copied into (U12), the field <see cref="ReplyHeap"/>, and the result after it.
     /// </summary>
-    private string Reply(KurzType result) => Types.IsVoid(result) ? "{ i32, ptr, i64, ptr, ptr, i64 }" : $"{{ i32, ptr, i64, ptr, ptr, i64, ptr, {Ir(result)} }}";
+    private string Reply(KurzType result) => Types.IsVoid(result) ? "{ i32, ptr, i64, ptr, ptr, i64, ptr, i64, i64 }" : $"{{ i32, ptr, i64, ptr, ptr, i64, ptr, i64, i64, ptr, {Ir(result)} }}";
 
     /// <summary>The field of the caller's heap in a reply (<see cref="Reply"/>), the result's the one after it.</summary>
-    private const int ReplyHeap = 6;
+    private const int ReplyHeap = 9;
 
     /// <summary>
     /// U37: the function that drops a message of the method <paramref name="f"/> unrun, the third of its call site's table, which the
@@ -1017,12 +1022,12 @@ public sealed partial class Emitter
 
     /// <summary>
     /// U46, U50: the IR type of the reply of an <c>attempt</c>, a call's (<see cref="Reply"/>) with the caller's heap at
-    /// <see cref="ReplyHeap"/> whatever the block gives, then the slot of the crash's message, at byte 56, where the runtime's
+    /// <see cref="ReplyHeap"/> whatever the block gives, then the slot of the crash's message, at byte 80, where the runtime's
     /// <c>Fell</c> stores it, then the block's value, where it gives one.
     /// </summary>
     private string AttemptReply(KurzType success) => success is Semantics.VoidType
-        ? "{ i32, ptr, i64, ptr, ptr, i64, ptr, ptr }"
-        : $"{{ i32, ptr, i64, ptr, ptr, i64, ptr, ptr, {Ir(success)} }}";
+        ? "{ i32, ptr, i64, ptr, ptr, i64, ptr, i64, i64, ptr, ptr }"
+        : $"{{ i32, ptr, i64, ptr, ptr, i64, ptr, i64, i64, ptr, ptr, {Ir(success)} }}";
 
     /// <summary>
     /// U46, U47: the function of the message of an <c>attempt</c> whose block has the function type <paramref name="block"/>, which the

@@ -423,7 +423,21 @@ call `handle_alloc_error`. The entry serves a heap (record, section 3): the one 
 switch to an actor's stack and puts back after it, the running actor's, which a waiting call sets
 aside while it waits (`Wait`); the new actor's, while `spawn` runs its constructor and the defaults
 of its body; the heap of a copy's session, from `CopyUse` to `CopyLeft`; else the thread's own, which
-holds what the top-level code allocates and what lives as long as the process ("The runtime"). A heap
+holds what the top-level code allocates and what lives as long as the process ("The runtime"). The
+thread holds the heap the entry serves and that heap's table of free blocks by size class in two words
+of its own, kept true wherever the heap that serves or its table changes (`HeapUse`, `HeapCurrent`,
+`HeapNew`, `HeapReset`, `Heads`), as mimalloc's thread-local `_mi_heap_default` names the heap that
+serves, so that the entry finds the free block of its class by one load of the thread, where it loaded
+the heap set to serve, then the thread's own, then that heap's table, and `Free` takes that table for a
+block of the heap that serves; the entry stays a call at every caller (`Emitter.OutOfLine`), as Rust's
+`__rust_alloc` is a call into the global allocator (the owner, 2026-11-20, issue 157, comment
+7051500158, S4, against the allocator as it stood, an exception to "no row slower beyond noise": eight
+rows of that issue's sweep ran slower by 0.6% to 5.7%, `hex-encode-16mib` and `equal` the most, and
+`hex-decode-64-digits` 9% to 14% faster and `substring` 6% to 7%; with the alignment of loops, S2,
+`parse-decimal` 1.1% to 1.9% slower, the cost of the two together, read as their placement, the owner's
+S6 of 2026-11-23, comment 7095824731, recorded in `kurz-design.md` beside S2; pinned by
+`ListTests.The_heap_the_allocation_entry_serves_and_its_table_are_set_where_either_changes` and
+`ListTests.The_allocation_entry_stays_a_call_where_its_size_is_a_constant`). A heap
 takes its memory in pages, its first page sized to what it holds first, from 256 bytes, each later page
 twice the size of the one before it, up to 65536 bytes, and larger, the smallest power of two that holds
 the block, only where one block needs more (record, section 3: the owner, 2026-11-15, #519, comment
@@ -696,7 +710,15 @@ pinned clang compiles unoptimised, at `-O0`, in a test build, as Cargo's `dev` p
 `-O2` in a release build (the owner, 2026-10-29, "As Rust's dev profile, -O0"), every function of which
 it aligns at 64 bytes through LLVM's `-align-all-functions=6`, where LLVM, and rustc with it, aligns one
 at 16 (the owner, 2026-11-02, issue 156, comment 6580739215; pinned by
-`ClangTests.A_release_build_aligns_every_function_at_64_bytes_and_a_test_build_leaves_llvms_alignment`), and links with the C
+`ClangTests.A_release_build_aligns_every_function_at_64_bytes_and_a_test_build_leaves_llvms_alignment`),
+and the head of every loop at 64 bytes through clang's `-falign-loops=64`, which reaches IR, where LLVM
+aligns one at 16 on x86-64 and leaves it unaligned on 64-bit Arm (the owner, 2026-11-20, issue 157,
+comment 7051500158, S2, against leaving the loops to LLVM, an exception to "no row slower beyond noise"
+as the alignment of functions is: the Cyrillic rows of `ToLower` and `ToUpper` ran 16.1% faster, and 42
+of the 102 rows of that issue's sweep slower beyond the band of two copies of a build, by up to 12.2%, in
+a larger binary; measured with the build of the option, five rows slower beyond the noise of S3 in two
+runs and 10.3% to 13.6% more text in each program of that sweep; pinned by
+`ClangTests.A_release_build_aligns_every_loop_at_64_bytes_and_a_test_build_leaves_llvms_alignment`), and links with the C
 library as the platform links it, on Linux its math library `libm` with it, as Rust's standard
 library links it through its `libc` crate (checked 2026-10-29: the `libc` crate's `src/unix/mod.rs`,
 which links `m` beside `c` on Linux), whose `fmod` an unoptimised `%` of a `double` calls, and with the
@@ -1186,7 +1208,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   in a loop until the word is set, as tokio's `block_on` runs its queue until its future is ready, so
   that a call behind any count of messages takes the stack of one, and ends the process with
   `deadlock` at the call's line where the queue is empty, no restart's pause runs and the word is not set
-  (U18, U42), and with `call-timeout` there once its deadline passes (U36); inside a
+  (U18, U42), or at the line of a call that an actor's start keeps out where one closes the loop, a place
+  `Enqueue` stores in that call's reply (U22, U52), the first place's in source order where more than one closes it
+  (`KeptSorted`), with a line `kept out at <file>:<n>` for each further place under the error line, a place with the
+  count of its calls where more than one, at most 10 such lines and then `... and K more` (`KeptLines`,
+  `DeadlockKept`), and with `call-timeout` there once its deadline passes (U36); inside a
   message it parks the activation, switching to the thread's side until the word is set or a timer of the
   thread, the timers kept in the order of their deadlines, wakes it at its deadline (U37, U38), and the scheduler drops
   a message whose deadline passed before it starts it, its reply's word set to 4 (`ActorTests`).
@@ -2137,7 +2163,10 @@ table of the tests, each test's function, its name as written and its line, and 
 `stop`, by one message with no deadline (D6), and waits for it as the top-level code waits for a call
 (`RootWait`, the loop `Wait` runs). The test passes where the actor answered, and fails where it crashed,
 the words of its crash kept for the line under `FAILED` and no log line written for it (F1, F3), or where
-the wait found nothing left to run, `deadlock at <file>:<the test's line>` (F5). Then every actor the
+the wait found nothing left to run, `deadlock at <file>:<the test's line>` (F5), or the place of the
+call an actor's start keeps out where that call closes the loop, which `TestRan` looks for as `Wait`
+does (`Kept`, U22, U52) and `RunTests` names (Y5), and where more than one closes it, the lines of
+`KeptLines` as the top-level code's error writes them, each indented by four spaces. Then every actor the
 test made ends at once, parked ones too (F6): the records of the run queue, each activation's stack back
 in the pool with its open copy sessions ended, the stack a pending block keeps, every heap, the heaps of
 messages, the timers, the pauses and the deadline of the top-level code's `within`, so that no timer and
