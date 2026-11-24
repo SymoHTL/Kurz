@@ -1,0 +1,17 @@
+// expect: output
+// | 9
+// rules: T19
+
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int Describe(Shape s) => s.Area()
+
+int Pass<T: Shape>(T item) => Describe(item)
+
+print(Pass(Square(3)))

@@ -1,0 +1,6 @@
+// expect: error limit-not-interface at 4
+// rules: T19
+
+int Twice<T: int>(T n) => 2
+
+print(Twice(1))

@@ -1,0 +1,17 @@
+// expect: error type-mismatch at 17
+// rules: T19
+
+class Animal {
+    pub virtual string Sound() => "quiet"
+}
+
+class Dog : Animal {
+    pub override string Sound() => "woof"
+}
+
+class Rock {
+}
+
+string Speak<T: Animal>(T a) => a.Sound()
+
+print(Speak(Rock()))

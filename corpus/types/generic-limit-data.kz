@@ -1,0 +1,11 @@
+// expect: error type-mismatch at 10
+// rules: T19
+
+interface Shape {
+    int Area()
+}
+
+data Box<T: Shape>(T Item)
+
+b = Box(5)
+print(b.Item)
