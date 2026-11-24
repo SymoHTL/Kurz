@@ -2503,9 +2503,9 @@ ask about it.
   match, from the last position before that match's end at which its state held no thread of an earlier start; its cache, made for each call and bounded at 2 MiB, is emptied when it fills, and after three emptyings that read
   fewer than 10 bytes a state, or where it cannot hold two states, the search goes to the Pike VM (the owner, 2026-11-12, issue 176,
   comment 6819137493, Q1, Q2 and Q4 of comment 6813110851) *(assumed, as the record and G2 keep them: the members a state
-  keeps, the cache the searches of one call share, its 2 MiB and the checks at an emptying and of the capacity)*; the text
-  length below which Q3 of that comment has the Pike VM
-  run alone is not built, and the DFA runs first at every length. The parse is
+  keeps, the cache the searches of one call share, its 2 MiB and the checks at an emptying and of the capacity)*; the DFA
+  runs first at every length of the text (the owner, 2026-11-20, issue 176, comment 7051500478, R1 of comment 7007321718,
+  which replaces Q3 of comment 6813110851 and its length). The parse is
   Rust's `ParserI`, one pass with stacks of the open groups, sequences, alternations and brackets, so that a pattern gives
   the error Rust's gives at the byte Rust's names, and the levels of Rust's `NestLimiter` are counted after it, a group, a
   sequence of two items or more, an alternation, a repetition, a bracketed class, a bracket inside one, a class's union of two
