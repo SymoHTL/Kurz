@@ -3185,10 +3185,9 @@ crash, which restarts it again (U3).
 
 A call that reaches the actor while its restart runs its constructor, a call of the chain the restart
 starts, waits in its inbox and is not let in by that chain (U17), so that a constructor that waits on
-it waits on a call that waits for that constructor, as a message to a `per node` actor from its own
-start does (U52), which the top-level code's wait on one thread reads as `deadlock` (U18) (§6, the
-owner, 2026-11-20, #599, comment 7051501153, "Option 1"). No actor crashes on it, so that no restart
-loops on it, and a `send` of that chain to the actor waits in its inbox behind the restart and is no
+it waits on a call that waits for that constructor, which the top-level code's wait on one thread
+reads as `deadlock` (U18) (§6, the owner, 2026-11-20, #599, comment 7051501153, "Option 1"). No
+actor crashes on it, so that no restart loops on it, and a `send` of that chain to the actor waits in its inbox behind the restart and is no
 `deadlock` *(assumed: the reading of "as T29 option 1 reads", #599, comment 7056452417)*. The error
 names the line of the call the inbox holds, the call that closes the loop, not the line of the
 top-level code's call that waits (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and the
