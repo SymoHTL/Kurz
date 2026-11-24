@@ -51,6 +51,12 @@ public sealed partial class Emitter
     private const int LinkSlot = 4;
     private const int CopySlot = 5;
 
+    // O7: the text of a thrown value is being made, in which an instance of a class that neither declares nor inherits a `Text()` has its
+    // class's name (the owner, 2026-11-20, issue 598, comment 7051500939), and one held as such a class the text of its own class where
+    // that class has one (2026-11-21, comment 7060156252, Q9 of comment 7055578588); everywhere else the checker reports such an instance's
+    // text as `no-text` (A4, A7), so that a helper this text builds for a type that holds one is built for a throw alone
+    private bool namesClasses;
+
     // each class whose body's defaults are queued for their function, with its name and the program's statement that first needed
     // it, which a refusal for Windows names (K7, S11)
     private readonly Queue<(ClassSymbol Class, string Name, int From)> defaultsPending = new();
@@ -693,9 +699,94 @@ public sealed partial class Emitter
         return Types.IsVoid(result) ? Emitted(call) : fn.Value(call);
     }
 
-    /// <summary>A5, A9: the text of an instance, which its <c>Text()</c> gives, the override of the instance's class where it is <c>virtual</c>; the caller holds a count of it.</summary>
+    /// <summary>
+    /// A5, A9: the text of an instance, which its <c>Text()</c> gives, the override of the instance's class where it is <c>virtual</c>; the
+    /// caller holds a count of it. In the text of a thrown value an instance held as a class with none has the text of its own class, or
+    /// that class's name (O7, <see cref="ClassText"/>).
+    /// </summary>
     private string InstanceText(string value, ClassType type) =>
-        CallOn(type.Symbol.TextMethod ?? throw new InvalidOperationException($"`{type}` has no `Text()`: `no-text`, which the checker reports (A4)"), value, type, []);
+        type.Symbol.TextMethod is { } text ? CallOn(text, value, type, [])
+        : namesClasses ? ClassText(value, type)
+        : throw new InvalidOperationException($"`{type}` has no `Text()`: `no-text`, which the checker reports (A4)");
+
+    /// <summary>
+    /// O7: the text a thrown value gives an instance held as a class with no <c>Text()</c>: what the <c>Text()</c> of the instance's own
+    /// class gives, its own or the nearest base's, found when the program runs, as C#'s virtual <c>ToString()</c> is (the owner, 2026-11-21,
+    /// issue 598, comment 7060156252, Q9 of comment 7055578588), and where that class's chain declares none, the bare name of the instance's
+    /// own class, a literal, which no count holds (the owner, 2026-11-20, comment 7051500939, and 2026-11-21, comment 7060156252, Q2 and Q3
+    /// of comment 7055011193). Where a class derives from the value's, the table the value carries is compared with the table of each
+    /// class of the program that derives from it, as <see cref="FaceArm"/> searches.
+    /// </summary>
+    private string ClassText(string value, ClassType type)
+    {
+        var symbol = type.Symbol;
+        var name = StringValue(symbol.Name);
+        if (!Layout.Fat(symbol))
+        {
+            return name;
+        }
+
+        var table = fn.Value($"extractvalue %kz.obj {value}, 1");
+        var derived = Model.Classes.Where(c => !ReferenceEquals(c, symbol) && c.HasBaseOrIs(symbol)).ToList();
+        foreach (var named in derived.Where(c => c.TextMethod is null))
+        {
+            name = fn.Value($"select i1 {fn.Value($"icmp eq ptr {table}, {Table(named)}")}, %kz.str {StringValue(named.Name)}, %kz.str {name}");
+        }
+
+        var texted = derived.Where(c => c.TextMethod is not null).ToList();
+        if (texted.Count == 0)
+        {
+            return name;
+        }
+
+        // each class whose chain declares a `Text()` below the value's: its call on the branch the instance's table takes, the name on the rest
+        var made = fn.Alloca("%kz.str", "thrown");
+        var done = fn.Label("thrown");
+        fn.Emit($"store %kz.str {name}, ptr {made}");
+        foreach (var own in texted)
+        {
+            var call = fn.Label("own");
+            var next = fn.Label("next");
+            fn.CondBranch(fn.Value($"icmp eq ptr {table}, {Table(own)}"), call, next);
+            fn.Block(call);
+            fn.Emit($"store %kz.str {CallOn(own.TextMethod!, value, type, [])}, ptr {made}");
+            fn.Branch(done);
+            fn.Block(next);
+        }
+
+        fn.Block(done);
+        return fn.Value($"load %kz.str, ptr {made}");
+    }
+
+    /// <summary>
+    /// O7: the text a thrown value gives an instance held as an interface that declares no <c>Text()</c>, that of a thrown class instance:
+    /// what the <c>Text()</c> of the instance's own class gives, its own or the nearest base's, found when the program runs, and where that
+    /// class's chain declares none, the bare name of the class, a literal, which no count holds (the owner, 2026-11-21, issue 621, comment
+    /// 7067091007). The table a value of the interface carries is its instance's class's own for the interface, so the class is found as
+    /// <see cref="FaceArm"/> finds it: the table is compared with the one for the interface of each class of the program that implements it.
+    /// </summary>
+    private string FaceText(string value, InterfaceSymbol face)
+    {
+        var address = fn.Value($"extractvalue %kz.obj {value}, 0");
+        var table = fn.Value($"extractvalue %kz.obj {value}, 1");
+        var made = fn.Alloca("%kz.str", "thrown");
+        var done = fn.Label("thrown");
+        foreach (var symbol in Model.Classes.Where(c => c.Implements(face)))
+        {
+            var own = fn.Label("own");
+            var next = fn.Label("next");
+            fn.CondBranch(fn.Value($"icmp eq ptr {table}, {InterfaceTable(symbol, face)}"), own, next);
+            fn.Block(own);
+            var text = symbol.TextMethod is { } method ? CallOn(method, Layout.Fat(symbol) ? Pair(address, Table(symbol)) : address, new ClassType(symbol), []) : StringValue(symbol.Name);
+            fn.Emit($"store %kz.str {text}, ptr {made}");
+            fn.Branch(done);
+            fn.Block(next);
+        }
+
+        fn.Unreachable(); // the table is the one of a class of the program that implements the interface
+        fn.Block(done);
+        return fn.Value($"load %kz.str, ptr {made}");
+    }
 
     /// <summary>One more strong count of an instance.</summary>
     private string RetainInstance() => Helper("retain.instance", "void", ["ptr"], () =>

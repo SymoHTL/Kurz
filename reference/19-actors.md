@@ -1019,7 +1019,9 @@ A use of a variable after its `move` is the compile error `used-after-move`, at 
 line of the `move`, on every path on which the value may have moved, as rustc reports a use after a
 move at the use (E0382) (§6, the owner, 2026-11-15, #519, comment 6896192351, Q1, "Rust: at the
 use, own id"), and its id has its row in the table of errors, as `move-reachable`'s and
-`move-at-call`'s do, since cases of this rule expect them (§6). Two paths to one block of a value that crosses, or of a
+`move-at-call`'s do, since cases of this rule expect them (§6). A bare `throw` in an arm of `else` is a use of the
+arm's name (O7), so that one after a `move` that may have ended the name is `used-after-move` at the `throw` (§5,
+§6, the owner, 2026-11-20, issue 596, comment 7051500690). Two paths to one block of a value that crosses, or of a
 value after `copy`, arrive as two paths to one copy, as Rust's clone of an `Rc` graph keeps its
 sharing, so that a copy is never larger than its source and a mutable graph keeps its shape (§6,
 the owner, 2026-11-15, #519, comment 6896192351, Q2, "Sharing kept"). The copies one call makes,
@@ -2020,6 +2022,79 @@ m = Cart(1)
 f = () => m.N
 send s.Take(move m)
 print(f())
+```
+
+Case: [outcomes/else-throw-after-move.kz](../corpus/outcomes/else-throw-after-move.kz)
+```kurz
+data Missing
+
+int | List<int> | Missing Plain(int id) {
+    if id == 1 {
+        return [id, 7, 9]
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Use(move List<int> l) => l.Count
+
+int Rethrown(int id) {
+    v = Plain(id) else {
+        List<int> n => {
+            c = Use(move n)
+            print("used {c}")
+            throw
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3))
+print(Rethrown(1))
+```
+
+Case: [outcomes/else-throw-after-move-other-path.kz](../corpus/outcomes/else-throw-after-move-other-path.kz)
+```kurz
+data Missing
+
+int | List<int> | Missing Plain(int id) {
+    if id == 1 {
+        return [id, 7, 9]
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Use(move List<int> l) => l.Count
+
+int Rethrown(int id, bool give) {
+    v = Plain(id) else {
+        List<int> n => {
+            if give {
+                return Use(move n)
+            } else {
+                throw
+            }
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3, true))
+print(Rethrown(1, true))
+print(Rethrown(1, false))
 ```
 
 ### U13 (decided, §6) The end of the program drops what is queued
