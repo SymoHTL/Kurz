@@ -1,0 +1,11 @@
+// expect: error bound-not-positive at 9
+// rules: U40
+
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+within -1s {
+    print(s.Get())
+}
