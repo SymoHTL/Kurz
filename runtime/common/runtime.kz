@@ -3611,8 +3611,9 @@ thread static mut byte* running = null
 thread static mut byte* holding = null
 
 // The heap of an actor `spawn` makes, whose first block holds the actor's record and a state of `size`
-// bytes behind it (design record, section 3), made before the arguments of `spawn`, which cross into it
-// (U12). A heap the system refuses ends the process as a refused allocation does.
+// bytes behind it (design record, section 3), made just before the first argument of `spawn` that crosses
+// into it (U12), or after the last where none crosses (section 6, T87 3). A heap the system refuses ends the
+// process as a refused allocation does.
 pub byte* ActorHeapNew(long size) {
     byte* heap = std.HeapNew(144 + size)
     if heap == null {
@@ -3645,11 +3646,11 @@ pub byte* MessageHeapNew() {
     return heap
 }
 
-// The heap of a `spawn` whose argument can raise after one that crosses, or can wait (`Emitter.EmitActorSpawn`),
-// made as `ActorHeapNew` makes it, before the arguments, which cross into it (U12), and listed with the
-// running actor as a message's heap of its own is (`Listed`), so that a raise of such an argument, which
-// crashes the actor whose code spawns, frees it with the copies made into it (`Fall`), as Rust drops the
-// parts of a value it was building (design record, section 6, T82 1); `SpawnHeapTaken` takes it off the list
+// The heap of a `spawn` whose first argument that crosses into it (U12), or one after it, can raise or wait
+// (`Emitter.EmitActorSpawn`), made as `ActorHeapNew` makes it, just before that first crossing argument, and
+// listed with the running actor as a message's heap of its own is (`Listed`), so that a raise of such an
+// argument, which crashes the actor whose code spawns, frees it with the copies made into it (`Fall`), as
+// Rust drops the parts of a value it was building (design record, section 6, T82 1, T87 3); `SpawnHeapTaken` takes it off the list
 // once the last argument is evaluated, and a case propagated out of a later argument frees it as a
 // message's (`MessageHeapFree`).
 pub byte* SpawnHeapNew(long size) {

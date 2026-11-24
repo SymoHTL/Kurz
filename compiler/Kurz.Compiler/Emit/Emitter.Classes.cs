@@ -90,15 +90,16 @@ public sealed partial class Emitter
     /// of the chain has a call of its base, the fields of each class from its constructor's arguments (<see cref="FillFields"/>);
     /// then each field of the body with an <c>=</c> its default, in their order, read in the class's file through the instance being
     /// built, as C# runs a field's initializer before the constructor's body; a class in a chain declares none (K6, K7, K18). With
-    /// <paramref name="into"/>, the heap of the actor whose state <c>spawn</c> makes, the arguments cross into it (U12), and
+    /// <paramref name="making"/>, which makes the heap of the actor whose state <c>spawn</c> makes where its first crossing argument
+    /// is evaluated next (<see cref="Arguments"/>), the arguments cross into it (U12), and
     /// <paramref name="kept"/> is given them, with their types, before the block is made (U22).
     /// </summary>
-    private string Construct(ClassSymbol symbol, CallExpression c, CallInfo info, Func<string> block, string? into = null, Action<List<string>, List<KurzType>>? kept = null)
+    private string Construct(ClassSymbol symbol, CallExpression c, CallInfo info, Func<string> block, Func<int, string>? making = null, Action<List<string>, List<KurzType>>? kept = null)
     {
         string p;
         if (info.Constructor is { } made)
         {
-            var arguments = Arguments(c, info, j => made.Parameters[j].Type, _ => false, j => Default(made.Declaration.Parameters[j].Default, classOwners[symbol]), cConvention: false, owned: false, into);
+            var arguments = Arguments(c, info, j => made.Parameters[j].Type, _ => false, j => Default(made.Declaration.Parameters[j].Default, classOwners[symbol]), cConvention: false, owned: false, making: making);
             kept?.Invoke(arguments, made.Parameters.Select(x => Sub(x.Type)).ToList());
             p = block();
             fn.Emit($"call void {Constructor(made)}({string.Join(", ", arguments.Prepend($"ptr {p}"))})");
@@ -106,7 +107,7 @@ public sealed partial class Emitter
         else if (symbol.Chain.All(x => x.BaseCall is null))
         {
             // each parameter of the constructor is a field, which owns the argument bound to it
-            var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: true, into);
+            var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: true, making: making);
             kept?.Invoke(arguments, symbol.Constructor.Select(x => Sub(x.Field.Type)).ToList());
             p = block();
             for (var i = 0; i < arguments.Count; i++)
@@ -123,7 +124,7 @@ public sealed partial class Emitter
         }
         else
         {
-            var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: false, into);
+            var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: false, making: making);
             p = block();
             FillFields(symbol, arguments, p);
         }

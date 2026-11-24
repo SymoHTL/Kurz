@@ -6783,6 +6783,128 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(text, ListTests.Edited([.. ListTests.Fence, .. UnlistedHeaps]), "actor-spawn-heap-unlisted"), 0, ["17"], "");
     }
 
+    [Fact]
+    public void A_spawn_whose_argument_raises_before_its_heap_is_made_leaves_no_heap()
+    {
+        // section 6 (the owner, 2026-11-23, #519, comment 7095825398, "T87 3"): a `spawn` makes the new actor's heap just before its first
+        // argument that crosses into it, or after its last where none crosses, so that the index in `Ahead`, before the crossing list, and
+        // the index in `Plain`, whose `spawn` has no crossing argument, crash `Front` with no heap made; the heap made before the first
+        // crossing argument is listed with `Front` where that argument can raise, the index in `Inside`, or one after it can wait, the
+        // property `Size`, whose index raises, so that the crash frees it; the count of the heaps of the thread moves by none at each of
+        // those crashes, as at a crash in `Before`, which raises before its `spawn`, where a heap made before the arguments, or listed with
+        // nothing, would stay, one heap more; all after a first crash, whose restart moved the count by one where the later ones move it by
+        // none; the calls with an index in range are the control that the count sees the heap of each actor a `spawn` made; under the
+        // allocator that makes every freed block inaccessible, with a heap that an actor takes or `HeapLeft` frees checked to stand on no
+        // list, and a listed heap's links written before `MessageHeapFree` frees it (`UnlistedHeaps`)
+        const string text = """
+            actor Holder(List<int> Items, int N) {
+                pub int Count() => Items.Count + N
+            }
+
+            actor Lead(int N, List<int> Items) {
+                pub int Count() => Items.Count + N
+            }
+
+            actor Pair(int A, int N) {
+                pub int Count() => A + N
+            }
+
+            actor Front {
+                mut int at = 0
+                List<int> sizes = [1, 2]
+
+                int Size => sizes[at]
+
+                pub void Before(List<int> ks, int i) {
+                    k = ks[i]
+                    h = spawn Holder([1, 2, 3], k) on crash stop
+                    print(h.Count())
+                }
+
+                pub void Ahead(List<int> ks, int i) {
+                    h = spawn Lead(ks[i], [1, 2, 3]) on crash stop
+                    print(h.Count())
+                }
+
+                pub void Plain(List<int> ks, int i) {
+                    h = spawn Pair(i, ks[i]) on crash stop
+                    print(h.Count())
+                }
+
+                pub void Inside(List<List<int>> rows, int i) {
+                    h = spawn Holder(rows[i], 1) on crash stop
+                    print(h.Count())
+                }
+
+                pub void Sized(int i) {
+                    at = i
+                    h = spawn Holder([1, 2, 3], Size) on crash stop
+                    print(h.Count())
+                }
+
+                pub int Ping() => 2
+            }
+
+            f = spawn Front()
+            send f.Before([1], 1)
+            print(f.Ping())
+            start = HttpServer.Heaps()
+            send f.Ahead([1], 1)
+            print(f.Ping())
+            ahead = HttpServer.Heaps()
+            send f.Plain([1], 1)
+            print(f.Ping())
+            plain = HttpServer.Heaps()
+            send f.Inside([[1]], 1)
+            print(f.Ping())
+            inside = HttpServer.Heaps()
+            send f.Sized(5)
+            print(f.Ping())
+            sized = HttpServer.Heaps()
+            send f.Before([1], 1)
+            print(f.Ping())
+            before = HttpServer.Heaps()
+            print("{ahead - start} {plain - ahead} {inside - plain} {sized - inside} {before - sized}")
+            f.Ahead([1], 0)
+            f.Plain([1], 0)
+            f.Inside([[1]], 0)
+            f.Sized(1)
+            print(HttpServer.Heaps() - before)
+
+            """;
+        var run = BuildAndRun(text, ListTests.Edited([.. ListTests.Fence, .. HeapCount, .. UnlistedHeaps]), "actor-spawn-raises-before-heap");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Equal(
+            [
+                "Front#1 crashed: index-out-of-range at program.kz:20", "Front#1 crashed: index-out-of-range at program.kz:26",
+                "Front#1 crashed: index-out-of-range at program.kz:31", "Front#1 crashed: index-out-of-range at program.kz:36",
+                "Front#1 crashed: index-out-of-range at program.kz:17", "Front#1 crashed: index-out-of-range at program.kz:20",
+            ],
+            crashes);
+        Ran((run.Code, run.Output, rest), 0, ["2", "2", "2", "2", "2", "2", "0 0 0 0 0", "4", "1", "2", "5", "4"], "");
+    }
+
+    [Theory]
+    [InlineData("h = spawn Lead(Noted(\"before\", 1), Listed(\"crossing\"))", "before")]
+    [InlineData("h = spawn Pair(Noted(\"first\", 1), Noted(\"last\", 2))", "first last")]
+    [InlineData("h = spawn Holder(Listed(\"crossing\"), Noted(\"after\", 1))", "")]
+    public void A_spawn_whose_heap_cannot_be_made_has_run_the_arguments_before_the_point_it_is_made_at_and_none_after(string statement, string printed)
+    {
+        // section 6 (the owner, 2026-11-23, #519, comment 7095825398, "T87 3"): where the new actor's heap cannot be made
+        // (`allocation-failed`), the arguments before the point where it is made, just before the first argument that crosses into it or
+        // after the last where none crosses, have run, and none from that point on; the runtime's `ActorHeapNew` edited to end the process
+        // as a heap the system refuses does, with each argument printing as it runs
+        var text = "actor Holder(List<int> Items, int N) {\n    pub int Count() => Items.Count + N\n}\n\n"
+            + "actor Lead(int N, List<int> Items) {\n    pub int Count() => Items.Count + N\n}\n\n"
+            + "actor Pair(int A, int N) {\n    pub int Count() => A + N\n}\n\n"
+            + "int Noted(string s, int k) {\n    print(s)\n    return k\n}\n\n"
+            + "List<int> Listed(string s) {\n    print(s)\n    return [1]\n}\n\n"
+            + $"{statement}\nprint(h.Count())\n";
+        var refused = ("runtime/common/runtime.kz", "    if heap == null {\n        AllocationFailed(144 + size)\n", "    if heap != null {\n        AllocationFailed(144 + size)\n");
+        var run = BuildAndRun(text, ListTests.Edited([refused]), "actor-spawn-heap-refused");
+        Ran((run.Code, run.Output, Regex.Replace(run.Error, @"\([0-9]+ bytes\)", "(N bytes)")), 1, printed.Split(' ', StringSplitOptions.RemoveEmptyEntries), "error: allocation-failed (N bytes)\n");
+    }
+
     // ---- the block `attempt { ... }` (U46 to U50; assumed: T18 to T23 of #519, comment 6980152255) --------------------------------
 
     /// <summary>
