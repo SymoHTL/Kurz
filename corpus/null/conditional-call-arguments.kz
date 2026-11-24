@@ -1,0 +1,16 @@
+// expect: output
+// | ran b
+// | axc
+// | -
+// rules: N5
+
+// the arguments of a call after `?.` run only where the value is not null
+string Say(string x) {
+    print("ran {x}")
+    return x
+}
+
+string? s = "abc"
+string? t = null
+print(s?.Replace(Say("b"), "x") ?? "-")
+print(t?.Replace(Say("c"), "x") ?? "-")

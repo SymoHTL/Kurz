@@ -1,0 +1,16 @@
+// expect: error nullable-unchecked at 15
+// rules: N9
+
+// a `mut` method on a narrowed path through a `mut` field of an instance, whose arguments run a call, uses the path after that
+// call: the error the same call gets with the call on the line before it
+class Bag(mut List<int>? Items)
+
+int Drop(Bag b) {
+    b.Items = null
+    return 5
+}
+
+c = Bag([1])
+if c.Items != null {
+    c.Items.Add(Drop(c))
+}

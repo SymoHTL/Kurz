@@ -1,0 +1,29 @@
+// expect: output
+// | got 3
+// | failed too big
+// | none
+// rules: N5
+
+// a call after `?.` whose union `match` takes whole gives that union with `null` among its cases
+data Failed(string Why)
+
+class Parser(int Limit) {
+    pub int | Failed Read(int n) {
+        if n > Limit {
+            return Failed("too big")
+        }
+        return n
+    }
+}
+
+void Show(Parser? p, int n) {
+    match p?.Read(n) {
+        int got => print("got {got}")
+        Failed f => print("failed {f.Why}")
+        null => print("none")
+    }
+}
+
+Show(Parser(5), 3)
+Show(Parser(5), 9)
+Show(null, 3)
