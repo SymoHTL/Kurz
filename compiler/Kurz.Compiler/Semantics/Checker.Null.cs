@@ -613,7 +613,7 @@ public sealed partial class Checker
 
         if (PathOf(place) is { } path && Changeable(path) && callsRun > callsBefore)
         {
-            Report(ErrorIds.NullableUnchecked, member.Line, $"`{member.Member}` is read from {Types.A(model.TypeOf(of).Type)} without a check (N2)");
+            Add(Diagnostic.Error(ErrorIds.NullableUnchecked, member.Line, $"`{member.Member}` is read from {Types.A(model.TypeOf(of).Type)} without a check (N2)") with { CallHelp = EndedHelp(of) });
             return;
         }
 
@@ -633,9 +633,37 @@ public sealed partial class Checker
         if (PathOf(e) is { } path && Changeable(path) && !frame.Known.Contains(path) && model.HasType(e) && Types.NonNull(model.TypeOf(e).Type) is null
             && PathType(e) is { } declared && Types.NonNull(declared) is not null)
         {
-            Report(ErrorIds.NullableUnchecked, line, $"{written(declared)} without a check (N2)");
+            Add(Diagnostic.Error(ErrorIds.NullableUnchecked, line, $"{written(declared)} without a check (N2)") with { CallHelp = EndedHelp(e) });
         }
     }
+
+    /// <summary>
+    /// N9: the help line of a write that a call in its arguments or its value refused (<see cref="ChainReceiver"/>,
+    /// <see cref="NarrowingEnded"/>): that call can set the path to <c>null</c>, and it runs into a variable first (section 4, the owner,
+    /// 2026-11-24, #624, comment 7135538740, "A help line of its own (Recommended)"), the call and the path as the source writes them, or
+    /// "a call in this line" where the last call to end the check is no call of a function or a method (section 4, an assumption there).
+    /// </summary>
+    private string EndedHelp(Expression path) =>
+        $"{(endedBy is { } call && SourceOf(call) is { } text ? $"`{text}`" : "a call in this line")} can set {(SourceOf(path) is { } p ? $"`{p}`" : "the path")} to `null`: run it into a variable before this line";
+
+    /// <summary>N9: an expression as its source writes it, for a help line: a name, a member, an item, a call and the forms of <see cref="DefaultText"/>; null for another form.</summary>
+    private static string? SourceOf(Expression e) => e switch
+    {
+        NameExpression n => n.Name,
+        ThisExpression => "this",
+        ParenthesizedExpression p => SourceOf(p.Inner) is { } inner ? $"({inner})" : null,
+        MemberAccess m => SourceOf(m.Target) is { } target ? $"{target}{(m.Conditional ? "?." : ".")}{m.Member}" : null,
+        IndexExpression i => SourceOf(i.Target) is { } target && SourceOf(i.Index) is { } index ? $"{target}{(i.Conditional ? "?[" : "[")}{index}]" : null,
+        CallExpression { TypeArguments.Count: 0, Within: null } c => SourceOf(c.Callee) is { } callee && c.Arguments.Select(ArgumentSource).ToList() is var arguments && arguments.All(a => a is not null)
+            ? $"{callee}({string.Join(", ", arguments)})" : null,
+        _ => DefaultText(e) is var text && !text.Contains("...", StringComparison.Ordinal) ? text : null,
+    };
+
+    /// <summary>An argument as its source writes it, its name and its word in front (D11, M7, U12), or null (<see cref="SourceOf"/>).</summary>
+    private static string? ArgumentSource(Argument a) =>
+        SourceOf(a.Value) is { } value
+            ? (a.Name is null ? "" : $"{a.Name}: ") + a.Word switch { ArgumentWord.Mut => "mut ", ArgumentWord.Copy => "copy ", ArgumentWord.Move => "move ", _ => "" } + value
+            : null;
 
     /// <summary>
     /// N5: <c>xs?[i]</c> is null where <c>xs</c> is and its item at <c>i</c> otherwise, and the rest of the chain is skipped with it, as

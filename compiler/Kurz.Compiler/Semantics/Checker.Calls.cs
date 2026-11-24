@@ -109,7 +109,7 @@ public sealed partial class Checker
         }
 
         var result = CallResult(c, expected);
-        CallRan(); // N9: a call can assign a `mut` field through another reference (K2) and free the target of a `weak` one (R3)
+        CallRan(c); // N9: a call can assign a `mut` field through another reference (K2) and free the target of a `weak` one (R3)
         if (result.IsError || result.Type is not UnionType u || Types.NonNull(u) is not null || keepCases && (expected is null || Types.KeepsCases(expected, u)))
         {
             return result; // N8: a `T?` is no outcome list, and a call that returns one yields it whole

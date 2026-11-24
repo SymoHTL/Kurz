@@ -3675,14 +3675,27 @@ public sealed class CheckerTests
         // N5, N9 with section 4, the owner, 2026-11-24, #624, comment 7131654435, and #628, comment 7131654741, "Refuse it
         // (Recommended)": a `mut` call after `?.` on a path a call can change, whose arguments run a call, and the same call, an item
         // and an entry written in a test's branch, are the error each gets with that call on the line before it; a path no call
-        // changes, a local variable, a map one holds and a `mut` parameter, and a call with no call in its arguments stay allowed, and
-        // a receiver the build does not read keeps its `not supported` and a variable passed as `mut` in them M7's error alone
+        // changes, a local variable, a path of `data` fields from one, a map one holds and a `mut` parameter, and a call with no call
+        // in its arguments stay allowed, the refusal's text is the one N2 gives the same call in a test's branch, and a receiver the
+        // build does not read keeps its `not supported` and a variable passed as `mut` in them M7's error alone
         const string Bag = "class Bag(mut List<int>? Items, mut Map<string, List<int>> M)\n\nint Drop(Bag b) {\n    b.Items = null\n    return 5\n}\n\nc = Bag([1], Map<string, List<int>>())\n";
         Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Bag + "c.Items?.Add(Drop(c))"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Bag + "c.M[\"k\"]?.Add(Drop(c))"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Bag + "if c.Items != null {\n    c.Items.Add(Drop(c))\n}"));
         Clean(Bag + "c.Items?.Add(5)\nc.M[\"k\"]?.Add(5)\nif c.Items != null {\n    c.Items.Add(5)\n}");
         Clean("int Two() => 2\n\nmut List<int>? xs = [1]\nxs?.Add(Two())\nmut m = Map<string, List<int>>()\nm[\"k\"]?.Add(Two())");
+        Clean("data Inner(List<int>? Items)\ndata Outer(Inner In)\n\nint Two() => 2\n\nmut o = Outer(Inner([1]))\no.In.Items?.Add(Two())");
+        Assert.Equal("`Add` is read from a `List<int>?` without a check (N2)", ErrorText(Bag + "c.Items?.Add(Drop(c))"));
+
+        // section 4, the owner, 2026-11-24, #624, comment 7135538740, "A help line of its own (Recommended)": where a call in the
+        // arguments or the written value ended the check, the help line names that call and the path, "a call in this line" where it
+        // is no call of a function or a method (an assumption there), and every other `nullable-unchecked` keeps N2's, a call earlier
+        // in its line among them
+        const string Ended = "`Drop(c)` can set `c.Items` to `null`: run it into a variable before this line";
+        Assert.Equal(Ended, Assert.Single(Check(Bag + "c.Items?.Add(Drop(c))").Diagnostics.Items).Help);
+        Assert.Equal(Ended, Assert.Single(Check(Bag + "if c.Items != null {\n    c.Items.Add(Drop(c))\n}").Diagnostics.Items).Help);
+        Assert.Equal("check it with `!= null`, or give a value for null with `??`", Assert.Single(Check(Bag + "print(Drop(c) + c.Items.Count)").Diagnostics.Items).Help);
+        Assert.Equal("a call in this line can set `c.Items` to `null`: run it into a variable before this line", Assert.Single(Check("class Note {\n    pub string Text() => \"n\"\n}\n\nclass Bag(mut List<int>? Items)\n\nint Drop(Bag b) {\n    b.Items = null\n    return 5\n}\n\nc = Bag([1])\nn = Note()\nprint(Drop(c))\nif c.Items != null {\n    c.Items.Add(\"{n}\".Bytes.Count)\n}").Diagnostics.Items).Help);
         Assert.Equal(["9: a `mut` method on a value held by a field of an instance (K2, M5)"], NotSupported("class Inner(mut List<int> Items)\nclass Outer(mut Inner? In)\nint Drop(Outer o) {\n    o.In = null\n    return 5\n}\nOuter c = Outer(Inner([1]))\nif c.In != null {\n    c.In.Items.Add(Drop(c))\n}"));
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors("int Pop(mut List<int>? ys) {\n    ys = null\n    return 1\n}\n\nmut List<int>? xs = [1]\nif xs != null {\n    xs.Add(Pop(mut xs))\n}"));
         Clean("int Two() => 2\n\nvoid Grow(mut List<int>? xs) {\n    xs?.Add(Two())\n    if xs != null {\n        xs.Add(Two())\n    }\n}\n\nmut List<int>? ys = [1]\nGrow(mut ys)");
@@ -3690,6 +3703,7 @@ public sealed class CheckerTests
         const string Box = "class Box(mut List<int>? L, mut Map<string, int>? M)\n\nint Clear(Box b) {\n    b.L = null\n    return 7\n}\n\nx = Box([1], Map<string, int>())\n";
         Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Box + "if x.L != null {\n    x.L[0] = Clear(x)\n}"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Box + "if x.M != null {\n    x.M[\"k\"] = Clear(x)\n}"));
+        Assert.Equal("`Clear(x)` can set `x.L` to `null`: run it into a variable before this line", Assert.Single(Check(Box + "if x.L != null {\n    x.L[0] = Clear(x)\n}").Diagnostics.Items).Help);
         Clean(Box + "if x.L != null {\n    x.L[0] = 7\n}\nif x.M != null {\n    x.M[\"k\"] = 7\n}");
     }
 
