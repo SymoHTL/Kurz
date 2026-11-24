@@ -3165,7 +3165,11 @@ runs at its `spawn` goes on to its spawner, since a throw there is the spawner's
 as §6 marks it)*. At the top level the root is the supervisor, so that `escalate` there ends the
 process with the child's error line, the text below it and the exit code 1 (§6, comment 6902210646,
 Q4), and with the trace of the child's stack, from its raise to its message's method *(assumed: as §6
-marks it, the trace of the stack that raised, as at a raise of the top-level code)*.
+marks it, the trace of the stack that raised, as at a raise of the top-level code)*. Under `kurz test` a
+crash that escalates into a test's own actor is taken there with no log line and fails that test, the
+child's words under its `FAILED` line, and the run goes on with the test after it (Y5; §11, the owner,
+2026-11-20, issue 586, comment 7051499099, Q2 of comment 6992687784 at its lean) *(assumed: F3 of comment
+6993110710, a reading of the build said back there)*.
 
 Case: [actors/crash-stop.kz](../corpus/actors/crash-stop.kz)
 ```kurz
