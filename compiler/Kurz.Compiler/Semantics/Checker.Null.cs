@@ -509,6 +509,9 @@ public sealed partial class Checker
     /// </summary>
     private Typed CheckChainCall(MemberAccess m, CallExpression c, Func<CallExpression, Typed> read)
     {
+        // N9: a call in the chain's index or key runs before the place is taken, as one in the arguments does, so it is counted with
+        // them (the owner, 2026-11-24, pull request 631, comment 7143447670, "Refuse it in the push (Recommended)")
+        var callsBefore = callsRun;
         var target = m.Conditional ? CheckNullable(m.Target) : CheckExpression(m.Target, null);
         if (target.IsError)
         {
@@ -546,7 +549,7 @@ public sealed partial class Checker
         var receiver = new ChainValue(m.Target.Line, m.Target);
         chainValues[receiver] = new Typed(from);
         var call = c with { Callee = new MemberAccess(m.Line, receiver, m.Member, false) };
-        chainCalls[call] = (c, m, callsRun);
+        chainCalls[call] = (c, m, callsBefore);
         var outer = sending;
         if (ReferenceEquals(c, sending))
         {

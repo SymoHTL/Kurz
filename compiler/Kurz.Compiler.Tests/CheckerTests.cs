@@ -3688,6 +3688,17 @@ public sealed class CheckerTests
         Clean("data Inner(List<int>? Items)\ndata Outer(Inner In)\n\nint Two() => 2\n\nmut o = Outer(Inner([1]))\no.In.Items?.Add(Two())");
         Assert.Equal("`Add` is read from a `List<int>?` without a check (N2)", ErrorText(Bag + "c.Items?.Add(Drop(c))"));
 
+        // N9 with pull request 631, comment 7143447670, "Refuse it in the push (Recommended)": a call in the chain's index or key runs
+        // before the place is taken and is counted as one in the arguments, where the item's position, checked against the list the
+        // field held before the call, would be written into the list the call left; the call run into a variable first, and the same
+        // index on a local list, stay allowed
+        const string Rows = "class Box(mut List<List<int>?> L, mut Map<string, List<int>> M)\n\nint Swap(Box b) {\n    b.L = [null]\n    return 3\n}\n\nstring Key(Box b) => \"k\"\n\nx = Box([[1], [2], [3], [4]], Map<string, List<int>>())\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 11)], Errors(Rows + "x.L[Swap(x)]?.Add(2)"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 11)], Errors(Rows + "x.M[Key(x)]?.Add(2)"));
+        Assert.Equal("`Swap(x)` can set `x.L[Swap(x)]` to `null`: run it into a variable before this line", Assert.Single(Check(Rows + "x.L[Swap(x)]?.Add(2)").Diagnostics.Items).Help);
+        Clean(Rows + "i = Swap(x)\nx.L[i]?.Add(2)");
+        Clean("int Three() => 3\n\nmut List<List<int>?> ys = [[1], [2], [3], [4]]\nys[Three()]?.Add(2)");
+
         // section 4, the owner, 2026-11-24, #624, comment 7135538740, "A help line of its own (Recommended)": where a call in the
         // arguments or the written value ended the check, the help line names that call and the path, "a call in this line" where it
         // is no call of a function or a method (an assumption there), and every other `nullable-unchecked` keeps N2's, a call earlier
