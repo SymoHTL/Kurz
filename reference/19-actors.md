@@ -4589,6 +4589,41 @@ q = Read(10) else {
 print(q)
 ```
 
+Case: [outcomes/else-throw-void-attempt.kz](../corpus/outcomes/else-throw-void-attempt.kz)
+```kurz
+data Big(int N)
+
+void Work(int n) {
+    if n > 1 {
+        throw Big(n)
+    }
+
+    print("worked {n}")
+}
+
+// a bare `throw` in the arm `else` over a block whose value is `void` throws the case `Crashed` that reached the arm
+void Run(int n) {
+    attempt { Work(n) } else {
+        else => throw
+    }
+}
+
+// the throw is a crash of the outer child, whose `Reason` holds that case
+void Read(int n) {
+    attempt { Run(n) } else {
+        Crashed c => {
+            match c.Reason {
+                Crashed<Big | RuntimeError> d => print("inner {d.Reason} at {d.Place.Line}, outer at {c.Place.Line}")
+                else => print("other {c.Reason}")
+            }
+        }
+    }
+}
+
+Read(1)
+Read(2)
+```
+
 ### U47 (assumed, §6) What the block of an `attempt` takes
 
 The block gets values only and cannot touch the parent's `mut` state, so that nothing half-changed survives (§6). It takes
