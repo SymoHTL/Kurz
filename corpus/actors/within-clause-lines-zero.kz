@@ -1,0 +1,13 @@
+// expect: error bound-not-positive at 11
+// rules: U41
+
+// the bound of a call's clause stands in brackets where it is computed, and over several lines it reports the line where it starts (U40)
+
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+print(s.Get() within (2s -
+    1s -
+    1s))
