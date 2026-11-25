@@ -743,6 +743,23 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void The_count_of_a_duration_is_a_double_in_each_unit_and_its_whole_nanoseconds_a_long_of_the_narrow_type_alone()
+    {
+        // T39 (section 4, the owner, 2026-11-25, issue 629, comments 7158347507 and 7159373153): a `TotalX` member for each unit of
+        // `duration.FromX`, a `double`, on both widths; `WholeNanoseconds`, a `long`, on a `duration` alone
+        Clean("d = 1s\ndouble a = d.TotalNanoseconds + d.TotalMicroseconds + d.TotalMilliseconds + d.TotalSeconds\nprint(a + d.TotalMinutes + d.TotalHours + d.TotalDays)");
+        Clean("d = 1s\nlong n = d.WholeNanoseconds\nprint(n)");
+        Clean("longduration w = 1s\ndouble x = w.TotalNanoseconds + w.TotalDays\nprint(x)");
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("d = 1s\nlong n = d.TotalSeconds\nprint(n)"));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("longduration w = 1s\nprint(w.WholeNanoseconds)"));
+
+        // a unit is one of `duration.FromX`: no bare `Total`, no timestamp's unit, and no member on a timestamp
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("d = 1s\nprint(d.Total)"));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("d = 1s\nprint(d.TotalUnixSeconds)"));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("t = timestamp.FromUnixSeconds(5)\nprint(t.TotalSeconds)"));
+    }
+
+    [Fact]
     public void A_part_of_a_list_is_a_list_and_its_ends_are_a_range_s()
     {
         // M9 (section 4, the owner, 2026-10-29, "A List<T>, a value"), with C8's ends: integers of one sign, in order where both are literals

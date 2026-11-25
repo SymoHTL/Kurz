@@ -862,6 +862,13 @@ public sealed partial class Checker
     };
 
     /// <summary>
+    /// T39: the nanoseconds of the unit a duration's <c>TotalX</c> member counts in, the unit of <c>duration.FromX</c> in <see cref="TimeFrom"/>,
+    /// or null where <paramref name="member"/> names no such member.
+    /// </summary>
+    internal static long? TotalScale(string member) =>
+        member.StartsWith("Total", StringComparison.Ordinal) && TimeFrom.TryGetValue(("duration", "From" + member["Total".Length..]), out var scale) ? scale : null;
+
+    /// <summary>
     /// T38: <c>duration.FromSeconds(n)</c> and the other constructors of <see cref="TimeFrom"/>, the time of a count, a <c>long</c> or a
     /// <c>double</c> (section 4, the owner, 2026-11-08, issue 110, comment 6723644046, "Also a double, as C#"). A count of an integer type
     /// that widens to <c>long</c> (T8) takes the <c>long</c> form and any other number the <c>double</c> form, as C# picks

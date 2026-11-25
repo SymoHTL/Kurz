@@ -402,7 +402,8 @@ public sealed partial class Emitter
 
     /// <summary>
     /// A field of a data value (D1), a string's <c>Pointer</c> and the count of its <c>Bytes</c> (R15, T15), read from the string itself,
-    /// a string's <c>Bytes</c> as a list (T15), a list's <c>Count</c> (M9) and <c>Pointer</c> (R15), and a listener's <c>Port</c> (S9);
+    /// a string's <c>Bytes</c> as a list (T15), a list's <c>Count</c> (M9) and <c>Pointer</c> (R15), a duration's counts (T39), and a
+    /// listener's <c>Port</c> (S9);
     /// every other member is not emitted.
     /// </summary>
     private string EmitMember(MemberAccess m, KurzType type) => MemberOf(m, () => EmitExpression(m.Target), TypeOf(m.Target), type);
@@ -452,6 +453,10 @@ public sealed partial class Emitter
                 return EnumNumber(target(), e); // D18
             case FlagsType when m.Member == "Number":
                 return target(); // D19: the sum of the bits it holds, which is the set itself
+            case PrimitiveType { Kind: Primitive.Duration or Primitive.LongDuration } when Checker.TotalScale(m.Member) is { } scale:
+                return DurationTotal(target(), targetType, scale); // T39
+            case PrimitiveType { Kind: Primitive.Duration } when m.Member == "WholeNanoseconds":
+                return target(); // T39: the count of nanoseconds a duration is
             case PrimitiveType { Kind: Primitive.Instant } when m.Member == "Elapsed":
                 return Elapsed(target(), m.Line); // S25
             case HandleType when m.Member == "Port":
