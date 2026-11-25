@@ -3092,7 +3092,7 @@ emitter does not read through a chain (N5, M9), and an assignment of a field, an
 through a nullable variable or field known not null, `o.I.X = 1` and `o.I.Items[0] = 1`, which the
 emitter does not write through, where an index written on a narrowed map or list, `o.Items[0] = 1`
 with a nullable field `Items`, is read (N3, M4), a `mut`
-method on a path through a nullable item, entry or call's result, `groups[key]?.Items.Add(1)` (N3, M5), and a path through a nullable variable or field passed as `mut`, `Bump(mut o.I.X)` (N3, M7); a `weak` reference as a type
+method on a path through a nullable item, entry or call's result, `groups[key]?.Items.Add(1)` (N5, M5), and a path through a nullable variable or field passed as `mut`, `Bump(mut o.I.X)` (N3, M7); a `weak` reference as a type
 argument of a `data` type, as a key or a value of a map and as a parameter or the result of a
 function type, which the emitter does not lay out, `weak` before a type parameter or a union of
 classes, and a `weak T?` as a case of a union, a nullable case of one (R3, R5, T19, D9); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
