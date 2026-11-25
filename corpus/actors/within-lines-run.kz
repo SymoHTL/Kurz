@@ -1,0 +1,11 @@
+// expect: throws invalid-input at 7
+// rules: U40
+
+// a bound read at run time over several lines reports the line where it starts, not its last operator's
+
+one = 2s - 1s
+within one +
+    one -
+    2s {
+    print("inside")
+}
