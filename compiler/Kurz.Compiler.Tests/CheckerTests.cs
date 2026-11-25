@@ -757,6 +757,20 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("d = 1s\nprint(d.Total)"));
         Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("d = 1s\nprint(d.TotalUnixSeconds)"));
         Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("t = timestamp.FromUnixSeconds(5)\nprint(t.TotalSeconds)"));
+
+        // the help line of a refusal that asked for a count names the members (comment 7159373153, "Add a help line (Recommended)"):
+        // `/` of two durations, by the left one's width, and a duration converted to a number; a duration divided by a number, a
+        // remainder of two durations, a timestamp converted to a number and a `/` of other types keep none
+        const string Narrow = "read its count with a member: `.TotalMilliseconds` or another unit's, a `double`, or `.WholeNanoseconds`, the exact `long`";
+        const string Wide = "read its count with a member: `.TotalMilliseconds` or another unit's, a `double`";
+        Assert.Equal(Narrow, Assert.Single(Check("d = 1s\nprint(d / 1ms)").Diagnostics.Items).Help);
+        Assert.Equal(Wide, Assert.Single(Check("longduration w = 1s\nprint(w / 1ms)").Diagnostics.Items).Help);
+        Assert.Equal(Narrow, Assert.Single(Check("d = 1s\nprint(long(d))").Diagnostics.Items).Help);
+        Assert.Equal(Wide, Assert.Single(Check("longduration w = 1s\nprint(double(w))").Diagnostics.Items).Help);
+        Assert.Null(Assert.Single(Check("d = 1s\nprint(d / 2)").Diagnostics.Items).Help);
+        Assert.Null(Assert.Single(Check("d = 1s\nprint(d % 1ms)").Diagnostics.Items).Help);
+        Assert.Null(Assert.Single(Check("t = timestamp.FromUnixSeconds(5)\nprint(long(t))").Diagnostics.Items).Help);
+        Assert.Null(Assert.Single(Check("print(1 / \"a\")").Diagnostics.Items).Help);
     }
 
     [Fact]

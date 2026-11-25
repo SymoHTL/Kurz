@@ -924,7 +924,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the nanoseconds converted to a `double` and divided by the unit's, and `d.WholeNanoseconds`, the `i64`
   itself; a `longduration`'s 128 bits are rounded to the nearest `double` of 64-bit conversions, the
   magnitude shifted until it fits 64 bits with bit 0 set where the shift dropped a bit that is not zero,
-  so that no target needs the runtime library's `__floattidf`;
+  so that no target needs the runtime library's `__floattidf`; `d / 1ms` and `long(d)` stay `type-mismatch`, with a help line
+  that names the members (the diagnostic's own help line, which N9's call sets too);
 - a reading of the monotonic clock, an `instant` (T36), as the `i64` of its nanoseconds: the difference
   of two readings a `duration`, a reading plus or less a narrow duration a reading, each raising
   `overflow` in every build where it leaves the range, the comparisons, a field, a map's key and its
