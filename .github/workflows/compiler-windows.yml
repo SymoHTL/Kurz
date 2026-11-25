@@ -21,7 +21,7 @@ jobs:
   compiler-windows:
     runs-on: windows-2025
     # held above the compiler gate's budget and this job's share in JOBS by tools/compiler_gate.py --self-test
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:

@@ -47,7 +47,7 @@ CWD = "compiler"  # the working directory of the command: the dotnet host reads 
 SOLUTION = "Kurz.sln"  # relative to CWD
 CONFIG = "compiler/NuGet.config"
 FLOOR = 1000  # below the tests the suites hold, above what is left without either corpus theory (over 300 cases each): a run that lost a project or a corpus theory cannot pass
-TIMEOUT = 1200  # seconds for restore, build and tests together: the Windows job's run took up to 864 s and met 900 twice on 2026-11-17 (runs 43985873704 and 43999911148, both green when run again)
+TIMEOUT = 1800  # seconds for restore, build and tests together: the Windows job's step took up to 1178 s and met 1200 three times on 2026-11-24 (runs 45473510913; 45465952795, 45471979520 and 45472163974), after up to 864 s and 900 met twice on 2026-11-17 (runs 43985873704 and 43999911148)
 # the workflows whose job runs this gate, each with the seconds that job spends outside it: compiler-windows and compiler-arm run it
 # alone, after the checkout, the cache of LLVM's archive and the SDK (about 100 s on 2026-11-17); gates runs it among every other
 # gate, in its container, and the slowest run seen spent 681 s outside it, 641 s of them in the replay of the red proofs (run
