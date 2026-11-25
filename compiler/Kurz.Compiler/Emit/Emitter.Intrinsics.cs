@@ -212,7 +212,7 @@ public sealed partial class Emitter
 
             var given = pointers.Select((_, i) => $"%given{Number(i)}").ToList();
             parameters.AddRange(given.Select(g => $"ptr {g}"));
-            if (parentElse is { } bare)
+            if (parentElse is { } bare && !Types.IsVoid(bare.Type)) // the arm of a `void` case passes nothing: there is no value (issue 638)
             {
                 parameters.Add($"{Ir(bare.Type)} %case");
                 elseCase = ("%case", bare.Type); // O7: a bare `throw` in the block throws the case its arm took
@@ -265,7 +265,7 @@ public sealed partial class Emitter
         }
 
         arguments.AddRange(pointers.Select(p => $"ptr {p}"));
-        if (elseCase is { } taken)
+        if (elseCase is { } taken && !Types.IsVoid(taken.Type))
         {
             arguments.Add($"{Ir(taken.Type)} {taken.Value}");
         }
