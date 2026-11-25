@@ -5000,11 +5000,19 @@ int Answer(byte* reply, byte* message, string file, int line) {
 // first timer or the deadline, or the run queue's first actor, as long as the reply is not set and its deadline has not passed; true
 // where one of those ends the loop, false where none of them is left, so that nothing could set the reply, where `Answer` raises
 // `deadlock` at the call's line and the test runner fails the test at its own (`RunTests`; Y5), or each at the lines of the calls
-// an actor's start keeps out where such calls close the loop (`Kept`).
+// an actor's start keeps out where such calls close the loop (`Kept`). An actor that sleeps is something left: with nothing else
+// to run, the loop sleeps to the first timer or the deadline (`Sleeping`; S28).
 bool RootWait(byte* reply) {
     raw {
-        long deadline = *Ptr<long>(reply + 16)
-        while ReplyState(reply) == 0 {
+        return RootLoop(reply, *Ptr<long>(reply + 16))
+    }
+}
+
+// The loop of `RootWait` for the reply `reply` to the deadline `deadline`, or, where `reply` is null, the top-level code's sleep to
+// that deadline (`Slept`; S28), which runs what the loop runs and, with nothing left, sleeps to the first timer or the deadline.
+bool RootLoop(byte* reply, long deadline) {
+    raw {
+        while reply == null || ReplyState(reply) == 0 {
             long now = PauseClock()
             if deadline <= now {
                 return true
@@ -5028,17 +5036,88 @@ bool RootWait(byte* reply) {
                 } else {
                     RunOne()
                 }
-            } else {
-                if runFirst == null {
-                    return false
-                }
-
+            } else if runFirst != null {
                 RunOne()
+            } else if reply == null || Sleeping() {
+                PauseSleep(Earliest(deadline, Next()) - now)
+            } else {
+                return false
             }
         }
     }
 
     return true
+}
+
+// Whether an actor's activation sleeps among the timers (`Slept`), its waiter naming no message, where one that waits for a call
+// names the message it waits on (`Answer`).
+bool Sleeping() {
+    raw {
+        mut byte* at = timers
+        while at != null {
+            if *Ptr<byte*>(*Ptr<byte*>(at + 8) + 432) == null {
+                return true
+            }
+
+            at = *Ptr<byte*>(at + 32)
+        }
+    }
+
+    return false
+}
+
+// S28: `Environment.Sleep(time)`, `nanoseconds` slept from now, none for zero or less (section 12, the owner, 2026-11-25, issue 627,
+// comment 7158347789, Q3, as Go's `time.Sleep`). Inside a message the activation parks, as a call that waits parks it (`Answer`; Q2, U4),
+// on a block of its heap shaped as a reply that is never set: its word 0, its waiter, its deadline, and its links among the
+// timers, which the scheduler's turn fires (`Fire`, `Waited`); its header names the block and no message, so that its actor's fall
+// takes it off the timers and waits for no answer (`Fall`), and the calls of its chain are let in above it while it parks, as above
+// an activation that waits (`Moved`; U17). The top-level code runs what its wait on a call runs to the deadline, and sleeps where
+// nothing is left (`RootLoop`), since every actor runs on its thread (U35), as tokio's `sleep` in `block_on` lets the runtime's
+// other tasks run; a deadline past the clock's range is the largest one, a sleep with no end.
+pub void Slept(long nanoseconds) {
+    if nanoseconds <= 0 {
+        return
+    }
+
+    long now = PauseClock()
+    mut long deadline = Never()
+    if nanoseconds < Never() - now {
+        deadline = now + nanoseconds
+    }
+
+    sys.Entered()
+    raw {
+        if running == null {
+            RootLoop(null, deadline)
+            sys.Left()
+            return
+        }
+
+        byte* sleep = Allocate(48)
+        byte* header = running
+        *Ptr<long>(sleep) = 0
+        *Ptr<byte*>(sleep + 8) = header
+        *Ptr<long>(sleep + 16) = deadline
+        *Ptr<byte*>(sleep + 24) = null
+        *Ptr<byte*>(sleep + 32) = null
+        *Ptr<long>(sleep + 40) = 0
+        *Ptr<byte*>(header + 360) = sleep
+        *Ptr<byte*>(header + 432) = null
+        TimerAdd(sleep)
+        byte* heap = std.HeapUse(null)
+        while !Waited(sleep) {
+            long entries = sys.Inside(0)
+            sys.Switch(header, threadSide)
+            sys.Inside(entries)
+        }
+
+        TimerRemove(sleep)
+        std.HeapUse(heap)
+        *Ptr<byte*>(header + 360) = null
+        std.Free(sleep, 48)
+    }
+
+    sys.Left()
 }
 
 // The replies of the calls that an actor's start keeps out, each address added to `found` in the order the walk finds them, which the
@@ -5842,7 +5921,8 @@ void Ends(bool hasText, byte* id, long idCount, byte* file, long fileCount, long
 // a wait that its deadline ended leaves (`Wait`), the reply is taken off the message it waits on by
 // the swap the callee takes it by (`ReplyTaken`), so that the callee runs to its end and its reply goes
 // nowhere, and where the callee took it first, the callee owns it and writes into the activation's frame,
-// whose stack stays out of the pool while the word is 0; the call it runs, whose reply it takes the same
+// whose stack stays out of the pool while the word is 0, but for the reply of a sleep, which names no message
+// and is only taken off the timers (`Slept`; S28); the call it runs, whose reply it takes the same
 // way, is answered `callee crashed`, which wakes its caller (U20); and its stack goes back to the pool. The
 // heaps of their own of the messages the actor's code was building are freed (`MessageHeapNew`). The calls
 // of the top activation's side list go to the front of the inbox, which is kept, the crashing message
@@ -5879,7 +5959,7 @@ void Fall(byte* state, byte* header, byte* kept) {
                 TimerRemove(waited)
             }
 
-            if waited != null && ReplyState(waited) == 0 && ReplyTaken(*Ptr<byte*>(at + 432)) == null {
+            if waited != null && ReplyState(waited) == 0 && *Ptr<byte*>(at + 432) != null && ReplyTaken(*Ptr<byte*>(at + 432)) == null {
                 while ReplyState(waited) == 0 {
                 }
             }

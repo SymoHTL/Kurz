@@ -1,0 +1,16 @@
+// expect: output
+// | ran
+// | after
+// rules: S28
+
+// the top-level code's sleep runs the messages its wait on a call runs, since every actor runs on its thread
+actor Worker {
+    pub void Work() {
+        print("ran")
+    }
+}
+
+w = spawn Worker()
+send w.Work()
+Environment.Sleep(10ms)
+print("after")

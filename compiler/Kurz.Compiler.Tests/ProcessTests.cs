@@ -292,6 +292,7 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("print(1)\nprint(timestamp.Now)\n", 2)]
     [InlineData("print(1)\nprint(instant.Now)\n", 2)]
     [InlineData("instant? t = null\nprint(1)\nif t != null {\n    print(t.Elapsed)\n}\n", 4)]
+    [InlineData("print(1)\nEnvironment.Sleep(1ms)\n", 2)] // S28: a wait reads the clock
     public void A_build_for_windows_says_not_supported_at_a_read_of_the_command_line_the_environment_or_the_clock(string text, int line)
     {
         var refused = Compile(text, Builder.CheckRuntime(Target.Windows));
