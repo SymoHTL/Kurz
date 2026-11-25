@@ -578,6 +578,23 @@ shows not null is read as the nullable type it is declared with, so `?.` and `?[
 `type-mismatch`, as C# reads them, by the reading N4 proposes; `memory/tree-value.kz` reads
 `root.Left?.Key` after an assignment narrowed `root.Left`.
 
+A call after `?.` or `?[`, `a?.M(x)`, is null where `a` is, the call and its arguments not run, and
+the call's result otherwise, made nullable: an `int` is an `int?`, a `T?` stays a `T?` and a union
+gains `null` among its cases; the rest of the chain is skipped at null (§4, the owner, 2026-11-24, issue
+624). A `void` call there is a statement, and as a value it is O10's `syntax` (E4). A call through a
+nullable reference to an actor waits as U4 says, and `send` before one sends where the chain did not
+stop, while `else` after one meets a `T?`, which is no outcome list *(the record marks these two as
+assumed)*. A call there that changes the value it is called on changes the place the chain names, a
+variable, a path of fields from one, or an item of a list or an entry of a map such a path holds, so
+that `groups[key]?.Add(n)` adds to the map's list, as Rust's `get_mut` and `push`; on a value that is
+no place, a call's result, it is the error the same call gets without `?.`, `mut-required` (M5) (§4,
+the owner, 2026-11-24). A path through the chain's value, `cfg?.Items.Add(1)`, is what the same call
+in a test's branch is, `not supported` (N3, M5) (§4, the owner, 2026-11-24, issue 624, comment
+7135538740). Such a call on a path a call can change (N9),
+whose arguments, index or key run a call, is `nullable-unchecked`, the error the same call gets with that call on
+the line before it, with the help line N9 gives it (§4, the owner, 2026-11-24); a local variable, a
+path of `data` fields from one and a map one holds stay allowed.
+
 Case: [null/conditional-access.kz](../corpus/null/conditional-access.kz)
 ```kurz
 string? Email(int id) {
@@ -618,6 +635,214 @@ data User(string Name)
 
 u = User("Ann")
 print(u?.Name)
+```
+
+Case: [null/conditional-call.kz](../corpus/null/conditional-call.kz)
+```kurz
+// a call after `?.` is null where the value is, and the call's result otherwise; the chain goes on after the call, and a call
+// after `?[` reads the item
+string? s = " a "
+string? t = null
+print(s?.Trim() ?? "-")
+print(t?.Trim() ?? "-")
+print(s?.Trim().ToUpper() ?? "-")
+print(t?.Trim().ToUpper() ?? "-")
+List<string>? xs = [" b "]
+List<string>? ys = null
+print(xs?[0].Trim().Bytes.Count ?? 0)
+print(ys?[0].Trim().Bytes.Count ?? 0)
+```
+
+Case: [null/conditional-call-arguments.kz](../corpus/null/conditional-call-arguments.kz)
+```kurz
+// the arguments of a call after `?.` run only where the value is not null
+string Say(string x) {
+    print("ran {x}")
+    return x
+}
+
+string? s = "abc"
+string? t = null
+print(s?.Replace(Say("b"), "x") ?? "-")
+print(t?.Replace(Say("c"), "x") ?? "-")
+```
+
+Case: [null/conditional-call-void.kz](../corpus/null/conditional-call-void.kz)
+```kurz
+// a `void` call after `?.` is a statement; a call with a result gives it made nullable
+class Note(string Name) {
+    pub void Say(string text) {
+        print("{Name}: {text}")
+    }
+
+    pub int Size() => 3
+}
+
+Note? a = Note("a")
+Note? b = null
+a?.Say("one")
+b?.Say("two")
+print(a?.Size() ?? -1)
+print(b?.Size() ?? -1)
+```
+
+Case: [null/conditional-call-void-value.kz](../corpus/null/conditional-call-void-value.kz)
+```kurz
+class Note(string Name) {
+    pub void Say(string text) {
+        print(text)
+    }
+}
+
+Note? a = Note("a")
+x = a?.Say("one")
+```
+
+Case: [null/conditional-call-union.kz](../corpus/null/conditional-call-union.kz)
+```kurz
+// a call after `?.` whose union `match` takes whole gives that union with `null` among its cases
+data Failed(string Why)
+
+class Parser(int Limit) {
+    pub int | Failed Read(int n) {
+        if n > Limit {
+            return Failed("too big")
+        }
+        return n
+    }
+}
+
+void Show(Parser? p, int n) {
+    match p?.Read(n) {
+        int got => print("got {got}")
+        Failed f => print("failed {f.Why}")
+        null => print("none")
+    }
+}
+
+Show(Parser(5), 3)
+Show(Parser(5), 9)
+Show(null, 3)
+```
+
+Case: [null/conditional-call-actor.kz](../corpus/null/conditional-call-actor.kz)
+```kurz
+// a call after `?.` on a nullable reference to an actor waits as any call through a reference does, and `send` sends one where
+// the reference is not null
+actor Counter {
+    mut int count = 0
+
+    pub void Add(int n) {
+        count = count + n
+    }
+
+    pub int Get() => count
+}
+
+Counter? a = spawn Counter()
+Counter? b = null
+a?.Add(2)
+b?.Add(2)
+send a?.Add(3)
+send b?.Add(3)
+print(a?.Get() ?? -1)
+print(b?.Get() ?? -1)
+```
+
+Case: [null/conditional-call-place.kz](../corpus/null/conditional-call-place.kz)
+```kurz
+// a `mut` call after `?.` changes the place the chain names: a variable, a path of fields from one, an entry of a map and an
+// item of a list it holds, and a list that another value holds is copied first, as `Add` copies it
+data Box(List<int>? Items)
+
+data Counter(int Count) {
+    pub mut void Bump(int n) {
+        Count = Count + n
+    }
+}
+
+mut List<int>? xs = [1]
+mut List<int>? none = null
+xs?.Add(2)
+none?.Add(2)
+print(xs ?? [])
+print(none ?? [])
+
+mut Box b = Box([1])
+b.Items?.Add(2)
+print(b.Items ?? [])
+
+mut Map<string, List<int>> groups = Map<string, List<int>>()
+groups["a"] = [1]
+before = groups
+groups["a"]?.Add(2)
+groups["b"]?.Add(2)
+print(groups["a"] ?? [])
+print(groups.ContainsKey("b"))
+print(before["a"] ?? [])
+
+mut List<List<int>?> lists = [[1], null]
+kept = lists
+lists[0]?.Add(2)
+lists[1]?.Add(2)
+print(lists[0] ?? [])
+print(kept[0] ?? [])
+
+mut Counter? c = Counter(1)
+c?.Bump(2)
+print(c?.Count ?? 0)
+```
+
+Case: [null/conditional-call-place-not-copied.kz](../corpus/null/conditional-call-place-not-copied.kz)
+```kurz
+// a `mut` call after `?.` changes a list no other value holds where it is, an entry's, a field's of an instance and a
+// variable's, as Rust's `get_mut` reaches it: the test before the call holds no count of the list, so `Add` does not copy it
+class Bag(mut List<int>? Items)
+
+mut m = Map<string, List<int>>()
+m["a"] = [1, 2, 3, 4]
+m["a"]?.RemoveAt(3)
+b = Bag([1, 2, 3, 4])
+b.Items?.RemoveAt(3)
+mut List<int>? xs = [1, 2, 3, 4]
+xs?.RemoveAt(3)
+raw {
+    before = (m["a"] ?? []).Pointer
+    m["a"]?.Add(9)
+    print((m["a"] ?? []).Pointer == before)
+    held = (b.Items ?? []).Pointer
+    b.Items?.Add(9)
+    print((b.Items ?? []).Pointer == held)
+    own = (xs ?? []).Pointer
+    xs?.Add(9)
+    print((xs ?? []).Pointer == own)
+}
+print(m["a"] ?? [])
+```
+
+Case: [null/conditional-call-no-place.kz](../corpus/null/conditional-call-no-place.kz)
+```kurz
+// a `mut` call after `?.` on a value that is no place is the error the same call gets without `?.`
+List<int>? Make() {
+    return [1]
+}
+
+Make()?.Add(2)
+```
+
+Case: [null/conditional-call-changeable.kz](../corpus/null/conditional-call-changeable.kz)
+```kurz
+// a `mut` call after `?.` on a path a call can change, whose arguments run a call, is the error the same call gets with that
+// call on the line before it
+class Bag(mut List<int>? Items)
+
+int Drop(Bag b) {
+    b.Items = null
+    return 5
+}
+
+c = Bag([1])
+c.Items?.Add(Drop(c))
 ```
 
 ### N6 (assumed, §4) `null` needs a nullable type
@@ -791,6 +1016,18 @@ are none of them. *(this list is proposed)*
 unchecked use), which its analysis can afford because it only warns; here an unchecked use is an
 error (N2), so the narrowing ends where the promise would end.
 
+A write into such a path whose arguments or value run a call, a `mut` method on it,
+`c.Items.Add(Drop(c))` after `if c.Items != null`, is a use of the path after that call, which ends
+the narrowing for it: `nullable-unchecked`, the error it gets with `Drop(c)` on the line before it, as N5 reads the same call after `?.` (§4, the owner, 2026-11-24,
+issue 628), where the build wrote into the `null` the call left. An item or an entry written into such a
+path, `x.L[0] = Clear(x)` and `x.M["k"] = Clear(x)`, is read so too *(the record marks this as
+assumed)*. The help line of that error, and of the same call after `?.` (N5), says that the call can set
+the path to `null` and to run it into a variable first, ``help: `Drop(c)` can set `c.Items` to `null`:
+run it into a variable before this line``, in place of N2's (§4, the owner, 2026-11-24, issue 624,
+comment 7135538740); a call that is no call of a function or a method, an interpolation or an `==`, is
+"a call in this line" there *(the record marks the words as assumed)*. A case pins an error's id and
+line (E2), so the help line has no case here.
+
 Case: [null/narrowed-field.kz](../corpus/null/narrowed-field.kz)
 ```kurz
 class Account(mut string? Email)
@@ -798,6 +1035,59 @@ class Account(mut string? Email)
 a = Account("a@example.com")
 if a.Email != null {
     print(a.Email.Bytes.Count)
+}
+```
+
+Case: [null/narrowed-field-call-in-arguments.kz](../corpus/null/narrowed-field-call-in-arguments.kz)
+```kurz
+// a `mut` method on a narrowed path through a `mut` field of an instance, whose arguments run a call, uses the path after that
+// call: the error the same call gets with the call on the line before it
+class Bag(mut List<int>? Items)
+
+int Drop(Bag b) {
+    b.Items = null
+    return 5
+}
+
+c = Bag([1])
+if c.Items != null {
+    c.Items.Add(Drop(c))
+}
+```
+
+Case: [null/conditional-call-changeable.kz](../corpus/null/conditional-call-changeable.kz)
+
+Case: [null/narrowed-field-item-after-call.kz](../corpus/null/narrowed-field-item-after-call.kz)
+```kurz
+// an item written into a narrowed path through a `mut` field of an instance, whose value runs a call, is written after that
+// call: the error the write gets with the call on the line before it
+class Box(mut List<int>? L)
+
+int Clear(Box b) {
+    b.L = null
+    return 7
+}
+
+x = Box([1, 2, 3])
+if x.L != null {
+    x.L[0] = Clear(x)
+}
+```
+
+Case: [null/narrowed-field-entry-after-call.kz](../corpus/null/narrowed-field-entry-after-call.kz)
+```kurz
+// an entry written into a narrowed path through a `mut` field of an instance, whose value runs a call, is written after that
+// call: the error the write gets with the call on the line before it
+class Box(mut Map<string, int>? M)
+
+int Clear(Box b) {
+    b.M = null
+    return 7
+}
+
+x = Box(Map<string, int>())
+if x.M != null {
+    x.M["k"] = Clear(x)
 }
 ```
 

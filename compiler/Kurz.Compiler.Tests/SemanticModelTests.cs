@@ -1024,6 +1024,12 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     }
 
                     break;
+                case CallExpression c when model.IsChainCall(c, out var chain):
+                    Expression(((MemberAccess)c.Callee).Target); // N5: the chain before the call, then the call it is read as
+                    Call(chain.Call);
+                    break;
+                case ChainValue:
+                    break; // N5: the value the chain before the call gave, which the walk read there
                 case CallExpression c:
                     Call(c);
                     break;

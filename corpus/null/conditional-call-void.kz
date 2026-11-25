@@ -1,0 +1,21 @@
+// expect: output
+// | a: one
+// | 3
+// | -1
+// rules: N5
+
+// a `void` call after `?.` is a statement; a call with a result gives it made nullable
+class Note(string Name) {
+    pub void Say(string text) {
+        print("{Name}: {text}")
+    }
+
+    pub int Size() => 3
+}
+
+Note? a = Note("a")
+Note? b = null
+a?.Say("one")
+b?.Say("two")
+print(a?.Size() ?? -1)
+print(b?.Size() ?? -1)

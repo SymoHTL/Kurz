@@ -1,0 +1,11 @@
+// expect: error syntax at 11
+// rules: N5, E4
+
+class Note(string Name) {
+    pub void Say(string text) {
+        print(text)
+    }
+}
+
+Note? a = Note("a")
+x = a?.Say("one")

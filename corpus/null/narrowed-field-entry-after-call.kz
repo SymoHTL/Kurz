@@ -1,0 +1,16 @@
+// expect: error nullable-unchecked at 15
+// rules: N9
+
+// an entry written into a narrowed path through a `mut` field of an instance, whose value runs a call, is written after that
+// call: the error the write gets with the call on the line before it
+class Box(mut Map<string, int>? M)
+
+int Clear(Box b) {
+    b.M = null
+    return 7
+}
+
+x = Box(Map<string, int>())
+if x.M != null {
+    x.M["k"] = Clear(x)
+}
