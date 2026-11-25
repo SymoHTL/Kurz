@@ -1,0 +1,21 @@
+// expect: output
+// | a
+// | -
+// | A
+// | -
+// | 1
+// | 0
+// rules: N5
+
+// a call after `?.` is null where the value is, and the call's result otherwise; the chain goes on after the call, and a call
+// after `?[` reads the item
+string? s = " a "
+string? t = null
+print(s?.Trim() ?? "-")
+print(t?.Trim() ?? "-")
+print(s?.Trim().ToUpper() ?? "-")
+print(t?.Trim().ToUpper() ?? "-")
+List<string>? xs = [" b "]
+List<string>? ys = null
+print(xs?[0].Trim().Bytes.Count ?? 0)
+print(ys?[0].Trim().Bytes.Count ?? 0)

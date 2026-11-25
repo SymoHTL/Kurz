@@ -339,3 +339,15 @@ xs = [1, 2]
 ys = [..xs, 3]
 print(ys.Count)
 ```
+
+Case: [null/conditional-call-void-value.kz](../corpus/null/conditional-call-void-value.kz)
+```kurz
+class Note(string Name) {
+    pub void Say(string text) {
+        print(text)
+    }
+}
+
+Note? a = Note("a")
+x = a?.Say("one")
+```
