@@ -1,0 +1,14 @@
+// expect: error syntax at 10
+// rules: F4
+
+// an arm of the `void` case binds no name: `void v =>` is refused as a variable of type `void` is, and the arm is written `void =>`
+data Circle(int R)
+
+string Describe(Circle | void s) {
+    return match s {
+        Circle c => "circle {c.R}"
+        void v => "none"
+    }
+}
+
+print(Describe(Circle(2)))

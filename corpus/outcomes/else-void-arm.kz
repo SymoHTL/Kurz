@@ -1,0 +1,29 @@
+// expect: output
+// | 1
+// | not found
+// | 5
+// rules: O5
+
+data Circle(int R)
+data NotFound
+
+Circle | void | NotFound Find(int id) {
+    if id == 1 {
+        return Circle(1)
+    }
+    return NotFound
+}
+
+int R(int id) {
+    Circle c = Find(id) else {
+        void => return 0
+        NotFound => {
+            print("not found")
+            Circle(5)
+        }
+    }
+    return c.R
+}
+
+print(R(1))
+print(R(2))
