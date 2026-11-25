@@ -1,0 +1,46 @@
+// expect: output
+// | 7
+// | napped
+// | 1
+// | 2
+// | true
+// rules: S28
+
+// a sleep parks its actor and the thread runs the others: `Quick` answers while `Napper` sleeps, and a sleep in a function
+// or a lambda its method calls parks it too; the wait lasts at least its duration
+void Rest(duration d) => Environment.Sleep(d)
+
+actor Napper {
+    pub void Nap() {
+        Rest(50ms)
+        print("napped")
+    }
+
+    pub int Ping() => 1
+
+    pub int Twice() {
+        f = (int x) => {
+            Environment.Sleep(1ms)
+            return x + 1
+        }
+        return f(1)
+    }
+
+    pub bool Measured() {
+        start = instant.Now
+        Environment.Sleep(20ms)
+        return start.Elapsed >= 20ms
+    }
+}
+
+actor Quick {
+    pub int Get() => 7
+}
+
+a = spawn Napper()
+q = spawn Quick()
+send a.Nap()
+print(q.Get())
+print(a.Ping())
+print(a.Twice())
+print(a.Measured())

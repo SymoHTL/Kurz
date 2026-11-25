@@ -1601,6 +1601,22 @@ public sealed partial class Emitter
         return null;
     }
 
+    /// <summary>
+    /// S28: <c>Environment.Sleep(time)</c>, the runtime's <c>Slept</c> with the duration's nanoseconds, which parks an actor's activation
+    /// and runs the top-level code's queue to the deadline; a build for Windows reads no clock (S11, S25).
+    /// </summary>
+    private string? EmitSleep(CallExpression c, CallInfo info)
+    {
+        if (target != Target.Linux)
+        {
+            throw Unsupported(c.Line, ProcessNotOnWindows);
+        }
+
+        var time = Arguments(c, info, _ => Types.Duration, _ => false, _ => null, cConvention: false, owned: false).Single()[(Ir(Types.Duration).Length + 1)..];
+        fn.Emit($"call void {RuntimeFunction("Slept")}(i64 {time})");
+        return null;
+    }
+
     /// <summary>F17: a <c>return</c> with a value among the top-level statements ends the program with that <c>int</c>, at once, as S23's call does.</summary>
     private void EmitExitCode(Expression value)
     {
