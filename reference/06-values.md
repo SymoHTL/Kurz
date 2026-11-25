@@ -637,9 +637,11 @@ Case: [values/mut-path-argument.kz](../corpus/values/mut-path-argument.kz)
 ```kurz
 // a path of `data` fields passed as `mut` gives the callee the place at the end of the path: a block that another variable holds is
 // copied first, so that variable keeps its value, two paths of one variable are two places, and the path may run through a `mut`
-// parameter and through a field of a field
+// parameter and through a field of a field; `Pair` is a block, since a type derives from it, and `Config` stands in the variable's
+// own place
 data Config(List<int> Items)
 data Pair(List<int> A, List<int> B)
+data Tagged(int Tag) : Pair
 data Inner(List<int> Items, int N)
 data Outer(Inner In, string Tag)
 

@@ -5864,9 +5864,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(ChainPath, fenced, "chain-path-fenced"), 0, ["[7, 5]"], "");
         // issue 646: two paths of one variable passed as `mut` give the callee two places in the variable's block; the place of the
         // second, taken after the first, copies no block the variable holds alone and copies a shared one once, so the place of the
-        // first is in the block the variable holds when the callee writes through it, whether another variable held the block or not
+        // first is in the block the variable holds when the callee writes through it, whether another variable held the block or not;
+        // `Pair` is a block because a type derives from it (D7), where a data type with no base and none derived from it is laid out in
+        // the variable's own place and no block is copied
         const string MutPath = """
             data Pair(List<int> A, List<int> B)
+            data Tagged(int Tag) : Pair
 
             void Two(mut List<int> a, mut List<int> b) {
                 a.Add(5)
