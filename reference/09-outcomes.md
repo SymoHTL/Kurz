@@ -1606,7 +1606,11 @@ print(value)
 ### O10 (decided, §5) A success case without a value
 
 `void` can be the success case: `void | NotFound Remove(int id)`. The call is then a statement,
-and its other cases propagate or are handled as those of any call (O2, O5).
+and its other cases propagate or are handled as those of any call (O2, O5). It is a statement where
+nothing reads its cases: a `match` reads them, and a variable, a parameter or a field of its union
+holds them (§5, the owner, 2026-11-24, issue 625, comment 7141775138, Q1 and Q2); every other use of
+the call as a value is `syntax`, "a call with a `void` success used as a value (O10)" *(assumed: the
+text, a reading of the build)*.
 
 A `void` case is a case with no payload: a value of a union with a `void` case holds it, and a
 `match` reads it with a `void` arm, over such a value or over a call whose success is `void`, as

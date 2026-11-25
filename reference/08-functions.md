@@ -214,7 +214,7 @@ print(Either())
 A function that has no result is declared with `void`, as in C# and in the record's samples. `void`
 is no type of a value: a parameter a function or a method declares, `static` or not, a field or a
 variable of type `void` is `syntax`, as C# refuses each (CS1536, CS0670, CS1547), while a case of a union may be
-`void`, the success case or another, a case with no payload (§5), and so may the result of a function type (F11) (§8, the owner, 2026-11-04). A parameter
+`void`, the success case or another, a case with no payload (§5, the owner, 2026-11-24, issue 625, comment 7141775138, Q1), and so may the result of a function type (F11) (§8, the owner, 2026-11-04). A parameter
 of a function type, `(void) => int`, is read as it is (§8, the owner, 2026-11-04): the type has one
 parameter, a lambda with no type on its parameter, `(v) => 1`, is a value of it, and no call of it
 can be written, since `f()` gives that parameter no argument (D11) and a call of a `void` function is
@@ -251,6 +251,38 @@ Case: [functions/void-variable.kz](../corpus/functions/void-variable.kz)
 ```kurz
 // `void` is no type of a variable: the case pins that refusal, and the value `1` is not checked against `void`
 void done = 1
+```
+
+Case: [outcomes/void-arm-value.kz](../corpus/outcomes/void-arm-value.kz)
+```kurz
+data Circle(int R)
+data NotFound
+
+string Describe(Circle | void s) {
+    return match s {
+        Circle c => "circle {c.R}"
+        void => "none"
+    }
+}
+
+void | NotFound Remove(int id) {
+    if id < 0 {
+        return NotFound
+    }
+}
+
+void Show(void | NotFound v) {
+    match v {
+        void => print("removed")
+        NotFound => print("not found")
+    }
+}
+
+print(Describe(Circle(2)))
+void | NotFound kept = Remove(1)
+Show(kept)
+void | NotFound lost = Remove(-1)
+Show(lost)
 ```
 
 ### F5 (decided, §8) Top-level statements

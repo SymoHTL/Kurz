@@ -2,7 +2,7 @@
 // | circle 2
 // | removed
 // | not found
-// rules: O10
+// rules: O10, F4
 
 data Circle(int R)
 data NotFound
