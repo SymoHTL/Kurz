@@ -2250,8 +2250,9 @@ public sealed partial class Checker
     /// M5: the receiver of a <c>mut</c> method as <see cref="MutReceiver"/> reads it, a place its path reaches. A path through a nullable
     /// variable or field, read where the checker knew it not null (N3) or after <c>?.</c> (N5, <see cref="ChainReceiver"/>), reaches the
     /// place in the case other than <c>null</c>, as Rust's <c>if let Some(c) = &amp;mut cfg { c.items.push(2) }</c> and
-    /// <c>cfg.as_mut().map(|c| c.items.push(3))</c> reach it (section 4, the owner, 2026-11-24, #624, comment 7135538740, issue 630); a step
-    /// the checker did not know not null was reported where the path was read (N2).
+    /// <c>cfg.as_mut().map(|c| c.items.push(3))</c> reach it (section 4: the build of both forms the owner's answer, 2026-11-24, #624, comment
+    /// 7135538740, and the place the product pass's reading, issue 630, comment 7161590400, assumed); a step the checker did not know not
+    /// null was reported where the path was read (N2).
     /// </summary>
     private void MutPlace(CallExpression call, Expression receiver, int line, string what)
     {

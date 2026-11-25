@@ -3682,8 +3682,9 @@ public sealed class CheckerTests
     [Fact]
     public void A_mut_method_on_a_path_through_a_nullable_value_changes_it_where_it_is_known_not_null_and_after_the_chain()
     {
-        // issue 630 (section 4, the owner, 2026-11-24, #624, comment 7135538740): a test's branch and `?.`, through a nullable
-        // variable, a nullable field and a nullable `mut` parameter (N3, N5, M5)
+        // issue 630 (section 4: the build of both forms the owner's answer, 2026-11-24, #624, comment 7135538740, and the place the
+        // product pass's reading, comment 7161590400, assumed): a test's branch and `?.`, through a nullable variable, a nullable field
+        // and a nullable `mut` parameter (N3, N5, M5)
         const string Config = "data Config(List<int> Items)\ndata Box(Config? Cfg)\n\nConfig? Find() => null\n\n";
         Clean(Config + "mut c = Find()\nif c != null {\n    c.Items.Add(1)\n}\nc?.Items.Add(2)\nc?.Items.Clear()");
         Clean(Config + "mut b = Box(Find())\nif b.Cfg != null {\n    b.Cfg.Items.Clear()\n}\nb.Cfg?.Items.Add(2)");
@@ -6362,7 +6363,9 @@ public sealed class CheckerTests
     [InlineData("data Box(Map<string, int> M)\n\nmut Box? b = Box(Map<string, int>())\nb.M[\"a\"] = 1", "4: an assignment into a path through a nullable variable or field (N3, M4)")]
     [InlineData("data In(Map<string, int> M)\ndata Out(In? I)\n\nmut o = Out(In(Map<string, int>()))\nif o.I != null {\n    o.I.M[\"a\"] = 1\n}", "6: an assignment into a path through a nullable variable or field (N3, M4)")]
     [InlineData("data In(int X)\ndata Out(In? I)\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nmut o = Out(In(1))\nif o.I != null {\n    Bump(mut o.I.X)\n}", "10: a path through a nullable variable or field passed as `mut` (N3, M7)")]
-    [InlineData("data Config(List<int> Items)\n\nmut groups = Map<string, Config>()\nkey = \"a\"\ngroups[key]?.Items.Add(2)", "5: a `mut` method on a path through a nullable variable or field (N3, M5)")]
+    [InlineData("data Config(List<int> Items)\n\nmut groups = Map<string, Config>()\nkey = \"a\"\ngroups[key]?.Items.Add(2)", "5: a `mut` method on a path through a nullable item, entry or call's result (N3, M5)")]
+    [InlineData("data Config(List<int> Items)\n\nmut xs = List<Config?>()\nxs[0]?.Items.Add(2)", "4: a `mut` method on a path through a nullable item, entry or call's result (N3, M5)")]
+    [InlineData("data Config(List<int> Items)\n\nConfig? Find() => null\n\nFind()?.Items.Add(2)", "5: a `mut` method on a path through a nullable item, entry or call's result (N3, M5)")]
     [InlineData("use tools\nprint(1)", "1: use (F10)")]
     [InlineData("use a/util\nprint(1)", "1: use (F10)")]
     [InlineData("print(string(1))", "1: a conversion to `string`, a type that is neither a number type nor a time type (T10, T29)")]
