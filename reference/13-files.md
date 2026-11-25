@@ -3020,9 +3020,9 @@ print(a.Nap(5ms) within 1s)
 print(a.Nap(200ms) within 20ms)
 ```
 
-Case: [actors/sleep-crash-above.kz](../corpus/actors/sleep-crash-above.kz)
+Case: [actors/sleep-chain-crash.kz](../corpus/actors/sleep-chain-crash.kz)
 ```kurz
-// `Boom`, a call of the chain, is let in above `Outer` while it sleeps, and its crash takes the sleep off the timers
+// `Boom`, a call of the chain, is let in while `Outer` sleeps, and its crash takes the sleep off the timers and wakes the caller
 actor Helper {
     pub void Poke(Napper n) {
         print(n.Boom())

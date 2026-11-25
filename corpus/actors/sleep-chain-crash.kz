@@ -1,7 +1,7 @@
 // expect: throws callee-crashed at 25
-// rules: S28
+// rules: S28, U20
 
-// `Boom`, a call of the chain, is let in above `Outer` while it sleeps, and its crash takes the sleep off the timers
+// `Boom`, a call of the chain, is let in while `Outer` sleeps, and its crash takes the sleep off the timers and wakes the caller
 actor Helper {
     pub void Poke(Napper n) {
         print(n.Boom())

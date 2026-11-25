@@ -5921,7 +5921,8 @@ void Ends(bool hasText, byte* id, long idCount, byte* file, long fileCount, long
 // a wait that its deadline ended leaves (`Wait`), the reply is taken off the message it waits on by
 // the swap the callee takes it by (`ReplyTaken`), so that the callee runs to its end and its reply goes
 // nowhere, and where the callee took it first, the callee owns it and writes into the activation's frame,
-// whose stack stays out of the pool while the word is 0; the call it runs, whose reply it takes the same
+// whose stack stays out of the pool while the word is 0, but for the reply of a sleep, which names no message
+// and is only taken off the timers (`Slept`; S28); the call it runs, whose reply it takes the same
 // way, is answered `callee crashed`, which wakes its caller (U20); and its stack goes back to the pool. The
 // heaps of their own of the messages the actor's code was building are freed (`MessageHeapNew`). The calls
 // of the top activation's side list go to the front of the inbox, which is kept, the crashing message
@@ -5958,7 +5959,7 @@ void Fall(byte* state, byte* header, byte* kept) {
                 TimerRemove(waited)
             }
 
-            if waited != null && *Ptr<byte*>(at + 432) != null && ReplyState(waited) == 0 && ReplyTaken(*Ptr<byte*>(at + 432)) == null {
+            if waited != null && ReplyState(waited) == 0 && *Ptr<byte*>(at + 432) != null && ReplyTaken(*Ptr<byte*>(at + 432)) == null {
                 while ReplyState(waited) == 0 {
                 }
             }

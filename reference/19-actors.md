@@ -2839,6 +2839,32 @@ f = spawn Front(w)
 print(f.Go())
 ```
 
+Case: [actors/sleep-chain-crash.kz](../corpus/actors/sleep-chain-crash.kz)
+```kurz
+// `Boom`, a call of the chain, is let in while `Outer` sleeps, and its crash takes the sleep off the timers and wakes the caller
+actor Helper {
+    pub void Poke(Napper n) {
+        print(n.Boom())
+    }
+}
+
+actor Napper {
+    pub int Outer(Helper helper) {
+        send helper.Poke(this)
+        Environment.Sleep(50ms)
+        return 1
+    }
+
+    pub int Boom() {
+        throw "boom"
+    }
+}
+
+poker = spawn Helper()
+a = spawn Napper()
+print(a.Outer(poker))
+```
+
 ### U21 (decided, §6) The inbox is kept, and the crashed instance's heap goes
 
 A crashed actor's inbox is kept and its new instance serves it, in its order, the crashing message
