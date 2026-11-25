@@ -1,0 +1,15 @@
+// expect: throws invalid-input at 14
+// rules: U41
+
+// the bound of a call's clause read at run time over two lines reports the line where the bound starts, not its member's (U40)
+
+data Limits(duration Zero)
+
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+cfg = Limits(0s)
+print(s.Get() within cfg
+    .Zero)
