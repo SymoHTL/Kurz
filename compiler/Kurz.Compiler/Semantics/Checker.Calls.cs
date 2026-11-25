@@ -881,11 +881,11 @@ public sealed partial class Checker
         member.StartsWith("Total", StringComparison.Ordinal) && TimeFrom.TryGetValue(("duration", "From" + member["Total".Length..]), out var scale) ? scale : null;
 
     /// <summary>
-    /// T39: the help line of a refusal that asked for the count of <paramref name="type"/>, a duration divided by a duration or converted to
-    /// a number, naming the members that give it (section 4, the owner, 2026-11-25, #629, comment 7159373153, "Add a help line
-    /// (Recommended)"); a <c>longduration</c> has no <c>WholeNanoseconds</c>.
+    /// T39: the help line of a refusal that asked for the count of a duration, divided by a duration or converted to a number, naming the
+    /// members that give it (section 4, the owner, 2026-11-25, #629, comment 7159373153, "Add a help line (Recommended)"), the operands
+    /// <paramref name="types"/>; <c>WholeNanoseconds</c> where none is a <c>longduration</c>, which has no such member.
     /// </summary>
-    private static string DurationHelp(KurzType type) => type is PrimitiveType { Kind: Primitive.Duration }
+    private static string DurationHelp(params KurzType[] types) => types.All(t => t is PrimitiveType { Kind: Primitive.Duration })
         ? "read its count with a member: `.TotalMilliseconds` or another unit's, a `double`, or `.WholeNanoseconds`, the exact `long`"
         : "read its count with a member: `.TotalMilliseconds` or another unit's, a `double`";
 

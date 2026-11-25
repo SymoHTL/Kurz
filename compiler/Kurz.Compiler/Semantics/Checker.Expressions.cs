@@ -1461,7 +1461,7 @@ public sealed partial class Checker
         if (type is null)
         {
             Add(Diagnostic.Error(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}` (T18, {(Types.IsInstant(left.Type) || Types.IsInstant(right.Type) ? "T36" : "T13")})")
-                with { OwnHelp = b.Operator == TokenKind.Slash && Types.IsDuration(left.Type) && Types.IsDuration(right.Type) ? DurationHelp(left.Type) : null }); // T39
+                with { OwnHelp = b.Operator == TokenKind.Slash && Types.IsDuration(left.Type) && Types.IsDuration(right.Type) ? DurationHelp(left.Type, right.Type) : null }); // T39
             return Typed.Error;
         }
 

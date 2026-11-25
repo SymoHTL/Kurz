@@ -922,22 +922,28 @@ print(timestamp.FromSeconds(5))
 `d.TotalSeconds` is the count of seconds in the duration `d`, a `double`, as C#'s
 `TimeSpan.TotalSeconds`, and there is one for each unit of a duration literal (L14):
 `TotalNanoseconds`, `TotalMicroseconds`, `TotalMilliseconds`, `TotalSeconds`, `TotalMinutes`,
-`TotalHours` and `TotalDays`. Each is the count of nanoseconds as the nearest `double`, ties to even,
-divided by the nanoseconds of the unit, as `TimeSpan` divides its ticks: two roundings, and a
-`double` holds a count of nanoseconds exactly up to 2^53, about 104 days, past which the count is
-rounded without a word. `d.WholeNanoseconds` is the exact count, a `long` (§4, the owner,
-2026-11-25, issue 629, comment 7158347507, Q1 "C# TotalX doubles" and Q2 "WholeNanoseconds long").
-The `TotalX` members stand on a `longduration` too (T29), whose 128 bits are rounded to the nearest
-`double` once, ties to even, and `WholeNanoseconds` on a `duration` alone, since no integer type
-holds the count of a `longduration`, where the name is `unknown-name` (V10). `d / 1ms` stays
-`type-mismatch` under T18, and so does a duration converted to a number, `long(d)`, under T10, each
-with a help line that names `TotalMilliseconds` and, on a `duration`, `WholeNanoseconds` (§4, the
-owner, 2026-11-25, issue 629, comment 7159373153, "TotalX on both" and "Add a help line").
+`TotalHours` and `TotalDays`. Each is the count of nanoseconds as a `double` divided by the
+nanoseconds of the unit, as `TimeSpan` divides its ticks, and a `double` holds a count of
+nanoseconds exactly up to 2^53, about 104 days. `d.WholeNanoseconds` is the exact count, a `long`
+(§4, the owner, 2026-11-25, issue 629, comment 7158347507, Q1 "C# TotalX doubles" and Q2
+"WholeNanoseconds long"). The `TotalX` members stand on a `longduration` too (T29), and
+`WholeNanoseconds` on a `duration` alone, since no integer type holds the count of a
+`longduration`, where the name is `unknown-name` (V10). `d / 1ms` stays `type-mismatch` under T18,
+and so does a duration converted to a number, `long(d)`, under T10, each with a help line that names
+`TotalMilliseconds` and, on a `duration`, `WholeNanoseconds` (§4, the owner, 2026-11-25, issue 629,
+comment 7159373153, "TotalX on both" and "Add a help line").
 *(assumed, §4: the defaults of the product pass, issue 629, comment 7158421176: C#'s component
 members, `d.Seconds` and the others that give the part of one unit, are no members of a duration,
-and such a name is `unknown-name` (V10); a write to a count, `d.TotalSeconds = 1.0`, is
-`assign-immutable`, as a write to a list's `Count` is; a negative duration gives a negative count,
-and a zero one `0`.)* A count read back from a timestamp is open (§14).
+and such a name is `unknown-name` (V10); a count past 2^53 nanoseconds is rounded without a word,
+no warning and no raise; the texts of an unknown member and of a write to a member are the ones
+of a member of any primitive; a write to a count, `d.TotalSeconds = 1.0`, is `assign-immutable`,
+as a write to a list's `Count` is; a negative duration gives a negative count, and a zero one `0`.
+And readings nobody was asked: "as `TimeSpan` divides its ticks" is read as the count converted to
+the nearest `double`, ties to even, then divided, two roundings, and a `longduration`'s 128 bits
+are rounded to the nearest `double` once, ties to even; the help line reads "read its count with a
+member: `.TotalMilliseconds` or another unit's, a `double`", with ", or `.WholeNanoseconds`, the
+exact `long`" where no operand is a `longduration`.)* A count read back from a timestamp is open
+(§14).
 
 Case: [types/duration-total.kz](../corpus/types/duration-total.kz)
 ```kurz
