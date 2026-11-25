@@ -816,7 +816,7 @@ value widens. *(assumed, §4: the defaults of the product pass that the answer t
 among them, and NaN and an infinity read as Rust's `try_from_secs_f64` reads them, one error with the
 overflow, and a constant one as T6 reads `int(1.0 / 0.0)`.)* A constructor of one time type called on
 the other, `timestamp.FromSeconds(5)`, is `unknown-name` (V10). How a program reads a count back from
-a time is open (§14).
+a duration is T39's, and from a timestamp open (§14).
 
 Case: [types/duration-from-count.kz](../corpus/types/duration-from-count.kz)
 ```kurz
@@ -915,6 +915,103 @@ Case: [types/timestamp-from-seconds.kz](../corpus/types/timestamp-from-seconds.k
 ```kurz
 // a timestamp counts from 1970 with `FromUnixSeconds`; `FromSeconds` is a duration's, and no member of `timestamp`
 print(timestamp.FromSeconds(5))
+```
+
+### T39 (decided, §4) The count of a duration
+
+`d.TotalSeconds` is the count of seconds in the duration `d`, a `double`, as C#'s
+`TimeSpan.TotalSeconds`, and there is one for each unit of a duration literal (L14):
+`TotalNanoseconds`, `TotalMicroseconds`, `TotalMilliseconds`, `TotalSeconds`, `TotalMinutes`,
+`TotalHours` and `TotalDays`. Each is the count of nanoseconds as the nearest `double`, ties to even,
+divided by the nanoseconds of the unit, as `TimeSpan` divides its ticks: two roundings, and a
+`double` holds a count of nanoseconds exactly up to 2^53, about 104 days, past which the count is
+rounded without a word. `d.WholeNanoseconds` is the exact count, a `long` (§4, the owner,
+2026-11-25, issue 629, comment 7158347507, Q1 "C# TotalX doubles" and Q2 "WholeNanoseconds long").
+The `TotalX` members stand on a `longduration` too (T29), whose 128 bits are rounded to the nearest
+`double` once, ties to even, and `WholeNanoseconds` on a `duration` alone, since no integer type
+holds the count of a `longduration`, where the name is `unknown-name` (V10). `d / 1ms` stays
+`type-mismatch` under T18, and so does a duration converted to a number, `long(d)`, under T10, each
+with a help line that names `TotalMilliseconds` and, on a `duration`, `WholeNanoseconds` (§4, the
+owner, 2026-11-25, issue 629, comment 7159373153, "TotalX on both" and "Add a help line").
+*(assumed, §4: the defaults of the product pass, issue 629, comment 7158421176: C#'s component
+members, `d.Seconds` and the others that give the part of one unit, are no members of a duration,
+and such a name is `unknown-name` (V10); a write to a count, `d.TotalSeconds = 1.0`, is
+`assign-immutable`, as a write to a list's `Count` is; a negative duration gives a negative count,
+and a zero one `0`.)* A count read back from a timestamp is open (§14).
+
+Case: [types/duration-total.kz](../corpus/types/duration-total.kz)
+```kurz
+d = 1500000ns
+print(d.TotalNanoseconds)
+print(d.TotalMicroseconds)
+print(d.TotalMilliseconds)
+print(d.TotalSeconds)
+print(90s.TotalMinutes)
+print(90min.TotalHours)
+print(36h.TotalDays)
+
+// a negative duration gives a negative count, and a zero one 0
+neg = -1500ms
+print(neg.TotalSeconds)
+print(neg.WholeNanoseconds)
+z = 0ns
+print(z.TotalSeconds)
+
+// `WholeNanoseconds` is the exact `long`; a `double` holds a count of nanoseconds exactly up to 2^53, and 2^53 + 1 is
+// rounded to 2^53
+long n = d.WholeNanoseconds
+print(n)
+odd = duration.FromNanoseconds(9007199254740993)
+print(odd.TotalNanoseconds)
+print(odd.WholeNanoseconds)
+```
+
+Case: [types/longduration-total.kz](../corpus/types/longduration-total.kz)
+```kurz
+// the `TotalX` members stand on a `longduration` too, beyond the range of a `duration`
+w = 110000days
+print(w.TotalDays)
+longduration nw = -1500ms
+print(nw.TotalSeconds)
+
+// the nearest `double` of the 128 bits, ties to even: 2^64 + 2^63 + 2049 is 2^64 + 2^63 + 4096, where a conversion of the
+// two 64-bit halves, the lower one rounded to 2^63 + 2048 first, would make a tie and give 2^64 + 2^63; 2^64 + 2^63 + 2047
+// is 2^64 + 2^63
+big = 27670116110564329473ns
+print(big.TotalNanoseconds)
+print((-big).TotalNanoseconds)
+low = 27670116110564329471ns
+print(low.TotalNanoseconds)
+
+// 2^63, the first count beyond 64 bits signed; 2^64 + 2048, a tie, to the even 2^64; 2^127 - 1, the largest, is 2^127
+first = 9223372036854775808ns
+print(first.TotalNanoseconds)
+tie = 18446744073709553664ns
+print(tie.TotalNanoseconds)
+largest = 170141183460469231731687303715884105727ns
+print(largest.TotalNanoseconds)
+```
+
+Case: [types/longduration-whole.kz](../corpus/types/longduration-whole.kz)
+```kurz
+// no integer type holds the count of a `longduration`, so it has no `WholeNanoseconds`
+longduration w = 1s
+print(w.WholeNanoseconds)
+```
+
+Case: [types/duration-total-write.kz](../corpus/types/duration-total-write.kz)
+```kurz
+// a count is read from a duration, never written into it
+mut d = 1500ms
+d.TotalSeconds = 1.0
+print(d)
+```
+
+Case: [types/duration-component.kz](../corpus/types/duration-component.kz)
+```kurz
+// C#'s component members, the part of one unit such as `Seconds`, are no members of a duration
+d = 1500ms
+print(d.Seconds)
 ```
 
 ### T36 (decided, §12) `instant`, a reading of the monotonic clock
