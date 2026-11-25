@@ -1657,6 +1657,13 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   from the top level and from a function, the low 8 bits of 256, 257 and -1 and on Windows their 32 bits, a narrower integer
   widened, a bare `return`, the lines printed before the end and none after it, the refusals, and a build for Windows of either
   form, made on any machine;
+- a wait for a time (S28), in a build for Linux: `Environment.Sleep(d)` calls the runtime's `Slept` with the nanoseconds,
+  which returns at once for zero or less; inside a message the activation parks on a block of its heap shaped as a reply
+  that is never set, among the thread's timers, which its header names with no message, so that a fall takes it off the
+  timers and waits for no answer, and the calls of its chain run above it; the top-level code runs the loop of its wait
+  on a call to the deadline (`RootLoop`), which, with nothing left to run, sleeps to the first timer or the deadline, and
+  so does that wait where an actor sleeps among the timers (`Sleeping`), where it raised `deadlock` before; a build for
+  Windows says `not supported`, as for `instant.Now`;
 - logging (P1 to P7 and P9), in a build for Linux: a program with a log call in one of its files reads
   `KURZ_LOG` alone, since the compiler builds no settings type whose `Logging` part P4 has win, through
   `Variable` before its first statement, after `args`, and hands it to `LogFilter`,

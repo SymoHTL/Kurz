@@ -2919,3 +2919,142 @@ print("start")
 code = Stop()
 print(code)
 ```
+
+### S28 (decided, §12) A wait for a time
+
+`Environment.Sleep(d)` waits for the `duration` `d`, a statement that gives nothing, beside
+`Environment.Exit` (S23) and `Environment.Variable` (S14). Inside an actor the call parks the actor for
+the time and its thread runs other actors, as a call that waits parks it (U4), and a `duration` of zero
+or less returns at once, as Go's `time.Sleep` does (§12, the owner, 2026-11-25, issue 627, comment
+7158347789, Q1 "Environment.Sleep(d)", Q2 "Park, thread runs others" and Q3 "Return at once").
+*(assumed, §12: the defaults of the product pass, issue 627, comment 7159631844: the wait lasts at least
+`d`, the clock's resolution deciding the rest, with no order promised between waits that end at one
+time; a parked actor takes no other message but the calls of its chain, which run above it as above an
+activation that waits for a call (U17); a `within` bound and the wait of a reply count the time a callee
+sleeps, so that `a.Nap(200ms) within 20ms` is `call-timeout` (U39); a call in a `test` block waits in
+real time; a `longduration` is `narrowing-conversion` (T29) and a number `type-mismatch`; nothing wakes
+a sleep early, and the call never raises; a build for Windows says `not supported`, as for `instant.Now`
+(S11, S25). And a reading of the build that nobody was asked: the top-level code's sleep runs the
+messages its wait on a call runs, to the end of the time, since every actor runs on its thread (U35).)*
+
+Case: [system/sleep.kz](../corpus/system/sleep.kz)
+```kurz
+// the wait lasts at least its duration; one of zero or less returns at once and raises nothing
+start = instant.Now
+Environment.Sleep(20ms)
+print(start.Elapsed >= 20ms)
+Environment.Sleep(0ns)
+Environment.Sleep(-5s)
+print("done")
+```
+
+Case: [actors/sleep-parks.kz](../corpus/actors/sleep-parks.kz)
+```kurz
+// a sleep parks its actor and the thread runs the others: `Quick` answers while `Napper` sleeps, and a sleep in a function
+// or a lambda its method calls parks it too; the wait lasts at least its duration
+void Rest(duration d) => Environment.Sleep(d)
+
+actor Napper {
+    pub void Nap() {
+        Rest(50ms)
+        print("napped")
+    }
+
+    pub int Ping() => 1
+
+    pub int Twice() {
+        f = (int x) => {
+            Environment.Sleep(1ms)
+            return x + 1
+        }
+        return f(1)
+    }
+
+    pub bool Measured() {
+        start = instant.Now
+        Environment.Sleep(20ms)
+        return start.Elapsed >= 20ms
+    }
+}
+
+actor Quick {
+    pub int Get() => 7
+}
+
+a = spawn Napper()
+q = spawn Quick()
+send a.Nap()
+print(q.Get())
+print(a.Ping())
+print(a.Twice())
+print(a.Measured())
+```
+
+Case: [actors/sleep-top-level-runs.kz](../corpus/actors/sleep-top-level-runs.kz)
+```kurz
+// the top-level code's sleep runs the messages its wait on a call runs, since every actor runs on its thread
+actor Worker {
+    pub void Work() {
+        print("ran")
+    }
+}
+
+w = spawn Worker()
+send w.Work()
+Environment.Sleep(10ms)
+print("after")
+```
+
+Case: [actors/sleep-within.kz](../corpus/actors/sleep-within.kz)
+```kurz
+// a call's bound counts the time its callee sleeps
+actor Napper {
+    pub int Nap(duration d) {
+        Environment.Sleep(d)
+        return 1
+    }
+}
+
+a = spawn Napper()
+print(a.Nap(5ms) within 1s)
+print(a.Nap(200ms) within 20ms)
+```
+
+Case: [actors/sleep-crash-above.kz](../corpus/actors/sleep-crash-above.kz)
+```kurz
+// `Boom`, a call of the chain, is let in above `Outer` while it sleeps, and its crash takes the sleep off the timers
+actor Helper {
+    pub void Poke(Napper n) {
+        print(n.Boom())
+    }
+}
+
+actor Napper {
+    pub int Outer(Helper helper) {
+        send helper.Poke(this)
+        Environment.Sleep(50ms)
+        return 1
+    }
+
+    pub int Boom() {
+        throw "boom"
+    }
+}
+
+poker = spawn Helper()
+a = spawn Napper()
+print(a.Outer(poker))
+```
+
+Case: [system/sleep-wide.kz](../corpus/system/sleep-wide.kz)
+```kurz
+// a `longduration` does not narrow to the `duration` the call takes without a word
+longduration w = 1s
+Environment.Sleep(w)
+```
+
+Case: [system/sleep-number.kz](../corpus/system/sleep-number.kz)
+```kurz
+// the call takes a `duration`, never a number of some unit
+Environment.Sleep(5)
+```

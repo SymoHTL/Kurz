@@ -1,0 +1,12 @@
+// expect: output
+// | true
+// | done
+// rules: S28
+
+// the wait lasts at least its duration; one of zero or less returns at once and raises nothing
+start = instant.Now
+Environment.Sleep(20ms)
+print(start.Elapsed >= 20ms)
+Environment.Sleep(0ns)
+Environment.Sleep(-5s)
+print("done")

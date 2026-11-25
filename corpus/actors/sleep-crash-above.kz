@@ -1,0 +1,25 @@
+// expect: throws callee-crashed at 25
+// rules: S28
+
+// `Boom`, a call of the chain, is let in above `Outer` while it sleeps, and its crash takes the sleep off the timers
+actor Helper {
+    pub void Poke(Napper n) {
+        print(n.Boom())
+    }
+}
+
+actor Napper {
+    pub int Outer(Helper helper) {
+        send helper.Poke(this)
+        Environment.Sleep(50ms)
+        return 1
+    }
+
+    pub int Boom() {
+        throw "boom"
+    }
+}
+
+poker = spawn Helper()
+a = spawn Napper()
+print(a.Outer(poker))

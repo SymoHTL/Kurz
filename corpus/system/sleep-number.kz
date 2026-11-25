@@ -1,0 +1,5 @@
+// expect: error type-mismatch at 5
+// rules: S28
+
+// the call takes a `duration`, never a number of some unit
+Environment.Sleep(5)

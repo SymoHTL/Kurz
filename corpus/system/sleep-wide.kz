@@ -1,0 +1,6 @@
+// expect: error narrowing-conversion at 6
+// rules: S28
+
+// a `longduration` does not narrow to the `duration` the call takes without a word
+longduration w = 1s
+Environment.Sleep(w)
