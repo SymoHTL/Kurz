@@ -865,6 +865,10 @@ public sealed partial class Checker
                 }
 
                 break;
+            case PrimitiveType { Kind: Primitive.Duration or Primitive.LongDuration } when TotalScale(member) is not null:
+                return new Typed(Types.Double); // T39: the count in the unit, as C#'s `TimeSpan.TotalSeconds` (section 4, the owner, 2026-11-25, issue 629)
+            case PrimitiveType { Kind: Primitive.Duration } when member == "WholeNanoseconds":
+                return new Typed(Types.Long); // T39: the exact count, which no integer type holds of a `longduration`
             case PrimitiveType { Kind: Primitive.Instant } when member == "Elapsed":
                 return new Typed(Types.Duration); // S25: `instant.Now - t` (section 12, assumed with the monotonic clock)
             case MapType when member == "Count":
@@ -1456,7 +1460,8 @@ public sealed partial class Checker
 
         if (type is null)
         {
-            Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}` (T18, {(Types.IsInstant(left.Type) || Types.IsInstant(right.Type) ? "T36" : "T13")})");
+            Add(Diagnostic.Error(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}` (T18, {(Types.IsInstant(left.Type) || Types.IsInstant(right.Type) ? "T36" : "T13")})")
+                with { OwnHelp = b.Operator == TokenKind.Slash && Types.IsDuration(left.Type) && Types.IsDuration(right.Type) ? DurationHelp(left.Type, right.Type) : null }); // T39
             return Typed.Error;
         }
 
