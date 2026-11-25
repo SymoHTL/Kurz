@@ -1,0 +1,9 @@
+// expect: error mut-required at 9
+// rules: N5, M5
+
+// a `mut` call after `?.` on a value that is no place is the error the same call gets without `?.`
+List<int>? Make() {
+    return [1]
+}
+
+Make()?.Add(2)

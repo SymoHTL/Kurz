@@ -1,0 +1,25 @@
+// expect: output
+// | 5
+// | -1
+// rules: N5
+
+// a call after `?.` on a nullable reference to an actor waits as any call through a reference does, and `send` sends one where
+// the reference is not null
+actor Counter {
+    mut int count = 0
+
+    pub void Add(int n) {
+        count = count + n
+    }
+
+    pub int Get() => count
+}
+
+Counter? a = spawn Counter()
+Counter? b = null
+a?.Add(2)
+b?.Add(2)
+send a?.Add(3)
+send b?.Add(3)
+print(a?.Get() ?? -1)
+print(b?.Get() ?? -1)

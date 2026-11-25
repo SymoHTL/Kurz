@@ -1250,7 +1250,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   of its type (N3); `==` with a nullable side is `false` for one `null` and `true` for two, `!=` the
   reverse, and both compare the values otherwise (N10); `a ?? b` runs `b` only where `a` is null, and a chain of
   `?.` and `?[` reads each member and item only where the value before it is not null, the index of
-  `?[` among it, each a value of its own that takes a count of what it read, and of a `weak` item its read (N4, N5, R3); a `T?` of a
+  `?[` among it, each a value of its own that takes a count of what it read, and of a `weak` item its read (N4, N5, R3); a call
+  there runs with its arguments only where the value before it is not null, on that value's case, and one that changes its
+  receiver tests the place the chain names, a variable, a path of fields, an item of a list or an entry of a map, without a
+  count of its value, and changes it where it is, a block other values hold copied first, as `Add` copies it (N5, M3); a `T?` of a
   type parameter that a nullable type fills is that type, as `Substitute` flattens a union (N11);
 - lists (M9): `List<T>()`, `Bytes()` and the type `Bytes`, the second name of `List<byte>`, which a
   message names so (section 4, the owner, 2026-10-29, "Bytes = List<byte>"), `Add`, `Count`, `list[i]`,
@@ -3066,15 +3069,15 @@ method, `Pos.Items.Add(1)`, among them (K2, M4, M5), an `equal by` that names a 
 `equal by` names a `mut` field, a class derived from the key's class or implementing the key's interface among them, where whether
 `mutable-key` reaches it is open (K12, K13, section 14); of chapter 4, a nullable `void` and a
 nullable case of a written union, which N1 does not name (N1, D9), `?.` or `?[` to a member or an
-item of a pointer, a C function type or `void`, which section 4 does not say (N5),
-a call and an index after `?.` or `?[`, which C# reads inside the chain and section 4 does not say,
+item of a pointer, a C function type or `void`, and to a call's result of a pointer or a C function type, which
+section 4 does not say (N5), an index after `?.` or `?[`, which C# reads inside the chain and section 4 does not say,
 a part after `?[` on a nullable list and an assignment through `?[`, which section 4 does not name
 (N5), `?[` on a nullable map, whose entry the
 emitter does not read through a chain (N5, M9), and an assignment of a field, an item or an entry
 through a nullable variable or field known not null, `o.I.X = 1` and `o.I.Items[0] = 1`, which the
 emitter does not write through, where an index written on a narrowed map or list, `o.Items[0] = 1`
 with a nullable field `Items`, is read (N3, M4), a `mut`
-method on such a path and such a path passed as `mut` (N3, M5, M7); a `weak` reference as a type
+method on such a path, after `?.` too, `cfg?.Items.Add(1)`, and such a path passed as `mut` (N3, M5, M7); a `weak` reference as a type
 argument of a `data` type, as a key or a value of a map and as a parameter or the result of a
 function type, which the emitter does not lay out, `weak` before a type parameter or a union of
 classes, and a `weak T?` as a case of a union, a nullable case of one (R3, R5, T19, D9); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
@@ -3554,7 +3557,13 @@ round can ask about it by the rule's id.
   narrows it: after `if u?.Email != null`, `u?.Email.Bytes` and `u.Email.Bytes` both read `Email`
   as a `string`, and after `if xs?[0] != null` `xs` is known not null, as C# reads `?[]`, while
   `Find(1)?.Email.Bytes`, whose path is no variable's, stays
-  `nullable-unchecked`; a parenthesis ends the chain. After `?[` holds what held before its index, since the
+  `nullable-unchecked`; a parenthesis ends the chain. A call in the chain, `a?.M(x)`, is read as the same call on the
+  value's case, whose result the chain makes nullable, a `T?` as it is and a union with `null` among its cases, and a
+  `void` one as it is, a statement, O10's `syntax` as a value; a `mut` one reads the place the chain names as M5 reads
+  the receiver of the same call without `?.`, an item of a list and an entry of a map that place holds among it, and
+  is `nullable-unchecked` on a path a call can change (N9) whose arguments run a call, the error it gets with that
+  call on the line before it; after a member or an item of the chain, a `mut` call is what the same call in a test's
+  branch is (the owner, 2026-11-24, #624). After `?[` holds what held before its index, since the
   index runs only where the list is not null, and an index that changes the list is
   `changed-while-held` (M7), since the list is read before it.
 - N10 with N3: a nullable side of `==`, on either side, beside a value whose type is not nullable, read as the checker
@@ -3723,6 +3732,13 @@ round can ask about it by the rule's id.
   an instance holds, `h.Xs[0] = 2`, ends it (the owner, 2026-11-02, #156, comment 6573114335). A read
   or a write of a map's entry whose key type compares by an `equal by` clause, `m[k]` and `m[k] = 2`,
   ends it as a call, since it runs that `==` and the key's hash (the owner, 2026-11-02, #110, comment 6586836827).
+  A `mut` method on such a path, and an item or an entry written into it, read where the path was narrowed and after a
+  call in the arguments or the value ended that, is `nullable-unchecked`, the error it gets with that call on the line
+  before it (the owner, 2026-11-24, #628, comment 7131654741), where the build wrote into the `null` the call left. Its
+  help line, and that of the same call after `?.`, says that the call can set the path to `null` and to run it into a
+  variable first, ``help: `Drop(c)` can set `c.Items` to `null`: run it into a variable before this line``, the call
+  as its source writes it, or "a call in this line" where the call is no call of a function or a method (the owner,
+  2026-11-24, #624, comment 7135538740).
 - R2 with R4: a ring of classes is reported once, at the line of its class declared first, with the
   path of fields that closes it; a field holds a class through a list, a map's key or value, a union's
   case and a `data` value's fields, at any depth, and a field of a class some class derives from holds
