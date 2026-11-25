@@ -243,6 +243,10 @@ public sealed partial class Emitter
                     return null;
                 }
 
+            case TypePattern tp when type is UnionType voidUnion && Sub(Model.PatternTypeOf(tp)) is VoidType:
+                // the `void` case has no payload: its arm takes the value whose tag is the case's, with no slot (issue 625, the owner, comment 7141775138)
+                fn.CondBranch(IsCase(tag!, voidUnion, voidUnion.Cases.First(c => c is VoidType)), body, next);
+                return null;
             case TypePattern tp:
                 {
                     var armType = Sub(Model.PatternTypeOf(tp));
