@@ -4,7 +4,7 @@
 // | true
 // | [1, 2, 9, 10]
 // allow: raw
-// rules: N5
+// rules: N3, N5
 
 // a `mut` call on a path of fields through a nullable value changes a list no other value holds where it is, after `?.` and in
 // a test's branch: the test before the call holds no count of the list, so `Add` does not copy it

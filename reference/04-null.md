@@ -643,6 +643,43 @@ if s.B != null {
 print(s.B?.Items ?? [])
 ```
 
+Case: [null/mut-path-through-nullable-not-copied.kz](../corpus/null/mut-path-through-nullable-not-copied.kz)
+```kurz
+// a `mut` call on a path of fields through a nullable value changes a list no other value holds where it is, after `?.` and in
+// a test's branch: the test before the call holds no count of the list, so `Add` does not copy it
+// `true` rests on the build's layout, which `allow: raw` reads: `RemoveAt` keeps the block's room, as Rust's `Vec::remove` keeps
+// its capacity, so that `Add` finds room where the block is; no rule of M9 fixes that room
+data Config(List<int> Items)
+data Box(Config? Cfg)
+
+Config? Find(int id) {
+    if id == 1 {
+        return Config([1, 2, 3, 4])
+    }
+    return null
+}
+
+mut cfg = Find(1)
+cfg?.Items.RemoveAt(3)
+cfg?.Items.RemoveAt(2)
+mut b = Box(Find(1))
+b.Cfg?.Items.RemoveAt(3)
+raw {
+    before = (cfg?.Items ?? []).Pointer
+    cfg?.Items.Add(9)
+    print((cfg?.Items ?? []).Pointer == before)
+    if cfg != null {
+        own = cfg.Items.Pointer
+        cfg.Items.Add(10)
+        print(cfg.Items.Pointer == own)
+    }
+    held = (b.Cfg?.Items ?? []).Pointer
+    b.Cfg?.Items.Add(9)
+    print((b.Cfg?.Items ?? []).Pointer == held)
+}
+print(cfg?.Items ?? [])
+```
+
 ### N4 (decided, §4) `??`
 
 `a ?? b` is `a` when `a` is not null, and `b` otherwise, as in C#. `??` on a value whose type is
@@ -1032,41 +1069,6 @@ print(s.B?.Items ?? [])
 ```
 
 Case: [null/mut-path-through-nullable-not-copied.kz](../corpus/null/mut-path-through-nullable-not-copied.kz)
-```kurz
-// a `mut` call on a path of fields through a nullable value changes a list no other value holds where it is, after `?.` and in
-// a test's branch: the test before the call holds no count of the list, so `Add` does not copy it
-// `true` rests on the build's layout, which `allow: raw` reads: `RemoveAt` keeps the block's room, as Rust's `Vec::remove` keeps
-// its capacity, so that `Add` finds room where the block is; no rule of M9 fixes that room
-data Config(List<int> Items)
-data Box(Config? Cfg)
-
-Config? Find(int id) {
-    if id == 1 {
-        return Config([1, 2, 3, 4])
-    }
-    return null
-}
-
-mut cfg = Find(1)
-cfg?.Items.RemoveAt(3)
-cfg?.Items.RemoveAt(2)
-mut b = Box(Find(1))
-b.Cfg?.Items.RemoveAt(3)
-raw {
-    before = (cfg?.Items ?? []).Pointer
-    cfg?.Items.Add(9)
-    print((cfg?.Items ?? []).Pointer == before)
-    if cfg != null {
-        own = cfg.Items.Pointer
-        cfg.Items.Add(10)
-        print(cfg.Items.Pointer == own)
-    }
-    held = (b.Cfg?.Items ?? []).Pointer
-    b.Cfg?.Items.Add(9)
-    print((b.Cfg?.Items ?? []).Pointer == held)
-}
-print(cfg?.Items ?? [])
-```
 
 Case: [null/mut-path-through-nullable-changeable.kz](../corpus/null/mut-path-through-nullable-changeable.kz)
 ```kurz
