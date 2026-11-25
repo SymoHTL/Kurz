@@ -581,13 +581,35 @@ public sealed partial class Checker
     /// 2026-11-24, #624, comment 7131301981, "Write the place (Recommended)"); the place is read as M5 reads the receiver of the same call
     /// without <c>?.</c>, so that a value that is no place is the error that call gets. A place a call can change (N9) whose call's
     /// arguments run a call is N2's <c>nullable-unchecked</c>, the error the call gets in a test's branch with that call on the line before
-    /// it (the owner, 2026-11-24, #624, comment 7131654435, "Refuse it (Recommended)"). After a member, an item or a call of the chain, the
-    /// receiver is what the same call in a test's branch reaches: a path through a nullable variable or field, an item of a list, a value.
+    /// it (the owner, 2026-11-24, #624, comment 7131654435, "Refuse it (Recommended)"). After a member of the chain on a path of fields
+    /// from a variable, <c>cfg?.Items.Add(3)</c>, the call changes the field's place in the value the chain read, as the same call in a
+    /// test's branch does (<see cref="MutPlace"/>; #624, comment 7135538740, issue 630), and a call in its arguments that can set a nullable
+    /// variable or field on the way to <c>null</c> is <c>nullable-unchecked</c>, as in that branch (<see cref="NullableStepOnTheWay"/>).
+    /// After an item or a call of the chain, the receiver is what the same call in a test's branch reaches: an item of a list, a value.
     /// </summary>
     private void ChainReceiver(CallExpression call, ChainValue value, int line, string what)
     {
         var (chain, member, callsBefore) = chainCalls[call];
         var of = Unwrap(value.Of);
+        if (!member.Conditional && of is MemberAccess && PathRoot(of) is NameExpression or ThisExpression)
+        {
+            Push();
+            MutReceiver(chain, of, line, what);
+            if (Pop(commit: true).Count > 0)
+            {
+                return;
+            }
+
+            if (callsRun > callsBefore && NullableStepOnTheWay(of) is var (step, declared))
+            {
+                Add(Diagnostic.Error(ErrorIds.NullableUnchecked, step.Line, $"`{step.Member}` is read from {Types.A(declared)} without a check (N2)") with { CallHelp = EndedHelp(step.Target) });
+                return;
+            }
+
+            placeCalls.Add(chain);
+            return;
+        }
+
         if (!member.Conditional)
         {
             if (of is IndexExpression)
@@ -623,21 +645,62 @@ public sealed partial class Checker
         placeCalls.Add(chain);
     }
 
+    /// <summary>The root of a path of members, conditional or not: the expression the first member is read from.</summary>
+    private static Expression PathRoot(Expression e)
+    {
+        var root = Unwrap(e);
+        while (root is MemberAccess m)
+        {
+            root = Unwrap(m.Target);
+        }
+
+        return root;
+    }
+
+    /// <summary>
+    /// N9: the first member, from the root, of the path to a <c>mut</c> method's receiver after <c>?.</c> that is read from a nullable
+    /// variable or field a call can change, with that step's declared type: a call in the arguments can set it to <c>null</c> before the
+    /// call takes the place (issue 630); null where no step is so.
+    /// </summary>
+    private (MemberAccess Step, KurzType Declared)? NullableStepOnTheWay(Expression place)
+    {
+        var steps = new List<MemberAccess>();
+        for (var e = Unwrap(place); e is MemberAccess m; e = Unwrap(m.Target))
+        {
+            steps.Insert(0, m);
+        }
+
+        foreach (var m in steps)
+        {
+            if (PathOf(m.Target) is { } path && Changeable(path) && NarrowedPathType(m.Target) is { } declared && Types.NonNull(declared) is not null)
+            {
+                return (m, declared);
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// N9: a write into a path a call can change, a <c>mut</c> method on it or an item or an entry written into it, read where the path
     /// was known not null, after a call in the write's arguments or value ended that (<see cref="EndChangeableNarrowing"/>): the write
     /// meets what it meets with that call on the line before it, N2's <c>nullable-unchecked</c>, <paramref name="written"/> naming the
     /// write (the owner, 2026-11-24, #628, comment 7131654741, "Refuse it (Recommended)", and comment 7131713661). A longer path through
-    /// such a field is refused before (K2, M4, M5).
+    /// such a field is refused before (K2, M4, M5). <paramref name="throughNullable"/> reads the declared type of a path that runs through
+    /// a nullable step before it (<see cref="NarrowedPathType"/>), for a step on the way to a <c>mut</c> method's receiver (issue 630).
+    /// Returns whether it reported.
     /// </summary>
-    private void NarrowingEnded(Expression receiver, Func<KurzType, string> written, int line)
+    private bool NarrowingEnded(Expression receiver, Func<KurzType, string> written, int line, bool throughNullable = false)
     {
         var e = Unwrap(receiver);
         if (PathOf(e) is { } path && Changeable(path) && !frame.Known.Contains(path) && model.HasType(e) && Types.NonNull(model.TypeOf(e).Type) is null
-            && PathType(e) is { } declared && Types.NonNull(declared) is not null)
+            && (throughNullable ? NarrowedPathType(e) : PathType(e)) is { } declared && Types.NonNull(declared) is not null)
         {
             Add(Diagnostic.Error(ErrorIds.NullableUnchecked, line, $"{written(declared)} without a check (N2)") with { CallHelp = EndedHelp(e) });
+            return true;
         }
+
+        return false;
     }
 
     /// <summary>
