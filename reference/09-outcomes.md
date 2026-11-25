@@ -1149,7 +1149,9 @@ Case: [outcomes/else-throw.kz](../corpus/outcomes/else-throw.kz)
 form. It is a statement and can stand wherever one can. As an arm of `else` it can also stand
 alone (O5): a bare `throw` there throws the case value that reached the arm, so the arm
 `NotFound => throw` throws the `NotFound`. A bare `throw` anywhere else is the compile error
-`throw-needs-value`: there is no value it could mean. *(proposed)* A bare `throw` in a lambda is one of these, a lambda
+`throw-needs-value`: there is no value it could mean. So is one in the arm of a `void` case, which
+holds no value to throw, "a bare `throw` throws the case its arm took, and a `void` case holds none
+(O7)" *(assumed: §5, issue 641, comment 7165561768)*. *(proposed)* A bare `throw` in a lambda is one of these, a lambda
 inside an arm of `else` too, since the lambda's body is not the arm *(assumed: as §5 marks it)*. When a supervisor reads what
 was thrown as the `Reason` of a crashed child, its type is the union of everything the
 child's code can throw, found over the whole program (the owner, 2026-10-03, against a fixed type
@@ -1420,6 +1422,28 @@ void Fail() {
 Fail()
 ```
 
+Case: [outcomes/else-throw-void-case.kz](../corpus/outcomes/else-throw-void-case.kz)
+```kurz
+data Circle(int R)
+
+Circle | void Find(bool b) {
+    if b {
+        return Circle(1)
+    }
+    return
+}
+
+// the arm of a `void` case holds no value a bare `throw` could throw
+Circle | void Take(bool b) {
+    Circle c = Find(b) else {
+        void => throw
+    }
+    return c
+}
+
+print("unreached")
+```
+
 Case: [outcomes/throw-text.kz](../corpus/outcomes/throw-text.kz)
 ```kurz
 void Check(int n) {
@@ -1615,7 +1639,7 @@ text, a reading of the build)*.
 A `void` case is a case with no payload: a value of a union with a `void` case holds it, and a
 `match` reads it with a `void` arm, over such a value or over a call whose success is `void`, as
 a `match` over any call reads the call's cases (O4, O8), and as Rust's `Ok(())` matches the `()` of
-a `Result<(), E>` (§5).
+a `Result<(), E>` (§5). A function gives its `void` case with a bare `return` (F3).
 
 Case: [outcomes/void-success.kz](../corpus/outcomes/void-success.kz)
 ```kurz

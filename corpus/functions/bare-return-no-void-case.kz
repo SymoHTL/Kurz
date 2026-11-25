@@ -1,0 +1,14 @@
+// expect: error missing-return at 11
+// rules: F3
+
+data Circle(int R)
+
+// a result with no `void` case has nothing a bare `return` gives
+Circle | string Find(bool b) {
+    if b {
+        return Circle(1)
+    }
+    return
+}
+
+print("unreached")
