@@ -928,7 +928,10 @@ An arm is read as an arm of `match` (C4): one that names an interface the call's
 or a class or a `data` type they derive from, covers those cases, as C#'s `catch (IOException e)`
 catches the exceptions derived from its type (§5, the owner, 2026-11-09, #408, comment 6748445211,
 "Cover, as match does", against `type-mismatch` as built); one that names a type the call cannot
-return beside its success is `type-mismatch` (T1), as such an arm of `match` is.
+return beside its success is `type-mismatch` (T1), as such an arm of `match` is. An arm `void =>`
+over a call whose success is another case takes the call's `void` case, which has no payload and
+gives the arm nothing to hold, as the `void` arm of `match` does (O10) *(assumed: §5's `void` case
+read with C4)*.
 
 Case: [outcomes/else-recover.kz](../corpus/outcomes/else-recover.kz)
 ```kurz
@@ -1129,6 +1132,33 @@ value = Find(2) else {
     NotFound => 0
 }
 print(value)
+```
+
+Case: [outcomes/else-void-arm.kz](../corpus/outcomes/else-void-arm.kz)
+```kurz
+data Circle(int R)
+data NotFound
+
+Circle | void | NotFound Find(int id) {
+    if id == 1 {
+        return Circle(1)
+    }
+    return NotFound
+}
+
+int R(int id) {
+    Circle c = Find(id) else {
+        void => return 0
+        NotFound => {
+            print("not found")
+            Circle(5)
+        }
+    }
+    return c.R
+}
+
+print(R(1))
+print(R(2))
 ```
 
 ### O6 (decided, §5, §6) Exceptions
@@ -1637,7 +1667,7 @@ the call as a value is `syntax`, "a call with a `void` success used as a value (
 text, a reading of the build)*.
 
 A `void` case is a case with no payload: a value of a union with a `void` case holds it, and a
-`match` reads it with a `void` arm, over such a value or over a call whose success is `void`, as
+`match` reads it with a `void` arm, `void =>`, which binds no name (F4), over such a value or over a call whose success is `void`, as
 a `match` over any call reads the call's cases (O4, O8), and as Rust's `Ok(())` matches the `()` of
 a `Result<(), E>` (§5). A function gives its `void` case with a bare `return` (F3).
 

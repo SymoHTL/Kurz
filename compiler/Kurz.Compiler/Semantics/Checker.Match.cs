@@ -117,7 +117,7 @@ public sealed partial class Checker
 
                         if (tp.Binding is not null)
                         {
-                            DeclareChecked(tp.Binding, type, false, VariableKind.Binding, arm.Line, tp);
+                            DeclareArmName(tp, type, arm.Line);
                             BindRegion(model.DeclarationOf(tp), subject, tp); // U12: a binding joins its subject's region (comment 6897444564)
                         }
 
@@ -556,7 +556,7 @@ public sealed partial class Checker
 
                         if (tp.Binding is not null)
                         {
-                            DeclareChecked(tp.Binding, type, false, VariableKind.Binding, arm.Line, tp);
+                            DeclareArmName(tp, type, arm.Line);
                             if (subject is not null)
                             {
                                 BindRegion(model.DeclarationOf(tp), subject, tp); // U12 (assumed): a binding joins the region of the call it takes a case of, as comment 6897444564 has a `match` binding join its subject's
@@ -598,6 +598,20 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>C4 and O5: the name an arm binds, of its case's type. A name of the <c>void</c> case is F4's <c>syntax</c> at the arm, as C# refuses a
+    /// variable of type <c>void</c> (CS1547), and the arm is written <c>void =&gt;</c> (the owner, 2026-11-25, issue 632, comment 7158347230); the name is
+    /// declared as an error, so that a read of it carries no second one (E1).</summary>
+    private void DeclareArmName(TypePattern tp, KurzType type, int line)
+    {
+        if (Types.IsVoid(type))
+        {
+            Report(ErrorIds.Syntax, line, "`void` is no type of a name an arm binds: write `void =>` (F4)");
+            type = Types.Error;
+        }
+
+        DeclareChecked(tp.Binding!, type, false, VariableKind.Binding, line, tp);
+    }
+
     /// <summary>The arms of an <c>else</c> after a call that did not type: what does not depend on the call's cases is still checked, with the success unknown (E1); after an <c>attempt</c>, <paramref name="afterAttempt"/>, an arm's <c>Crashed</c> with no type arguments names the case unknown too (U46).</summary>
     private void CheckArmsLoosely(IReadOnlyList<MatchArm> arms, bool afterAttempt = false)
     {
@@ -611,7 +625,7 @@ public sealed partial class Checker
                         var type = afterAttempt && tp.Type is NamedType { Name: "Crashed", TypeArguments.Count: 0 } ? Types.Error : Resolve(tp.Type);
                         if (tp.Binding is not null)
                         {
-                            DeclareChecked(tp.Binding, type, false, VariableKind.Binding, arm.Line, tp);
+                            DeclareArmName(tp, type, arm.Line);
                         }
 
                         break;

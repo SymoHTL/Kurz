@@ -114,7 +114,7 @@ if x {
 ### C4 (decided, §5) `match`
 
 `match value { Case name => ... }` runs the arm whose case the value is. An arm names a case type,
-optionally followed by a name for the value as that type. O8 says which arms have to be there, and
+optionally followed by a name for the value as that type; an arm of a `void` case names none (F4). O8 says which arms have to be there, and
 C9 what else an arm can test. When a value fits several arms, the first arm in source order whose
 type the value is runs, as C#'s `switch` does; an arm may name a class or a `data` type derived from
 a case (D6, K6), `Admin` where the case is `User`; and an arm that can never run, because an earlier

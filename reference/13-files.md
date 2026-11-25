@@ -2932,10 +2932,16 @@ or less returns at once, as Go's `time.Sleep` does (§12, the owner, 2026-11-25,
 time; a parked actor takes no other message but the calls of its chain, which run above it as above an
 activation that waits for a call (U17); a `within` bound and the wait of a reply count the time a callee
 sleeps, so that `a.Nap(200ms) within 20ms` is `call-timeout` (U39); a call in a `test` block waits in
-real time; a `longduration` is `narrowing-conversion` (T29) and a number `type-mismatch`; nothing wakes
-a sleep early, and the call never raises; a build for Windows says `not supported`, as for `instant.Now`
+real time; a `longduration` is `narrowing-conversion` (T29) and a number `type-mismatch`; no call wakes
+or cancels a sleep, and a crash of the actor ends its sleeping activation with the rest of its chain
+(U20); the call never raises; a build for Windows says `not supported`, as for `instant.Now`
 (S11, S25). And a reading of the build that nobody was asked: the top-level code's sleep runs the
-messages its wait on a call runs, to the end of the time, since every actor runs on its thread (U35).)*
+messages its wait on a call runs, to the end of the time, since every actor runs on its thread (U35); a
+top-level call that waits while an actor's activation sleeps is no `deadlock`, since that actor can still
+set the reply once it wakes, as Go reports no deadlock while a goroutine sleeps on a timer, at the cost
+that a reply nothing sets waits as long as an unrelated actor sleeps; and a `duration` whose end lies
+past the clock's range sleeps without end, as Rust's `thread::sleep` sleeps in pieces whose sum is the
+whole time.)*
 
 Case: [system/sleep.kz](../corpus/system/sleep.kz)
 ```kurz
@@ -2951,7 +2957,9 @@ print("done")
 Case: [actors/sleep-parks.kz](../corpus/actors/sleep-parks.kz)
 ```kurz
 // a sleep parks its actor and the thread runs the others: `Quick` answers while `Napper` sleeps, and a sleep in a function
-// or a lambda its method calls parks it too; the wait lasts at least its duration
+// or a lambda its method calls parks it too; the wait lasts at least its duration. `7` prints before `napped` whatever the time:
+// every actor and the top level run on one thread (U35), `Nap` parks before `Get` runs, and a timer that fires late wakes
+// `Napper` behind `Quick`, whose reply ends the top level's wait first
 void Rest(duration d) => Environment.Sleep(d)
 
 actor Napper {

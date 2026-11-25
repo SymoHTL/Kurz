@@ -1386,6 +1386,27 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_name_an_arm_of_the_void_case_binds_is_syntax_at_the_arm_and_the_arm_without_it_is_clean()
+    {
+        // F4: `void` is no type of a name an arm binds, of a `match` over a value or over a call or of `else` after a call (C4, O5), and the arm
+        // is written `void =>` (the owner, 2026-11-25, issue 632, comment 7158347230); the name is an error, so a read of it carries no second
+        // error, O10's text of a call among them (E1); each row's control is the same arm with no name
+        const string Value = "data Circle(int R)\n\nstring D(Circle | void s) {\n    return match s {\n        Circle c => \"circle {c.R}\"\n        void v => \"none\"\n    }\n}\n\nprint(D(Circle(2)))";
+        const string Call = "data Circle(int R)\n\nvoid | Circle Make(bool b) {\n    if b {\n        return Circle(1)\n    }\n}\n\nstring D(bool b) {\n    return match Make(b) {\n        Circle c => \"circle {c.R}\"\n        void v => \"none\"\n    }\n}\n\nprint(D(true))";
+        const string Else = "data Circle(int R)\n\nCircle | void Find(bool b) {\n    return Circle(1)\n}\n\nint R(bool b) {\n    Circle c = Find(b) else {\n        void v => return 0\n    }\n    return c.R\n}\n\nprint(R(true))";
+        const string Lost = "int R(bool b) {\n    int c = Lost(b) else {\n        void v => return 0\n    }\n    return c\n}\n\nprint(R(true))";
+        Assert.Equal([(ErrorIds.Syntax, 6)], Errors(Value));
+        Assert.Equal([(ErrorIds.Syntax, 6)], Errors("data Circle(int R)\n\nvoid | Circle P(Circle | void s) {\n    return match s {\n        Circle c => c\n        void v => v\n    }\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.Syntax, 12)], Errors(Call));
+        Assert.Equal([(ErrorIds.Syntax, 9)], Errors(Else));
+        Assert.Equal([(ErrorIds.UnknownName, 2), (ErrorIds.Syntax, 3)], Errors(Lost));
+        Clean(Value.Replace("void v =>", "void =>"));
+        Clean(Call.Replace("void v =>", "void =>"));
+        Clean(Else.Replace("void v =>", "void =>"));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors(Lost.Replace("void v =>", "void =>")));
+    }
+
+    [Fact]
     public void The_end_of_a_while_true_is_reached_only_through_a_break_of_its_own()
     {
         // F3, as in C#: the end point of a `while` whose condition is the constant `true` is reached only through a `break` of that loop that

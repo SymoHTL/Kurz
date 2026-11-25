@@ -427,8 +427,17 @@ public sealed partial class Emitter
             {
                 var armType = Sub(Model.PatternTypeOf(tp));
                 taken.Add(armType);
-                elseCase = (fn.Value($"load {Ir(armType)}, ptr {caseSlot}"), armType);
-                held = (caseSlot!, armType);
+                if (armType is VoidType)
+                {
+                    // the `void` case has no payload, so `Test` made no slot: the arm holds nothing and loads nothing, as a `match` arm of it
+                    // (issue 625, the owner, comment 7141775138), and a bare `throw` in it reaches the text of a `void`, which is not supported
+                    elseCase = (string.Empty, armType);
+                }
+                else
+                {
+                    elseCase = (fn.Value($"load {Ir(armType)}, ptr {caseSlot}"), armType);
+                    held = (caseSlot!, armType);
+                }
             }
             else if (arm.Pattern is ElsePattern)
             {

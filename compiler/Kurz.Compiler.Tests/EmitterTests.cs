@@ -1880,4 +1880,21 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             + "mut long w = 70001\nview = AtomicLong.FromPtr(&w)\nprint(Read<MemoryOrder.Acquire>(view))\nprint(Read<MemoryOrder.Release>(view))\n";
         Ran(BuildAndRun(text, "atomic-order-copy", "raw"), 1, ["70001"], "error: invalid-ordering-at-run-time at program.kz:4\n");
     }
+
+    [Fact]
+    public void The_void_arm_of_else_loads_no_case_and_a_guarded_block_in_it_takes_none()
+    {
+        // O5 (issue 638): the `void` case has no payload, so its arm of `else` loads nothing from a slot, which `Test` makes for no `void`
+        // case, as the `void` arm of a `match` holds nothing (issue 625, the owner, comment 7141775138), and a guarded block in the arm,
+        // a function of its own, takes no case as a parameter; the program builds, and the arm beside it runs
+        const string text = "data Circle(int R)\ndata NotFound\n\nCircle | void | NotFound Find(int id) {\n    if id == 1 {\n        return Circle(1)\n    }\n"
+            + "    return NotFound\n}\n\nint R(int id) {\n    Circle c = Find(id) else {\n        void => {\n            if X86.Sse41.IsSupported {\n"
+            + "                print(0)\n            }\n            return 0\n        }\n        NotFound => Circle(5)\n    }\n    return c.R\n}\n\n"
+            + "print(R(1))\nprint(R(2))\n";
+        var program = Emit(text);
+        Assert.Contains(".guarded.", program.Ir, StringComparison.Ordinal);
+        Assert.DoesNotContain("load void", program.Ir, StringComparison.Ordinal);
+        Assert.DoesNotContain("void %case", program.Ir, StringComparison.Ordinal);
+        Ran(Toolchain.Run(toolchain.Build(program, "else-void-arm-guarded")), 0, ["1", "5"], string.Empty);
+    }
 }
