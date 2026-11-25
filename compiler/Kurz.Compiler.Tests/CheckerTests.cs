@@ -6350,7 +6350,9 @@ public sealed class CheckerTests
     [InlineData("data Box<T>(T Item)\ndata IntBox(int Extra) : Box<int>\n\nb = IntBox(1, 2)\nprint(b.Item)", "2: a generic data type as a base (T19)")]
     [InlineData("uint u = 1\nprint(-u)", "2: `-` on a `uint`, which no rule gives a meaning")]
     [InlineData("ulong u = 1\nprint(-u)", "2: `-` on a `ulong`, which no rule gives a meaning")]
-    [InlineData("void Bump(mut int n) {\n    n = n + 1\n}\n\nmut xs = List<short>()\nBump(mut xs[0])", "6: an element of a list passed as `mut` (M7, M9)")]
+    [InlineData("void Bump(mut int n) {\n    n = n + 1\n}\n\nmut xs = List<short>()\nBump(mut xs[0])", "6: an item of a list or an entry of a map, or a path through one, passed as `mut` (M7, M9)")]
+    [InlineData("data Box(Map<string, List<int>> M)\n\nvoid Grow(mut List<int> xs) {\n    xs.Add(4)\n}\n\nmut b = Box(Map<string, List<int>>())\nGrow(mut b.M[\"k\"])", "8: an item of a list or an entry of a map, or a path through one, passed as `mut` (M7, M9)")]
+    [InlineData("data Config(List<int> Items)\ndata Box(List<Config> Cs)\n\nvoid Grow(mut List<int> xs) {\n    xs.Add(4)\n}\n\nmut b = Box(List<Config>())\nGrow(mut b.Cs[0].Items)", "9: an item of a list or an entry of a map, or a path through one, passed as `mut` (M7, M9)")]
     [InlineData("static int Twice(int n) {\n    return \"x\"\n}\n\nprint(Twice(\"a\"))", "1: the modifier `static` of a method (K7, M6)")]
     [InlineData("data User(string Name)\n\nmut u = User(\"a\")\nu?.Name = \"b\"", "4: `?.` (N5)")]
     public void A_construct_of_a_chapter_the_checker_does_not_read_is_not_supported_and_carries_no_error(string program, string first)

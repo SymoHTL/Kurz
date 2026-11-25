@@ -2558,7 +2558,7 @@ public sealed partial class Checker
 
             if (a.Mut && IsElementPath(a.Value))
             {
-                NotSupported(a.Line, "an element of a list passed as `mut` (M7, M9)"); // before the pick, so that no misfit of its type is reported beside it (E1)
+                NotSupported(a.Line, "an item of a list or an entry of a map, or a path through one, passed as `mut` (M7, M9)"); // before the pick, so that no misfit of its type is reported beside it (E1)
                 Push();
                 CheckExpression(a.Value, null);
                 Pop(commit: false);
@@ -3586,7 +3586,7 @@ public sealed partial class Checker
         return fits;
     }
 
-    /// <summary>M7, M9: whether the path after <c>mut</c> starts at an element of a list, which the checker does not read.</summary>
+    /// <summary>M7, M9: whether the path after <c>mut</c> starts at an item of a list or an entry of a map, which the checker does not read.</summary>
     private static bool IsElementPath(Expression value)
     {
         var root = Unwrap(value);

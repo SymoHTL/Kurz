@@ -5862,6 +5862,29 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(box.Items)
             """;
         Ran(BuildAndRun(ChainPath, fenced, "chain-path-fenced"), 0, ["[7, 5]"], "");
+        // issue 646: two paths of one variable passed as `mut` give the callee two places in the variable's block; the place of the
+        // second, taken after the first, copies no block the variable holds alone and copies a shared one once, so the place of the
+        // first is in the block the variable holds when the callee writes through it, whether another variable held the block or not
+        const string MutPath = """
+            data Pair(List<int> A, List<int> B)
+
+            void Two(mut List<int> a, mut List<int> b) {
+                a.Add(5)
+                b.Add(6)
+            }
+
+            mut p = Pair([1], [2])
+            held = p
+            Two(mut p.A, mut p.B)
+            print(p.A)
+            print(p.B)
+            print(held.A)
+            mut q = Pair([3], [4])
+            Two(mut q.A, mut q.B)
+            print(q.A)
+            print(q.B)
+            """;
+        Ran(BuildAndRun(MutPath, fenced, "mut-path-fenced"), 0, ["[1, 5]", "[2, 6]", "[1]", "[3, 5]", "[4, 6]"], "");
 
         // the positive control: a write into a freed block under the same allocator ends the process, and so does one into a freed
         // block of more than 262144 bytes, which the thread keeps outside the fence
@@ -8216,7 +8239,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     [Theory]
     [InlineData("s = \"ab\"\nprint(s.Chars[0])\n", 2, "`s.Chars` as a list (T15)", null)]
-    [InlineData("data Box(List<int> Items)\n\nvoid Fill(mut List<int> xs) {\n    xs.Add(1)\n}\n\nmut b = Box(List<int>())\nFill(mut b.Items)\n", 8, "a `mut` parameter given anything but a variable (M7)", null)]
+    [InlineData("data Config(List<int> Items)\n\nvoid Grow(mut List<int> xs) {\n    xs.Add(4)\n}\n\nclass H(mut Config Cfg) {\n    pub void Run() {\n        Grow(mut Cfg.Items)\n    }\n}\n\nh = H(Config([1]))\nh.Run()\n", 9, "a `mut` parameter given a path through a field of a class instance (M7)", null)]
     public void What_the_emitter_does_not_lay_out_of_a_list_is_not_supported_at_its_line(string text, int line, string message, string? grant)
     {
         var compilation = Compile(text, toolchain.Runtime, grant is null ? [] : [grant]);
