@@ -7,7 +7,9 @@
 // rules: S28
 
 // a sleep parks its actor and the thread runs the others: `Quick` answers while `Napper` sleeps, and a sleep in a function
-// or a lambda its method calls parks it too; the wait lasts at least its duration
+// or a lambda its method calls parks it too; the wait lasts at least its duration. `7` prints before `napped` whatever the time:
+// every actor and the top level run on one thread (U35), `Nap` parks before `Get` runs, and a timer that fires late wakes
+// `Napper` behind `Quick`, whose reply ends the top level's wait first
 void Rest(duration d) => Environment.Sleep(d)
 
 actor Napper {
