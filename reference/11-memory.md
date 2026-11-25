@@ -49,7 +49,11 @@ own they were built in, which a message takes wherever an argument after one tha
 §6, the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)"), the memo of those copies ending before
 that heap is freed *(assumed: a reading of the build, as for a call that is no message)*; where such an
 argument can raise with no call in it, the crossing arguments are copied after the last, so that none is
-made before the raise (U21; §6, the owner, 2026-11-21, #519, comment 7060155980, "T83 1"). No case shows
+made before the raise (U21; §6, the owner, 2026-11-21, #519, comment 7060155980, "T83 1"). The copies
+a `spawn`'s arguments made before such a raise are freed with the heap of the actor it was making, which
+the crash of its spawner frees where its first crossing argument, or an argument after it, can raise or
+wait, a raise before that argument finding no heap (U21; §6, the same comment, "T82 1", and 2026-11-23,
+comment 7095825398, "T87 3") *(assumed: a reading of T82 1, the heap freed whole)*. No case shows
 that order either: nothing of the program runs at a release, nor between a jump
 and the releases it makes.
 

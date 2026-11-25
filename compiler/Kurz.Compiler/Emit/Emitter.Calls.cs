@@ -18,6 +18,11 @@ public sealed partial class Emitter
             return construction is null ? null : EmitCall(construction); // T33: `T.Make` is the constructor's call it became; a type with no fields, its constant
         }
 
+        if (Model.IsChainCall(c, out var chain))
+        {
+            return EmitChainCall(c, chain); // N5
+        }
+
         var info = Model.CallOf(c);
         var result = Sub(info.Result);
         var copied = c.Arguments.Where(a => Model.IsCopied(a.Value) && ReachesInstance(Sub(Model.TypeOf(a.Value).Type))).ToList();
@@ -336,12 +341,17 @@ public sealed partial class Emitter
     /// argument is held as it was evaluated, a value read from a name with no copy, and copied after the last argument, so that a raise
     /// leaves no copy (section 6, the owner, 2026-11-21, #519, comment 7060155980, "T83 1"); no argument of such a message runs a call,
     /// which can wait and builds the message in a heap of its own (<see cref="EmitMessage"/>), so that nothing but a raise runs between a
-    /// crossing argument and its copy, and a read of what an argument after it changes is <c>changed-while-held</c> (M7).
+    /// crossing argument and its copy, and a read of what an argument after it changes is <c>changed-while-held</c> (M7). With
+    /// <paramref name="making"/>, the heap of a <c>spawn</c>'s actor, which <paramref name="into"/> then names once it is made, is made by
+    /// it, given the place of the argument evaluated next, just before the first argument that crosses into it, or after the last
+    /// argument where none crosses, the call's session begun with it (section 6, the owner, 2026-11-23, #519, comment 7095825398,
+    /// "T87 3").
     /// </summary>
-    private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, (Expression Value, Unit File)?> slotDefault, bool cConvention, bool owned, string? into = null, bool after = false)
+    private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, (Expression Value, Unit File)?> slotDefault, bool cConvention, bool owned, string? into = null, bool after = false, Func<int, string>? making = null)
     {
         var values = new string?[c.Arguments.Count];
-        var session = into is null ? null : CallSession(Enumerable.Range(0, c.Arguments.Count).Count(i => info.Binding[i] >= 0 && !slotMut(info.Binding[i]) && Counted(Sub(slotType(info.Binding[i])))), into);
+        var copies = Enumerable.Range(0, c.Arguments.Count).Count(i => info.Binding[i] >= 0 && !slotMut(info.Binding[i]) && Counted(Sub(slotType(info.Binding[i]))));
+        var session = into is null ? null : CallSession(copies, into);
         var late = new List<(int Index, Func<string, string> Read)>(); // U12: the copies read after the call's last copy (Late)
         var taken = new List<string>(); // the values the slots took, temporaries of the region until the last argument (Taken)
         var held = new List<Action>(); // T83 1: the copies of the crossing arguments, made after the last argument where `after`
@@ -367,6 +377,16 @@ public sealed partial class Emitter
             copy();
         }
 
+        // T87 3: the heap of a `spawn` made where the argument at `from` is evaluated next, and the call's session in it
+        void MakeHeap(int from)
+        {
+            if (making is not null && into is null)
+            {
+                into = making(from);
+                session = CallSession(copies, into);
+            }
+        }
+
         void Cross(int i, string value, KurzType type, string? environment, bool keep)
         {
             // U12: a copy into the actor's heap, read at once where it is the call's one copy, else after its last
@@ -389,13 +409,19 @@ public sealed partial class Emitter
                 var a = c.Arguments[i].Value;
                 var type = Sub(slotType(slot));
                 var takes = owned || TakesSlot(c, info, slot); // U12: a parameter written `move` owns its argument
+                var crosses = (into is not null || making is not null) && Counted(type);
+                if (crosses)
+                {
+                    MakeHeap(i);
+                }
+
                 if (Model.IsMove(a))
                 {
                     // U12: the value goes to a parameter's place with no copy and, of a value whose place it empties, no count changed
                     // (comment 6895076937); across into an actor's heap, a copy there, and the moved value let go of, which frees it
                     // (section 6, assumed on comment 6902210646, Q5)
                     var moved = Convert(MovedValue(a), TypeOf(a), type, a.Line, owned: true);
-                    if (into is not null && Counted(type))
+                    if (crosses)
                     {
                         // a function value with its environment copied, as an argument with no word crosses (comment 6902210646, Q5)
                         var (at, environment) = (i, CrossingEnvironment(a, type));
@@ -415,7 +441,7 @@ public sealed partial class Emitter
                     continue;
                 }
 
-                if (into is not null && Counted(type))
+                if (crosses)
                 {
                     // U12: each argument copied where it is evaluated, or after the last where `after` (T83 1), left to right, in the
                     // call's session; a function value with the environment of the lambda the checker saw for it
@@ -444,6 +470,8 @@ public sealed partial class Emitter
                 }
             }
         }
+
+        MakeHeap(c.Arguments.Count); // T87 3: where no argument crossed, the heap after the last
 
         foreach (var copy in held)
         {

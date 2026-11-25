@@ -51,7 +51,10 @@ public sealed partial class Emitter
     /// the constructor and the defaults of the body run here, before <c>spawn</c> gives the reference, which on one thread is the new
     /// actor running its constructor while the spawner waits (U3). The record keeps the size of the actor's stack, the one its <c>stack</c>
     /// clause writes or 2 MiB, which the runtime rounds up to its page and raises to its floor (U1; section 6, "2 MiB + clause"). The
-    /// actor's heap is made first, its first page sized to the record and the state (section 3), and the arguments cross into it as a
+    /// actor's heap, its first page sized to the record and the state (section 3), is made just before the first argument that crosses
+    /// into it, or after the last argument where none crosses, so that a raise of an argument before that point finds no heap, as Rust's
+    /// <c>Box::new</c> evaluates a value's fields before it allocates (section 6, the owner, 2026-11-23, #519, comment 7095825398,
+    /// "T87 3"; <see cref="Arguments"/>), and the arguments cross into it as a
     /// message's do (U12, <see cref="Crossed"/>); the constructor and the defaults then allocate in it, as the actor's code does, and
     /// the spawner's heap is served again once the state stands. The spawner's heap, the supervisor's, holds the block of the actor's
     /// restart with a copy of each argument the constructor is given (<see cref="KeptArguments"/>; U22) where the policy restarts, the policy
@@ -61,7 +64,15 @@ public sealed partial class Emitter
     /// runs, so that the variables it takes by value are taken after the arguments ran, as the checker reads the block after them and as
     /// it is written, and the function that runs it (<see cref="Deciding"/>; U28, U31). While the constructor runs, the runtime names the actor as the one whose
     /// constructor runs, so that an actor it spawns is its child (the runtime's <c>Building</c>; U13), and its record says that its
-    /// constructor runs until <c>ActorBuilt</c>, so that an escalation that reaches it is its spawner's crash (U3, U25).
+    /// constructor runs until <c>ActorBuilt</c>, so that an escalation that reaches it is its spawner's crash (U3, U25). Where an
+    /// argument evaluated after the heap is made, the first that crosses among them, can raise (<see cref="Raises"/>) or wait
+    /// (<see cref="SemanticModel.CanWait"/>), the actor's heap is listed with the actor whose code spawns, as a message's heap of its own is
+    /// (the runtime's <c>SpawnHeapNew</c>), so that the crash a raise of an argument makes frees it with the copies made into it, as
+    /// Rust drops the parts of a value it was building, and is taken off that list once the last argument is evaluated, before
+    /// <c>ActorNew</c> takes the actor's number, its slot and its place under its supervisor, so that such a raise takes none of them
+    /// (section 6, the owner, 2026-11-21, #519, comment 7060155980, "T82 1", the heap freed whole and the arguments that can wait
+    /// assumed there, and "T87 3", the first crossing argument's own raise assumed there); a case propagated out of a later argument
+    /// frees it as a message's heap of its own (<see cref="EndHeaps"/>).
     /// </summary>
     private string EmitActorSpawn(SpawnExpression s)
     {
@@ -70,14 +81,34 @@ public sealed partial class Emitter
         var block = layout.ClassBlock(symbol);
         var stack = StackOf(symbol);
         var supervisor = fn.Value($"call ptr {StdFunction("HeapCurrent")}()");
-        var heap = fn.Value($"call ptr {RuntimeFunction("ActorHeapNew")}(i64 {IrSize(block)})");
-        var left = HeapBegun(heap, "HeapLeft");
+        string? heap = null;
+        string? left = null;
+        var listed = false;
+
+        // T87 3: the heap made where the argument at `from` is evaluated next, the first that crosses, or after the last where none does
+        string HeapAt(int from)
+        {
+            if (heap is null)
+            {
+                listed = s.Call.Arguments.Skip(from).Any(a => Model.CanWait(a.Value) || Raises(a.Value));
+                heap = fn.Value($"call ptr {RuntimeFunction(listed ? "SpawnHeapNew" : "ActorHeapNew")}(i64 {IrSize(block)})");
+                left = HeapBegun(heap, listed ? "MessageHeapFree" : "HeapLeft");
+            }
+
+            return heap;
+        }
+
         var spawner = fn.Alloca("ptr", "spawner");
         var building = fn.Alloca("ptr", "building");
         var side = "null";
         var policy = s.Policy ?? symbol.Declaration.Clauses?.FirstOrDefault(c => c.Policy is not null)?.Policy ?? new CrashPolicy(s.Line, "restart");
         var state = Construct(symbol, s.Call, info, () =>
         {
+            if (listed)
+            {
+                fn.Emit($"call void {RuntimeFunction("SpawnHeapTaken")}(ptr {heap})");
+            }
+
             var state = fn.Value($"call ptr {RuntimeFunction("ActorNew")}(ptr {heap}, i64 {IrSize(block)}, i64 {stack}, ptr {side}, ptr {ActorName(symbol)})");
             fn.Emit($"store ptr null, ptr {left}");
             fn.Emit($"store i64 1, ptr {state}");
@@ -85,7 +116,7 @@ public sealed partial class Emitter
             fn.Emit($"store ptr {fn.Value($"call ptr {RuntimeFunction("Building")}(ptr {state})")}, ptr {building}");
             fn.Emit($"store ptr {fn.Value($"call ptr {StdFunction("HeapUse")}(ptr {heap})")}, ptr {spawner}");
             return state;
-        }, into: heap, kept: (arguments, types) => side = policy.Word switch
+        }, making: HeapAt, kept: (arguments, types) => side = policy.Word switch
         {
             "restart" => KeptArguments(s.Call, info, symbol, arguments, types, supervisor, policy),
             "escalate" => Escalating(supervisor),
@@ -538,7 +569,8 @@ public sealed partial class Emitter
     /// <summary>
     /// At a region's end, or a jump out of it, after the region let go of its copies, the heap of each <c>spawn</c> begun in it that a
     /// case propagated out of an argument after it left without its actor, and of each message built in a heap of its own that it left
-    /// unqueued, freed whole (the runtime's <c>HeapLeft</c> and <c>MessageHeapFree</c>).
+    /// unqueued, freed whole (the runtime's <c>HeapLeft</c>, and <c>MessageHeapFree</c> for those and for a <c>spawn</c>'s heap listed with
+    /// its builder, <see cref="EmitActorSpawn"/>).
     /// </summary>
     private void EndHeaps(List<(string Value, KurzType Type)> temporaries)
     {
@@ -577,7 +609,7 @@ public sealed partial class Emitter
     /// <summary>
     /// U40, U41: a bound of <c>within</c> that is no constant (<see cref="Checker.ConstantBound"/>), a block's or a call's clause's, read
     /// where it is read, at the block's entry before its first statement or at the call after its arguments and before its queueing, and
-    /// of zero or less the run-time error <c>invalid-input</c> at the bound's line, whose text the runtime's <c>InvalidBound</c> writes,
+    /// of zero or less the run-time error <c>invalid-input</c> at the line where the bound starts (<see cref="Checker.BoundLine"/>), whose text the runtime's <c>InvalidBound</c> writes,
     /// the crash of the code that runs it (section 6, the owner, 2026-11-20, #519, comment 7051492844, "T4 (2)"; assumed: T78 and T81 of
     /// comment 7055305138, and T79 of it as corrected on 2026-11-21); a constant one, a literal or one folded from literals, the checker
     /// refused where it is zero or less, and it takes no compare.
@@ -593,7 +625,7 @@ public sealed partial class Emitter
         var positive = fn.Label("bound.positive");
         fn.CondBranch(fn.Value($"icmp sgt i64 {value}, 0"), positive, refused);
         fn.Block(refused);
-        fn.Emit($"call void {RuntimeFunction("InvalidBound")}(i64 {value}, %kz.str {StringValue(unit.File)}, i32 {Number(bound.Line)})");
+        fn.Emit($"call void {RuntimeFunction("InvalidBound")}(i64 {value}, %kz.str {StringValue(unit.File)}, i32 {Number(Checker.BoundLine(bound))})");
         fn.Unreachable();
         fn.Block(positive);
     }
@@ -615,7 +647,8 @@ public sealed partial class Emitter
     /// name, either in brackets; an expression that runs a call, a name that runs a property's among them, can wait
     /// (<see cref="SemanticModel.CanWait"/>). <see cref="EmitMessage"/> reads it of each argument of a message
     /// after one that crosses (<see cref="RaisesAfterCrossing"/>; section 6, the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)",
-    /// and 2026-11-21, comment 7060155980, "T83 1", the arguments read as a bound is, assumed there), and the bound of a call's clause,
+    /// and 2026-11-21, comment 7060155980, "T83 1", the arguments read as a bound is, assumed there), and of each argument of a
+    /// <c>spawn</c> from its first crossing one on (<see cref="EmitActorSpawn"/>; "T82 1" and "T87 3"), and the bound of a call's clause,
     /// which raises <c>invalid-input</c> too where it is zero or less (U40, U41), by <see cref="BoundRaises"/>.
     /// </summary>
     private static bool Raises(Expression e) => e switch

@@ -72,6 +72,8 @@ public sealed partial class Checker
                 return CheckThis(t); // K7
             case MemberAccess m:
                 return CheckMember(m);
+            case ChainValue v:
+                return chainValues[v]; // N5: read with its chain (CheckChainCall)
             case CallExpression c:
                 {
                     var result = CheckCall(c, expected, keepCases);
