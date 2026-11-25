@@ -364,7 +364,8 @@ public sealed partial class Emitter
     /// M4: the place at the end of a path of fields from the <c>mut</c> variable <paramref name="root"/>, read as the code before it left
     /// the variable, and the type there: each data value on the path is changed in place, a plain value in its variable or its field,
     /// and a block after it was copied into the place that held it, since another variable may hold the same block, the place letting
-    /// go of the block it held.
+    /// go of the block it held. A nullable step, which the checker read known not null or after <c>?.</c> (N3, N5, issue 630), is the room
+    /// of its case (<see cref="NarrowedPlace(string, KurzType, KurzType, int)"/>).
     /// </summary>
     private (string Place, KurzType Type) WritablePath(NameExpression root, List<MemberAccess> members)
     {
@@ -373,6 +374,11 @@ public sealed partial class Emitter
         var type = Sub(variable.Type);
         foreach (var m in members)
         {
+            if (Types.NonNull(type) is { } inner)
+            {
+                (place, type) = NarrowedPlace(place, type, inner, m.Line);
+            }
+
             var data = (DataType)type;
             var index = Layout.FieldIndex(data, m.Member);
             if (layout.IsBlock(data))
@@ -408,7 +414,7 @@ public sealed partial class Emitter
             return chainPlaces[chain](); // N5: the place the chain names, taken where the call takes it
         }
 
-        if (InstanceFieldPlace(receiver) is { } field)
+        if (InstanceFieldPlace(receiver, narrowed: true) is { } field)
         {
             return field; // K2: a field of an instance, which holds its list or map as a variable does
         }

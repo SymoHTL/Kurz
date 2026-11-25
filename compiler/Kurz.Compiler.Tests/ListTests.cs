@@ -5843,6 +5843,25 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print("{x.Name == null}")
             """;
         Ran(BuildAndRun(ChainReceiver, fenced, "chain-receiver-fenced"), 0, ["true", "true"], "");
+        // issue 630: a `mut` call after `?.` on a path through a nullable variable borrows the field's list for the chain's test of
+        // `null` alone and takes the place where the call takes it, after its argument, which gives the field another list and frees
+        // the one the test read: the call writes the field's new list, and nothing reads the freed one
+        const string ChainPath = """
+            class Box {
+                pub mut List<int> Items = [1, 2, 3]
+            }
+
+            int Swap(Box b) {
+                b.Items = [7]
+                return 5
+            }
+
+            box = Box()
+            Box? c = box
+            c?.Items.Add(Swap(box))
+            print(box.Items)
+            """;
+        Ran(BuildAndRun(ChainPath, fenced, "chain-path-fenced"), 0, ["[7, 5]"], "");
 
         // the positive control: a write into a freed block under the same allocator ends the process, and so does one into a freed
         // block of more than 262144 bytes, which the thread keeps outside the fence

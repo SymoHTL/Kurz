@@ -588,9 +588,13 @@ assumed)*. A call there that changes the value it is called on changes the place
 variable, a path of fields from one, or an item of a list or an entry of a map such a path holds, so
 that `groups[key]?.Add(n)` adds to the map's list, as Rust's `get_mut` and `push`; on a value that is
 no place, a call's result, it is the error the same call gets without `?.`, `mut-required` (M5) (§4,
-the owner, 2026-11-24). A path through the chain's value, `cfg?.Items.Add(1)`, is what the same call
-in a test's branch is, `not supported` (N3, M5) (§4, the owner, 2026-11-24, issue 624, comment
-7135538740). Such a call on a path a call can change (N9),
+the owner, 2026-11-24). A path through the chain's value, `cfg?.Items.Add(1)`, changes the field's
+place where the chain did not stop, as the same call in a test's branch, `if cfg != null {
+cfg.Items.Add(1) }`, changes it where the test knows the value not null: the value without its
+`null`, written where it stands, through a variable, a field or a `mut` parameter, and through a
+class instance the instance's field (§4, the owner, 2026-11-24, issue 624, comment 7135538740, issue
+630) *(the record marks the readings as assumed)*; a path through an item or an entry,
+`groups[key]?.Items.Add(1)`, stays `not supported` (N3, M5). Such a call on a path a call can change (N9),
 whose arguments, index or key run a call, is `nullable-unchecked`, the error the same call gets with that call on
 the line before it, with the help line N9 gives it (§4, the owner, 2026-11-24); a local variable, a
 path of `data` fields from one and a map one holds stay allowed.
@@ -845,6 +849,152 @@ c = Bag([1])
 c.Items?.Add(Drop(c))
 ```
 
+Case: [null/mut-path-through-nullable.kz](../corpus/null/mut-path-through-nullable.kz)
+```kurz
+// a `mut` call on a path of fields through a nullable value changes the field's place where a test's branch knows the value
+// not null and after `?.` where the chain did not stop, through a nullable variable, a nullable field and a nullable `mut`
+// parameter, and a value another variable holds keeps what it held
+data Config(List<int> Items)
+data Box(Config? Cfg)
+
+Config? Find(int id) {
+    if id == 1 {
+        return Config([1])
+    }
+    return null
+}
+
+void Grow(mut Config? c) {
+    if c != null {
+        c.Items.Add(2)
+    }
+    c?.Items.Add(3)
+}
+
+mut cfg = Find(1)
+if cfg != null {
+    cfg.Items.Add(2)
+}
+cfg?.Items.Add(3)
+print(cfg?.Items ?? [])
+
+mut none = Find(2)
+none?.Items.Add(3)
+print(none?.Items ?? [])
+
+mut kept = Find(1)
+before = kept
+kept?.Items.Add(2)
+print(before?.Items ?? [])
+print(kept?.Items ?? [])
+
+mut b = Box(Find(1))
+if b.Cfg != null {
+    b.Cfg.Items.Add(2)
+}
+b.Cfg?.Items.Add(3)
+print(b.Cfg?.Items ?? [])
+
+mut p = Find(1)
+Grow(mut p)
+print(p?.Items ?? [])
+```
+
+Case: [null/mut-path-through-nullable-instance.kz](../corpus/null/mut-path-through-nullable-instance.kz)
+```kurz
+// a `mut` call on a `mut` field of an instance held by a nullable variable or field changes the instance's field where a test's
+// branch knows it not null and after `?.`, in a method through a field named alone and through `this`; the variable that holds
+// the reference need not be `mut`, as for an instance that is not nullable
+class Box {
+    pub mut List<int> Items = [1]
+}
+
+class Shelf {
+    pub mut Box? B = null
+
+    pub void Fill() {
+        if B != null {
+            B.Items.Add(2)
+        }
+        this.B?.Items.Add(3)
+    }
+}
+
+Box? Find(int id) {
+    if id == 1 {
+        return Box()
+    }
+    return null
+}
+
+c = Find(1)
+if c != null {
+    c.Items.Add(2)
+}
+c?.Items.Add(3)
+print(c?.Items ?? [])
+
+s = Shelf()
+s.B = Find(1)
+s.Fill()
+s.B?.Items.Add(4)
+print(s.B?.Items ?? [])
+```
+
+Case: [null/mut-path-through-nullable-not-copied.kz](../corpus/null/mut-path-through-nullable-not-copied.kz)
+```kurz
+// a `mut` call on a path of fields through a nullable value changes a list no other value holds where it is, after `?.` and in
+// a test's branch: the test before the call holds no count of the list, so `Add` does not copy it
+data Config(List<int> Items)
+data Box(Config? Cfg)
+
+Config? Find(int id) {
+    if id == 1 {
+        return Config([1, 2, 3, 4])
+    }
+    return null
+}
+
+mut cfg = Find(1)
+cfg?.Items.RemoveAt(3)
+cfg?.Items.RemoveAt(2)
+mut b = Box(Find(1))
+b.Cfg?.Items.RemoveAt(3)
+raw {
+    before = (cfg?.Items ?? []).Pointer
+    cfg?.Items.Add(9)
+    print((cfg?.Items ?? []).Pointer == before)
+    if cfg != null {
+        own = cfg.Items.Pointer
+        cfg.Items.Add(10)
+        print(cfg.Items.Pointer == own)
+    }
+    held = (b.Cfg?.Items ?? []).Pointer
+    b.Cfg?.Items.Add(9)
+    print((b.Cfg?.Items ?? []).Pointer == held)
+}
+print(cfg?.Items ?? [])
+```
+
+Case: [null/mut-path-through-nullable-changeable.kz](../corpus/null/mut-path-through-nullable-changeable.kz)
+```kurz
+// a `mut` call after `?.` on a path through a nullable field a call can change, whose arguments run a call, is the error the
+// same call gets in a test's branch with that call on the line before it
+class Box {
+    pub mut List<int> Items = [1]
+}
+
+class Shelf(mut Box? B)
+
+int Drop(Shelf s) {
+    s.B = null
+    return 5
+}
+
+shelf = Shelf(Box())
+shelf.B?.Items.Add(Drop(shelf))
+```
+
 ### N6 (assumed, §4) `null` needs a nullable type
 
 `null` is a value of nullable types only, and of pointer types (R10, §3, the owner, 2026-10-21).
@@ -1056,6 +1206,29 @@ if c.Items != null {
 ```
 
 Case: [null/conditional-call-changeable.kz](../corpus/null/conditional-call-changeable.kz)
+
+Case: [null/mut-path-through-nullable-changeable.kz](../corpus/null/mut-path-through-nullable-changeable.kz)
+
+Case: [null/narrowed-field-instance-after-call.kz](../corpus/null/narrowed-field-instance-after-call.kz)
+```kurz
+// a `mut` call on a narrowed path through a nullable `mut` field of an instance, whose arguments run a call, reads the path
+// after that call, which ends the narrowing: the error it gets with that call on the line before it
+class Box {
+    pub mut List<int> Items = [1]
+}
+
+class Shelf(mut Box? B)
+
+int Drop(Shelf s) {
+    s.B = null
+    return 5
+}
+
+shelf = Shelf(Box())
+if shelf.B != null {
+    shelf.B.Items.Add(Drop(shelf))
+}
+```
 
 Case: [null/narrowed-field-item-after-call.kz](../corpus/null/narrowed-field-item-after-call.kz)
 ```kurz

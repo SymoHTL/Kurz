@@ -1,0 +1,18 @@
+// expect: error nullable-unchecked at 18
+// rules: N5, N9
+
+// a `mut` call after `?.` on a path through a nullable field a call can change, whose arguments run a call, is the error the
+// same call gets in a test's branch with that call on the line before it
+class Box {
+    pub mut List<int> Items = [1]
+}
+
+class Shelf(mut Box? B)
+
+int Drop(Shelf s) {
+    s.B = null
+    return 5
+}
+
+shelf = Shelf(Box())
+shelf.B?.Items.Add(Drop(shelf))

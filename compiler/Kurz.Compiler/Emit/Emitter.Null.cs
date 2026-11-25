@@ -137,9 +137,11 @@ public sealed partial class Emitter
     /// <summary>
     /// N5: a member of a chain of <c>?.</c>, a value of its own that the caller makes a temporary of: <c>null</c> where the value it is
     /// read from is null, which stops the rest of the chain, and otherwise the member of that value's case, of its own type
-    /// <paramref name="member"/>, made a value of the chain's nullable type.
+    /// <paramref name="member"/>, made a value of the chain's nullable type. Without <paramref name="retain"/> the member is borrowed from
+    /// the value it was read from, for a <c>mut</c> call on its place (<see cref="EmitChainCall"/>), so that the call finds a list or a map
+    /// no other value holds and changes it where it is (M3, issue 630).
     /// </summary>
-    private string EmitChainMember(MemberAccess m, KurzType member, UnionType result)
+    private string EmitChainMember(MemberAccess m, KurzType member, UnionType result, bool retain = true)
     {
         var targetType = (UnionType)TypeOf(m.Target);
         var inner = Types.NonNull(targetType)!;
@@ -157,7 +159,7 @@ public sealed partial class Emitter
         {
             var payload = Payload(target, targetType, inner);
             var value = MemberOf(m, () => payload, inner, member);
-            var owned = Counted(member) && !Take(value) ? Retained(value, member) : value;
+            var owned = retain && Counted(member) && !Take(value) ? Retained(value, member) : value;
             fn.Emit($"store {Ir(result)} {Convert(owned, member, result, m.Line)}, ptr {slot}");
         });
         fn.Branch(done);
@@ -214,8 +216,20 @@ public sealed partial class Emitter
         }
         else if (chain.Place)
         {
-            value = InstanceFieldPlace(target) is { } field ? fn.Value($"load {Ir(stored)}, ptr {field}") : EmitExpression(target);
-            place = () => NarrowedPlace(CollectionPlace(target), stored, TypeOf(chain.Receiver), target.Line).Place;
+            // issue 630: after a member of the chain, `cfg?.Items`, the place holds the member's own type, which the chain made nullable,
+            // and the member is borrowed for the test of `null`, so that the call changes a list no temporary holds
+            KurzType held = stored;
+            if (target is MemberAccess member && Model.IsChainMember(member, out var memberType))
+            {
+                held = Sub(memberType);
+                value = EmitChainMember(member, held, stored, retain: false);
+            }
+            else
+            {
+                value = InstanceFieldPlace(target) is { } field ? fn.Value($"load {Ir(stored)}, ptr {field}") : EmitExpression(target);
+            }
+
+            place = () => NarrowedPlace(CollectionPlace(target), held, TypeOf(chain.Receiver), target.Line).Place;
         }
         else
         {
