@@ -602,10 +602,11 @@ public sealed class SemanticModel
     public bool IsCopied(Expression expression) => copied.Contains(expression);
 
     /// <summary>
-    /// U4, U17: whether the expression is an argument of a message that runs a call as it is evaluated, a call that can wait and so let
-    /// other messages run, a crash of the message's callee among them, as the checker reads every call (<c>Checker.Calls</c>, the reading
-    /// behind M7's count of a read of a <c>mut</c> parameter); the emitter builds a message in a heap of its own where any argument is
-    /// such (<c>Emitter.EmitMessage</c>).
+    /// U4, U17: whether the expression is an argument of a message or of a <c>spawn</c> that runs a call as it is evaluated, a call that can
+    /// wait and so let other messages run, a crash of the message's callee among them, as the checker reads every call (<c>Checker.Calls</c>,
+    /// the reading behind M7's count of a read of a <c>mut</c> parameter); the emitter builds a message in a heap of its own where any
+    /// argument is such (<c>Emitter.EmitMessage</c>), and lists the heap of a <c>spawn</c> with its builder where such an argument is
+    /// evaluated after that heap is made (<c>Emitter.EmitActorSpawn</c>).
     /// </summary>
     public bool CanWait(Expression argument) => waitingArguments.Contains(argument);
 

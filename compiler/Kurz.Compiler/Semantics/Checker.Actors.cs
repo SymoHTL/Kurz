@@ -671,6 +671,8 @@ public sealed partial class Checker
             return Typed.Error; // U12: the constructor's arguments cross as a call's do (Q13 of comment 6847932993)
         }
 
+        RecordWaits(s.Call); // section 6, T82 1, T87 3: the heap of a `spawn` made before an argument that can wait is freed at its builder's crash
+
         if (s.Policy is { } policy && !reported && CheckPolicy(policy))
         {
             return Typed.Error; // U25, U16: the policy is read after the arguments, as it is written after them
@@ -1039,8 +1041,10 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// U4, U17: each argument of the message <paramref name="c"/> that runs a call as it is evaluated (<see cref="Calls"/>), which can wait,
-    /// recorded for the emitter, which builds the message in a heap of its own where any argument is such (U12, U21). The arguments written
+    /// U4, U17: each argument of the message or the <c>spawn</c> <paramref name="c"/> that runs a call as it is evaluated (<see cref="Calls"/>),
+    /// which can wait, recorded for the emitter, which builds the message in a heap of its own where any argument is such, and lists the
+    /// heap of the <c>spawn</c> with its builder where such an argument is its first crossing one or comes after it (U12, U21; section 6,
+    /// "T82 1", assumed there, and "T87 3"). The arguments written
     /// at the call are all: a parameter's default is a constant expression (F12), which runs no call and cannot wait.
     /// </summary>
     private void RecordWaits(CallExpression c)
