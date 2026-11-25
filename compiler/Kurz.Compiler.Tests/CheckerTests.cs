@@ -1361,6 +1361,31 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_bare_return_gives_the_void_case_of_the_result_and_a_bare_throw_in_the_arm_of_that_case_is_throw_needs_value()
+    {
+        // F3 (issue 641, assumed): a bare `return` gives the result's `void` case, the success or another, and is `missing-return` only
+        // where the result holds none; the end of a function whose `void` case stands beside another success stays `missing-return`
+        const string find = "data Circle(int R)\n\nCircle | void Find(bool b) {\n    if b {\n        return Circle(1)\n    }\n\n    return\n}\n\n";
+        Clean(find + "print(1)");
+        Assert.Equal([(ErrorIds.MissingReturn, 8)], Errors(find.Replace("Circle | void Find", "Circle | string Find") + "print(1)"));
+        Assert.Equal("a bare `return` in a function whose result holds no `void` case (F3)", ErrorText(find.Replace("Circle | void Find", "Circle | string Find") + "print(1)"));
+        Assert.Equal([(ErrorIds.MissingReturn, 3)], Errors(find.Replace("\n\n    return\n}", "\n}") + "print(1)"));
+
+        // a lambda's bare `return` reads the lambda's result, as a function's does; the control's result holds no `void` case
+        const string show = "data Circle(int R)\n\nstring Show((bool) => Circle | void f, bool b) {\n    return match f(b) {\n        Circle c => \"circle {c.R}\"\n"
+            + "        void => \"none\"\n    }\n}\n\nprint(Show((b) => {\n    if b {\n        return Circle(2)\n    }\n\n    return\n}, true))";
+        Clean(show);
+        Assert.Equal([(ErrorIds.MissingReturn, 15)], Errors(show.Replace("Circle | void f", "Circle | string f").Replace("void => \"none\"", "string s => s")));
+
+        // O7 (issue 641, assumed): the arm of a `void` case holds no value a bare `throw` could throw; the control's arm gives the `void`
+        // case of its own function with a bare `return`
+        const string take = "Circle | void Take(bool b) {\n    Circle c = Find(b) else {\n        void => throw\n    }\n\n    return c\n}\n\nprint(1)";
+        Assert.Equal([(ErrorIds.ThrowNeedsValue, 13)], Errors(find + take));
+        Assert.Equal("a bare `throw` throws the case its arm took, and a `void` case holds none (O7)", ErrorText(find + take));
+        Clean(find + take.Replace("void => throw", "void => return"));
+    }
+
+    [Fact]
     public void A_name_an_arm_of_the_void_case_binds_is_syntax_at_the_arm_and_the_arm_without_it_is_clean()
     {
         // F4: `void` is no type of a name an arm binds, of a `match` over a value or over a call or of `else` after a call (C4, O5), and the arm
@@ -3657,8 +3682,9 @@ public sealed class CheckerTests
     [Fact]
     public void A_mut_method_on_a_path_through_a_nullable_value_changes_it_where_it_is_known_not_null_and_after_the_chain()
     {
-        // issue 630 (section 4, the owner, 2026-11-24, #624, comment 7135538740): a test's branch and `?.`, through a nullable
-        // variable, a nullable field and a nullable `mut` parameter (N3, N5, M5)
+        // issue 630 (section 4: the build of both forms the owner's answer, 2026-11-24, #624, comment 7135538740, and the place the
+        // product pass's reading, comment 7161590400, assumed): a test's branch and `?.`, through a nullable variable, a nullable field
+        // and a nullable `mut` parameter (N3, N5, M5)
         const string Config = "data Config(List<int> Items)\ndata Box(Config? Cfg)\n\nConfig? Find() => null\n\n";
         Clean(Config + "mut c = Find()\nif c != null {\n    c.Items.Add(1)\n}\nc?.Items.Add(2)\nc?.Items.Clear()");
         Clean(Config + "mut b = Box(Find())\nif b.Cfg != null {\n    b.Cfg.Items.Clear()\n}\nb.Cfg?.Items.Add(2)");
@@ -6337,7 +6363,9 @@ public sealed class CheckerTests
     [InlineData("data Box(Map<string, int> M)\n\nmut Box? b = Box(Map<string, int>())\nb.M[\"a\"] = 1", "4: an assignment into a path through a nullable variable or field (N3, M4)")]
     [InlineData("data In(Map<string, int> M)\ndata Out(In? I)\n\nmut o = Out(In(Map<string, int>()))\nif o.I != null {\n    o.I.M[\"a\"] = 1\n}", "6: an assignment into a path through a nullable variable or field (N3, M4)")]
     [InlineData("data In(int X)\ndata Out(In? I)\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nmut o = Out(In(1))\nif o.I != null {\n    Bump(mut o.I.X)\n}", "10: a path through a nullable variable or field passed as `mut` (N3, M7)")]
-    [InlineData("data Config(List<int> Items)\n\nmut groups = Map<string, Config>()\nkey = \"a\"\ngroups[key]?.Items.Add(2)", "5: a `mut` method on a path through a nullable variable or field (N3, M5)")]
+    [InlineData("data Config(List<int> Items)\n\nmut groups = Map<string, Config>()\nkey = \"a\"\ngroups[key]?.Items.Add(2)", "5: a `mut` method on a path through a nullable item, entry or call's result (N3, M5)")]
+    [InlineData("data Config(List<int> Items)\n\nmut xs = List<Config?>()\nxs[0]?.Items.Add(2)", "4: a `mut` method on a path through a nullable item, entry or call's result (N3, M5)")]
+    [InlineData("data Config(List<int> Items)\n\nConfig? Find() => null\n\nFind()?.Items.Add(2)", "5: a `mut` method on a path through a nullable item, entry or call's result (N3, M5)")]
     [InlineData("use tools\nprint(1)", "1: use (F10)")]
     [InlineData("use a/util\nprint(1)", "1: use (F10)")]
     [InlineData("print(string(1))", "1: a conversion to `string`, a type that is neither a number type nor a time type (T10, T29)")]

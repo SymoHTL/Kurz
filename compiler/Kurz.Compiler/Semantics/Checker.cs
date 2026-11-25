@@ -54,6 +54,7 @@ public sealed partial class Checker
     private List<TypeParameterSymbol>? typeContext;
     private bool inElseArm;
     private VariableSymbol? elseArmName; // O7, U12: the name the arm of `else` being checked binds, which its bare `throw` reads
+    private bool elseArmVoid; // O7: the arm of `else` being checked takes a `void` case, which its bare `throw` cannot throw (issue 641)
     private CallExpression? loopSource; // S16: the collection of the `for` loop being checked, the one place `f.Lines()` stands
     private bool realKeepsOwnType;
     private int blockDepth;
@@ -1842,6 +1843,9 @@ public sealed partial class Checker
     /// <summary>O10: a function whose success case is <c>void</c> needs no <c>return</c> with a value.</summary>
     private static bool SuccessIsVoid(KurzType type) => type is VoidType || type is UnionType { Cases: [VoidType, ..] };
 
+    /// <summary>F3: a result a bare <c>return</c> gives, <c>void</c> or a union with a <c>void</c> case, the success or another (issue 641).</summary>
+    private static bool HoldsVoid(KurzType type) => type is VoidType || (type is UnionType u && u.Cases.Any(c => c is VoidType));
+
     /// <summary>F12 names the parameters only: the type parameters are matched by their position, and their count makes no difference.</summary>
     private static bool SameParameters(FunctionSymbol a, FunctionSymbol b)
     {
@@ -2443,6 +2447,12 @@ public sealed partial class Checker
                 else if (!inElseArm)
                 {
                     Report(ErrorIds.ThrowNeedsValue, t.Line, "a bare `throw` stands only in an arm of `else` (O7)");
+                }
+                else if (elseArmVoid)
+                {
+                    // O7: a bare `throw` throws the case its arm took, and a `void` case holds no value (issue 641, the product pass's Q2
+                    // (a), comment 7165561768, assumed)
+                    Report(ErrorIds.ThrowNeedsValue, t.Line, "a bare `throw` throws the case its arm took, and a `void` case holds none (O7)");
                 }
                 else if (elseArmName is { } name)
                 {
@@ -3280,9 +3290,11 @@ public sealed partial class Checker
 
         if (r.Value is null)
         {
-            if (!Types.IsError(expected) && !SuccessIsVoid(expected))
+            // F3: a bare `return` gives the result's `void` case, the success or another, as Rust's `return;` gives `()`; a result with
+            // none is `missing-return` (issue 641, the product pass's Q1 (a) and Q1c (b), comment 7165561768, assumed)
+            if (!Types.IsError(expected) && !HoldsVoid(expected))
             {
-                Report(ErrorIds.MissingReturn, r.Line, "a bare `return` in a function with a result (F3)");
+                Report(ErrorIds.MissingReturn, r.Line, "a bare `return` in a function whose result holds no `void` case (F3)");
             }
 
             return;

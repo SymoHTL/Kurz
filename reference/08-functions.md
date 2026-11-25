@@ -24,6 +24,11 @@ A body between braces holds statements. `return expression` ends the function wi
 as in C#. As there, a function with a result whose end can be reached without a `return`, and a
 bare `return` in such a function, are the compile error `missing-return`; `return` with a value in
 a `void` function (F4), and a value of another type than the result, are `type-mismatch`.
+A bare `return` gives the result's `void` case, the success or another (O10), in a lambda's body
+the `void` case of the lambda's result (F11), so it is `missing-return` only where the result holds no
+`void` case, "a bare `return` in a function whose
+result holds no `void` case (F3)"; the end of a function whose result holds a `void` case beside
+another success stays `missing-return` *(assumed: §5, issue 641, comment 7165561768)*.
 Whether the end can be reached is read as N3 reads a block that always leaves, its `while true`
 form included.
 *(proposed: C#'s rules with Kurz's ids; the reading of the end is N3's, which the record marks as
@@ -50,6 +55,68 @@ int Sign(int n) {
 }
 
 print(Sign(3))
+```
+
+Case: [functions/void-case-return.kz](../corpus/functions/void-case-return.kz)
+```kurz
+data Circle(int R)
+
+// a bare `return` gives the result's `void` case, which is not its success here
+Circle | void Find(bool b) {
+    if b {
+        return Circle(1)
+    }
+    return
+}
+
+string Show(bool b) {
+    return match Find(b) {
+        Circle c => "circle {c.R}"
+        void => "none"
+    }
+}
+
+print(Show(true))
+print(Show(false))
+```
+
+Case: [functions/void-case-return-lambda.kz](../corpus/functions/void-case-return-lambda.kz)
+```kurz
+data Circle(int R)
+
+string Show((bool) => Circle | void f, bool b) {
+    return match f(b) {
+        Circle c => "circle {c.R}"
+        void => "none"
+    }
+}
+
+// a lambda's bare `return` gives the `void` case of the lambda's result, as a function's does
+(bool) => Circle | void find = (b) => {
+    if b {
+        return Circle(2)
+    }
+
+    return
+}
+
+print(Show(find, true))
+print(Show(find, false))
+```
+
+Case: [functions/bare-return-no-void-case.kz](../corpus/functions/bare-return-no-void-case.kz)
+```kurz
+data Circle(int R)
+
+// a result with no `void` case has nothing a bare `return` gives
+Circle | string Find(bool b) {
+    if b {
+        return Circle(1)
+    }
+    return
+}
+
+print("unreached")
 ```
 
 Case: [functions/while-true-end.kz](../corpus/functions/while-true-end.kz)

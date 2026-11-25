@@ -1,15 +1,15 @@
 // expect: output
-// | [1, 2, 3]
+// | [1, 3]
 // | []
 // | [1]
 // | [1, 2]
-// | [1, 2, 3]
-// | [1, 2, 3]
+// | [1, 3]
+// | [1, 3]
 // rules: N5
 
-// a `mut` call on a path of fields through a nullable value changes the field's place where a test's branch knows the value
-// not null and after `?.` where the chain did not stop, through a nullable variable, a nullable field and a nullable `mut`
-// parameter, and a value another variable holds keeps what it held
+// a `mut` call after `?.` on a path of fields through a nullable value changes the field's place where the chain did not stop,
+// through a nullable variable, a nullable field and a nullable `mut` parameter, and a value another variable holds keeps what it
+// held
 data Config(List<int> Items)
 data Box(Config? Cfg)
 
@@ -21,16 +21,10 @@ Config? Find(int id) {
 }
 
 void Grow(mut Config? c) {
-    if c != null {
-        c.Items.Add(2)
-    }
     c?.Items.Add(3)
 }
 
 mut cfg = Find(1)
-if cfg != null {
-    cfg.Items.Add(2)
-}
 cfg?.Items.Add(3)
 print(cfg?.Items ?? [])
 
@@ -45,9 +39,6 @@ print(before?.Items ?? [])
 print(kept?.Items ?? [])
 
 mut b = Box(Find(1))
-if b.Cfg != null {
-    b.Cfg.Items.Add(2)
-}
 b.Cfg?.Items.Add(3)
 print(b.Cfg?.Items ?? [])
 

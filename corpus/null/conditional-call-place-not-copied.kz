@@ -8,6 +8,8 @@
 
 // a `mut` call after `?.` changes a list no other value holds where it is, an entry's, a field's of an instance and a
 // variable's, as Rust's `get_mut` reaches it: the test before the call holds no count of the list, so `Add` does not copy it
+// `true` rests on the build's layout, which `allow: raw` reads: `RemoveAt` keeps the block's room, as Rust's `Vec::remove` keeps
+// its capacity, so that `Add` finds room where the block is; no rule of M9 fixes that room
 class Bag(mut List<int>? Items)
 
 mut m = Map<string, List<int>>()
