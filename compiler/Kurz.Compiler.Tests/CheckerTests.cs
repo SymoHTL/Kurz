@@ -3634,6 +3634,37 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_mut_method_on_a_path_through_a_nullable_value_changes_it_where_it_is_known_not_null_and_after_the_chain()
+    {
+        // issue 630 (section 4, the owner, 2026-11-24, #624, comment 7135538740): a test's branch and `?.`, through a nullable
+        // variable, a nullable field and a nullable `mut` parameter (N3, N5, M5)
+        const string Config = "data Config(List<int> Items)\ndata Box(Config? Cfg)\n\nConfig? Find() => null\n\n";
+        Clean(Config + "mut c = Find()\nif c != null {\n    c.Items.Add(1)\n}\nc?.Items.Add(2)\nc?.Items.Clear()");
+        Clean(Config + "mut b = Box(Find())\nif b.Cfg != null {\n    b.Cfg.Items.Clear()\n}\nb.Cfg?.Items.Add(2)");
+        Clean(Config + "void Grow(mut Config? c) {\n    if c != null {\n        c.Items.Add(1)\n    }\n    c?.Items.Add(2)\n}\n\nprint(1)");
+        Clean(Config + "mut Config? n = Config(List<int>())\nn.Items.Add(1)");
+
+        // the variable is `mut`, as on a path that is not nullable (M5), and a step not known not null is N2's at its read
+        Assert.Equal([(ErrorIds.MutRequired, 7)], Errors(Config + "c = Find()\nc?.Items.Add(2)"));
+        Assert.Equal([(ErrorIds.MutRequired, 8)], Errors(Config + "c = Find()\nif c != null {\n    c.Items.Add(1)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(Config + "mut c = Find()\nc.Items.Add(1)"));
+
+        // a class instance on the way: its `mut` field changes, the variable need not be `mut` (K2), and a field without `mut` is
+        // `mut-required`
+        const string Shelf = "class Box {\n    pub mut List<int> Items = [1]\n    pub List<int> Fixed = [1]\n}\n\nclass Shelf(mut Box? B)\n\nint Drop(Shelf s) {\n    s.B = null\n    return 5\n}\n\nshelf = Shelf(Box())\n";
+        Clean(Shelf + "if shelf.B != null {\n    shelf.B.Items.Add(1)\n}\nshelf.B?.Items.Add(2)");
+        Assert.Equal([(ErrorIds.MutRequired, 14)], Errors(Shelf + "shelf.B?.Fixed.Add(2)"));
+
+        // N9: a call in the arguments that can set a nullable field on the way to `null` is that field's read with the call on the
+        // line before it, in the branch and after `?.`; the call run into a variable first stays allowed
+        Assert.Equal([(ErrorIds.NullableUnchecked, 15)], Errors(Shelf + "if shelf.B != null {\n    shelf.B.Items.Add(Drop(shelf))\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 14)], Errors(Shelf + "shelf.B?.Items.Add(Drop(shelf))"));
+        Assert.Equal("`Drop(shelf)` can set `shelf.B` to `null`: run it into a variable before this line", Assert.Single(Check(Shelf + "shelf.B?.Items.Add(Drop(shelf))").Diagnostics.Items).Help);
+        Clean(Shelf + "n = Drop(shelf)\nshelf.B?.Items.Add(n)");
+        Clean(Config + "int Two() => 2\n\nmut c = Find()\nc?.Items.Add(Two())");
+    }
+
+    [Fact]
     public void Coalescing_runs_its_right_side_only_where_the_left_is_null_and_a_chain_stops_at_the_first_null()
     {
         // N4, N5 as C# reads them: a right side of neither type is the mismatch; `?.` makes the member's type nullable, keeps a nullable
@@ -3785,7 +3816,12 @@ public sealed class CheckerTests
         Assert.Equal(Ended, Assert.Single(Check(Bag + "if c.Items != null {\n    c.Items.Add(Drop(c))\n}").Diagnostics.Items).Help);
         Assert.Equal("check it with `!= null`, or give a value for null with `??`", Assert.Single(Check(Bag + "print(Drop(c) + c.Items.Count)").Diagnostics.Items).Help);
         Assert.Equal("a call in this line can set `c.Items` to `null`: run it into a variable before this line", Assert.Single(Check("class Note {\n    pub string Text() => \"n\"\n}\n\nclass Bag(mut List<int>? Items)\n\nint Drop(Bag b) {\n    b.Items = null\n    return 5\n}\n\nc = Bag([1])\nn = Note()\nprint(Drop(c))\nif c.Items != null {\n    c.Items.Add(\"{n}\".Bytes.Count)\n}").Diagnostics.Items).Help);
-        Assert.Equal(["9: a `mut` method on a value held by a field of an instance (K2, M5)"], NotSupported("class Inner(mut List<int> Items)\nclass Outer(mut Inner? In)\nint Drop(Outer o) {\n    o.In = null\n    return 5\n}\nOuter c = Outer(Inner([1]))\nif c.In != null {\n    c.In.Items.Add(Drop(c))\n}"));
+        // issue 630: a nullable field of an instance on the way to the receiver, narrowed, which the call can set to `null`, is the
+        // error of the field's read with the call on the line before it; with no call in the arguments the instance's field changes
+        const string Nested = "class Inner(mut List<int> Items)\nclass Outer(mut Inner? In)\nint Drop(Outer o) {\n    o.In = null\n    return 5\n}\nOuter c = Outer(Inner([1]))\nif c.In != null {\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Nested + "    c.In.Items.Add(Drop(c))\n}"));
+        Assert.Equal("`Drop(c)` can set `c.In` to `null`: run it into a variable before this line", Assert.Single(Check(Nested + "    c.In.Items.Add(Drop(c))\n}").Diagnostics.Items).Help);
+        Clean(Nested + "    c.In.Items.Add(5)\n}");
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors("int Pop(mut List<int>? ys) {\n    ys = null\n    return 1\n}\n\nmut List<int>? xs = [1]\nif xs != null {\n    xs.Add(Pop(mut xs))\n}"));
         Clean("int Two() => 2\n\nvoid Grow(mut List<int>? xs) {\n    xs?.Add(Two())\n    if xs != null {\n        xs.Add(Two())\n    }\n}\n\nmut List<int>? ys = [1]\nGrow(mut ys)");
 
@@ -6263,7 +6299,6 @@ public sealed class CheckerTests
     [InlineData("List<int>? Find() => null\n\nprint(Find()?[0][1])", "3: an index after `?.` or `?[` (N5)")]
     [InlineData("List<int>? Find() => null\n\nprint(Find()?[0..<1])", "3: a part after `?[` (N5, M9)")]
     [InlineData("mut List<int>? xs = null\nxs?[0] = 1", "2: an assignment through `?[` (N5)")]
-    [InlineData("data User(List<int> Items)\n\nmut User? u = null\nu?.Items.Clear()", "4: a `mut` method on a path through a nullable variable or field (N3, M5)")]
     [InlineData("class Cell {\n    pub int* At() => null\n}\n\nCell? c = Cell()\nprint(c?.At() == null)", "6: `?.` to an `int*`, which no `?` makes nullable (N1, N5)")]
     [InlineData("int? | string x = 1\nprint(x)", "1: a nullable case of a union, `int?` (N1, D9)")]
     [InlineData("void? F() {\n}\n\nprint(1)", "1: a nullable `void` (N1)")]
@@ -6280,9 +6315,8 @@ public sealed class CheckerTests
     [InlineData("data P(int X)\n\nmut m = Map<string, P>()\nm[\"a\"].X = 1", "4: an assignment into a map reached through an item or a call, or into a path that goes on after the key (M4, M9)")]
     [InlineData("data Box(Map<string, int> M)\n\nmut Box? b = Box(Map<string, int>())\nb.M[\"a\"] = 1", "4: an assignment into a path through a nullable variable or field (N3, M4)")]
     [InlineData("data In(Map<string, int> M)\ndata Out(In? I)\n\nmut o = Out(In(Map<string, int>()))\nif o.I != null {\n    o.I.M[\"a\"] = 1\n}", "6: an assignment into a path through a nullable variable or field (N3, M4)")]
-    [InlineData("data Box(List<int> Items)\n\nmut Box? b = Box(List<int>())\nb.Items.Add(1)", "4: a `mut` method on a path through a nullable variable or field (N3, M5)")]
-    [InlineData("data In(List<int> Items)\ndata Out(In? I)\n\nmut o = Out(In(List<int>()))\nif o.I != null {\n    o.I.Items.Clear()\n}", "6: a `mut` method on a path through a nullable variable or field (N3, M5)")]
     [InlineData("data In(int X)\ndata Out(In? I)\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nmut o = Out(In(1))\nif o.I != null {\n    Bump(mut o.I.X)\n}", "10: a path through a nullable variable or field passed as `mut` (N3, M7)")]
+    [InlineData("data Config(List<int> Items)\n\nmut groups = Map<string, Config>()\nkey = \"a\"\ngroups[key]?.Items.Add(2)", "5: a `mut` method on a path through a nullable variable or field (N3, M5)")]
     [InlineData("use tools\nprint(1)", "1: use (F10)")]
     [InlineData("use a/util\nprint(1)", "1: use (F10)")]
     [InlineData("print(string(1))", "1: a conversion to `string`, a type that is neither a number type nor a time type (T10, T29)")]

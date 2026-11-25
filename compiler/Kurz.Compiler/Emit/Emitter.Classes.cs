@@ -591,9 +591,20 @@ public sealed partial class Emitter
         }
     }
 
-    /// <summary>M5, M9: the place of a list, a map or a hasher held by a field of an instance, for a <c>mut</c> member; null for any other receiver.</summary>
-    private string? InstanceFieldPlace(Expression receiver)
+    /// <summary>
+    /// M5, M9: the place of a list, a map or a hasher held by a field of an instance, for a <c>mut</c> member; null for any other receiver.
+    /// <paramref name="narrowed"/> takes an instance read as a nullable value too, after <c>?.</c> or as a member of a chain, where the
+    /// chain's test of <c>null</c> ran before (<see cref="EmitChainCall"/>, N5, issue 630).
+    /// </summary>
+    private string? InstanceFieldPlace(Expression receiver, bool narrowed = false)
     {
+        if (narrowed && Unwrap(receiver) is MemberAccess { Target: var target } read && TypeOf(target) is Semantics.UnionType union && Types.NonNull(union) is ClassType held)
+        {
+            var at = held.Symbol.FieldIndex(read.Member);
+            var instance = WithoutNull(EmitExpression(target), union);
+            return NarrowedPlace(InstanceFieldPointer(held.Symbol, Address(instance, held.Symbol), at), held.Symbol.Fields[at].Type, TypeOf(receiver), read.Line).Place;
+        }
+
         switch (Unwrap(receiver))
         {
             case NameExpression n when Model.IsImplicitField(n, out _, out var field) && field is not null:
