@@ -1,0 +1,26 @@
+// expect: throws thrown at 20
+// | 1
+// | before
+// rules: O7
+
+data Circle(int R)
+data NotFound
+
+Circle | void | NotFound Find(int id) {
+    if id == 1 {
+        return Circle(1)
+    }
+    return NotFound
+}
+
+// the arm `void =>` takes the `void` case, so the arm `else` takes `NotFound` alone, which its bare `throw` throws
+Circle Get(int id) {
+    return Find(id) else {
+        void => return Circle(0)
+        else => throw
+    }
+}
+
+print(Get(1).R)
+print("before")
+print(Get(2).R)

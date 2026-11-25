@@ -1386,6 +1386,20 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_bare_throw_in_an_else_arm_that_takes_the_void_case_is_throw_needs_value()
+    {
+        // O7 (issue 650, assumed): the arm `else` takes the cases no arm before it handled; where they hold the `void` case, a bare `throw`
+        // there has no value to throw, as in the arm of a `void` case; the controls: an arm `void =>` before it leaves `else` the case
+        // `NotFound` alone, and a result with no `void` case leaves `else` cases that each hold a value
+        const string find = "data Circle(int R)\ndata NotFound\n\nCircle | void | NotFound Find(bool b) {\n    return Circle(1)\n}\n\n";
+        const string get = "Circle Get(bool b) {\n    return Find(b) else {\n        else => throw\n    }\n}\n\nprint(Get(true).R)";
+        Assert.Equal([(ErrorIds.ThrowNeedsValue, 10)], Errors(find + get));
+        Assert.Equal("a bare `throw` throws the case its arm took, and `else` here takes the `void` case, which holds none (O7)", ErrorText(find + get));
+        Clean(find + get.Replace("        else => throw", "        void => return Circle(0)\n        else => throw"));
+        Clean(find.Replace("Circle | void | NotFound Find", "Circle | NotFound Find") + get);
+    }
+
+    [Fact]
     public void A_name_an_arm_of_the_void_case_binds_is_syntax_at_the_arm_and_the_arm_without_it_is_clean()
     {
         // F4: `void` is no type of a name an arm binds, of a `match` over a value or over a call or of `else` after a call (C4, O5), and the arm

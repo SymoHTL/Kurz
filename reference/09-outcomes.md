@@ -1181,7 +1181,10 @@ alone (O5): a bare `throw` there throws the case value that reached the arm, so 
 `NotFound => throw` throws the `NotFound`. A bare `throw` anywhere else is the compile error
 `throw-needs-value`: there is no value it could mean. So is one in the arm of a `void` case, which
 holds no value to throw, "a bare `throw` throws the case its arm took, and a `void` case holds none
-(O7)" *(assumed: §5, issue 641, comment 7165561768)*. *(proposed)* A bare `throw` in a lambda is one of these, a lambda
+(O7)" *(assumed: §5, issue 641, comment 7165561768)*. So is one in an arm `else` that takes a
+`void` case no arm before it handled, "a bare `throw` throws the case its arm took, and `else`
+here takes the `void` case, which holds none (O7)", while an arm `void =>` before it leaves `else`
+the other cases *(assumed: §5, issue 650, comment 7176868566)*. *(proposed)* A bare `throw` in a lambda is one of these, a lambda
 inside an arm of `else` too, since the lambda's body is not the arm *(assumed: as §5 marks it)*. When a supervisor reads what
 was thrown as the `Reason` of a crashed child, its type is the union of everything the
 child's code can throw, found over the whole program (the owner, 2026-10-03, against a fixed type
@@ -1469,6 +1472,50 @@ Circle | void Take(bool b) {
 }
 
 print("unreached")
+```
+
+Case: [outcomes/else-throw-catchall-void.kz](../corpus/outcomes/else-throw-catchall-void.kz)
+```kurz
+data Circle(int R)
+data NotFound
+
+Circle | void | NotFound Find(bool b) {
+    return Circle(1)
+}
+
+// the arm `else` takes the `void` case and `NotFound`, and the `void` case holds no value a bare `throw` could throw
+Circle Get(bool b) {
+    return Find(b) else {
+        else => throw
+    }
+}
+
+print("unreached")
+```
+
+Case: [outcomes/else-throw-after-void-arm.kz](../corpus/outcomes/else-throw-after-void-arm.kz)
+```kurz
+data Circle(int R)
+data NotFound
+
+Circle | void | NotFound Find(int id) {
+    if id == 1 {
+        return Circle(1)
+    }
+    return NotFound
+}
+
+// the arm `void =>` takes the `void` case, so the arm `else` takes `NotFound` alone, which its bare `throw` throws
+Circle Get(int id) {
+    return Find(id) else {
+        void => return Circle(0)
+        else => throw
+    }
+}
+
+print(Get(1).R)
+print("before")
+print(Get(2).R)
 ```
 
 Case: [outcomes/throw-text.kz](../corpus/outcomes/throw-text.kz)
