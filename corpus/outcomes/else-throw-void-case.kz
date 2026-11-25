@@ -1,0 +1,21 @@
+// expect: error throw-needs-value at 16
+// rules: O7
+
+data Circle(int R)
+
+Circle | void Find(bool b) {
+    if b {
+        return Circle(1)
+    }
+    return
+}
+
+// the arm of a `void` case holds no value a bare `throw` could throw
+Circle | void Take(bool b) {
+    Circle c = Find(b) else {
+        void => throw
+    }
+    return c
+}
+
+print("unreached")

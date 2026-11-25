@@ -1,0 +1,24 @@
+// expect: output
+// | circle 1
+// | none
+// rules: F3
+
+data Circle(int R)
+
+// a bare `return` gives the result's `void` case, which is not its success here
+Circle | void Find(bool b) {
+    if b {
+        return Circle(1)
+    }
+    return
+}
+
+string Show(bool b) {
+    return match Find(b) {
+        Circle c => "circle {c.R}"
+        void => "none"
+    }
+}
+
+print(Show(true))
+print(Show(false))

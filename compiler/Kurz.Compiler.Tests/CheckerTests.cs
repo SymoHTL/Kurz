@@ -1361,6 +1361,31 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_bare_return_gives_the_void_case_of_the_result_and_a_bare_throw_in_the_arm_of_that_case_is_throw_needs_value()
+    {
+        // F3 (issue 641, assumed): a bare `return` gives the result's `void` case, the success or another, and is `missing-return` only
+        // where the result holds none; the end of a function whose `void` case stands beside another success stays `missing-return`
+        const string find = "data Circle(int R)\n\nCircle | void Find(bool b) {\n    if b {\n        return Circle(1)\n    }\n\n    return\n}\n\n";
+        Clean(find + "print(1)");
+        Assert.Equal([(ErrorIds.MissingReturn, 8)], Errors(find.Replace("Circle | void Find", "Circle | string Find") + "print(1)"));
+        Assert.Equal("a bare `return` in a function whose result holds no `void` case (F3)", ErrorText(find.Replace("Circle | void Find", "Circle | string Find") + "print(1)"));
+        Assert.Equal([(ErrorIds.MissingReturn, 3)], Errors(find.Replace("\n\n    return\n}", "\n}") + "print(1)"));
+
+        // a lambda's bare `return` reads the lambda's result, as a function's does; the control's result holds no `void` case
+        const string show = "data Circle(int R)\n\nstring Show((bool) => Circle | void f, bool b) {\n    return match f(b) {\n        Circle c => \"circle {c.R}\"\n"
+            + "        void => \"none\"\n    }\n}\n\nprint(Show((b) => {\n    if b {\n        return Circle(2)\n    }\n\n    return\n}, true))";
+        Clean(show);
+        Assert.Equal([(ErrorIds.MissingReturn, 15)], Errors(show.Replace("Circle | void f", "Circle | string f").Replace("void => \"none\"", "string s => s")));
+
+        // O7 (issue 641, assumed): the arm of a `void` case holds no value a bare `throw` could throw; the control's arm gives the `void`
+        // case of its own function with a bare `return`
+        const string take = "Circle | void Take(bool b) {\n    Circle c = Find(b) else {\n        void => throw\n    }\n\n    return c\n}\n\nprint(1)";
+        Assert.Equal([(ErrorIds.ThrowNeedsValue, 13)], Errors(find + take));
+        Assert.Equal("a bare `throw` throws the case its arm took, and a `void` case holds none (O7)", ErrorText(find + take));
+        Clean(find + take.Replace("void => throw", "void => return"));
+    }
+
+    [Fact]
     public void A_name_an_arm_of_the_void_case_binds_is_syntax_at_the_arm_and_the_arm_without_it_is_clean()
     {
         // F4: `void` is no type of a name an arm binds, of a `match` over a value or over a call or of `else` after a call (C4, O5), and the arm
