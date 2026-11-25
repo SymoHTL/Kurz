@@ -602,7 +602,7 @@ public sealed partial class Checker
 
             if (callsRun > callsBefore && NullableStepOnTheWay(of) is var (step, declared))
             {
-                Add(Diagnostic.Error(ErrorIds.NullableUnchecked, step.Line, $"`{step.Member}` is read from {Types.A(declared)} without a check (N2)") with { CallHelp = EndedHelp(step.Target) });
+                Add(Diagnostic.Error(ErrorIds.NullableUnchecked, step.Line, $"`{step.Member}` is read from {Types.A(declared)} without a check (N2)") with { OwnHelp = EndedHelp(step.Target) });
                 return;
             }
 
@@ -638,7 +638,7 @@ public sealed partial class Checker
 
         if (PathOf(place) is { } path && Changeable(path) && callsRun > callsBefore)
         {
-            Add(Diagnostic.Error(ErrorIds.NullableUnchecked, member.Line, $"`{member.Member}` is read from {Types.A(model.TypeOf(of).Type)} without a check (N2)") with { CallHelp = EndedHelp(of) });
+            Add(Diagnostic.Error(ErrorIds.NullableUnchecked, member.Line, $"`{member.Member}` is read from {Types.A(model.TypeOf(of).Type)} without a check (N2)") with { OwnHelp = EndedHelp(of) });
             return;
         }
 
@@ -696,7 +696,7 @@ public sealed partial class Checker
         if (PathOf(e) is { } path && Changeable(path) && !frame.Known.Contains(path) && model.HasType(e) && Types.NonNull(model.TypeOf(e).Type) is null
             && (throughNullable ? NarrowedPathType(e) : PathType(e)) is { } declared && Types.NonNull(declared) is not null)
         {
-            Add(Diagnostic.Error(ErrorIds.NullableUnchecked, line, $"{written(declared)} without a check (N2)") with { CallHelp = EndedHelp(e) });
+            Add(Diagnostic.Error(ErrorIds.NullableUnchecked, line, $"{written(declared)} without a check (N2)") with { OwnHelp = EndedHelp(e) });
             return true;
         }
 

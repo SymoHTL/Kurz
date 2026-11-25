@@ -40,22 +40,24 @@ public sealed record Diagnostic(DiagnosticKind Kind, string Id, int Line, string
     public bool IsNotSupported => Kind == DiagnosticKind.NotSupported;
 
     /// <summary>
-    /// N9: the help line of a <c>nullable-unchecked</c> whose check a call in its line ended, in place of the one that says how to check
-    /// (section 4, the owner, 2026-11-24, #624, comment 7135538740, "A help line of its own (Recommended)"), or null.
+    /// The help line the place of an error gives it, or null: N9's, of a <c>nullable-unchecked</c> whose check a call in its line ended,
+    /// in place of the one that says how to check (section 4, the owner, 2026-11-24, #624, comment 7135538740, "A help line of its own
+    /// (Recommended)"), and T39's, of a duration divided by a duration or converted to a number (section 4, the owner, 2026-11-25,
+    /// #629, comment 7159373153, "Add a help line (Recommended)").
     /// </summary>
-    public string? CallHelp { get; init; }
+    public string? OwnHelp { get; init; }
 
     /// <summary>
-    /// What to do about the error, the line below it, or null: <c>nullable-unchecked</c> says how to check (section 4, the owner,
-    /// 2026-10-30, "Text + help line"), or, where a call ended the check, <see cref="CallHelp"/>, indented by two spaces as the
-    /// command's own failures indent their <c>help:</c> (section 2, an assumption in section 4).
+    /// What to do about the error, the line below it, or null: <see cref="OwnHelp"/>, or for <c>nullable-unchecked</c> how to check
+    /// (section 4, the owner, 2026-10-30, "Text + help line"), indented by two spaces as the command's own failures indent their
+    /// <c>help:</c> (section 2, an assumption in section 4).
     /// </summary>
-    public string? Help => IsError && Id == ErrorIds.NullableUnchecked ? CallHelp ?? "check it with `!= null`, or give a value for null with `??`" : null;
+    public string? Help => !IsError ? null : OwnHelp ?? (Id == ErrorIds.NullableUnchecked ? "check it with `!= null`, or give a value for null with `??`" : null);
 
     /// <summary>
     /// The diagnostic as the command writes it, the file's name and the line in front: <c>hello.kz:3: &lt;id&gt;: &lt;text&gt;</c> (design
     /// record, section 2), <c>hello.kz:3: warning: &lt;id&gt;: &lt;text&gt;</c> (H5), or <c>hello.kz:3: not supported: &lt;text&gt;</c>; an
-    /// error that has a <see cref="Help"/>, N2's <c>nullable-unchecked</c>, gets it on the line below.
+    /// error that has a <see cref="Help"/>, N2's <c>nullable-unchecked</c> and T39's <c>type-mismatch</c> among them, gets it on the line below.
     /// </summary>
     public string At(string file) => Kind switch
     {
