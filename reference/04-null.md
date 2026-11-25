@@ -233,6 +233,13 @@ read it):
   `else` block of `if name != value { }` and of `if value != name { }` (N10);
 - after an assignment of a value whose type is not nullable (N7).
 
+A `mut` call on a path of fields through a variable, a field or a `mut` parameter known not null,
+`if cfg != null { cfg.Items.Add(1) }`, changes the field's place: the value without its `null`,
+written where it stands, and through a class instance the instance's field, as the same call after
+`?.` does (N5; §4: the build of both forms the owner's answer, 2026-11-24, issue 624, comment
+7135538740, and the place the product pass's reading, issue 630, comment 7161590400) *(the record
+marks the readings as assumed)*.
+
 `!` turns a test around, and a test of `a?.b != null` shows that `a` is not null either. A block
 always leaves when its end cannot be reached, as C# decides reachability: it ends in `return` or
 `throw`, in `break` or `continue` inside a loop, in an `if` with `else` or a `match` whose every
@@ -546,6 +553,96 @@ if false {
 }
 ```
 
+Case: [null/mut-path-through-nullable-narrowed.kz](../corpus/null/mut-path-through-nullable-narrowed.kz)
+```kurz
+// a `mut` call on a path of fields through a nullable value changes the field's place where a test's branch knows the value not
+// null, through a nullable variable, a nullable field and a nullable `mut` parameter, and a value another variable holds keeps
+// what it held
+data Config(List<int> Items)
+data Box(Config? Cfg)
+
+Config? Find(int id) {
+    if id == 1 {
+        return Config([1])
+    }
+    return null
+}
+
+void Grow(mut Config? c) {
+    if c != null {
+        c.Items.Add(2)
+    }
+}
+
+mut cfg = Find(1)
+if cfg != null {
+    cfg.Items.Add(2)
+}
+print(cfg?.Items ?? [])
+
+mut kept = Find(1)
+before = kept
+if kept != null {
+    kept.Items.Add(2)
+}
+print(before?.Items ?? [])
+print(kept?.Items ?? [])
+
+mut b = Box(Find(1))
+if b.Cfg != null {
+    b.Cfg.Items.Add(2)
+}
+print(b.Cfg?.Items ?? [])
+
+mut p = Find(1)
+Grow(mut p)
+print(p?.Items ?? [])
+```
+
+Case: [null/mut-path-through-nullable-instance-narrowed.kz](../corpus/null/mut-path-through-nullable-instance-narrowed.kz)
+```kurz
+// a `mut` call on a `mut` field of an instance held by a nullable variable or field changes the instance's field where a test's
+// branch knows it not null, in a method through a field named alone and through `this`; the variable that holds the reference
+// need not be `mut`, as for an instance that is not nullable
+class Box {
+    pub mut List<int> Items = [1]
+}
+
+class Shelf {
+    pub mut Box? B = null
+
+    pub void Fill() {
+        if B != null {
+            B.Items.Add(2)
+        }
+        if this.B != null {
+            this.B.Items.Add(3)
+        }
+    }
+}
+
+Box? Find(int id) {
+    if id == 1 {
+        return Box()
+    }
+    return null
+}
+
+c = Find(1)
+if c != null {
+    c.Items.Add(2)
+}
+print(c?.Items ?? [])
+
+s = Shelf()
+s.B = Find(1)
+s.Fill()
+if s.B != null {
+    s.B.Items.Add(4)
+}
+print(s.B?.Items ?? [])
+```
+
 ### N4 (decided, §4) `??`
 
 `a ?? b` is `a` when `a` is not null, and `b` otherwise, as in C#. `??` on a value whose type is
@@ -592,9 +689,14 @@ the owner, 2026-11-24). A path through the chain's value, `cfg?.Items.Add(1)`, c
 place where the chain did not stop, as the same call in a test's branch, `if cfg != null {
 cfg.Items.Add(1) }`, changes it where the test knows the value not null: the value without its
 `null`, written where it stands, through a variable, a field or a `mut` parameter, and through a
-class instance the instance's field (§4, the owner, 2026-11-24, issue 624, comment 7135538740, issue
-630) *(the record marks the readings as assumed)*; a path through an item or an entry,
-`groups[key]?.Items.Add(1)`, stays `not supported` (N3, M5). Such a call on a path a call can change (N9),
+class instance the instance's field (§4: the build of both forms the owner's answer, 2026-11-24, issue
+624, comment 7135538740, and the place the product pass's reading, issue 630, comment 7161590400)
+*(the record marks the readings as assumed)*; a path through a nullable item, entry or call's
+result, `groups[key]?.Items.Add(1)`, stays `not supported`, "a `mut` method on a path through a nullable
+item, entry or call's result (N3, M5)", and so do an assignment into a path through a nullable
+variable or field, `c.Items[0] = 3`, "an assignment into a path through a nullable variable or field
+(N3, M4)", and such a path passed as `mut`, `Grow(mut c.Items)`, "a path through a nullable variable or
+field passed as `mut` (N3, M7)" (issue 639). Such a call on a path a call can change (N9),
 whose arguments, index or key run a call, is `nullable-unchecked`, the error the same call gets with that call on
 the line before it, with the help line N9 gives it (§4, the owner, 2026-11-24); a local variable, a
 path of `data` fields from one and a map one holds stay allowed.
@@ -801,6 +903,8 @@ Case: [null/conditional-call-place-not-copied.kz](../corpus/null/conditional-cal
 ```kurz
 // a `mut` call after `?.` changes a list no other value holds where it is, an entry's, a field's of an instance and a
 // variable's, as Rust's `get_mut` reaches it: the test before the call holds no count of the list, so `Add` does not copy it
+// `true` rests on the build's layout, which `allow: raw` reads: `RemoveAt` keeps the block's room, as Rust's `Vec::remove` keeps
+// its capacity, so that `Add` finds room where the block is; no rule of M9 fixes that room
 class Bag(mut List<int>? Items)
 
 mut m = Map<string, List<int>>()
@@ -851,9 +955,9 @@ c.Items?.Add(Drop(c))
 
 Case: [null/mut-path-through-nullable.kz](../corpus/null/mut-path-through-nullable.kz)
 ```kurz
-// a `mut` call on a path of fields through a nullable value changes the field's place where a test's branch knows the value
-// not null and after `?.` where the chain did not stop, through a nullable variable, a nullable field and a nullable `mut`
-// parameter, and a value another variable holds keeps what it held
+// a `mut` call after `?.` on a path of fields through a nullable value changes the field's place where the chain did not stop,
+// through a nullable variable, a nullable field and a nullable `mut` parameter, and a value another variable holds keeps what it
+// held
 data Config(List<int> Items)
 data Box(Config? Cfg)
 
@@ -865,16 +969,10 @@ Config? Find(int id) {
 }
 
 void Grow(mut Config? c) {
-    if c != null {
-        c.Items.Add(2)
-    }
     c?.Items.Add(3)
 }
 
 mut cfg = Find(1)
-if cfg != null {
-    cfg.Items.Add(2)
-}
 cfg?.Items.Add(3)
 print(cfg?.Items ?? [])
 
@@ -889,9 +987,6 @@ print(before?.Items ?? [])
 print(kept?.Items ?? [])
 
 mut b = Box(Find(1))
-if b.Cfg != null {
-    b.Cfg.Items.Add(2)
-}
 b.Cfg?.Items.Add(3)
 print(b.Cfg?.Items ?? [])
 
@@ -902,9 +997,9 @@ print(p?.Items ?? [])
 
 Case: [null/mut-path-through-nullable-instance.kz](../corpus/null/mut-path-through-nullable-instance.kz)
 ```kurz
-// a `mut` call on a `mut` field of an instance held by a nullable variable or field changes the instance's field where a test's
-// branch knows it not null and after `?.`, in a method through a field named alone and through `this`; the variable that holds
-// the reference need not be `mut`, as for an instance that is not nullable
+// a `mut` call after `?.` on a `mut` field of an instance held by a nullable variable or field changes the instance's field,
+// in a method through a field named alone and through `this`; the variable that holds the reference need not be `mut`, as for
+// an instance that is not nullable
 class Box {
     pub mut List<int> Items = [1]
 }
@@ -913,9 +1008,7 @@ class Shelf {
     pub mut Box? B = null
 
     pub void Fill() {
-        if B != null {
-            B.Items.Add(2)
-        }
+        B?.Items.Add(2)
         this.B?.Items.Add(3)
     }
 }
@@ -928,9 +1021,6 @@ Box? Find(int id) {
 }
 
 c = Find(1)
-if c != null {
-    c.Items.Add(2)
-}
 c?.Items.Add(3)
 print(c?.Items ?? [])
 
@@ -945,6 +1035,8 @@ Case: [null/mut-path-through-nullable-not-copied.kz](../corpus/null/mut-path-thr
 ```kurz
 // a `mut` call on a path of fields through a nullable value changes a list no other value holds where it is, after `?.` and in
 // a test's branch: the test before the call holds no count of the list, so `Add` does not copy it
+// `true` rests on the build's layout, which `allow: raw` reads: `RemoveAt` keeps the block's room, as Rust's `Vec::remove` keeps
+// its capacity, so that `Add` finds room where the block is; no rule of M9 fixes that room
 data Config(List<int> Items)
 data Box(Config? Cfg)
 
