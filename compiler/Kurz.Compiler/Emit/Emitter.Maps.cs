@@ -825,6 +825,48 @@ public sealed partial class Emitter
         return fn.Value($"call {Ir(result)} {remove}(ptr {CollectionPlace(receiver)}, {Ir(type.Key)} {key})");
     }
 
+    /// <summary>N5: the helper that gives the place of the value of the key's entry in the map's block in <c>%a0</c>, read in place, or null where the map has no entry of the key.</summary>
+    private string EntryPeek(MapType type) => Helper($"peek.{Lower.Mangle(type)}", "ptr", ["ptr", Ir(type.Key)], () =>
+    {
+        var look = fn.Label("look");
+        var absent = fn.Label("absent");
+        var present = fn.Label("present");
+        fn.CondBranch(fn.Value("icmp eq ptr %a0, null"), absent, look);
+        fn.Block(look);
+        var slot = fn.Value($"call ptr {FindEntry(type)}(ptr %a0, {Ir(type.Key)} %a1, i64 {KeyHash("%a0", "%a1", type.Key)})");
+        fn.CondBranch(fn.Value($"icmp eq ptr {slot}, null"), absent, present);
+        fn.Block(present);
+        fn.Return($"ptr {ValueAt(type, slot)}");
+        fn.Block(absent);
+        fn.Return("ptr null");
+    });
+
+    /// <summary>
+    /// N5, M3: the helper that gives the place of the value of the key's entry, the key in <c>%a1</c>, of the map at the place in
+    /// <c>%a0</c>, for a <c>mut</c> call after <c>?.</c> that changes the value, as Rust's <c>get_mut</c> gives it: a block other values hold
+    /// is copied first (<see cref="OwnBlock"/>), and the value is the copy's at the offset the lookup found it at in the block, as
+    /// <see cref="EmitMapRemove"/> takes it; the entry is there, which the read before the call tested.
+    /// </summary>
+    private string EntryPlace(MapType type) => Helper($"entry.{Lower.Mangle(type)}", "ptr", ["ptr", Ir(type.Key)], () =>
+    {
+        var asked = fn.Alloca("i64", "asked");
+        fn.Emit($"store i64 0, ptr {asked}");
+        var block = fn.Value("load ptr, ptr %a0");
+        var slot = fn.Value($"call ptr {FindEntry(type)}(ptr {block}, {Ir(type.Key)} %a1, i64 {KeyHash(block, "%a1", type.Key)})");
+        OwnBlock(type, asked);
+        var current = fn.Value("load ptr, ptr %a0");
+        var copied = fn.Label("in.copy");
+        var take = fn.Label("take");
+        var at = fn.Alloca("ptr", "own");
+        fn.Emit($"store ptr {slot}, ptr {at}");
+        fn.CondBranch(fn.Value($"icmp eq ptr {current}, {block}"), take, copied); // the block found in, where no other value held it
+        fn.Block(copied);
+        var offset = fn.Value($"sub i64 {fn.Value($"ptrtoint ptr {slot} to i64")}, {fn.Value($"ptrtoint ptr {block} to i64")}");
+        fn.Emit($"store ptr {fn.Value($"getelementptr i8, ptr {current}, i64 {offset}")}, ptr {at}"); // the same slot of the copy, at its offset in the block
+        fn.Block(take);
+        fn.Return($"ptr {ValueAt(type, fn.Value($"load ptr, ptr {at}"))}");
+    });
+
     /// <summary>
     /// M9: <c>map.ContainsKey(key)</c>, whether the map has an entry of the key, as C#'s <c>Dictionary.ContainsKey</c>. The map is read
     /// before its key and held without a count of its own while the key is made: a key that changes the map,

@@ -1,0 +1,29 @@
+// expect: output
+// | Holder#2 5
+// | 1
+// rules: U21
+
+// the first `Go` crashes `Spawner` at the index, after the list crossed into the heap of the actor its `spawn` was making: that
+// heap is freed with the list's copy at the crash, and no actor was made, so that the restarted `Spawner`'s `spawn` makes `Holder#2`
+
+actor Holder(List<int> Items, int N) {
+    pub int Count() => Items.Count + N
+}
+
+actor Spawner {
+    mut int made = 0
+
+    pub void Go(List<int> xs, int at) {
+        ys = [1, 2]
+        h = spawn Holder(xs, ys[at])
+        made = made + 1
+        print("{h} {h.Count()}")
+    }
+
+    pub int Made() => made
+}
+
+s = spawn Spawner()
+send s.Go([10, 20, 30], 5)
+s.Go([10, 20, 30], 1)
+print(s.Made())

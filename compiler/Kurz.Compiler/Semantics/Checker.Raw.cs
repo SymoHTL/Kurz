@@ -666,6 +666,7 @@ public sealed partial class Checker
 
         CheckWrittenValue(a, index, map.Value); // M4: the value first, then the key, as the write runs them
         CheckKey(index.Index, map);
+        NarrowingEnded(index.Target, declared => $"an entry is written into {Types.A(declared)}", a.Line); // N9
         if (throughInstance)
         {
             EndChangeableNarrowing(); // N9: the write, which runs after its value and its key, ends what was known of a path through a `mut` field
@@ -695,6 +696,7 @@ public sealed partial class Checker
             Report(ErrorIds.TypeMismatch, index.Line, $"an index is an integer, not {Types.A(position.Type)} (M9, T2)");
         }
 
+        NarrowingEnded(index.Target, declared => $"an item is written into {Types.A(declared)}", a.Line); // N9
         if (throughInstance)
         {
             EndChangeableNarrowing(); // N9: the write, which runs after its value and its index, ends what was known of a path through a `mut` field
