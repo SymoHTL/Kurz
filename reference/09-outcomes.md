@@ -1606,7 +1606,16 @@ print(value)
 ### O10 (decided, §5) A success case without a value
 
 `void` can be the success case: `void | NotFound Remove(int id)`. The call is then a statement,
-and its other cases propagate or are handled as those of any call (O2, O5).
+and its other cases propagate or are handled as those of any call (O2, O5). It is a statement where
+nothing reads its cases: a `match` reads them, and a variable, a parameter or a field of its union
+holds them (§5, the owner, 2026-11-24, issue 625, comment 7141775138, Q1 and Q2); every other use of
+the call as a value is `syntax`, "a call with a `void` success used as a value (O10)" *(assumed: the
+text, a reading of the build)*.
+
+A `void` case is a case with no payload: a value of a union with a `void` case holds it, and a
+`match` reads it with a `void` arm, over such a value or over a call whose success is `void`, as
+a `match` over any call reads the call's cases (O4, O8), and as Rust's `Ok(())` matches the `()` of
+a `Result<(), E>` (§5).
 
 Case: [outcomes/void-success.kz](../corpus/outcomes/void-success.kz)
 ```kurz
@@ -1625,6 +1634,59 @@ Remove(1) else {
 Remove(2) else {
     NotFound => print("none")
 }
+```
+
+Case: [outcomes/void-arm-call.kz](../corpus/outcomes/void-arm-call.kz)
+```kurz
+data Circle(int R)
+
+void | Circle Make(bool b) {
+    if b {
+        return Circle(1)
+    }
+}
+
+string D(bool b) {
+    return match Make(b) {
+        Circle c => "circle {c.R}"
+        void => "none"
+    }
+}
+
+print(D(true))
+print(D(false))
+```
+
+Case: [outcomes/void-arm-value.kz](../corpus/outcomes/void-arm-value.kz)
+```kurz
+data Circle(int R)
+data NotFound
+
+string Describe(Circle | void s) {
+    return match s {
+        Circle c => "circle {c.R}"
+        void => "none"
+    }
+}
+
+void | NotFound Remove(int id) {
+    if id < 0 {
+        return NotFound
+    }
+}
+
+void Show(void | NotFound v) {
+    match v {
+        void => print("removed")
+        NotFound => print("not found")
+    }
+}
+
+print(Describe(Circle(2)))
+void | NotFound kept = Remove(1)
+Show(kept)
+void | NotFound lost = Remove(-1)
+Show(lost)
 ```
 
 ### O11 (decided, §2, §6) A child's stack and the process's heap
