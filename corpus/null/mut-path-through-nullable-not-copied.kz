@@ -1,0 +1,39 @@
+// expect: output
+// | true
+// | true
+// | true
+// | [1, 2, 9, 10]
+// allow: raw
+// rules: N5
+
+// a `mut` call on a path of fields through a nullable value changes a list no other value holds where it is, after `?.` and in
+// a test's branch: the test before the call holds no count of the list, so `Add` does not copy it
+data Config(List<int> Items)
+data Box(Config? Cfg)
+
+Config? Find(int id) {
+    if id == 1 {
+        return Config([1, 2, 3, 4])
+    }
+    return null
+}
+
+mut cfg = Find(1)
+cfg?.Items.RemoveAt(3)
+cfg?.Items.RemoveAt(2)
+mut b = Box(Find(1))
+b.Cfg?.Items.RemoveAt(3)
+raw {
+    before = (cfg?.Items ?? []).Pointer
+    cfg?.Items.Add(9)
+    print((cfg?.Items ?? []).Pointer == before)
+    if cfg != null {
+        own = cfg.Items.Pointer
+        cfg.Items.Add(10)
+        print(cfg.Items.Pointer == own)
+    }
+    held = (b.Cfg?.Items ?? []).Pointer
+    b.Cfg?.Items.Add(9)
+    print((b.Cfg?.Items ?? []).Pointer == held)
+}
+print(cfg?.Items ?? [])

@@ -1,0 +1,42 @@
+// expect: output
+// | [1, 2, 3]
+// | [1, 2, 3, 4]
+// rules: N5
+
+// a `mut` call on a `mut` field of an instance held by a nullable variable or field changes the instance's field where a test's
+// branch knows it not null and after `?.`, in a method through a field named alone and through `this`; the variable that holds
+// the reference need not be `mut`, as for an instance that is not nullable
+class Box {
+    pub mut List<int> Items = [1]
+}
+
+class Shelf {
+    pub mut Box? B = null
+
+    pub void Fill() {
+        if B != null {
+            B.Items.Add(2)
+        }
+        this.B?.Items.Add(3)
+    }
+}
+
+Box? Find(int id) {
+    if id == 1 {
+        return Box()
+    }
+    return null
+}
+
+c = Find(1)
+if c != null {
+    c.Items.Add(2)
+}
+c?.Items.Add(3)
+print(c?.Items ?? [])
+
+s = Shelf()
+s.B = Find(1)
+s.Fill()
+s.B?.Items.Add(4)
+print(s.B?.Items ?? [])

@@ -2217,7 +2217,8 @@ public sealed partial class Checker
     /// M5: the receiver of a <c>mut</c> method is a <c>mut</c> variable or a path of data fields from one; in a lambda, such a variable
     /// is not changed (F11). A path through an index is not read (M9). The call changes what it takes as <c>mut</c> (M7). After
     /// <c>?.</c> it is the place the chain names (<see cref="ChainReceiver"/>, N5); a path a call can change, known not null where it was
-    /// read and left nullable by a call in the arguments, is N2's (<see cref="NarrowingEnded"/>, N9).
+    /// read and left nullable by a call in the arguments, is N2's (<see cref="NarrowingEnded"/>, N9), the path itself or a nullable
+    /// variable or field on the way to it, the first one from its root (issue 630).
     /// </summary>
     private void MutReceiver(CallExpression call, Expression receiver, int line, string what)
     {
@@ -2228,15 +2229,35 @@ public sealed partial class Checker
         }
 
         MutPlace(call, receiver, line, what);
+        var steps = new List<MemberAccess>();
+        for (var e = Unwrap(receiver); e is MemberAccess m; e = Unwrap(m.Target))
+        {
+            steps.Insert(0, m);
+        }
+
+        foreach (var m in steps)
+        {
+            if (NarrowingEnded(m.Target, declared => $"`{m.Member}` is read from {Types.A(declared)}", line, throughNullable: true))
+            {
+                return; // N9: a nullable step on the way, read known not null, which a call in the arguments left nullable
+            }
+        }
+
         NarrowingEnded(receiver, declared => $"`{((MemberAccess)call.Callee).Member}` is read from {Types.A(declared)}", line); // N9
     }
 
-    /// <summary>M5: the receiver of a <c>mut</c> method as <see cref="MutReceiver"/> reads it, a place its path reaches.</summary>
+    /// <summary>
+    /// M5: the receiver of a <c>mut</c> method as <see cref="MutReceiver"/> reads it, a place its path reaches. A path through a nullable
+    /// variable or field, read where the checker knew it not null (N3) or after <c>?.</c> (N5, <see cref="ChainReceiver"/>), reaches the
+    /// place in the case other than <c>null</c>, as Rust's <c>if let Some(c) = &amp;mut cfg { c.items.push(2) }</c> and
+    /// <c>cfg.as_mut().map(|c| c.items.push(3))</c> reach it (section 4, the owner, 2026-11-24, #624, comment 7135538740, issue 630); a step
+    /// the checker did not know not null was reported where the path was read (N2).
+    /// </summary>
     private void MutPlace(CallExpression call, Expression receiver, int line, string what)
     {
         var members = new List<MemberAccess>();
         var root = Unwrap(receiver);
-        while (root is MemberAccess { Conditional: false } m)
+        while (root is MemberAccess m)
         {
             members.Insert(0, m);
             root = Unwrap(m.Target);
@@ -2248,7 +2269,7 @@ public sealed partial class Checker
             return;
         }
 
-        if (MutReceiverThroughInstance(receiver, members, line, what))
+        if (MutReceiverThroughInstance(receiver, members, line, what, narrowed: true))
         {
             return; // K2, M5: a `mut` field of an instance
         }
@@ -2271,12 +2292,7 @@ public sealed partial class Checker
             return; // reported where the receiver was read
         }
 
-        if (ThroughNullable(variable, members, "a `mut` method on a path through a nullable variable or field (N3, M5)"))
-        {
-            return;
-        }
-
-        if (!IsFieldPath(variable.Type, members, out var notField))
+        if (!IsFieldPath(variable.Type, members, out var notField, narrowed: true))
         {
             Report(ErrorIds.MutRequired, line, $"{what}, and `{notField}` is no field of a data value: only a path of data fields from a `mut` variable reaches a value that changes (M5, M4)");
             return;
@@ -2334,13 +2350,18 @@ public sealed partial class Checker
         return false;
     }
 
-    /// <summary>M4: whether every member of the path from a value of <paramref name="type"/> is a field of a data type; a type the checker could not tell passes.</summary>
-    private static bool IsFieldPath(KurzType type, List<MemberAccess> members, out string notField)
+    /// <summary>
+    /// M4: whether every member of the path from a value of <paramref name="type"/> is a field of a data type; a type the checker could not
+    /// tell passes. <paramref name="narrowed"/> reads each nullable step as the case other than <c>null</c>, for a path the checker read known
+    /// not null or after <c>?.</c> (<see cref="MutPlace"/>, N3, N5).
+    /// </summary>
+    private static bool IsFieldPath(KurzType type, List<MemberAccess> members, out string notField, bool narrowed = false)
     {
         notField = "";
         var current = type;
         foreach (var m in members)
         {
+            current = narrowed ? Types.NonNull(current) ?? current : current;
             if (Types.IsError(current))
             {
                 return true;
