@@ -1457,10 +1457,7 @@ Case: [outcomes/else-throw-void-case.kz](../corpus/outcomes/else-throw-void-case
 data Circle(int R)
 
 Circle | void Find(bool b) {
-    if b {
-        return Circle(1)
-    }
-    return
+    return Circle(1)
 }
 
 // the arm of a `void` case holds no value a bare `throw` could throw
