@@ -1255,7 +1255,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void A_message_whose_clauses_bound_is_the_name_of_a_property_is_built_in_a_heap_of_its_own()
+    public void A_message_whose_argument_is_the_name_of_a_property_is_built_in_a_heap_of_its_own()
     {
         // U39, U12, K7: a name that reads a property inside its class, `Items`, is the call of its getter, which can raise, an index
         // there, and the checker reads it as a call that can wait (`Checker.Calls`, `SemanticModel.CanWait`), so that a message with it

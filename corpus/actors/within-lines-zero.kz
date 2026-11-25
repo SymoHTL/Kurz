@@ -1,0 +1,15 @@
+// expect: error bound-not-positive at 11
+// rules: U40
+
+// a bound over several lines reports the line where it starts, as an error of the whole does (E1), not its last operator's
+
+actor Store {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+within 3s -
+    1s -
+    2s {
+    print(s.Get())
+}
