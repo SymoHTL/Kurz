@@ -659,7 +659,8 @@ public sealed partial class Checker
             return new Typed(Types.Long); // R14: the address a pointer holds
         }
 
-        Report(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is not converted to {Types.A(target)} (T10, {(Types.IsInstant(source.Type) || Types.IsInstant(target) ? "T36" : "T13")})");
+        Add(Diagnostic.Error(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is not converted to {Types.A(target)} (T10, {(Types.IsInstant(source.Type) || Types.IsInstant(target) ? "T36" : "T13")})")
+            with { OwnHelp = Types.IsDuration(source.Type) && Types.IsNumber(target) ? DurationHelp(source.Type) : null });
         return Typed.Error;
     }
 
@@ -871,6 +872,22 @@ public sealed partial class Checker
         [("timestamp", "FromUnixSeconds")] = 1_000_000_000,
         [("timestamp", "FromUnixMilliseconds")] = 1_000_000,
     };
+
+    /// <summary>
+    /// T39: the nanoseconds of the unit a duration's <c>TotalX</c> member counts in, the unit of <c>duration.FromX</c> in <see cref="TimeFrom"/>,
+    /// or null where <paramref name="member"/> names no such member.
+    /// </summary>
+    internal static long? TotalScale(string member) =>
+        member.StartsWith("Total", StringComparison.Ordinal) && TimeFrom.TryGetValue(("duration", "From" + member["Total".Length..]), out var scale) ? scale : null;
+
+    /// <summary>
+    /// T39: the help line of a refusal that asked for the count of a duration, divided by a duration or converted to a number, naming the
+    /// members that give it (section 4, the owner, 2026-11-25, #629, comment 7159373153, "Add a help line (Recommended)"), the operands
+    /// <paramref name="types"/>; <c>WholeNanoseconds</c> where none is a <c>longduration</c>, which has no such member.
+    /// </summary>
+    private static string DurationHelp(params KurzType[] types) => types.All(t => t is PrimitiveType { Kind: Primitive.Duration })
+        ? "read its count with a member: `.TotalMilliseconds` or another unit's, a `double`, or `.WholeNanoseconds`, the exact `long`"
+        : "read its count with a member: `.TotalMilliseconds` or another unit's, a `double`";
 
     /// <summary>
     /// T38: <c>duration.FromSeconds(n)</c> and the other constructors of <see cref="TimeFrom"/>, the time of a count, a <c>long</c> or a

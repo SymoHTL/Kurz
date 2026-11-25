@@ -1,0 +1,6 @@
+// expect: error unknown-name at 6
+// rules: T39
+
+// no integer type holds the count of a `longduration`, so it has no `WholeNanoseconds`
+longduration w = 1s
+print(w.WholeNanoseconds)

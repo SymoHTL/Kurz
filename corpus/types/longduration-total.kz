@@ -1,0 +1,33 @@
+// expect: output
+// | 110000
+// | -1.5
+// | 2.767011611056433E+19
+// | -2.767011611056433E+19
+// | 2.7670116110564327E+19
+// | 9.223372036854776E+18
+// | 1.8446744073709552E+19
+// | 1.7014118346046923E+38
+// rules: T39
+
+// the `TotalX` members stand on a `longduration` too, beyond the range of a `duration`
+w = 110000days
+print(w.TotalDays)
+longduration nw = -1500ms
+print(nw.TotalSeconds)
+
+// the nearest `double` of the 128 bits, ties to even: 2^64 + 2^63 + 2049 is 2^64 + 2^63 + 4096, where a conversion of the
+// two 64-bit halves, the lower one rounded to 2^63 + 2048 first, would make a tie and give 2^64 + 2^63; 2^64 + 2^63 + 2047
+// is 2^64 + 2^63
+big = 27670116110564329473ns
+print(big.TotalNanoseconds)
+print((-big).TotalNanoseconds)
+low = 27670116110564329471ns
+print(low.TotalNanoseconds)
+
+// 2^63, the first count beyond 64 bits signed; 2^64 + 2048, a tie, to the even 2^64; 2^127 - 1, the largest, is 2^127
+first = 9223372036854775808ns
+print(first.TotalNanoseconds)
+tie = 18446744073709553664ns
+print(tie.TotalNanoseconds)
+largest = 170141183460469231731687303715884105727ns
+print(largest.TotalNanoseconds)

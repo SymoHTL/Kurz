@@ -1,0 +1,7 @@
+// expect: error assign-immutable at 6
+// rules: T39
+
+// a count is read from a duration, never written into it
+mut d = 1500ms
+d.TotalSeconds = 1.0
+print(d)
