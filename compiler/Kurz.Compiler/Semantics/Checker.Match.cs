@@ -647,10 +647,11 @@ public sealed partial class Checker
     /// <summary>O5: what the arm does (<see cref="CheckElseArmBody"/>), with the name its pattern binds as the one its bare <c>throw</c> reads (O7, U12).</summary>
     private Flow CheckElseArm(MatchArm arm, KurzType success)
     {
-        var outer = elseArmName;
+        var (outer, outerVoid) = (elseArmName, elseArmVoid);
         elseArmName = arm.Pattern is TypePattern { Binding: not null } named ? model.DeclarationOf(named) : null;
+        elseArmVoid = arm.Pattern is TypePattern { Type: Syntax.VoidType }; // the arm of a `void` case, whose bare `throw` has no value (O7)
         var flow = CheckElseArmBody(arm.Body, success);
-        elseArmName = outer;
+        (elseArmName, elseArmVoid) = (outer, outerVoid);
         return flow;
     }
 

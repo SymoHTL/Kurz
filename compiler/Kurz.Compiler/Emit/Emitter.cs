@@ -638,8 +638,9 @@ public sealed partial class Emitter
             return;
         }
 
-        if (value is null && returnType is UnionType { Cases: [VoidType, ..] } union)
+        if (value is null && returnType is UnionType union && union.Cases.Any(c => c is VoidType))
         {
+            // F3: a bare `return` gives the result's `void` case, the success or another (issue 641)
             Leaving(0, 0);
             ReturnRaw(MakeUnion(union, Types.Void, null));
             return;
