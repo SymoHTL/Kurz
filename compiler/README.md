@@ -1253,7 +1253,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `?[` among it, each a value of its own that takes a count of what it read, and of a `weak` item its read (N4, N5, R3); a call
   there runs with its arguments only where the value before it is not null, on that value's case, and one that changes its
   receiver tests the place the chain names, a variable, a path of fields, an item of a list or an entry of a map, without a
-  count of its value, and changes it where it is, a block other values hold copied first, as `Add` copies it (N5, M3); a `T?` of a
+  count of its value, and changes it where it is, a block other values hold copied first, as `Add` copies it (N5, M3); a path
+  of fields through the chain's value, `cfg?.Items.Add(1)`, is the field's place in the value without its `null`, and in a
+  test's branch that knows the value not null the same call writes that place (N3, N5, M5); a `T?` of a
   type parameter that a nullable type fills is that type, as `Substitute` flattens a union (N11);
 - lists (M9): `List<T>()`, `Bytes()` and the type `Bytes`, the second name of `List<byte>`, which a
   message names so (section 4, the owner, 2026-10-29, "Bytes = List<byte>"), `Add`, `Count`, `list[i]`,
