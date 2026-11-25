@@ -1613,7 +1613,7 @@ the call as a value is `syntax`, "a call with a `void` success used as a value (
 text, a reading of the build)*.
 
 A `void` case is a case with no payload: a value of a union with a `void` case holds it, and a
-`match` reads it with a `void` arm, over such a value or over a call whose success is `void`, as
+`match` reads it with a `void` arm, `void =>`, which binds no name (F4), over such a value or over a call whose success is `void`, as
 a `match` over any call reads the call's cases (O4, O8), and as Rust's `Ok(())` matches the `()` of
 a `Result<(), E>` (§5).
 

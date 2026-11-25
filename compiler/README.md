@@ -3277,7 +3277,7 @@ round can ask about it by the rule's id.
   postfix `else` after a call only (O5); `data E()`, a declaration with an empty field list, which
   neither D1 nor D8 writes, D8 writing a type without fields as the bare name `data E`; `mut` on a
   field (D4); a function of the file without a body (F2, F3); `void` as the type of a variable, a
-  parameter or a field (F4); a modifier on a variable (V2, V4); the left side of an assignment that
+  parameter, a field or a name an arm binds (F4); a modifier on a variable (V2, V4); the left side of an assignment that
   is neither a name nor a path (V8, M4). An id of the type checker could be meant for any of them;
   a design round can ask by the rule.
 - T9 with T23 and T28: `-` on a `uint` or a `ulong` value is `not supported`: T9 and T23 judge two
