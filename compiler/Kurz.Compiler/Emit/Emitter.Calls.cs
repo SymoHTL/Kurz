@@ -96,6 +96,7 @@ public sealed partial class Emitter
             CallKind.EnvironmentArgs => EmitArguments(0, c.Line),
             CallKind.EnvironmentVariable => EmitVariable(c, info),
             CallKind.EnvironmentExit => EmitExit(c, info),
+            CallKind.EnvironmentSleep => EmitSleep(c, info),
             CallKind.Hash or CallKind.HmacHash or CallKind.HexEncode or CallKind.HasherNew or CallKind.HmacNew or CallKind.HasherUpdate or CallKind.HasherFinish
                 or CallKind.HmacVerify or CallKind.FixedTimeEqual => EmitHashCall(c, info),
             _ => throw new InvalidOperationException(info.Kind.ToString()),

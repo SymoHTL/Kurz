@@ -212,7 +212,8 @@ public sealed partial class Checker
     /// owner, 2026-10-30, "Both"); S14: <c>Environment.Variable(name)</c>, a variable of the environment or the case <c>EnvError</c>, as
     /// Rust's <c>env::var</c> (section 12, the owner, 2026-10-30, "An outcome, as Rust"); S23: <c>Environment.Exit(code)</c>, the end of the
     /// process with an <c>int</c> code, as C#'s <c>Environment.Exit</c> and Rust's <c>std::process::exit</c> (section 12, the owner, 2026-11-01,
-    /// "Top-level return n + Exit"), after which no path goes on (<see cref="IsExit"/>).
+    /// "Top-level return n + Exit"), after which no path goes on (<see cref="IsExit"/>); S28: <c>Environment.Sleep(time)</c>, a wait of a
+    /// <c>duration</c>, as Rust's <c>std::thread::sleep</c> (section 12, the owner, 2026-11-25, issue 627, comment 7158347789).
     /// </summary>
     private Typed CheckEnvironmentFunction(MemberAccess m, CallExpression c)
     {
@@ -221,6 +222,7 @@ public sealed partial class Checker
             "Args" => (CallKind.EnvironmentArgs, [], new ListType(Types.String)),
             "Variable" => (CallKind.EnvironmentVariable, [new Slot("name", Types.String, false, false, false)], Types.Union([Types.String, new DataType(dataTypes["EnvError"], [])])),
             "Exit" => (CallKind.EnvironmentExit, [new Slot("code", Types.Int, false, false, false)], Types.Void),
+            "Sleep" => (CallKind.EnvironmentSleep, [new Slot("time", Types.Duration, false, false, false)], Types.Void),
             _ => null,
         };
         if (function is not { } f)
