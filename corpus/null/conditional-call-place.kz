@@ -1,0 +1,52 @@
+// expect: output
+// | [1, 2]
+// | []
+// | [1, 2]
+// | [1, 2]
+// | false
+// | [1]
+// | [1, 2]
+// | [1]
+// | 3
+// rules: N5
+
+// a `mut` call after `?.` changes the place the chain names: a variable, a path of fields from one, an entry of a map and an
+// item of a list it holds, and a list that another value holds is copied first, as `Add` copies it
+data Box(List<int>? Items)
+
+data Counter(int Count) {
+    pub mut void Bump(int n) {
+        Count = Count + n
+    }
+}
+
+mut List<int>? xs = [1]
+mut List<int>? none = null
+xs?.Add(2)
+none?.Add(2)
+print(xs ?? [])
+print(none ?? [])
+
+mut Box b = Box([1])
+b.Items?.Add(2)
+print(b.Items ?? [])
+
+mut Map<string, List<int>> groups = Map<string, List<int>>()
+groups["a"] = [1]
+before = groups
+groups["a"]?.Add(2)
+groups["b"]?.Add(2)
+print(groups["a"] ?? [])
+print(groups.ContainsKey("b"))
+print(before["a"] ?? [])
+
+mut List<List<int>?> lists = [[1], null]
+kept = lists
+lists[0]?.Add(2)
+lists[1]?.Add(2)
+print(lists[0] ?? [])
+print(kept[0] ?? [])
+
+mut Counter? c = Counter(1)
+c?.Bump(2)
+print(c?.Count ?? 0)

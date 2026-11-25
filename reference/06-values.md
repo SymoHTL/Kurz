@@ -106,6 +106,16 @@ more()
 print(b.Items)
 ```
 
+Case: [null/conditional-call-no-place.kz](../corpus/null/conditional-call-no-place.kz)
+```kurz
+// a `mut` call after `?.` on a value that is no place is the error the same call gets without `?.`
+List<int>? Make() {
+    return [1]
+}
+
+Make()?.Add(2)
+```
+
 ### M6 (decided, §4) Where the `mut` marker of a method is written
 
 In front of the return type: `mut void Add(T item)`. `mut` stands in front everywhere else as

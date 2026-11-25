@@ -40,11 +40,17 @@ public sealed record Diagnostic(DiagnosticKind Kind, string Id, int Line, string
     public bool IsNotSupported => Kind == DiagnosticKind.NotSupported;
 
     /// <summary>
-    /// What to do about the error, the line below it, or null: <c>nullable-unchecked</c> says how to check (section 4, the owner,
-    /// 2026-10-30, "Text + help line"), indented by two spaces as the command's own failures indent their <c>help:</c> (section 2, an
-    /// assumption in section 4).
+    /// N9: the help line of a <c>nullable-unchecked</c> whose check a call in its line ended, in place of the one that says how to check
+    /// (section 4, the owner, 2026-11-24, #624, comment 7135538740, "A help line of its own (Recommended)"), or null.
     /// </summary>
-    public string? Help => IsError && Id == ErrorIds.NullableUnchecked ? "check it with `!= null`, or give a value for null with `??`" : null;
+    public string? CallHelp { get; init; }
+
+    /// <summary>
+    /// What to do about the error, the line below it, or null: <c>nullable-unchecked</c> says how to check (section 4, the owner,
+    /// 2026-10-30, "Text + help line"), or, where a call ended the check, <see cref="CallHelp"/>, indented by two spaces as the
+    /// command's own failures indent their <c>help:</c> (section 2, an assumption in section 4).
+    /// </summary>
+    public string? Help => IsError && Id == ErrorIds.NullableUnchecked ? CallHelp ?? "check it with `!= null`, or give a value for null with `??`" : null;
 
     /// <summary>
     /// The diagnostic as the command writes it, the file's name and the line in front: <c>hello.kz:3: &lt;id&gt;: &lt;text&gt;</c> (design

@@ -2054,11 +2054,14 @@ public sealed partial class Checker
     // N9: the calls read so far, so that a condition knows whether one ran in it
     private int callsRun;
 
-    /// <summary>N9: a call ran, which ends what was known of every path a call can change, and counts for the end of a condition.</summary>
-    private void CallRan()
+    // N9: the call of a function or a method that ended what was known last, which a help line names, null where something else did
+    private CallExpression? endedBy;
+
+    /// <summary>N9: a call ran, <paramref name="by"/> where it is a call of a function or a method, which ends what was known of every path a call can change, and counts for the end of a condition.</summary>
+    private void CallRan(CallExpression? by = null)
     {
         callsRun++;
-        EndChangeableNarrowing();
+        EndChangeableNarrowing(by);
     }
 
     /// <summary>
@@ -2076,8 +2079,12 @@ public sealed partial class Checker
     private static ImmutableHashSet<NullPath> Unweak(ImmutableHashSet<NullPath> known) =>
         known.Any(ThroughWeak) ? known.Where(p => !ThroughWeak(p)).ToImmutableHashSet() : known;
 
-    /// <summary>N9: a call or an assignment ends what was known of every path through a <c>mut</c> field of an instance.</summary>
-    private void EndChangeableNarrowing() => frame.Known = Unchangeable(frame.Known);
+    /// <summary>N9: a call or an assignment ends what was known of every path through a <c>mut</c> field of an instance; <paramref name="by"/> is the call of a function or a method that did.</summary>
+    private void EndChangeableNarrowing(CallExpression? by = null)
+    {
+        frame.Known = Unchangeable(frame.Known);
+        endedBy = by;
+    }
 
     /// <summary>N9: what is known of paths that no call can change.</summary>
     private static ImmutableHashSet<NullPath> Unchangeable(ImmutableHashSet<NullPath> known) =>
