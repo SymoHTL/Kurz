@@ -21,8 +21,8 @@ Case: [functions/expression-body.kz](../corpus/functions/expression-body.kz)
 ### F3 (assumed, §8) Block body and `return`
 
 A body between braces holds statements. `return expression` ends the function with that result,
-as in C#. As there, a function with a result whose end can be reached without a `return`, and a
-bare `return` in such a function, are the compile error `missing-return`; `return` with a value in
+as in C#. As there, a function with a result whose end can be reached without a `return` is the
+compile error `missing-return`; `return` with a value in
 a `void` function (F4), and a value of another type than the result, are `type-mismatch`.
 A bare `return` gives the result's `void` case, the success or another (O10), in a lambda's body
 the `void` case of the lambda's result (F11), so it is `missing-return` only where the result holds no
