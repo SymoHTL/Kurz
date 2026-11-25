@@ -1,0 +1,6 @@
+// expect: error unknown-name at 6
+// rules: T39
+
+// C#'s component members, the part of one unit such as `Seconds`, are no members of a duration
+d = 1500ms
+print(d.Seconds)

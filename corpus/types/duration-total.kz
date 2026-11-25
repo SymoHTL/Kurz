@@ -1,0 +1,39 @@
+// expect: output
+// | 1500000
+// | 1500
+// | 1.5
+// | 0.0015
+// | 1.5
+// | 1.5
+// | 1.5
+// | -1.5
+// | -1500000000
+// | 0
+// | 1500000
+// | 9007199254740992
+// | 9007199254740993
+// rules: T39
+
+d = 1500000ns
+print(d.TotalNanoseconds)
+print(d.TotalMicroseconds)
+print(d.TotalMilliseconds)
+print(d.TotalSeconds)
+print(90s.TotalMinutes)
+print(90min.TotalHours)
+print(36h.TotalDays)
+
+// a negative duration gives a negative count, and a zero one 0
+neg = -1500ms
+print(neg.TotalSeconds)
+print(neg.WholeNanoseconds)
+z = 0ns
+print(z.TotalSeconds)
+
+// `WholeNanoseconds` is the exact `long`; a `double` holds a count of nanoseconds exactly up to 2^53, and 2^53 + 1 is
+// rounded to 2^53
+long n = d.WholeNanoseconds
+print(n)
+odd = duration.FromNanoseconds(9007199254740993)
+print(odd.TotalNanoseconds)
+print(odd.WholeNanoseconds)
