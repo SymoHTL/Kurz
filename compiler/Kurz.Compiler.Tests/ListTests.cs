@@ -8242,7 +8242,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     [Theory]
     [InlineData("s = \"ab\"\nprint(s.Chars[0])\n", 2, "`s.Chars` as a list (T15)", null)]
-    [InlineData("data Config(List<int> Items)\n\nvoid Grow(mut List<int> xs) {\n    xs.Add(4)\n}\n\nclass H(mut Config Cfg) {\n    pub void Run() {\n        Grow(mut Cfg.Items)\n    }\n}\n\nh = H(Config([1]))\nh.Run()\n", 9, "a `mut` parameter given a path through a field of a class instance (M7)", null)]
+    [InlineData("data Config(List<int> Items)\n\nvoid Grow(mut List<int> xs) {\n    xs.Add(4)\n}\n\nclass H(mut Config Cfg) {\n    pub void Run() {\n        Grow(mut Cfg.Items)\n    }\n}\n\nh = H(Config([1]))\nh.Run()\n", 9, "a path through a class instance passed as `mut` (M7)", null)]
+    [InlineData("class Box(List<int> Items)\ndata Link(weak Box? To)\n\nvoid Set(mut Box? x) {\n    x = Box([9])\n}\n\nb = Box([1])\nmut l = Link(b)\nSet(mut l.To)\n", 10, "a path to a `weak` field passed as `mut` (M7, R3)", null)]
     public void What_the_emitter_does_not_lay_out_of_a_list_is_not_supported_at_its_line(string text, int line, string message, string? grant)
     {
         var compilation = Compile(text, toolchain.Runtime, grant is null ? [] : [grant]);

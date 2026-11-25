@@ -6353,6 +6353,9 @@ public sealed class CheckerTests
     [InlineData("void Bump(mut int n) {\n    n = n + 1\n}\n\nmut xs = List<short>()\nBump(mut xs[0])", "6: an item of a list or an entry of a map, or a path through one, passed as `mut` (M7, M9)")]
     [InlineData("data Box(Map<string, List<int>> M)\n\nvoid Grow(mut List<int> xs) {\n    xs.Add(4)\n}\n\nmut b = Box(Map<string, List<int>>())\nGrow(mut b.M[\"k\"])", "8: an item of a list or an entry of a map, or a path through one, passed as `mut` (M7, M9)")]
     [InlineData("data Config(List<int> Items)\ndata Box(List<Config> Cs)\n\nvoid Grow(mut List<int> xs) {\n    xs.Add(4)\n}\n\nmut b = Box(List<Config>())\nGrow(mut b.Cs[0].Items)", "9: an item of a list or an entry of a map, or a path through one, passed as `mut` (M7, M9)")]
+    [InlineData("void Fill(mut List<int> xs) {\n    xs.Add(1)\n}\n\nclass Box(mut List<int> Items)\n\nb = Box(List<int>())\nFill(mut b.Items)", "8: a path through a class instance passed as `mut` (M7)")]
+    [InlineData("void Fill(mut List<int> xs) {\n    xs.Add(1)\n}\n\nclass Box(mut List<int> Items)\ndata Link(weak Box? To)\n\nb = Box(List<int>())\nmut l = Link(b)\nif l.To != null {\n    Fill(mut l.To.Items)\n}", "11: a path through a `weak` reference passed as `mut` (M7, R3)")]
+    [InlineData("void Fill(mut List<int> xs) {\n    xs.Add(1)\n}\n\nclass Box(mut List<int> Items)\n\nb = Box(List<int>())\nmut weak Box? w = b\nif w != null {\n    Fill(mut w.Items)\n}", "10: a path through a `weak` reference passed as `mut` (M7, R3)")]
     [InlineData("static int Twice(int n) {\n    return \"x\"\n}\n\nprint(Twice(\"a\"))", "1: the modifier `static` of a method (K7, M6)")]
     [InlineData("data User(string Name)\n\nmut u = User(\"a\")\nu?.Name = \"b\"", "4: `?.` (N5)")]
     public void A_construct_of_a_chapter_the_checker_does_not_read_is_not_supported_and_carries_no_error(string program, string first)

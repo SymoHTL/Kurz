@@ -158,11 +158,12 @@ A path of `data` fields passed as `mut`, `Grow(mut b.Items)`, gives the callee t
 the path, as C#'s `ref b.Items` and Rust's `&mut b.items` do: a block on the path that another value
 holds is copied first, as an assignment into the path copies it (M4), so that a variable that held it
 keeps its value, and one the variable holds alone is written where it stands (§4, the owner, 2026-11-25,
-"Copy if shared"). An item of a list, an entry of a map and a field of a class instance on the path stay
-`not supported`, each with a text that names its form (§4, the owner, 2026-11-25, "Data fields only").
-*(assumed, §4: the place is taken after the other arguments ran, as a variable's is; a field of a class
-instance reached from a variable, `Grow(mut h.Items)`, keeps the `mut-at-call` the build gives it, whose
-text names the field as no field of a `data` value.)*
+"Copy if shared"). An item of a list, an entry of a map, a field of a class instance and a `weak`
+reference on the path stay `not supported`, each with a text that names its form (§4, the owner,
+2026-11-25, "Data fields only"). *(assumed, §4: the place is taken after the other arguments ran, as a
+variable's is; an item and an entry share one text, which names both; a path to a `weak` field given to
+a `mut weak T?` parameter keeps the `type-mismatch` the build gives it, since a read of the field is the
+strong `T?` (R3).)*
 
 Within one expression, a read of what a call takes as `mut`, of a value that holds it or of one it
 holds (the variable itself, a path of fields, an item of a list), is the compile error

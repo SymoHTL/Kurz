@@ -2351,6 +2351,41 @@ public sealed partial class Checker
     }
 
     /// <summary>
+    /// M7 (the owner, 2026-11-25, issue 646, "Data fields only"): the text of a path after <c>mut</c> that leaves its <c>data</c> fields
+    /// through a form the build leaves out, a <c>weak</c> reference (R3) or a field of a class instance, each naming its form; null where
+    /// the step it leaves at is neither, a property of a class (K7) among them, which stays <c>mut-at-call</c>.
+    /// </summary>
+    private static string? LeftOutStep(KurzType type, List<MemberAccess> members)
+    {
+        var current = type;
+        foreach (var m in members)
+        {
+            if (current is WeakRefType weak)
+            {
+                return HasField(weak.Target, m.Member) ? "a path through a `weak` reference passed as `mut` (M7, R3)" : null;
+            }
+
+            var plain = Types.NonNull(current) ?? current;
+            if (plain is ClassType instance)
+            {
+                return HasField(instance, m.Member) ? "a path through a class instance passed as `mut` (M7)" : null;
+            }
+
+            if (plain is not DataType d || d.Symbol.Field(m.Member) is not { } field)
+            {
+                return null;
+            }
+
+            current = SubstituteData(d, field.Type);
+        }
+
+        return null;
+    }
+
+    /// <summary>K1: whether the member is a field of the class or of a base, which a property (K7) is not.</summary>
+    private static bool HasField(ClassType type, string member) => type.Symbol.Chain.Any(c => c.Field(member) is not null);
+
+    /// <summary>
     /// M4: whether every member of the path from a value of <paramref name="type"/> is a field of a data type; a type the checker could not
     /// tell passes. <paramref name="narrowed"/> reads each nullable step as the case other than <c>null</c>, for a path the checker read known
     /// not null or after <c>?.</c> (<see cref="MutPlace"/>, N3, N5).
@@ -3657,6 +3692,12 @@ public sealed partial class Checker
 
         if (!IsFieldPath(variable.Type, members, out var notField))
         {
+            if (LeftOutStep(variable.Type, members) is { } leftOut)
+            {
+                NotSupported(a.Line, leftOut);
+                return;
+            }
+
             Report(ErrorIds.MutAtCall, a.Line, $"`{notField}` is no field of a data value: after `mut` stands a `mut` variable or a path of data fields from one (M7)");
             return;
         }

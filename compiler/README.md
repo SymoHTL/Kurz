@@ -2199,7 +2199,7 @@ writes, and the corpus's `tests/` cases what a case of `kurz test` shows (E3).
 A program that uses one of these gets one `not supported` at the construct's line, in the
 checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
-`data` type or a union (R14), a `mut` parameter given anything but a variable, a path of `data` fields from one or a `mut` field named alone in its method, a path of fields from such a field among them (the owner, 2026-11-25, issue 646, "Data fields only"), and a `mut` parameter of a lambda
+`data` type or a union (R14), a `mut` parameter given anything but a variable, a path of `data` fields from one or a `mut` field named alone in its method, a path of fields from such a field and a path of `data` fields to a `weak` field among them (the owner, 2026-11-25, issue 646, "Data fields only"), and a `mut` parameter of a lambda
 (M7), a `label` operand of an `asm` and an `asm` output into an item of a list or a map (R11), `s.Chars` as a list (T15), a call on a file or a socket, a read of the
 command line, the environment or the clock, and a log call, in a build for Windows (S11, P6), a vector held in a list, a
 map, a field or a union and a lambda that reads a variable of a vector's type, whose places are not
@@ -3147,7 +3147,7 @@ value of a type parameter or a pointer, at any depth (D3, M9), and `==` on a bas
 generic, whose fields of a type parameter it does not read, and such a base as a key, where a generic
 `data` type in a relation of inheritance is itself not read (D3, M9, D6, T19); a map whose values are pointers or of `void`, which have no nullable type the checker reads (N1, R10); an assignment into a map or a list
 reached through an item or a call, or into a path that goes on after the key or the item (M9, M4), a `mut` method
-on an element of a list and an item of a list or an entry of a map, or a path through one, passed as `mut` (M7, M9); of the body of a `data`
+on an element of a list and an item of a list or an entry of a map, or a path through one, passed as `mut` (M7, M9), a path through a class instance or through a `weak` reference passed as `mut` (M7, R3: the owner, 2026-11-25, issue 646, "Data fields only"); of the body of a `data`
 type (D16), a property, which section 14 leaves open, a field of a type without a primary constructor, a `static` field, a field without
 a written type and one with a modifier but `pub` and `mut`, a constructor, a `static` method, and, as in a class (K7),
 a method marked both `virtual` and `override`, or `virtual` without `pub`, a method marked `prot`, `internal` or another modifier of a method but `pub` and `mut`, a method with
