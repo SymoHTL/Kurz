@@ -102,8 +102,14 @@ public sealed partial class Checker
 
     private Typed CheckCall(CallExpression c, KurzType? expected, bool keepCases)
     {
+        if (c.Callee is MemberAccess m && (m.Conditional || InChain(m.Target)))
+        {
+            // N5: the call where the chain did not stop, read as every call is, its other cases among it
+            return CheckChainCall(m, c, call => CheckExpression(call, null, keepCases));
+        }
+
         var result = CallResult(c, expected);
-        CallRan(); // N9: a call can assign a `mut` field through another reference (K2) and free the target of a `weak` one (R3)
+        CallRan(c); // N9: a call can assign a `mut` field through another reference (K2) and free the target of a `weak` one (R3)
         if (result.IsError || result.Type is not UnionType u || Types.NonNull(u) is not null || keepCases && (expected is null || Types.KeepsCases(expected, u)))
         {
             return result; // N8: a `T?` is no outcome list, and a call that returns one yields it whole
@@ -122,6 +128,11 @@ public sealed partial class Checker
     private Typed CallResult(CallExpression c, KurzType? expected)
     {
         var result = CalleeResult(c, expected);
+        if (c.Callee is MemberAccess m && (m.Conditional || InChain(m.Target)))
+        {
+            return result; // N5: its words and its clause are the call's it is read as (CheckChainCall)
+        }
+
         if (!result.IsError && PlainCallWords(c))
         {
             result = Typed.Error;
@@ -1518,11 +1529,13 @@ public sealed partial class Checker
     {
         if (m.Conditional || InChain(m.Target))
         {
-            // N5: C# reads a call after `?.` inside the chain, which section 4 does not say
-            NotSupported(m.Line, "a call after `?.` or `?[` (N5)");
-            CheckExpression(m.Target, null);
-            CheckArgumentsLoosely(c);
-            return Typed.Error;
+            // N5: after `send` (U6) or before `else` (O5), the call's whole result, where the chain did not stop
+            return CheckChainCall(m, c, call =>
+            {
+                var whole = CallResult(call, null);
+                model.RecordType(call, whole);
+                return whole;
+            });
         }
 
         if (CheckIntrinsicCall(m, c) is { } intrinsic)
@@ -2192,9 +2205,24 @@ public sealed partial class Checker
 
     /// <summary>
     /// M5: the receiver of a <c>mut</c> method is a <c>mut</c> variable or a path of data fields from one; in a lambda, such a variable
-    /// is not changed (F11). A path through an index is not read (M9). The call changes what it takes as <c>mut</c> (M7).
+    /// is not changed (F11). A path through an index is not read (M9). The call changes what it takes as <c>mut</c> (M7). After
+    /// <c>?.</c> it is the place the chain names (<see cref="ChainReceiver"/>, N5); a path a call can change, known not null where it was
+    /// read and left nullable by a call in the arguments, is N2's (<see cref="NarrowingEnded"/>, N9).
     /// </summary>
     private void MutReceiver(CallExpression call, Expression receiver, int line, string what)
+    {
+        if (Unwrap(receiver) is ChainValue chain)
+        {
+            ChainReceiver(call, chain, line, what); // N5
+            return;
+        }
+
+        MutPlace(call, receiver, line, what);
+        NarrowingEnded(receiver, declared => $"`{((MemberAccess)call.Callee).Member}` is read from {Types.A(declared)}", line); // N9
+    }
+
+    /// <summary>M5: the receiver of a <c>mut</c> method as <see cref="MutReceiver"/> reads it, a place its path reaches.</summary>
+    private void MutPlace(CallExpression call, Expression receiver, int line, string what)
     {
         var members = new List<MemberAccess>();
         var root = Unwrap(receiver);

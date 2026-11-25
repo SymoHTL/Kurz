@@ -556,7 +556,17 @@ public sealed partial class Emitter
     }
 
     /// <summary>M9: the item of the list at the index <paramref name="index"/> names, read in place; a position outside its items raises <c>index-out-of-range</c> at the line.</summary>
-    private string ListItem(string list, IndexExpression index, ListType type)
+    private string ListItem(string list, IndexExpression index, ListType type) => ListItem(list, ItemPosition(list, index), type);
+
+    /// <summary>M9: the item of the list at <paramref name="position"/>, one <see cref="ItemPosition"/> gave, read in place.</summary>
+    private string ListItem(string list, string position, ListType type)
+    {
+        var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {list})");
+        return fn.Value($"load {Ir(type.Element)}, ptr {fn.Value($"getelementptr {Ir(type.Element)}, ptr {items}, i64 {position}")}");
+    }
+
+    /// <summary>T14: the position the index <paramref name="index"/> names in the list, inside its items; a position outside them raises <c>index-out-of-range</c> at the line.</summary>
+    private string ItemPosition(string list, IndexExpression index)
     {
         var indexType = TypeOf(index.Index);
         var position = Resize(EmitExpression(index.Index), indexType, Types.IsSigned(indexType) ? Types.Long : Types.ULong);
@@ -567,9 +577,16 @@ public sealed partial class Emitter
         fn.Block(outside);
         Raise(ErrorIds.IndexOutOfRange, index.Line);
         fn.Block(inside);
-        var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {list})");
-        return fn.Value($"load {Ir(type.Element)}, ptr {fn.Value($"getelementptr {Ir(type.Element)}, ptr {items}, i64 {position}")}");
+        return position;
     }
+
+    /// <summary>
+    /// N5, M3: the helper that gives the place of the item at the position in <c>%a1</c> of the list at the place in <c>%a0</c>, in a block
+    /// no other value holds (<see cref="OwnItems"/>), for a <c>mut</c> call after <c>?.</c> that changes the item; the position is inside
+    /// the items, which the read before the call tested.
+    /// </summary>
+    private string ItemPlace(ListType type) =>
+        Helper($"item.{Lower.Mangle(type)}", "ptr", ["ptr", "i64"], () => fn.Return($"ptr {fn.Value($"getelementptr {Ir(type.Element)}, ptr {OwnItems(type)}, i64 %a1")}"));
 
     /// <summary>
     /// M9, M4, T14: <c>xs[i] = value</c> on a <c>mut</c> variable or parameter, or on a path of fields from one, as C# and Rust write an item (section 4, the owner,

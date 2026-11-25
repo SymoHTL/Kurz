@@ -93,6 +93,10 @@ public sealed partial class Emitter
                 return EmitMonotonicNow(m.Line);
             case MemberAccess m:
                 return HeldCopy(m, EmitMember(m, type), type);
+            case ChainValue v:
+                return chainPayloads[v]; // N5: the value the chain's call is called on, where the chain did not stop
+            case CallExpression c when Model.IsChainCall(c, out _):
+                return Temp(EmitCall(c) ?? throw new InvalidOperationException($"a `void` call stands as a value at line {c.Line}: the checker reports it"), type);
             case CallExpression c when !Model.IsMade(c, out _) && Model.CallOf(c).Result is WeakRefType weak: // `T.Make` is its construction, no call (T33)
                 return Upgrade(Temp(EmitCall(c)!, weak), weak); // R3: a `weak T?` result, read as a strong `T?`
             case CallExpression c:

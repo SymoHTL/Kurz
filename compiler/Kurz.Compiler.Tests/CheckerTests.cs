@@ -3679,6 +3679,109 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_call_after_a_conditional_access_is_the_call_where_the_chain_did_not_stop()
+    {
+        // N5 with section 4, the owner, 2026-11-24, #624, comment 7130490403, "yes support calls after ?. like c#": the call's result
+        // made nullable, a `T?` as it is, and `void` as it is; the chain goes on after the call, and a call after `?[` reads the item
+        const string Note = "class Note {\n    pub int Size() => 1\n    pub string Text() => \"a\"\n    pub string? Name() => null\n    pub void Say() {\n    }\n}\n\nNote? Find() => null\nList<Note>? All() => null\n\n";
+        Assert.Equal("int?", TypeOf(Note + "n = Find()?.Size()\nprint(n)", "n"));
+        Assert.Equal("string?", TypeOf(Note + "n = Find()?.Name()\nprint(n)", "n"));
+        Assert.Equal("int?", TypeOf(Note + "n = Find()?.Text().Bytes.Count\nprint(n)", "n"));
+        Assert.Equal("int?", TypeOf(Note + "n = All()?[0].Size()\nprint(n)", "n"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 12)], Errors(Note + "print(Find()?.Name().Bytes.Count)"));
+        Clean(Note + "Find()?.Say()");
+
+        // O2, O3: a union result is read as the same call reads it without `?.`, its other cases leaving where the context does not
+        // take them whole, against what a declared type takes; its words and its clause are that call's (U12, U41)
+        const string Parser = "data Failed(string Why)\n\nclass Parser(int Limit) {\n    pub int | Failed Read(int n) {\n        if n > Limit {\n            return Failed(\"too big\")\n        }\n        return n\n    }\n}\n\n";
+        Assert.Equal([(ErrorIds.UnlistedCase, 13)], Errors(Parser + "void Go(Parser? p) {\n    x = p?.Read(9)\n    print(x)\n}\n\nGo(Parser(5))"));
+        Clean(Parser + "void | Failed Go(Parser? p) {\n    int? x = p?.Read(3)\n    print(x)\n}\n\nGo(Parser(5)) else {\n    Failed f => print(f.Why)\n}");
+        Clean("class Bag {\n    pub void Keep(move List<int> items) {\n        print(items)\n    }\n}\n\nactor Sink {\n    pub int Get() => 1\n}\n\nBag? Find() => Bag()\nSink? s = spawn Sink()\n\nmut xs = [1]\nxs.Add(2)\nFind()?.Keep(move xs)\nprint(s?.Get() within 2s)");
+
+        // U12: a result moves as the same call's result does, from the region of the value it was called on
+        Clean("class Box(mut int V)\n\nclass Maker {\n    pub Box Make() => Box(1)\n}\n\nactor Sink {\n    pub void Take(move Box box) {\n        print(box.V)\n    }\n}\n\ns = spawn Sink()\nMaker? mk = Maker()\nb = mk?.Make()\nif b != null {\n    send s.Take(move b)\n}\nprint(mk == null)");
+
+        // U6: `send` before it sends where the chain did not stop, a method with a result being `send-result` as anywhere, and its
+        // arguments' words are the call's (U12)
+        const string Sink = "actor Sink {\n    pub int Get() => 1\n    pub void Take(move List<int> items) {\n        print(items)\n    }\n}\n\nSink? s = spawn Sink()\n";
+        Assert.Equal([(ErrorIds.SendResult, 9)], Errors(Sink + "send s?.Get()"));
+        Assert.Equal([(ErrorIds.Syntax, 12)], Errors(Note + "send Find()?.Say()"));
+        Clean(Sink + "mut xs = [1]\nxs.Add(2)\nsend s?.Take(move xs)");
+
+        // O5: the chain's value is a `T?`, which is no outcome list (N8), so `else` after it has no case to take, and its words are
+        // read once, as the call's (U12)
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors("data Failed(string Why)\n\nvoid Go(string? s) {\n    x = s?.Trim() else {\n        Failed f => \"\"\n    }\n    print(x)\n}\n\nGo(null)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 12)], Errors("data Failed(string Why)\n\nclass Bag {\n    pub int Keep(move List<int> items) => items.Count\n}\n\nBag? Find() => Bag()\n\nmut xs = [1]\nxs.Add(2)\nn = Find()?.Keep(move xs) else {\n    Failed f => 0\n}\nprint(n)"));
+    }
+
+    [Fact]
+    public void A_mut_call_after_a_conditional_access_changes_the_place_the_chain_names()
+    {
+        // N5, M5 with section 4, the owner, 2026-11-24, #624, comment 7131301981, "Write the place (Recommended)": a variable without
+        // `mut` and a value that is no place are the errors the same call gets without `?.`, and a path through the chain's value is
+        // what the same call in a test's branch is
+        Clean("mut List<int>? xs = [1]\nxs?.Add(2)\nmut m = Map<string, List<int>>()\nm[\"k\"]?.Add(1)\nmut List<List<int>?> ls = [[1]]\nls[0]?.Add(2)");
+        Assert.Equal([(ErrorIds.MutRequired, 2)], Errors("List<int>? xs = [1]\nxs?.Add(2)"));
+        Assert.Equal([(ErrorIds.MutRequired, 7)], Errors("class Box {\n    pub List<int> Copy() => [1]\n}\n\nBox? Find() => null\n\nFind()?.Copy().Add(1)"));
+        Assert.Equal(["2: a `mut` method on an element of a list (M5, M9)"], NotSupported("mut List<List<int>>? ls = [[1]]\nls?[0].Add(1)"));
+
+        // M7: the place is held while the arguments run, as the receiver of the same call without `?.`, of an entry the map, and
+        // after `?[` the list the chain started from
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("int Pop(mut List<int>? ys) {\n    ys = null\n    return 1\n}\n\nmut List<int>? xs = [1]\nxs?.Add(Pop(mut xs))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors("int Clear(mut Map<string, List<int>> n) {\n    n = Map<string, List<int>>()\n    return 1\n}\n\nmut m = Map<string, List<int>>()\nm[\"k\"] = [1]\nm[\"k\"]?.Add(Clear(mut m))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 11)], Errors("class Note(int N) {\n    pub int Plus(int k) => N + k\n}\n\nint Pop(mut List<Note>? ys) {\n    ys = null\n    return 1\n}\n\nmut List<Note>? ns = [Note(1)]\nprint(ns?[0].Plus(Pop(mut ns)))"));
+    }
+
+    [Fact]
+    public void A_write_into_a_path_a_call_can_change_after_a_call_in_its_arguments_is_nullable_unchecked()
+    {
+        // N5, N9 with section 4, the owner, 2026-11-24, #624, comment 7131654435, and #628, comment 7131654741, "Refuse it
+        // (Recommended)": a `mut` call after `?.` on a path a call can change, whose arguments run a call, and the same call, an item
+        // and an entry written in a test's branch, are the error each gets with that call on the line before it; a path no call
+        // changes, a local variable, a path of `data` fields from one, a map one holds and a `mut` parameter, and a call with no call
+        // in its arguments stay allowed, the refusal's text is the one N2 gives the same call in a test's branch, and a receiver the
+        // build does not read keeps its `not supported` and a variable passed as `mut` in them M7's error alone
+        const string Bag = "class Bag(mut List<int>? Items, mut Map<string, List<int>> M)\n\nint Drop(Bag b) {\n    b.Items = null\n    return 5\n}\n\nc = Bag([1], Map<string, List<int>>())\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Bag + "c.Items?.Add(Drop(c))"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Bag + "c.M[\"k\"]?.Add(Drop(c))"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Bag + "if c.Items != null {\n    c.Items.Add(Drop(c))\n}"));
+        Clean(Bag + "c.Items?.Add(5)\nc.M[\"k\"]?.Add(5)\nif c.Items != null {\n    c.Items.Add(5)\n}");
+        Clean("int Two() => 2\n\nmut List<int>? xs = [1]\nxs?.Add(Two())\nmut m = Map<string, List<int>>()\nm[\"k\"]?.Add(Two())");
+        Clean("data Inner(List<int>? Items)\ndata Outer(Inner In)\n\nint Two() => 2\n\nmut o = Outer(Inner([1]))\no.In.Items?.Add(Two())");
+        Assert.Equal("`Add` is read from a `List<int>?` without a check (N2)", ErrorText(Bag + "c.Items?.Add(Drop(c))"));
+
+        // N9 with pull request 631, comment 7143447670, "Refuse it in the push (Recommended)": a call in the chain's index or key runs
+        // before the place is taken and is counted as one in the arguments, where the item's position, checked against the list the
+        // field held before the call, would be written into the list the call left; the call run into a variable first, and the same
+        // index on a local list, stay allowed
+        const string Rows = "class Box(mut List<List<int>?> L, mut Map<string, List<int>> M)\n\nint Swap(Box b) {\n    b.L = [null]\n    return 3\n}\n\nstring Key(Box b) => \"k\"\n\nx = Box([[1], [2], [3], [4]], Map<string, List<int>>())\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 11)], Errors(Rows + "x.L[Swap(x)]?.Add(2)"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 11)], Errors(Rows + "x.M[Key(x)]?.Add(2)"));
+        Assert.Equal("`Swap(x)` can set `x.L[Swap(x)]` to `null`: run it into a variable before this line", Assert.Single(Check(Rows + "x.L[Swap(x)]?.Add(2)").Diagnostics.Items).Help);
+        Clean(Rows + "i = Swap(x)\nx.L[i]?.Add(2)");
+        Clean("int Three() => 3\n\nmut List<List<int>?> ys = [[1], [2], [3], [4]]\nys[Three()]?.Add(2)");
+
+        // section 4, the owner, 2026-11-24, #624, comment 7135538740, "A help line of its own (Recommended)": where a call in the
+        // arguments or the written value ended the check, the help line names that call and the path, "a call in this line" where it
+        // is no call of a function or a method (an assumption there), and every other `nullable-unchecked` keeps N2's, a call earlier
+        // in its line among them
+        const string Ended = "`Drop(c)` can set `c.Items` to `null`: run it into a variable before this line";
+        Assert.Equal(Ended, Assert.Single(Check(Bag + "c.Items?.Add(Drop(c))").Diagnostics.Items).Help);
+        Assert.Equal(Ended, Assert.Single(Check(Bag + "if c.Items != null {\n    c.Items.Add(Drop(c))\n}").Diagnostics.Items).Help);
+        Assert.Equal("check it with `!= null`, or give a value for null with `??`", Assert.Single(Check(Bag + "print(Drop(c) + c.Items.Count)").Diagnostics.Items).Help);
+        Assert.Equal("a call in this line can set `c.Items` to `null`: run it into a variable before this line", Assert.Single(Check("class Note {\n    pub string Text() => \"n\"\n}\n\nclass Bag(mut List<int>? Items)\n\nint Drop(Bag b) {\n    b.Items = null\n    return 5\n}\n\nc = Bag([1])\nn = Note()\nprint(Drop(c))\nif c.Items != null {\n    c.Items.Add(\"{n}\".Bytes.Count)\n}").Diagnostics.Items).Help);
+        Assert.Equal(["9: a `mut` method on a value held by a field of an instance (K2, M5)"], NotSupported("class Inner(mut List<int> Items)\nclass Outer(mut Inner? In)\nint Drop(Outer o) {\n    o.In = null\n    return 5\n}\nOuter c = Outer(Inner([1]))\nif c.In != null {\n    c.In.Items.Add(Drop(c))\n}"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors("int Pop(mut List<int>? ys) {\n    ys = null\n    return 1\n}\n\nmut List<int>? xs = [1]\nif xs != null {\n    xs.Add(Pop(mut xs))\n}"));
+        Clean("int Two() => 2\n\nvoid Grow(mut List<int>? xs) {\n    xs?.Add(Two())\n    if xs != null {\n        xs.Add(Two())\n    }\n}\n\nmut List<int>? ys = [1]\nGrow(mut ys)");
+
+        const string Box = "class Box(mut List<int>? L, mut Map<string, int>? M)\n\nint Clear(Box b) {\n    b.L = null\n    return 7\n}\n\nx = Box([1], Map<string, int>())\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Box + "if x.L != null {\n    x.L[0] = Clear(x)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Box + "if x.M != null {\n    x.M[\"k\"] = Clear(x)\n}"));
+        Assert.Equal("`Clear(x)` can set `x.L` to `null`: run it into a variable before this line", Assert.Single(Check(Box + "if x.L != null {\n    x.L[0] = Clear(x)\n}").Diagnostics.Items).Help);
+        Clean(Box + "if x.L != null {\n    x.L[0] = 7\n}\nif x.M != null {\n    x.M[\"k\"] = 7\n}");
+    }
+
+    [Fact]
     public void A_part_of_a_nullable_list_and_a_nullable_index_are_nullable_unchecked()
     {
         // N2: a part of a nullable list, a nullable index of a list and the nullable index of `?[`, as an index of a nullable list is
@@ -6145,7 +6248,8 @@ public sealed class CheckerTests
     [InlineData("List<int>? Find() => null\n\nprint(Find()?[0][1])", "3: an index after `?.` or `?[` (N5)")]
     [InlineData("List<int>? Find() => null\n\nprint(Find()?[0..<1])", "3: a part after `?[` (N5, M9)")]
     [InlineData("mut List<int>? xs = null\nxs?[0] = 1", "2: an assignment through `?[` (N5)")]
-    [InlineData("data User(List<int> Items)\n\nmut User? u = null\nu?.Items.Clear()", "4: a call after `?.` or `?[` (N5)")]
+    [InlineData("data User(List<int> Items)\n\nmut User? u = null\nu?.Items.Clear()", "4: a `mut` method on a path through a nullable variable or field (N3, M5)")]
+    [InlineData("class Cell {\n    pub int* At() => null\n}\n\nCell? c = Cell()\nprint(c?.At() == null)", "6: `?.` to an `int*`, which no `?` makes nullable (N1, N5)")]
     [InlineData("int? | string x = 1\nprint(x)", "1: a nullable case of a union, `int?` (N1, D9)")]
     [InlineData("void? F() {\n}\n\nprint(1)", "1: a nullable `void` (N1)")]
     [InlineData("data In(int X)\ndata Out(In? I)\n\nmut o = Out(In(1))\nif o.I != null {\n    o.I.X = 2\n}", "6: an assignment of a field through a nullable variable or field (N3, M4)")]
@@ -7902,7 +8006,7 @@ public sealed class CheckerTests
     [InlineData("T Bad<T>() => T.Make((mut f) => 0)\n\nprint(Bad<Point>())", "7: syntax: `T.Make` takes one lambda of one parameter with no type, `T.Make(f => ...)` (T33)")]
     [InlineData("T Bad<T>() => T.Make(x: f => 0)\n\nprint(Bad<Point>())", "7: syntax: `T.Make` takes one lambda of one parameter with no type, `T.Make(f => ...)` (T33)")]
     [InlineData("T Bad<T>() => T.Make(mut (f => 0))\n\nprint(Bad<Point>())", "7: syntax: `T.Make` takes one lambda of one parameter with no type, `T.Make(f => ...)` (T33)")]
-    [InlineData("T Bad<T>() => T?.Make(f => 0)\n\nprint(Bad<Point>())", "7: unknown-name: no `T` is visible here (V10)|7: : a call after `?.` or `?[` (N5)")]
+    [InlineData("T Bad<T>() => T?.Make(f => 0)\n\nprint(Bad<Point>())", "7: unknown-name: no `T` is visible here (V10)")]
     [InlineData("T Bad<T>() => T.Make(f => f)\n\nprint(Bad<Point>())", "7: syntax: `f` walks the fields of `T`, and stands only in `f.Name`, `f.Type` as a type and `f.Get(value)` (T33)")]
     [InlineData("int Grow(mut List<int> t) {\n    t.Add(9)\n    return 0\n}\n\nint Sum(List<int> xs, Point p) => p.X\n\nint Fill<T>(mut List<int> numbers) => Sum(numbers, T.Make(f => Grow(mut numbers)))\n\nmut list = List<int>()\nprint(Fill<Point>(mut list))", "14: changed-while-held: `numbers` is still in use while the call that takes `mut numbers` runs, and a `List<int>` is not copied: copy it into a variable of its own on a line before (M7)")]
     [InlineData("T Bad<T>(T value) => T.Make(value => 0)\n\nprint(Bad(Point(1, 2)))", "7: redeclared: `value` is visible already (V9)")]

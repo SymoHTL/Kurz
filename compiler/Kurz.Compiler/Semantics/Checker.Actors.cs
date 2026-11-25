@@ -907,7 +907,7 @@ public sealed partial class Checker
         sending = outer;
         CallRan();
         RecordThrough(s.Call, typed);
-        if (typed.IsError || model.TryCallOf(s.Call) is not { } call)
+        if (typed.IsError || model.TryCallOf(model.IsChainCall(s.Call, out var chain) ? chain.Call : s.Call) is not { } call) // N5: after `?.`, the call it is read as
         {
             return;
         }

@@ -1,0 +1,14 @@
+// expect: error nullable-unchecked at 14
+// rules: N5, N9
+
+// a `mut` call after `?.` on a path a call can change, whose arguments run a call, is the error the same call gets with that
+// call on the line before it
+class Bag(mut List<int>? Items)
+
+int Drop(Bag b) {
+    b.Items = null
+    return 5
+}
+
+c = Bag([1])
+c.Items?.Add(Drop(c))

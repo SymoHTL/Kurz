@@ -5826,6 +5826,23 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(WithFieldPath, fenced, "with-field-path-fenced"), 0, ["[7]", "[9]"], "");
         Ran(BuildAndRun(WithFieldName, fenced, "with-field-name-fenced"), 0, ["[7]", "[9]"], "");
         Ran(BuildAndRun(WithFieldLambda, fenced, "with-field-lambda-fenced"), 0, ["[7]", "[9]"], "");
+        // N5: a call after `?.` on a field of an instance whose argument sets the field to `null` and makes a string of the same size:
+        // the value the call is made on holds a count of its own to the end of the statement (InstanceField, K2), as before a dot
+        const string ChainReceiver = """
+            class Box(mut string? Name, mut string? Other)
+
+            string Drop(Box b) {
+                b.Name = null
+                b.Other = "zzzzzzzzzzzzzzzz{3 + 3}"
+                return "abcdefghijklmnop"
+            }
+
+            Box x = Box("abcdefghijklmnop{1 + 1}", null)
+            bool? r = x.Name?.StartsWith(Drop(x))
+            print("{r}")
+            print("{x.Name == null}")
+            """;
+        Ran(BuildAndRun(ChainReceiver, fenced, "chain-receiver-fenced"), 0, ["true", "true"], "");
 
         // the positive control: a write into a freed block under the same allocator ends the process, and so does one into a freed
         // block of more than 262144 bytes, which the thread keeps outside the fence

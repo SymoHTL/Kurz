@@ -403,6 +403,11 @@ public sealed partial class Emitter
     /// </summary>
     private string CollectionPlace(Expression receiver)
     {
+        if (Unwrap(receiver) is ChainValue chain)
+        {
+            return chainPlaces[chain](); // N5: the place the chain names, taken where the call takes it
+        }
+
         if (InstanceFieldPlace(receiver) is { } field)
         {
             return field; // K2: a field of an instance, which holds its list or map as a variable does
