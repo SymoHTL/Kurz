@@ -5673,7 +5673,9 @@ T88). A worker whose `eventfd` or record the system refuses ends the start with 
 *(assumed in §6)*. A message to an actor on another thread is copied into the receiver's heap by the
 receiver at its turn, and a result into the waiter's heap as its wait returns (§6, the owner,
 2026-11-20, #519, comment 7051492844, T17, 1), and an ended actor's first page is freed once every
-worker thread has passed a turn since its end (§6, the same comment, T16, 2).
+worker thread has passed a turn since its end (§6, the same comment, T16, 2). A wait of the top-level
+code raises `deadlock` at the line of its call where no worker thread has an actor to run, no timer is
+pending and no poller holds a registration, as Go's `checkdead` *(assumed in §6)*.
 
 No case: for the count of the threads, since a case is a single file with no `project.kz` (chapter 0) and
 gives its program no environment, as `log-filter`'s place in chapter 12 says, and cannot make its system
