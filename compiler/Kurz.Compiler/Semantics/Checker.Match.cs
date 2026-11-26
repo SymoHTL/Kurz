@@ -505,6 +505,7 @@ public sealed partial class Checker
         var handled = new List<KurzType>();
         var hasElse = false;
         var armWrong = false;
+        var elseTakesVoid = false; // O7: the arm `else` takes a `void` case no arm before it handled, whose bare `throw` has no value (issue 650)
         var start = frame.Known; // N3: the success goes on with what held after the call, an arm with that too, and after both holds what each keeps
         var reaching = new List<ImmutableHashSet<NullPath>> { start };
         var startMoves = frame.Moves; // U12: each arm is a branch
@@ -524,6 +525,7 @@ public sealed partial class Checker
                     }
 
                     hasElse = true;
+                    elseTakesVoid = rest.Any(c => Types.IsVoid(c) && !handled.Any(h => IsCaseOf(c, h)));
                     break;
                 case TypePattern tp:
                     {
@@ -576,7 +578,7 @@ public sealed partial class Checker
                     throw new InvalidOperationException(arm.Pattern.GetType().Name);
             }
 
-            if (CheckElseArm(arm, success) == Flow.Completes)
+            if (CheckElseArm(arm, success, arm.Pattern is ElsePattern && elseTakesVoid) == Flow.Completes)
             {
                 reaching.Add(frame.Known); // an arm that returns or throws reaches nothing after the call (N3)
             }
@@ -644,14 +646,16 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>O5: what the arm does (<see cref="CheckElseArmBody"/>), with the name its pattern binds as the one its bare <c>throw</c> reads (O7, U12).</summary>
-    private Flow CheckElseArm(MatchArm arm, KurzType success)
+    /// <summary>O5: what the arm does (<see cref="CheckElseArmBody"/>), with the name its pattern binds as the one its bare <c>throw</c> reads (O7, U12);
+    /// <paramref name="takesVoid"/> is an arm <c>else</c> that takes a <c>void</c> case, whose bare <c>throw</c> has no value either (O7, issue 650).</summary>
+    private Flow CheckElseArm(MatchArm arm, KurzType success, bool takesVoid = false)
     {
-        var (outer, outerVoid) = (elseArmName, elseArmVoid);
+        var (outer, outerVoid, outerElse) = (elseArmName, elseArmVoid, elseArmTakesVoid);
         elseArmName = arm.Pattern is TypePattern { Binding: not null } named ? model.DeclarationOf(named) : null;
         elseArmVoid = arm.Pattern is TypePattern { Type: Syntax.VoidType }; // the arm of a `void` case, whose bare `throw` has no value (O7)
+        elseArmTakesVoid = takesVoid;
         var flow = CheckElseArmBody(arm.Body, success);
-        (elseArmName, elseArmVoid) = (outer, outerVoid);
+        (elseArmName, elseArmVoid, elseArmTakesVoid) = (outer, outerVoid, outerElse);
         return flow;
     }
 

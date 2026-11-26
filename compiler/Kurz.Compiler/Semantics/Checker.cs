@@ -55,6 +55,7 @@ public sealed partial class Checker
     private bool inElseArm;
     private VariableSymbol? elseArmName; // O7, U12: the name the arm of `else` being checked binds, which its bare `throw` reads
     private bool elseArmVoid; // O7: the arm of `else` being checked takes a `void` case, which its bare `throw` cannot throw (issue 641)
+    private bool elseArmTakesVoid; // O7: the arm being checked is `else`, and it takes a `void` case no arm before it handled (issue 650)
     private CallExpression? loopSource; // S16: the collection of the `for` loop being checked, the one place `f.Lines()` stands
     private bool realKeepsOwnType;
     private int blockDepth;
@@ -2453,6 +2454,12 @@ public sealed partial class Checker
                     // O7: a bare `throw` throws the case its arm took, and a `void` case holds no value (issue 641, the product pass's Q2
                     // (a), comment 7165561768, assumed)
                     Report(ErrorIds.ThrowNeedsValue, t.Line, "a bare `throw` throws the case its arm took, and a `void` case holds none (O7)");
+                }
+                else if (elseArmTakesVoid)
+                {
+                    // O7: the arm `else` takes the `void` case no arm before it handled, as the arm of a `void` case does, and a bare `throw`
+                    // there has no value either (issue 650, the product pass's Q1 (a) and Q3 (b), comment 7176868566, assumed)
+                    Report(ErrorIds.ThrowNeedsValue, t.Line, "a bare `throw` throws the case its arm took, and `else` here takes the `void` case, which holds none (O7)");
                 }
                 else if (elseArmName is { } name)
                 {
