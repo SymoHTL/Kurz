@@ -66,6 +66,10 @@ extern "C" {
     int waitid(int type, int id, void* info, int options)
     int getrlimit(int resource, long* limits)
     int kill(int pid, int number)
+    int epoll_create1(int options)
+    int epoll_ctl(int poller, int operation, int fd, void* event)
+    int epoll_wait(int poller, void* events, int count, int timeout)
+    int pthread_atfork(void* prepare, void* parent, extern "C" () => void child)
 }
 
 // The platform's unwinder, libgcc_s's, which the trace walks the stack with (design record, section 6),
@@ -2098,14 +2102,29 @@ pub long OpenFile(byte* path, bool create) {
     return Checked(result)
 }
 
-// Up to `count` bytes of the file `fd` read to `bytes`: their count, 0 at the end of the file.
+// Up to `count` bytes of the file `fd` read to `bytes`: their count, 0 at the end of the file. A read of a socket, which the
+// runtime makes non-blocking, that would block (`EAGAIN`, 11) waits in the poller for `EPOLLIN` (1) within the socket's bound
+// (`Ready`) and is made again, as Tokio's `PollEvented` reads (issue 658): a socket with bytes ready costs no call of the
+// poller. A file or a pipe keeps its `EAGAIN`.
 pub long ReadFile(int fd, byte* bytes, long count) {
     mut long result = -1
-    raw {
-        int* error = __errno_location()
-        result = read(fd, bytes, count)
-        while result < 0 && *error == 4 {
+    mut bool blocked = true
+    while blocked {
+        raw {
+            int* error = __errno_location()
             result = read(fd, bytes, count)
+            while result < 0 && *error == 4 {
+                result = read(fd, bytes, count)
+            }
+
+            blocked = result < 0 && *error == 11
+        }
+
+        if blocked {
+            long waited = Ready(fd, 1, 20)
+            if waited < 0 {
+                return waited
+            }
         }
     }
 
@@ -2129,7 +2148,8 @@ pub long Seek(int fd, long offset) {
 
 // The `count` bytes at `bytes` written to the file `fd`, `write` called again with the rest where it
 // took a part, as `print` writes and Rust's `write_all` does: `count`, or the bytes written before a
-// call that took none, which is `WriteZero` to the caller, or the failure of the call that failed.
+// call that took none, which is `WriteZero` to the caller, or the failure of the call that failed. A write of a socket that
+// would block (`EAGAIN`, 11) waits in the poller for `EPOLLOUT` (4) within the socket's bound and is made again (`Writable`).
 pub long WriteFile(int fd, byte* bytes, long count) {
     mut long done = 0
     while done < count {
@@ -2139,17 +2159,34 @@ pub long WriteFile(int fd, byte* bytes, long count) {
         }
 
         if written < 0 {
-            return Checked(written)
-        }
-
-        if written == 0 {
+            long waited = Writable(fd)
+            if waited <= 0 {
+                return waited
+            }
+        } else if written == 0 {
             return done
+        } else {
+            done = done + written
         }
-
-        done = done + written
     }
 
     return done
+}
+
+// After a write of the socket `fd` that failed: where it would block (`EAGAIN`, 11), the wait in the poller for `EPOLLOUT` (4)
+// within the socket's bound for its writes (`SO_SNDTIMEO`, 21), 1 where the socket is ready for the write to be made again, -11
+// where the bound passed; the failure of the write, or of the poller, else.
+long Writable(int fd) {
+    mut bool blocked = false
+    raw {
+        blocked = *__errno_location() == 11
+    }
+
+    if !blocked {
+        return Checked(-1)
+    }
+
+    return Ready(fd, 4, 21)
 }
 
 // The file `fd` closed: 0, or the failure of `close`, of which an interrupt is none: Linux lets go of
@@ -2592,8 +2629,10 @@ pub int Variable(byte* key, mut string value) {
 // byte 0, with room for one of IPv6, 28 bytes; the length `getsockname` takes at 32; the 1 that
 // `setsockopt` sets at 36; the 0 that `ioctl` takes at 40; the hints for `getaddrinfo` at 64, 48 bytes;
 // the list it gives at 112; the `struct timeval` of a bound at 128, 16 bytes; the `struct pollfd` of a
-// connection in progress at 144, 8 bytes; the error `SO_ERROR` gives at 152 and its length at 156; and
-// the `struct timespec` of the monotonic clock at 160, 16 bytes.
+// connection in progress at 144, 8 bytes; the error `SO_ERROR` gives at 152 and its length at 156; the
+// `struct timespec` of the monotonic clock at 160, 16 bytes; the `struct epoll_event` of a registration in the
+// poller at 176, 16 bytes, and the 8 bytes of its data at 192 (`PollAdd`, `PollWait`); the wait of a call that would
+// block at 200, 8 bytes (`Waiter`); and the events `epoll_wait` gives at 256, at most 64 of 16 bytes.
 thread static mut byte* endpoints = null
 
 // The page above, mapped where this thread has none yet: its address, or null where the system refuses it.
@@ -2608,6 +2647,276 @@ byte* Endpoints() {
     }
 
     return held
+}
+
+// The poller of the process (section 6, assumed there: one poller per process, under `epoll` on Linux, waited on by the
+// scheduler where it runs out of work, as Tokio's driver; issue 658): the descriptor `epoll_create1` gave, with
+// `EPOLL_CLOEXEC` (524288), at the first socket (`Poller`), -1 before it.
+static mut int poller = -1
+
+// The poller of the process, made where it has none (`poller`): its descriptor, or the failure of `epoll_create1` or of
+// `pthread_atfork`, which gives a child of a `fork` its own (`Forked`). The opening of a socket makes it first (`Attempt`), so
+// that it takes the descriptor before the first socket's in every run, as Go's `netpollGenericInit` makes its poller at the
+// first descriptor it polls, and a program with no socket opens none.
+long Poller() {
+    raw {
+        if poller < 0 {
+            int made = epoll_create1(524288)
+            if made < 0 {
+                return -long(*__errno_location())
+            }
+
+            if !forkHeld {
+                int held = pthread_atfork(null, null, Forked)
+                if held != 0 {
+                    close(made)
+                    return -long(held)
+                }
+
+                forkHeld = true
+            }
+
+            poller = made
+        }
+
+        return long(poller)
+    }
+}
+
+// Whether `Forked` is registered with `pthread_atfork`, once in the process, since a handler registered twice runs twice.
+static mut bool forkHeld = false
+
+// The poller dropped in the child of a `fork`, which shares its parent's (`pthread_atfork`): one `epoll` that two processes wait
+// on gives an event to the wait of either, with a block of the other's memory, so that the child's next registration makes a
+// poller of its own (`Poller`), as libuv's `uv_loop_fork` and libevent's `event_reinit` make the loop again in a child.
+extern "C" void Forked() {
+    raw {
+        if poller >= 0 {
+            close(poller)
+            poller = -1
+        }
+    }
+}
+
+// The wait of a call on a socket that would block (`EAGAIN`, 11) set to `wait`, which `runtime/common/` gives at the start of the
+// process, since this file calls none of that file's functions: given the descriptor, the events of `epoll` it waits for,
+// `EPOLLIN` (1) or `EPOLLOUT` (4), and the bound in nanoseconds, it parks the actor that called, or the top-level code, until the
+// descriptor is ready, 1, or the bound passed, 0, or gives the failure of the poller, below 0. It stands in the page of the thread
+// that starts the process, at 200 (`Endpoints`), the thread that runs every actor (U35), since a function is no constant that a
+// `static` can start at (R13); a thread with no waiter in its page waits in `poll` (`Blocked`).
+pub void Waiter(extern "C" (int, int, long) => int wait) {
+    raw {
+        byte* held = Endpoints()
+        if held != null {
+            *Ptr<extern "C" (int, int, long) => int>(held + 200) = wait
+        }
+    }
+}
+
+// The wait of a thread whose page holds no waiter (`Waiter`): `poll` on `fd` for `events`, `POLLIN` (1) or `POLLOUT` (4), the
+// numbers of `epoll`'s, for `nanoseconds` in whole milliseconds, rounded up, at most the largest `int`, with no bound where it is
+// the largest `long`: 1 where it is ready or a signal interrupted the wait, after which the call is made again, 0 where the time
+// ran out, or the failure of `poll`.
+int Blocked(int fd, int events, long nanoseconds, byte* held) {
+    mut long wait = -1
+    if nanoseconds < 9223372036854775807 {
+        wait = nanoseconds / 1000000
+        if nanoseconds % 1000000 != 0 {
+            wait = wait + 1
+        }
+
+        if wait > 2147483647 {
+            wait = 2147483647
+        }
+    }
+
+    mut int got = 0
+    raw {
+        int* error = __errno_location()
+        *Ptr<int>(held + 144) = fd
+        *Ptr<int>(held + 148) = events
+        int polled = poll(Ptr<void>(held + 144), 1, int(wait))
+        if polled > 0 || (polled < 0 && *error == 4) {
+            got = 1
+        } else if polled < 0 {
+            got = -*error
+        }
+    }
+
+    return got
+}
+
+// The call that would block on `fd` waited for (`Waiter`, `Blocked`): 1 where the call is to be made again, its failure, or
+// `EAGAIN` negated, -11, where the bound passed first, the number the system gave a blocking socket whose bound ran out, which the
+// kinds give as `TimedOut` (S9; section 12, 2026-11-13, "Keep 11"), -12 (`ENOMEM`) where the thread's page cannot be mapped.
+long WaitReady(int fd, int events, long nanoseconds) {
+    mut int got = 0
+    raw {
+        byte* held = Endpoints()
+        if held == null {
+            return -12
+        }
+
+        if *Ptr<long>(held + 200) == 0 {
+            got = Blocked(fd, events, nanoseconds, held)
+        } else {
+            extern "C" (int, int, long) => int wait = *Ptr<extern "C" (int, int, long) => int>(held + 200)
+            got = wait(fd, events, nanoseconds)
+        }
+    }
+
+    if got == 0 {
+        return -11
+    }
+
+    if got < 0 {
+        return long(got)
+    }
+
+    return 1
+}
+
+// The bound of the socket `fd` for its reads and its `accept`, with `option` `SO_RCVTIMEO` (20), or for its writes, with
+// `SO_SNDTIMEO` (21), in nanoseconds, which `SetTimeout` keeps in the option and the poller's timer measures (section 12,
+// 2026-11-13, "Same bounds, poller timer"), since the socket does not block and the kernel measures nothing: the largest `long`
+// where the option holds no bound, -1 where it cannot be read, a descriptor that is no socket among them (`Ready`).
+long SocketBound(int fd, int option) {
+    mut long bound = 9223372036854775807
+    raw {
+        byte* held = Endpoints()
+        if held == null {
+            return bound
+        }
+
+        *Ptr<long>(held + 128) = 0
+        *Ptr<long>(held + 136) = 0
+        *Ptr<int>(held + 156) = 16
+        if getsockopt(fd, 1, option, Ptr<void>(held + 128), Ptr<int>(held + 156)) == 0 {
+            long seconds = *Ptr<long>(held + 128)
+            long micros = *Ptr<long>(held + 136)
+            if (seconds != 0 || micros != 0) && seconds < 9223372036 {
+                bound = seconds * 1000000000 + micros * 1000
+            }
+        } else {
+            bound = -1
+        }
+    }
+
+    return bound
+}
+
+// The wait of a call on `fd` that would block (`EAGAIN`, 11) for the `events` of `epoll` within the socket's bound that `option`
+// names (`SocketBound`, `WaitReady`): 1 where the call is to be made again, -11 where the bound passed, the failure of the poller;
+// -11 at once, the `EAGAIN` as the system gave it, where `fd` is no socket, so that a file or a pipe a program made non-blocking
+// keeps the kind `WouldBlock` for it, as every `EAGAIN` but a socket's bound keeps it (S9).
+long Ready(int fd, int events, int option) {
+    long bound = SocketBound(fd, option)
+    if bound < 0 {
+        return -11
+    }
+
+    return WaitReady(fd, events, bound)
+}
+
+// The descriptor `fd` registered in the poller for the `events` of `epoll`, with `EPOLLONESHOT` (1 << 30), so that one event
+// disarms it, its data the block `block` of the actor that waits, as Tokio's `Registration` holds its waker: `EPOLL_CTL_MOD` (3)
+// for a descriptor an event disarmed, `EPOLL_CTL_ADD` (1) where the poller has none (`ENOENT`, 2). The data stands at `dataAt` of
+// the 12 bytes of x86-64's packed struct and the 16 of AArch64's, which each architecture's file gives (`EpollDataAt`), copied a
+// byte at a time. 0, or the failure, -12 (`ENOMEM`) where the thread's page cannot be mapped.
+pub long PollAdd(int fd, int events, byte* block, long dataAt) {
+    mut long result = -12
+    raw {
+        byte* held = Endpoints()
+        if held == null {
+            return result
+        }
+
+        int* error = __errno_location()
+        long made = Poller()
+        if made < 0 {
+            return made
+        }
+
+        *Ptr<long>(held + 176) = 0
+        *Ptr<long>(held + 184) = 0
+        *Ptr<int>(held + 176) = events | 1073741824
+        *Ptr<byte*>(held + 192) = block
+        mut long i = 0
+        while i < 8 {
+            held[176 + dataAt + i] = held[192 + i]
+            i = i + 1
+        }
+
+        mut int done = epoll_ctl(poller, 3, fd, Ptr<void>(held + 176))
+        if done != 0 && *error == 2 {
+            done = epoll_ctl(poller, 1, fd, Ptr<void>(held + 176))
+        }
+
+        result = 0
+        if done != 0 {
+            result = -long(*error)
+        }
+    }
+
+    return result
+}
+
+// The registration of `fd` taken out of the poller, `EPOLL_CTL_DEL` (2), for a wait whose bound passed or whose actor fell while
+// the registration was armed; a failure ignored, a descriptor closed since among them.
+pub void PollRemove(int fd) {
+    raw {
+        byte* held = Endpoints()
+        if held != null && poller >= 0 {
+            epoll_ctl(poller, 2, fd, Ptr<void>(held + 176))
+        }
+    }
+}
+
+// The wait of the scheduler that has nothing to run (section 6): `epoll_wait` for at most `nanoseconds`, in whole milliseconds,
+// rounded up so that a deadline is not passed before it comes, as Tokio's driver rounds its timeout, and at most the largest
+// `int`; the data of each event, a block that `PollAdd` registered, written to `ready`, at most `count` of them: their count, 0
+// where a signal interrupted the wait or no registration was ever made. The events stand `dataAt` + 8 bytes apart.
+pub long PollWait(long nanoseconds, byte* ready, long count, long dataAt) {
+    mut long given = 0
+    raw {
+        byte* held = Endpoints()
+        if held == null || poller < 0 {
+            return 0
+        }
+
+        mut long wait = 0
+        if nanoseconds > 0 {
+            wait = nanoseconds / 1000000
+            if nanoseconds % 1000000 != 0 {
+                wait = wait + 1
+            }
+
+            if wait > 2147483647 {
+                wait = 2147483647
+            }
+        }
+
+        mut long most = count
+        if most > 64 {
+            most = 64
+        }
+
+        long size = dataAt + 8
+        int got = epoll_wait(poller, Ptr<void>(held + 256), int(most), int(wait))
+        while given < long(got) {
+            byte* event = held + 256 + given * size
+            mut long i = 0
+            while i < 8 {
+                held[192 + i] = event[dataAt + i]
+                i = i + 1
+            }
+
+            *Ptr<byte*>(ready + given * 8) = *Ptr<byte*>(held + 192)
+            given = given + 1
+        }
+    }
+
+    return given
 }
 
 // The bound of a read, a write and `Connect` on a socket where the program sets none, 5 seconds in
@@ -2766,14 +3075,15 @@ long WrittenWithin(int fd, byte* bytes, long count, long nanoseconds) {
         }
 
         if written < 0 {
-            return Checked(written)
-        }
-
-        if written == 0 {
+            long waited = Writable(fd)
+            if waited <= 0 {
+                return waited
+            }
+        } else if written == 0 {
             return done
+        } else {
+            done = done + written
         }
-
-        done = done + written
     }
 
     return done
@@ -2791,36 +3101,40 @@ long Bounded(int fd) {
 }
 
 // The connection in progress on the socket `fd` waited for until `deadline`, a time of `Monotonic`, with
-// the page at `held`, as Rust's `poll_connected` waits for it on Linux (S9): `poll` for `POLLOUT` (4) for
-// the time left in whole milliseconds, cut down, at least 1 and at most the largest `int`, made again where
-// a signal interrupted it (`EINTR`, 4) or where it gave no event, until the clock read again says the time
-// ran out; an event without `POLLERR` (8) or `POLLHUP` (16) is the connection made, and one with either is
-// the error `SO_ERROR` (4) gives. 0; -4100 where the time ran out; the failure of `poll` or of the
-// connection; or -4099, `Other` with the number 0, where `SO_ERROR` holds none, where Rust gives
-// `Uncategorized`.
+// the page at `held`, as Rust's `poll_connected` waits for it on Linux (S9): a wait in the poller for
+// `EPOLLOUT` (4) for the time left (`WaitReady`; issue 658), then `poll` for `POLLOUT` (4) with no time, which
+// reads the events, made again where a signal interrupted it (`EINTR`, 4) or where it gave no event, until
+// the clock read again says the time ran out; an event without `POLLERR` (8) or `POLLHUP` (16) is the
+// connection made, and one with either is the error `SO_ERROR` (4) gives. 0; -4100 where the time ran out;
+// the failure of the poller, of `poll` or of the connection; or -4099, `Other` with the number 0, where
+// `SO_ERROR` holds none, where Rust gives `Uncategorized`.
 long Connected(int fd, long deadline, byte* held) {
     mut long result = -4099
-    raw {
-        int* error = __errno_location()
-        mut bool waiting = true
-        while waiting {
-            long now = Monotonic(held)
-            if now >= deadline {
-                return -4100
-            }
+    mut bool waiting = true
+    while waiting {
+        mut long now = 0
+        raw {
+            now = Monotonic(held)
+        }
 
-            mut long wait = (deadline - now) / 1000000
-            if wait == 0 {
-                wait = 1
-            }
+        if now >= deadline {
+            return -4100
+        }
 
-            if wait > 2147483647 {
-                wait = 2147483647
-            }
+        long waited = WaitReady(fd, 4, deadline - now)
+        if waited == -11 {
+            return -4100
+        }
 
+        if waited < 0 {
+            return waited
+        }
+
+        raw {
+            int* error = __errno_location()
             *Ptr<int>(held + 144) = fd
             *Ptr<int>(held + 148) = 4
-            int polled = poll(Ptr<void>(held + 144), 1, int(wait))
+            int polled = poll(Ptr<void>(held + 144), 1, 0)
             if polled < 0 && *error != 4 {
                 return -long(*error)
             }
@@ -2829,6 +3143,10 @@ long Connected(int fd, long deadline, byte* held) {
                 waiting = false
             }
         }
+    }
+
+    raw {
+        int* error = __errno_location()
 
         if (held[150] & 24) == 0 {
             return 0
@@ -2916,21 +3234,22 @@ long ScopeOf(byte* text, long count) {
 // listening with room for 128 connections that wait, as Rust's `TcpListener::bind` sets them; else
 // connected to it by `deadline`, a time of `Monotonic`, as Rust's `connect_timeout` connects: the socket
 // opened with `SOCK_NONBLOCK` (2048), `connect` made again where a signal interrupted it (`EINTR`, 4) and
-// a socket that is connected already (`EISCONN`, 106) taken, as Rust's `connect` takes it, the socket made
-// blocking again by `ioctl` with `FIONBIO` (21537) and 0, as Rust's `set_nonblocking`, and a connection in
+// a socket that is connected already (`EISCONN`, 106) taken, as Rust's `connect` takes it, and a connection in
 // progress (`EINPROGRESS`, 115) waited for by `Connected`; then the default bound set on its reads and
-// writes (`Bounded`): the descriptor, or the failure with the socket closed.
+// writes (`Bounded`): the descriptor, or the failure with the socket closed. Every socket stays non-blocking,
+// the listener among them, so that a call on it that would block waits in the poller (issue 658), where Rust's
+// `connect_timeout` makes the socket blocking again.
 long Attempt(byte* address, int length, bool listening, long deadline) {
     mut long result = -1
     raw {
         int* error = __errno_location()
         int family = int(address[0]) + int(address[1]) * 256
-        mut int blocking = 2048
-        if listening {
-            blocking = 0
+        long made = Poller()
+        if made < 0 {
+            return made
         }
 
-        int fd = socket(family, 524289 + blocking, 0)
+        int fd = socket(family, 526337, 0)
         if fd < 0 {
             return -long(*error)
         }
@@ -2958,13 +3277,12 @@ long Attempt(byte* address, int length, bool listening, long deadline) {
 
             bool progress = done != 0 && *error == 115
             if done == 0 || progress {
-                *Ptr<int>(endpoints + 40) = 0
-                done = ioctl(fd, 21537, Ptr<void>(endpoints + 40))
-                if done == 0 && progress {
+                done = 0
+                if progress {
                     failure = Connected(fd, deadline, endpoints)
                 }
 
-                if done == 0 && failure == 0 {
+                if failure == 0 {
                     failure = Bounded(fd)
                 }
             }
@@ -3149,13 +3467,28 @@ pub long ConnectWithin(byte* text, long nanoseconds) {
 // where a signal interrupted it, as Rust's `accept` takes it, with the default bound set on its reads and
 // writes (`Bounded`), which the listener's own bound would otherwise give it, since Linux copies a
 // listener's options to the sockets it accepts: its descriptor, or the failure with the connection closed.
+// The connection is non-blocking, `SOCK_NONBLOCK` (2048), as the runtime makes every socket, and an `accept4`
+// that would block (`EAGAIN`, 11) waits in the poller for `EPOLLIN` (1) within the listener's bound and is made
+// again (issue 658).
 pub long Accept(int fd) {
     mut long result = -1
-    raw {
-        int* error = __errno_location()
-        result = long(accept4(fd, null, null, 524288))
-        while result < 0 && *error == 4 {
-            result = long(accept4(fd, null, null, 524288))
+    mut bool blocked = true
+    while blocked {
+        raw {
+            int* error = __errno_location()
+            result = long(accept4(fd, null, null, 526336))
+            while result < 0 && *error == 4 {
+                result = long(accept4(fd, null, null, 526336))
+            }
+
+            blocked = result < 0 && *error == 11
+        }
+
+        if blocked {
+            long waited = Ready(fd, 1, 20)
+            if waited < 0 {
+                return waited
+            }
         }
     }
 

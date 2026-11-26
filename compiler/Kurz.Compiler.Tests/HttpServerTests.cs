@@ -1023,7 +1023,8 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         // W8 (section 12, the default of the follow-up's product pass, Q12): the file `HttpSendFile` opened is closed on every path, a
         // failed write among them, since a file closes at its last count (S5) when the send returns. A client that
         // reads nothing holds a file of 8 MiB past the bound of its first write, 100 ms at 1 MB a second, and the write gives
-        // `TimedOut`; the file, the program's descriptor 5 after the listener's 3 and the connection's 4, is then closed
+        // `TimedOut`; the file, the program's descriptor 6 after the poller's 3, which the first socket makes, the listener's 4 and the
+        // connection's 5, is then closed
         const string text = """
             extern "C" {
                 int fcntl(int fd, int command, ...)
@@ -1059,8 +1060,8 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
                     HttpError e => print(e.Detail)
                 }
 
-                print(Open(3))
-                print(Open(5))
+                print(Open(4))
+                print(Open(6))
             }
 
             Main(args[0]) else {
@@ -1112,7 +1113,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         // W10 (section 12, the default of the follow-up's product pass, Q10): `WriteWithin` sets `SO_SNDTIMEO` (21) to what remains of
         // a response's bound before each call of the system, and the stream's default bound of 5 seconds (S9) again before it returns,
         // so that a later write that sets no time of its own, the `100 Continue` of the next request among them, is not held to a
-        // remainder; the handler reads the bound of the stream `Accept` gave, descriptor 5, at each request (as FileTests' `Bounds`),
+        // remainder; the handler reads the bound of the stream `Accept` gave, descriptor 6, at each request (as FileTests' `Bounds`),
         // under the grants `raw` and `native`; the first request has a body, so that its response is written before the second is
         // read and not held for it (W9)
         const string text = """
@@ -1146,7 +1147,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
                 client.Write("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 1\r\n\r\nxGET /b HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
                 client.ShutdownWrite()
                 HttpServer.ServeConnection(server, (HttpRequest r) => {
-                    print("{r.Path} {Bound(5, 21)}")
+                    print("{r.Path} {Bound(6, 21)}")
                     return HttpResponse.Empty(204)
                 }, HttpLimits(MinResponseDataRate: HttpRate(10_000_000, 100ms)))
             }

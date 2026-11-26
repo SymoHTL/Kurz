@@ -278,6 +278,21 @@ pub void Sleep(long nanoseconds) {
     }
 }
 
+// The poller of `runtime/common/` on Windows, where a socket keeps its blocking wait, bounded by its options (issue 658): no
+// waiter is kept, since no call here would block in the poller's place, no registration is made, and the scheduler's wait
+// never reaches `PollWait`, since the count of registrations stays 0; the byte of an event's data is none.
+pub void Waiter(extern "C" (int, int, long) => int wait) {
+}
+
+pub long PollAdd(int fd, int events, byte* block, long dataAt) => -4099
+
+pub void PollRemove(int fd) {
+}
+
+pub long PollWait(long nanoseconds, byte* ready, long count, long dataAt) => 0
+
+pub long EpollDataAt() => 0
+
 // The bound of a call that waits where no `within` names another, 5 seconds in nanoseconds (U36), the value
 // Linux's runtime gives its sockets and its calls, which a test holds equal.
 pub long DefaultBound() => 5000000000

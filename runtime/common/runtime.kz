@@ -33,6 +33,7 @@ static mut byte* sharedWords = null
 // start gave it (S13).
 pub void Start(int count, byte* values) {
     sys.Start(count, values)
+    sys.Waiter(SocketWaited)
     raw {
         byte* words = std.AllocateIn(null, 48)
         if words != null {
@@ -5001,7 +5002,8 @@ int Answer(byte* reply, byte* message, string file, int line) {
 // where one of those ends the loop, false where none of them is left, so that nothing could set the reply, where `Answer` raises
 // `deadlock` at the call's line and the test runner fails the test at its own (`RunTests`; Y5), or each at the lines of the calls
 // an actor's start keeps out where such calls close the loop (`Kept`). An actor that sleeps is something left: with nothing else
-// to run, the loop sleeps to the first timer or the deadline (`Sleeping`; S28).
+// to run, the loop sleeps to the first timer or the deadline (`Sleeping`; S28); so is a registration of the poller, a call on a
+// socket that waits, with no deadline among them, and the loop then waits in the poller (`polled`, `IdleWait`; issue 658).
 bool RootWait(byte* reply) {
     raw {
         return RootLoop(reply, *Ptr<long>(reply + 16))
@@ -5032,14 +5034,14 @@ bool RootLoop(byte* reply, long deadline) {
                     // constructor's (O11)
                     Restart(ended)
                 } else if runFirst == null {
-                    PauseSleep(Earliest(Earliest(due, deadline), Next()) - now)
+                    IdleWait(Earliest(Earliest(due, deadline), Next()) - now)
                 } else {
                     RunOne()
                 }
             } else if runFirst != null {
                 RunOne()
-            } else if reply == null || Sleeping() {
-                PauseSleep(Earliest(deadline, Next()) - now)
+            } else if reply == null || Sleeping() || polled > 0 {
+                IdleWait(Earliest(deadline, Next()) - now)
             } else {
                 return false
             }
@@ -5125,6 +5127,107 @@ void Park(long deadline) {
     }
 
     sys.Left()
+}
+
+// The registrations of the poller whose wait has not ended (`SocketWaited`): where it is above 0, the scheduler that has nothing
+// to run waits in the poller (`IdleWait`), and the top-level code's wait that finds nothing else left waits there too and
+// raises no `deadlock` (`RootLoop`; section 6: a deadlock where no timer is pending and the poller holds no registration, as Go's
+// `checkdead` counts its netpoller).
+thread static mut long polled = 0
+
+// The blocks that `sys.PollWait` gives, at most 64 of 8 bytes, taken of the thread's own heap at the first wait (`Polled`).
+thread static mut byte* readied = null
+
+// The wait of a call on the socket `fd` that would block, which the runtime's code for the system calls (`sys.Waiter`; section 6,
+// "the poller"; section 12, 2026-11-13, "Same bounds, poller timer"; issue 658): the descriptor registered in the poller for
+// `events` (`sys.PollAdd`), with a block shaped as a reply that is never answered: its word, which the poller sets to 1 at the
+// descriptor's event (`Polled`), its waiter, the deadline `nanoseconds` from now on the runtime's clock, which `advance` moves
+// (Y10, section 11), its links among the timers and, at 40, the descriptor plus one, so that a fall unhooks the registration
+// (`Fall`). Inside a message the activation parks as a sleep does (`Park`), among the timers, until the event or the deadline,
+// and the calls of its chain are let in above it; the top-level code runs what its wait on a call runs, to the event or the
+// deadline (`RootLoop`). 1 where the descriptor is ready, 0 where the deadline passed first, the registration then taken out
+// (`sys.PollRemove`), as an event disarms it otherwise; the failure of the poller, below 0. The descriptor is made ready before
+// the deadline wins, as Tokio's `timeout` polls its future first: an event the same turn sees is the call's.
+extern "C" int SocketWaited(int fd, int events, long nanoseconds) {
+    long now = PauseClock()
+    mut long deadline = Never()
+    if nanoseconds < Never() - now {
+        deadline = now + nanoseconds
+    }
+
+    mut int result = 0
+    sys.Entered()
+    raw {
+        byte* block = Allocate(48)
+        byte* header = running
+        *Ptr<long>(block) = 0
+        *Ptr<byte*>(block + 8) = header
+        *Ptr<long>(block + 16) = deadline
+        *Ptr<byte*>(block + 24) = null
+        *Ptr<byte*>(block + 32) = null
+        *Ptr<long>(block + 40) = long(fd) + 1
+        long added = sys.PollAdd(fd, events, block, sys.EpollDataAt())
+        if added < 0 {
+            std.Free(block, 48)
+            sys.Left()
+            return int(added)
+        }
+
+        polled = polled + 1
+        if header == null {
+            RootLoop(block, deadline)
+        } else {
+            *Ptr<byte*>(header + 360) = block
+            *Ptr<byte*>(header + 432) = null
+            TimerAdd(block)
+            byte* heap = std.HeapUse(null)
+            while *Ptr<long>(block) == 0 && !Waited(block) {
+                long entries = sys.Inside(0)
+                sys.Switch(header, threadSide)
+                sys.Inside(entries)
+            }
+
+            TimerRemove(block)
+            std.HeapUse(heap)
+            *Ptr<byte*>(header + 360) = null
+        }
+
+        polled = polled - 1
+        if *Ptr<long>(block) != 0 {
+            result = 1
+        } else {
+            sys.PollRemove(fd)
+        }
+
+        std.Free(block, 48)
+    }
+
+    sys.Left()
+    return result
+}
+
+// The scheduler's wait in the poller for at most `nanoseconds` (`IdleWait`): each block an event gave set ready, its word 1,
+// and the actor of the activation that waits on it woken, which goes on where that activation is its top (`SocketWaited`); the
+// top-level code's block names no waiter, and its wait reads the word (`RootLoop`).
+void Polled(long nanoseconds) {
+    raw {
+        if readied == null {
+            readied = AllocateOwn(512)
+        }
+
+        long count = sys.PollWait(nanoseconds, readied, 64, sys.EpollDataAt())
+        mut long i = 0
+        while i < count {
+            byte* block = *Ptr<byte*>(readied + i * 8)
+            *Ptr<long>(block) = 1
+            byte* header = *Ptr<byte*>(block + 8)
+            if header != null {
+                Wake(*Ptr<byte*>(header + 320))
+            }
+
+            i = i + 1
+        }
+    }
 }
 
 // The replies of the calls that an actor's start keeps out, each address added to `found` in the order the walk finds them, which the
@@ -5966,6 +6069,13 @@ void Fall(byte* state, byte* header, byte* kept) {
                 TimerRemove(waited)
             }
 
+            // a call on a socket that waits in the poller (`SocketWaited`): its registration taken out, so that no event
+            // writes the block, which the fall frees with the heap
+            if waited != null && *Ptr<byte*>(at + 432) == null && *Ptr<long>(waited + 40) > 0 {
+                sys.PollRemove(int(*Ptr<long>(waited + 40) - 1))
+                polled = polled - 1
+            }
+
             if waited != null && ReplyState(waited) == 0 && *Ptr<byte*>(at + 432) != null && ReplyTaken(*Ptr<byte*>(at + 432)) == null {
                 while ReplyState(waited) == 0 {
                 }
@@ -6417,6 +6527,20 @@ pub long Ahead() {
     raw {
         return ahead
     }
+}
+
+// The wait of the scheduler that has nothing to run, `nanoseconds` from now (`RootLoop`): a wait in the poller where a
+// registration waits (`polled`, `Polled`), so that a descriptor's event ends it as the deadline does (section 6, the scheduler
+// that runs out of work waits on the poller; issue 658), the sleep of `PauseSleep` otherwise.
+void IdleWait(long nanoseconds) {
+    raw {
+        if polled > 0 {
+            Polled(nanoseconds)
+            return
+        }
+    }
+
+    PauseSleep(nanoseconds)
 }
 
 // The sleep of the top-level code until a restart's pause ends, or a deadline before it passes, `nanoseconds`

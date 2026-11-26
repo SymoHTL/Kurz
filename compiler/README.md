@@ -589,22 +589,24 @@ it and takes `EISCONN`; `Accept` calls `accept4` close-on-exec, again where a si
 socket is opened close-on-exec (S9). A read, a write and `Connect` on a socket wait at most 5 seconds where
 the program sets no other time, `DefaultBound` being the one definition of the 5 seconds (S9). `Connect`, and
 `ConnectWithin`, its second form, connect as Rust's `connect_timeout` does: the socket opened with
-`SOCK_NONBLOCK`, made blocking again by `ioctl` with `FIONBIO`, and a connection in progress waited for by
-`poll` in whole milliseconds, cut down and at least 1, until a deadline of the monotonic clock, after which the
+`SOCK_NONBLOCK`, which it keeps (S10), and a connection in progress waited for in the poller (`WaitReady`, in the
+item of a call on a socket that would block), until a deadline of the monotonic clock, after which the
 call fails with -4100, `TimedOut` with the number 0, as Rust's gives no error of the system. The deadline is set
 once the addresses are known, after the lookup of a name, which it does not bound, as Rust's `connect` leaves
 `getaddrinfo`, and holds over every address tried, one bound over the addresses of a name, whose cost is that a
 first address that never answers spends the whole bound, and the later addresses are not tried (section 12). A stream `Connect`
 made and one `Accept` gave get `SO_RCVTIMEO` and `SO_SNDTIMEO` of 5 seconds, two calls of `setsockopt` for each
 stream; a listener gets neither, so that `Accept` waits without a bound until `SetAcceptTimeout` sets its `SO_RCVTIMEO`,
-which bounds an `accept` (socket(7)), and the stream it gives is set explicitly, since Linux copies a listener's options to the sockets it accepts. `SetTimeout` sets either option,
+and the stream it gives is set explicitly, since Linux copies a listener's options to the sockets it accepts. The options
+bound no call on a socket that does not block (socket(7)): they hold the time, which each wait in the poller reads back by
+`getsockopt` as its bound (`SocketBound`), no bound where they are zeros. `SetTimeout` sets either option,
 for a stream's two setters and a listener's alike, as Rust's `set_timeout` does: a time of zero or below is -4097, `InvalidInput`; a bound is the whole seconds and
 the microseconds cut from the rest, a positive time that comes to no microsecond raised to 1, and no bound the
 `timeval` of zeros. Rust also bounds the seconds by `time_t::MAX`, which is not written here: a `duration` of 64
 bits in nanoseconds holds at most about 292 years, far below it. A stream's read and write and a listener's `Accept` take their kind
-from `SocketErrorKind`, which gives `TimedOut` for `EAGAIN`, with which a blocking socket's call returns when its time
-runs out, the number staying the system's 11; every other `EAGAIN` keeps `WouldBlock`. The bound holds for each
-system call, as Rust's `SO_RCVTIMEO` and `SO_SNDTIMEO` do: a `Write` of many bytes waits at most the bound for
+from `SocketErrorKind`, which gives `TimedOut` for `EAGAIN`, -11, which the wait in the poller gives where the bound
+passed first, the number a blocking socket's call gives when its time runs out, 11; every other `EAGAIN` keeps
+`WouldBlock`. The bound holds for each wait of a system call, as Rust's `SO_RCVTIMEO` and `SO_SNDTIMEO` do: a `Write` of many bytes waits at most the bound for
 each piece the system takes, as Rust's `write_all` does, and can take longer in all. `ShutdownWrite` calls `shutdown` with
 `SHUT_WR` (1) and keeps the descriptor, so that the stream still reads, and gives the system's answer as it is: a second
 call passes, and one on a stream whose peer reset the connection fails with `ENOTCONN`, 107, `NotConnected`.
@@ -1684,10 +1686,28 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   actors they woke run before the test goes on. `PauseClock` and the time of a crash's log line add `ahead`; the program's
   `instant.Now` and `timestamp.Now`, and so the time of a log call, add it through the runtime's `Ahead` in a build of
   `kurz test` alone, `--release` among them, while every other build reads the system's clock directly and stores nothing
-  to `ahead`, a global the optimiser folds to 0 there (`EmitterTests`); `TestEnded` sets it back to 0. A socket's bound and
-  a child process's wait are a wait in the kernel with a timeout of its own, the socket's option or `poll`'s, which
-  `advance` does not reach, where §11 holds a socket's bound by the poller's timer, which the runtime lacks; a build for
-  Windows says `not supported`, as for `instant.Now`;
+  to `ahead`, a global the optimiser folds to 0 there (`EmitterTests`); `TestEnded` sets it back to 0. A socket's bound is
+  a deadline among the timers, as a sleep's is (`SocketWaited`, in the item of a call on a socket that would block), which
+  `advance` passes; a child process's wait is a wait in
+  the kernel with a timeout of its own, `poll`'s, which `advance` does not reach; a build for Windows says `not supported`,
+  as for `instant.Now`;
+- a call on a socket that would block (S10), in a build for Linux: every socket is opened with `SOCK_NONBLOCK` and stays so,
+  a read, a write, an `Accept` and a connect in progress are tried first, and one that fails with `EAGAIN` on a socket, which
+  `getsockopt` tells from a file or a pipe that keeps its `EAGAIN` (`Ready`), waits through the
+  waiter that `Start` puts into the page of the thread at 200 (`Waiter`), `SocketWaited`, which registers the descriptor in
+  the process's one `epoll` with `EPOLLONESHOT` (`PollAdd`), `EPOLL_CTL_MOD` first and `EPOLL_CTL_ADD` where it has none, its
+  data a block shaped as a sleep's whose word the event sets, which also holds the descriptor plus one at 40; inside a message
+  the activation parks on it among the timers, to the bound that `SocketBound` reads back from the socket's
+  `SO_RCVTIMEO` or `SO_SNDTIMEO`, which keep the time a setter wrote, so that the calls of its chain run above it and a fall
+  takes the registration out (`Fall`), and the top-level code runs `RootLoop` to the event or the bound. 1 makes the call
+  again, and a bound that passed first gives -11, `TimedOut` with the number 11, the registration taken out (`PollRemove`).
+  While a registration waits (`polled`), the scheduler that has nothing to run waits in `epoll_wait` to the first timer, in
+  whole milliseconds rounded up (`IdleWait`, `Polled`), and `RootLoop` raises no `deadlock`. The poller is made before the
+  first socket (`Poller`), so that it takes the same descriptor in every run, and a child of a `fork` drops it at the fork
+  (`Forked`, by `pthread_atfork`), since one `epoll` that two processes wait on gives either one's event to the other. The
+  offset of the event's data is the architecture's (`EpollDataAt`): 4 in x86-64's packed `struct epoll_event`, 8 in
+  AArch64's. A thread whose page holds no waiter waits in `poll` (`Blocked`); a build for Windows gives no call on a socket
+  (S11), and its runtime's functions of the poller are stubs;
 - logging (P1 to P7 and P9), in a build for Linux: a program with a log call in one of its files reads
   `KURZ_LOG` alone, since the compiler builds no settings type whose `Logging` part P4 has win, through
   `Variable` before its first statement, after `args`, and hands it to `LogFilter`,
