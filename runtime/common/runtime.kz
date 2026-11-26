@@ -5505,17 +5505,28 @@ byte* Onward(byte* callee) {
 }
 
 // The text of the loop of `hops` waits on the wait line from the actor whose record is `first` (`Onward`; U63, U64; the owner,
-// 2026-11-20, #519, comment 7051071630, T68 3): one line for each wait of the loop, from the wait of `first` (`WaitText`), built
-// in the heap of the code that raises, at the raise alone.
+// 2026-11-20, #519, comment 7051071630, T68 3): the lines of `LoopLines`, one apart from the next by a line break, built in the
+// heap of the code that raises, at the raise alone.
 string LoopText(byte* first, long hops) {
     mut string text = ""
     mut string gap = ""
+    for one in LoopLines(first, hops) {
+        text = "{text}{gap}{one}"
+        gap = "\n"
+    }
+
+    return text
+}
+
+// The lines of the loop of `hops` waits on the wait line from the actor whose record is `first` (`Onward`; U63): one for each
+// wait of the loop, from the wait of `first` (`WaitText`), which `LoopText` joins and the runner writes under a test's `FAILED`
+// line (`RunTests`; Y5).
+List<string> LoopLines(byte* first, long hops) {
+    mut lines = List<string>()
     mut byte* callee = first
     mut long count = 0
     while count < hops {
-        string one = WaitText(callee)
-        text = "{text}{gap}{one}"
-        gap = "\n"
+        lines.Add(WaitText(callee))
         raw {
             callee = Onward(callee)
         }
@@ -5523,7 +5534,7 @@ string LoopText(byte* first, long hops) {
         count = count + 1
     }
 
-    return text
+    return lines
 }
 
 // The line of the wait of the actor whose record is `state` on the wait line (U63; T68 3 of comment 7051071630):
@@ -5579,10 +5590,22 @@ string WaitText(byte* state) {
 // the loop's waits stand below it as layer 3 writes them, from the first wait of the loop the walk meets (`LoopText`,
 // `Deadlocked`; U64; the owner, 2026-11-21, #519, comment 7060155980, T85 2): Brent's check finds the loop's length, and a second
 // pass from the call, one pointer that length ahead of the other, its first actor, as Brent's algorithm finds the start of a
-// cycle (not checked at source). Where the line ends, the error line stands alone (`Raise`).
+// cycle (not checked at source) (`LoopFirst`). Where the line ends, the error line stands alone (`Raise`).
 void Stuck(byte* reply, string file, int line) {
-    mut byte* first = null
     mut long length = 0
+    byte* first = LoopFirst(reply, mut length)
+    if first == null {
+        Raise("deadlock", file, line)
+    }
+
+    sys.Left()
+    Deadlocked(LoopText(first, length), file, line)
+}
+
+// The first actor of the loop that one walk from the call whose reply is `reply` runs into (`Along`), the count of its waits set
+// in `length`, as `Stuck` reads them, and null where the line ends (`Stuck`, `TestRan`; U64). It allocates nothing.
+byte* LoopFirst(byte* reply, mut long length) {
+    mut byte* first = null
     raw {
         byte* start = *Ptr<byte*>(reply + 72)
         if Reached(start, null) {
@@ -5618,12 +5641,7 @@ void Stuck(byte* reply, string file, int line) {
         }
     }
 
-    if first == null {
-        Raise("deadlock", file, line)
-    }
-
-    sys.Left()
-    Deadlocked(LoopText(first, length), file, line)
+    return first
 }
 
 // The text of the actor whose record is `state`: the name of its type, `#` and its number (U2), as its log line names it (U24).
@@ -7439,7 +7457,10 @@ thread static mut long testWordsRoom = 0
 // 2026-11-21, #599, comment 7063693195, Y5's line 1), in any file (the same comment 7067131310, the file 1), and where more than
 // one closes it, the first place in source order so and the further lines of `KeptLines` under it, each indented by four spaces
 // (comment 7067131310, several 2, and comment 7067139953, the form 1; comment 7067639209, the order 1, the same place 1, the cap 1
-// and the indent 1); then every actor the test made ends at once
+// and the indent 1), and where no such call closes it and one walk from the test's call runs into a loop, the test's line so and
+// the loop's waits under it in U63's form, with each wait's chain ID, as a program run outside `kurz test` gets them under its
+// error line (`LoopFirst`, `LoopLines`; the owner, 2026-11-23, #622, comment 7095825069, 1), each indented by four spaces as the
+// calls kept out are *(assumed: the form of those calls' lines, comment 7067139953)*; then every actor the test made ends at once
 // (`TestEnded`; F6). The line of its result is written on standard output after the lines the test printed (F4), `test "name" ...
 // ok` or `test "name" ... FAILED`, the words indented by four spaces under a failed one, and after the last test the counts, `2 tests:
 // 1 passed, 1 failed`, `1 test:` for one (Q3, F21); the process then ends with the exit code 0 where every test passed, else 1 (Q4).
@@ -7473,7 +7494,9 @@ pub void RunTests(byte* table, long count, string file) {
         }
 
         mut kept = List<long>()
-        int kind = TestRan(test, name, run, reply, file, line, mut kept)
+        mut long hops = 0
+        mut byte* first = null
+        int kind = TestRan(test, name, run, reply, file, line, mut kept, mut first, mut hops)
         if kind == 1 {
             passed = passed + 1
             Print(1, "test {written} ... ok", file, line)
@@ -7487,6 +7510,11 @@ pub void RunTests(byte* table, long count, string file) {
             } else if kept.Count > 0 {
                 lines = KeptLines(KeptSorted(kept))
                 words = "deadlock at {lines[0]}"
+            } else if first != null {
+                lines.Add(words)
+                for wait in LoopLines(first, hops) {
+                    lines.Add(wait)
+                }
             }
 
             Print(1, "test {written} ... FAILED", file, line)
@@ -7522,8 +7550,11 @@ pub void RunTests(byte* table, long count, string file) {
 // `reply` in the thread's own heap, with no deadline (D6), and the top-level code's wait for it (`RootWait`), which runs the messages
 // of the test's actors meanwhile; the reply's word once the wait ended, 1 where the test answered and 2 where its actor crashed (U20),
 // and 0 where nothing was left that could answer it, the replies of the calls an actor's start keeps out then added to `kept`, none
-// where none closes the loop, looked for with the chain of the test's message read before the wait, as `Wait` reads its call's (`Kept`).
-int TestRan(byte* test, byte* name, byte* run, byte* reply, string file, int line, mut List<long> kept) {
+// where none closes the loop, looked for with the chain of the test's message read before the wait, as `Wait` reads its call's (`Kept`),
+// and where none is added, the first actor of the loop that one walk from the test's call runs into set in `first` and the count of
+// its waits in `hops`, as the top-level code's wait finds them (`LoopFirst`; U64; the owner, 2026-11-23, #622, comment 7095825069, 1),
+// `first` left null where the line ends.
+int TestRan(byte* test, byte* name, byte* run, byte* reply, string file, int line, mut List<long> kept, mut byte* first, mut long hops) {
     byte* heap = ActorHeapNew(0)
     byte* state = ActorNew(heap, 0, 2097152, null, name)
     ActorBuilt(state)
@@ -7547,6 +7578,9 @@ int TestRan(byte* test, byte* name, byte* run, byte* reply, string file, int lin
     bool answered = RootWait(reply)
     if !answered {
         Kept(high, low, mut kept)
+        if kept.Count == 0 {
+            first = LoopFirst(reply, mut hops)
+        }
     }
 
     sys.Left()

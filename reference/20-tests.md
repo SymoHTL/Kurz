@@ -237,7 +237,13 @@ order as `deadlock at <file>:<n>` and each further place on a line `kept out at 
 as the top-level code's error does (U22) (§11, the owner, 2026-11-21, #599, comment 7067131310,
 several 2; comment 7067139953, the form 1), in the order, with the counts and with the cap of U22,
 each line indented by four spaces as every word under a `FAILED` line (Y3) (§11, the owner,
-2026-11-21, #599, comment 7067639209, the order 1, the same place 1, the cap 1, the indent 1). An error that
+2026-11-21, #599, comment 7067639209, the order 1, the same place 1, the cap 1, the indent 1). Where no
+call that an actor's start keeps out closes the loop and one walk from the test's call runs into a loop
+that a crash closes (U64), the words are the test's line and, under it, the loop's waits, each with its
+chain's ID, in the form the top-level code's error writes them below its error line (U63), each line
+indented by four spaces as the calls kept out are, as `tests/test-deadlock.kz` shows (§11, the owner,
+2026-11-23, #622, comment 7095825069, 1, "Yes, list the waits") *(assumed: the indent of the calls kept
+out, comment 7067639209, for these lines, which the answer did not name)*. An error that
 ends the process wherever it happens (U19), `allocation-failed` among them, and on Windows an overflow of
 an actor's stack, at which the build ends the process as the system ends it (U19), ends the run inside a
 test too: its error line stands on standard error, and neither that test's line, nor the tests after it,
@@ -249,9 +255,10 @@ dropped at once, parked ones too, as U13 drops what is queued at a program's end
 (U2) go on counting, each test's own actor taking one as a spawned actor does, so that the actors of a
 test are numbered after those of the tests before it, so that where each of two tests spawns one child,
 the first test's child is `#2` and the second's `#4`, and a socket or a file its actors hold stays open
-*(assumed: F3, F6 and F22 of comment 6993110710, readings of the build said back there)*. No line names a
-test's own actor, since its crash writes none: the name `test` that F2 of comment 6993110710 gives it in
-the log line of a crash is a reading with no case. A test has no bound of time: a test that waits on a
+*(assumed: F3, F6 and F22 of comment 6993110710, readings of the build said back there)*. No log line names a
+test's own actor, since its crash writes none, and the line of its wait in a loop under a `FAILED` line
+names it by the name `test` that F2 of comment 6993110710 gives it in the log line of a crash, `test#1` in
+`tests/test-deadlock.kz` *(assumed: F2, a reading of the build said back there)*. A test has no bound of time: a test that waits on a
 wait the runtime does not own, a call on a file, whose wait runs on the pool of threads for blocking
 calls, or a `raw` call of a C function that blocks (§11), holds the run *(assumed: D6 of comment
 6992687784, said back there)*.
@@ -275,7 +282,8 @@ print(total)
 
 Case: [tests/test-deadlock.kz](../corpus/tests/test-deadlock.kz)
 ```kurz
-// the block of the child's policy runs in the test's actor once its message ends, and that message waits on the child
+// the block of the child's policy runs in the test's actor once its message ends, and that message waits on the child: a loop
+// that the crash closes, whose waits stand under the test's `FAILED` line, each with its chain's ID, written `<chain>`
 actor Worker {
     pub void Fail() {
         throw "down"

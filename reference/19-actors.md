@@ -7920,6 +7920,32 @@ Case: [actors/waitline-escalate.kz](../corpus/actors/waitline-escalate.kz)
 
 Case: [actors/waitline-vouch.kz](../corpus/actors/waitline-vouch.kz)
 
+Case: [tests/test-deadlock.kz](../corpus/tests/test-deadlock.kz)
+```kurz
+// the block of the child's policy runs in the test's actor once its message ends, and that message waits on the child: a loop
+// that the crash closes, whose waits stand under the test's `FAILED` line, each with its chain's ID, written `<chain>`
+actor Worker {
+    pub void Fail() {
+        throw "down"
+    }
+
+    pub int Get() => 1
+}
+
+test "waits on its own block" {
+    w = spawn Worker() on crash (c) {
+        restart
+    }
+
+    send w.Fail()
+    print(w.Get())
+}
+
+test "after" {
+    print("after")
+}
+```
+
 ### U64 (decided, §6) U18 behind layer 3
 
 U18's end of the process stays for what layer 3 does not see: on one thread, a loop that a crash closes, where a child
@@ -7930,10 +7956,14 @@ deadline standing (U42) (§6, "Deadlocks", layer 3; the owner, 2026-11-20, #519,
 the top-level code's call (U60), and where it runs into a loop, the error line ends with a colon and the loop's waits stand
 below it in U63's form, one line for each, each with its chain's ID where U63 gives one, from the first wait of the loop the walk meets; where
 the line ends before any loop, the error line stands alone (the owner, 2026-11-21, #519, comment 7060155980, T85 2).
+Under `kurz test` the runner's wait for a test that finds nothing left to run takes the same walk from the test's call, and
+the loop's waits stand under the test's `FAILED` line (Y5; §11, the owner, 2026-11-23, #622, comment 7095825069, 1).
 
 Case: [actors/deadlock-pending-crash.kz](../corpus/actors/deadlock-pending-crash.kz)
 
 Case: [actors/waitline-into-loop.kz](../corpus/actors/waitline-into-loop.kz)
+
+Case: [tests/test-deadlock.kz](../corpus/tests/test-deadlock.kz)
 
 ### U65 (decided, §6) `vouch` and layer 3
 
