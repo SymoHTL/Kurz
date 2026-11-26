@@ -219,6 +219,27 @@ public sealed partial class Emitter
         return fn.Value($"call ptr {name}(ptr {pointer})");
     }
 
+    /// <summary>
+    /// M7 (the owner, 2026-11-25, issue 646, "Copy if shared"): the block of the type or of a type derived from it that the place holds,
+    /// made the place's own: a block with one count, which the place alone holds, as it is, and any other a copy stored into the place,
+    /// the place letting go of the block it held, as an assignment into a path copies it (M4).
+    /// </summary>
+    private string OwnDataBlock(DataSymbol symbol) => Helper($"own.{symbol.Name}", "ptr", ["ptr"], () =>
+    {
+        var held = fn.Value("load ptr, ptr %a0");
+        var count = fn.Value($"load i64, ptr {held}");
+        var alone = fn.Label("alone");
+        var shared = fn.Label("shared");
+        fn.CondBranch(fn.Value($"icmp eq i64 {count}, 1"), alone, shared);
+        fn.Block(alone);
+        fn.Return($"ptr {held}");
+        fn.Block(shared);
+        var copy = CopyBlock(held, symbol);
+        fn.Emit($"store ptr {copy}, ptr %a0");
+        Release(held, new DataType(symbol, []));
+        fn.Return($"ptr {copy}");
+    });
+
     /// <summary>The type at the top of the relation of inheritance the type is in, or the type itself: the family whose blocks one helper counts and ends.</summary>
     private static DataSymbol Family(DataSymbol symbol) => symbol.Base is { } b ? Family(b) : symbol;
 
@@ -365,9 +386,11 @@ public sealed partial class Emitter
     /// the variable, and the type there: each data value on the path is changed in place, a plain value in its variable or its field,
     /// and a block after it was copied into the place that held it, since another variable may hold the same block, the place letting
     /// go of the block it held. A nullable step, which the checker read known not null or after <c>?.</c> (N3, N5, issue 630), is the room
-    /// of its case (<see cref="NarrowedPlace(string, KurzType, KurzType, int)"/>).
+    /// of its case (<see cref="NarrowedPlace(string, KurzType, KurzType, int)"/>). <paramref name="shared"/>, for a path passed as
+    /// <c>mut</c> (M7, issue 646), copies a block only where another value holds it (<see cref="OwnDataBlock"/>), so that a place taken
+    /// before on the same variable stays where it is.
     /// </summary>
-    private (string Place, KurzType Type) WritablePath(NameExpression root, List<MemberAccess> members)
+    private (string Place, KurzType Type) WritablePath(NameExpression root, List<MemberAccess> members, bool shared = false)
     {
         var variable = Model.VariableOf(root);
         var place = Place(variable, root.Line);
@@ -381,7 +404,12 @@ public sealed partial class Emitter
 
             var data = (DataType)type;
             var index = Layout.FieldIndex(data, m.Member);
-            if (layout.IsBlock(data))
+            if (layout.IsBlock(data) && shared)
+            {
+                var own = fn.Value($"call ptr {OwnDataBlock(data.Symbol)}(ptr {place})");
+                place = FieldPointer(layout.Block(data.Symbol), own, index);
+            }
+            else if (layout.IsBlock(data))
             {
                 var old = fn.Value($"load ptr, ptr {place}");
                 var copy = CopyBlock(old, data.Symbol);
