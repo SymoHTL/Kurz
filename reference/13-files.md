@@ -2599,6 +2599,108 @@ Main() else {
 }
 ```
 
+Case: [system/park-file-fork.kz](../corpus/system/park-file-fork.kz)
+```kurz
+// `Filer`'s read of a file runs on the pool of threads for blocking calls (S10), so that the scheduler takes the events of the
+// pool's `eventfd`. The child of a `fork` drops the pool and its `eventfd`, whose number its accepted connection then takes, and
+// the child's read of that connection waits in the poller of its own: the event of the connection reaches the read, and not the
+// pool the child does not have, so that the read ends within 2 seconds of the write and not at its bound of 5
+extern "C" {
+    int fork()
+    int waitpid(int pid, long status, int options)
+    int usleep(int microseconds)
+    void _exit(int code)
+}
+
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+actor Filer {
+    pub string Read() {
+        f = File.Open("park-file-fork.txt") else {
+            IoError e => return "open {e.Kind}"
+        }
+
+        mut buffer = Bytes()
+        n = f.Read(mut buffer, 8) else {
+            IoError e => return "read {e.Kind}"
+        }
+
+        f.Close() else {
+            IoError e => return "close {e.Kind}"
+        }
+
+        return "file {n} {Text(buffer)}"
+    }
+}
+
+void | IoError Main() {
+    k = File.Create("park-file-fork.txt")
+    k.Write("f".Bytes)
+    k.Close()
+    listener = TcpListener.Bind("127.0.0.1:0")
+    port = listener.Port
+    a = spawn Filer()
+    print(a.Read())
+    mut int child = 0
+    raw {
+        child = fork()
+    }
+
+    // a fork that failed ends the case before the client, so that no `waitpid` takes a pid below 0
+    if child < 0 {
+        print("fork failed")
+        return
+    }
+
+    if child == 0 {
+        conn = listener.Accept() else {
+            IoError e => {
+                print("child accept {e.Kind}")
+                raw {
+                    _exit(1)
+                }
+
+                return
+            }
+        }
+
+        mut buffer = Bytes()
+        start = instant.Now
+        match conn.Read(mut buffer, 1) {
+            int n => print("child read {Text(buffer)} {instant.Now - start < 2s}")
+            IoError e => print("child read {e.Kind}")
+        }
+
+        raw {
+            _exit(0)
+        }
+    }
+
+    stream = TcpStream.Connect("127.0.0.1:{port}")
+    raw {
+        usleep(300000)
+    }
+
+    stream.Write("r".Bytes)
+    raw {
+        waitpid(child, 0, 0)
+    }
+
+    print("parent done")
+    File.Delete("park-file-fork.txt")
+}
+
+Main() else {
+    IoError e => print(e)
+}
+```
+
 ### S11 (decided, §12) Not on Windows
 
 In a build for Windows, a call of this chapter is `not supported`, and the runtime of Windows gives

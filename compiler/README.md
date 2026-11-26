@@ -1732,7 +1732,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the descriptor an opening gave). The pool starts a thread where none is idle and fewer than 512 run, detached and with 2 MiB of
   stack, and ends one that waited 10 seconds idle, Tokio's defaults, under a mutex and a condition of the C library; where the
   system refuses a thread and no thread of the pool runs, the process ends with `error: thread-refused (1)`. A child of a `fork`
-  drops the pool (`Forked`). The wait for a child and its output (`Drive`, `ChildPolled`) waits in the poller instead, where
+  drops the pool (`Forked`), and the scheduler takes the event of the pool's `eventfd` only while that descriptor is the pool's
+  (`PoolHeld`), so that a descriptor of the child that took its number reaches its own waits. The wait for a child and its
+  output (`Drive`, `ChildPolled`) waits in the poller instead, where
   the thread's page holds the waiter `Start` puts in at 224 (`ManyWaiter`) and `BlockingOffloads` says so, as Go's `os/exec`
   reads a child's pipes through its netpoller: each of the child's pipes and its descriptor (`pidfd_open`) registered with a
   block of its own, which `Ended` marks in the block that holds them (`ManyWaited`, -2 at 40, each wait -3), the actor parked

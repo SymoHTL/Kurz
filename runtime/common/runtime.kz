@@ -5644,7 +5644,9 @@ long PoolArm(long event) {
 // descriptor an event gave whose events it gives, or every wait of it at an error or a hang-up (`EPOLLERR` 8, `EPOLLHUP` 16),
 // taken out of its list and ended with 1 (`Ended`), and the registration armed again for the waits left (`Rearm`), as Tokio's
 // `ScheduledIo` wakes the readers at a read's readiness and the writers at a write's; where the poller fails, every wait of every
-// descriptor ended with the failure (`Fail`), as each call's `IoError` of the system's kind and number (S1).
+// descriptor ended with the failure (`Fail`), as each call's `IoError` of the system's kind and number (S1). The event of the pool's
+// `eventfd` takes the jobs done (`PoolDrain`) where that descriptor is the pool's still (`sys.PoolHeld`): the child of a `fork`
+// drops the pool, and a descriptor that takes its number there reaches its own waits.
 void Polled(long nanoseconds) {
     raw {
         if readied == null {
@@ -5670,7 +5672,7 @@ void Polled(long nanoseconds) {
         while i < count {
             long fd = *Ptr<long>(readied + i * 16)
             long given = *Ptr<long>(readied + i * 16 + 8)
-            if fd == poolEvent {
+            if fd == poolEvent && fd == sys.PoolHeld() {
                 PoolDrain()
             } else if fd >= 0 && fd < waitSlots {
                 byte* slot = waits + fd * 8

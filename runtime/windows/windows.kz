@@ -311,6 +311,8 @@ pub long Submit(byte* job) => -4099
 
 pub byte* PoolDone() => null
 
+pub long PoolHeld() => -1
+
 pub void JobDropped(byte* job) {
 }
 

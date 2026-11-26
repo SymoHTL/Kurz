@@ -2837,6 +2837,18 @@ pub long PoolEvent() {
     }
 }
 
+// The `eventfd` of the pool of threads for blocking calls where the pool is made, with no pool made for it, -1 where none is, as in
+// the child of a `fork` before its first job (`Forked`), where a descriptor of the child can take the number the parent's had.
+pub long PoolHeld() {
+    raw {
+        if pool == null {
+            return -1
+        }
+
+        return long(*Ptr<int>(pool + 160))
+    }
+}
+
 // The flag of the pool of threads for blocking calls at 192, 1 while the registration of its `eventfd` in the poller is armed,
 // which the scheduler sets where it arms it and `PoolDone` clears at its event: its address, after `PoolEvent` made the pool.
 pub int* PoolFlag() {
