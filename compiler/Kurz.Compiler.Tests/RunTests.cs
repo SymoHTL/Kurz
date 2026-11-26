@@ -415,8 +415,9 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         }
 
         // the trace on, as a program runs where nobody set KURZ_TRACE; the log line of a crash left out in a case of a crash (E3); a case's
-        // `threads: 1` line (chapter 0) asks for the one thread the build runs every program on, first in, first out (U35), so the run sets
-        // nothing for it
+        // `threads: 1` line (chapter 0) asks for one thread, first in, first out, which `KURZ_THREADS` set to 1 gives (U35; section 6, the
+        // owner, 2026-11-17, #570, comment 6961064167), and every other case runs with no `KURZ_THREADS`, on the count the build gives
+        threads ??= header.OneThread ? "1" : null;
         var (code, output, written) = threads is null ? Toolchain.Run(executable, null) : Toolchain.Run(executable, null, threads);
         var all = LeftOut(written, header.Rules);
         Assert.Equal(header.OutputLines, output);
