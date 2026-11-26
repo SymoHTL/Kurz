@@ -543,12 +543,19 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             Assert.True(header.Expectation == Expectation.Throws && header.ErrorId == "deadlock" && !NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with calls kept out, and the run does not run it as a `throws` case of `deadlock`");
         }
 
-        // a case listed with the text of its loop is a `throws deadlock` case of U63 or U64 the run runs
+        // a case listed with the text of its loop is a `throws deadlock` case of U63 or U64 the run runs, where the build
+        // builds it: a build for Windows says `not supported` to a case of sockets (S11)
         Assert.NotEmpty(LoopTexts);
         foreach (var (relativePath, _) in LoopTexts)
         {
             var header = Header(relativePath);
-            Assert.True(header.Expectation == Expectation.Throws && NamesALoop(header) && !NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with the text of its loop, and the run does not run it as a `throws deadlock` case of U63 or U64");
+            Assert.True(header.Expectation == Expectation.Throws && NamesALoop(header), $"{relativePath}: listed with the text of its loop, and it is no `throws deadlock` case of U63 or U64");
+            if (NotEmitted.ContainsKey(relativePath))
+            {
+                continue;
+            }
+
+            Assert.True(!NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with the text of its loop, and the run does not run it as a `throws deadlock` case of U63 or U64");
         }
 
         // a case listed as run under the plain allocator alone is one the plain run runs
