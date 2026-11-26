@@ -5790,9 +5790,10 @@ bool Runs(byte* state, byte* message) {
 // a child whose block of `on crash` waits, whose block runs after the supervisor's current message (U28), and the actor that the
 // reply of the top activation reaches, which `Enqueue` stored in it; null where the line ends: at a child whose block the
 // top-level code runs (U33), at a top activation that runs, whose reply is set or whose deadline passed, and at one that waits on
-// no call, a sleep (`Park`) or a wait in the poller (`SocketWaited`), whose block of 48 bytes at 360 is no reply, read only after
-// the word at 432, which names the message of a call's wait (`Answer`) and no message of those (U60; assumed: a sleep and a wait in
-// the poller wait on no actor, so that the line ends there).
+// no call, a sleep (`Park`) or a wait in the poller (`SocketWaited`), whose block at 360 is no reply, the sleep's of 48 bytes and
+// the poller wait's of 64 (its link to the next wait of its descriptor at 48, its events at 56), read only after the word at
+// 432, which names the message of a call's wait (`Answer`) and no message of those (U60; assumed: a sleep and a wait in the
+// poller wait on no actor, so that the line ends there).
 byte* Onward(byte* callee) {
     raw {
         if *Ptr<int>(callee - 88) == 5 {

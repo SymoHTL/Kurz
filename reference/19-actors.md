@@ -2893,11 +2893,11 @@ print("after")
 
 Case: [system/park-crash-deadlock.kz](../corpus/system/park-crash-deadlock.kz)
 ```kurz
-// `Boom`'s crash takes `Outer`'s wait on its read out of the poller, as in `park-read-crash.kz` (S10, U20). Then `Boss`'s `Go`
-// waits on `Get`, queued behind `Fail` in `Worker`'s inbox, and the block of `Worker`'s policy waits behind `Go`, a loop that a
-// crash closes and that layer 3 does not see (U60): the top-level code's wait on `Go` finds no actor left to run, no timer
-// pending and nothing registered with the poller, so that it is `deadlock` at its line (U18), and not a wait in the poller
-// without end. The combination is under test: S10 and U18 its subject, U20 and U64 the rules it passes through
+// `Boom`'s crash takes `Outer`'s wait on its read out of the poller, which `park-read-crash.kz` holds (S10, U20). Then `Boss`'s
+// `Go` waits on `Get`, queued behind `Fail` in `Worker`'s inbox, and the block of `Worker`'s policy waits behind `Go`, a loop that a
+// crash closes and that layer 3 does not see (U60): the top-level code's wait on `Go` finds no actor left to run, no timer pending
+// and nothing registered with the poller, so that it is `deadlock` at its line (U18), and not a wait in the poller without end.
+// U18 alone is the subject, the end the top-level code's wait reaches once nothing is registered; S10, U20 and U64 it passes through
 actor Helper {
     pub void Poke(Napper n) {
         print(n.Boom())
