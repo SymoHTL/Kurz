@@ -86,3 +86,8 @@ pub long LockWake(int* word) {
 // `CreateDirectories` in `runtime/linux/linux.kz`, which hands it through `MakeDirectory` to `IsDirectory`, the reader
 // of the byte.
 pub long StatModeAt() => 24
+
+// The byte of the data in the `struct epoll_event` of x86-64, 4, after the 4 bytes of the events, since the kernel packs the struct
+// there (`EPOLL_PACKED` in its `uapi/linux/eventpoll.h`, not checked at source), where AArch64's is 8; the poller of
+// `runtime/common/` passes it to `PollAdd` and `PollWait` in `runtime/linux/linux.kz`, which copy the data a byte at a time.
+pub long EpollDataAt() => 4

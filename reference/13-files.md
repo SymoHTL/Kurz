@@ -1691,9 +1691,400 @@ said back on 2026-11-13, under which §12's "Block the thread" of 2026-10-29 des
 without actors)*. A program without actors serves one connection at a time (§12, the owner,
 2026-10-30, "One at a time").
 
-No case: a case prints what its calls return, and the same output stands for a call that blocks
-and for one that switches; S9's cases `tcp-echo.kz` and `bind-name.kz` connect before they accept, which
-the system completes without the accept.
+Case: [system/park-accept-first.kz](../corpus/system/park-accept-first.kz)
+```kurz
+// the top-level code's `Accept` waits for a connection that only an actor makes: it parks the root actor under `epoll`, so that
+// the actor's `Run` runs, connects and parks on its own read, and the byte the top-level code writes after the `Accept` reaches
+// that read (S10); a thread that blocked in the `Accept` would run no actor and wait without end, since `Accept` has no bound
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+actor Client {
+    mut string got = ""
+
+    pub void Run(int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => {
+                got = "connect {e.Kind}"
+                return
+            }
+        }
+
+        mut buffer = Bytes()
+        match stream.Read(mut buffer, 1) {
+            int n => got = "read {n} {Text(buffer)}"
+            IoError e => got = "read {e.Kind}"
+        }
+    }
+
+    pub string Got() => got
+}
+
+void | IoError Main() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    c = spawn Client()
+    send c.Run(listener.Port)
+    server = listener.Accept()
+    server.Write("x".Bytes)
+    print(c.Got())
+}
+
+Main() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/park-write.kz](../corpus/system/park-write.kz)
+```kurz
+// a writer connects, and then writes 32 MiB to a connection that nobody reads while it writes, more than a local connection's
+// buffers hold, so that a write would block: it parks its actor under `epoll` (S10), the top-level code's call of the ticker runs
+// while it waits, and the reads of the top-level code then take every byte, each of which lets the write go on; a thread that blocked
+// in the write would hold the ticker and the reads to the write's bound, 5 seconds by default (S9), and the write would end `TimedOut`
+actor Ticker {
+    pub string Tick() => "ticked"
+}
+
+actor Writer {
+    mut TcpStream? held = null
+    mut string result = "none"
+
+    pub string Connect(int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return "connect {e.Kind}"
+        }
+
+        held = stream
+        return "connected"
+    }
+
+    pub void Run(int total) {
+        stream = held
+        if stream == null {
+            return
+        }
+
+        piece = "0123456789abcdef".Bytes
+        mut chunk = Bytes()
+        while chunk.Count < 65536 {
+            chunk.AddRange(piece)
+        }
+
+        mut written = 0
+        while written < total {
+            stream.Write(chunk) else {
+                IoError e => {
+                    result = "{e.Kind} {e.Code}"
+                    return
+                }
+            }
+
+            written = written + chunk.Count
+        }
+
+        result = "wrote {written}"
+    }
+
+    pub string Result() => result
+}
+
+void | IoError Main() {
+    total = 33554432
+    listener = TcpListener.Bind("127.0.0.1:0")
+    w = spawn Writer()
+    t = spawn Ticker()
+    connected = w.Connect(listener.Port)
+    if connected != "connected" {
+        print(connected)
+        return
+    }
+
+    server = listener.Accept()
+    send w.Run(total)
+    print(t.Tick())
+    mut got = 0
+    while got < total {
+        mut buffer = Bytes()
+        got = got + server.Read(mut buffer, 65536)
+    }
+
+    print("read {got}")
+    print(w.Result())
+}
+
+Main() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/park-two-readers.kz](../corpus/system/park-two-readers.kz)
+```kurz
+// two actors read a byte each from a connection of their own, and the byte of `b`'s comes first: `b` reads it while `a` still
+// waits, since each read that would block parks its actor under `epoll` (S10), and `a` reads its byte once it comes; a thread that
+// blocked in `a`'s read would hold `b` for the read's bound, 5 seconds by default (S9), past the 2 seconds the last line allows
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+actor Journal {
+    mut string lines = ""
+
+    pub void Add(string line) {
+        lines = "{lines}{line};"
+    }
+
+    pub string Lines() => lines
+}
+
+actor Client(Journal Lines, string Name) {
+    pub void Run(int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => {
+                Lines.Add("{Name} connect {e.Kind}")
+                return
+            }
+        }
+
+        mut buffer = Bytes()
+        match stream.Read(mut buffer, 1) {
+            int n => Lines.Add("{Name} read {Text(buffer)}")
+            IoError e => Lines.Add("{Name} {e.Kind}")
+        }
+    }
+}
+
+void | IoError Main() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    journal = spawn Journal()
+    a = spawn Client(journal, "a")
+    b = spawn Client(journal, "b")
+    send a.Run(listener.Port)
+    first = listener.Accept()
+    send b.Run(listener.Port)
+    second = listener.Accept()
+    start = instant.Now
+    second.Write("2".Bytes)
+    Environment.Sleep(50ms)
+    first.Write("1".Bytes)
+    Environment.Sleep(50ms)
+    print(journal.Lines())
+    print(instant.Now - start < 2s)
+}
+
+Main() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/park-read-crash.kz](../corpus/system/park-read-crash.kz)
+```kurz
+// `Boom`, a call of the chain, is let in while `Outer` waits in the poller on its read, and its crash takes the read's
+// registration out of the poller and off the timers and wakes the caller (U20): the byte written to the connection after it
+// reaches no registration whose block the crash freed, and the last wait finds nothing registered with the poller, so that it is
+// `deadlock` at its line (U18) and not a wait in the poller without end
+actor Helper {
+    pub void Poke(Napper n) {
+        print(n.Boom())
+    }
+}
+
+actor Napper {
+    pub int Outer(Helper helper, int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return -1
+        }
+
+        send helper.Poke(this)
+        mut buffer = Bytes()
+        n = stream.Read(mut buffer, 1) else {
+            IoError e => return -2
+        }
+
+        return n
+    }
+
+    pub int Boom() {
+        throw "boom"
+    }
+}
+
+actor Caller(Napper N, Helper H) {
+    pub void Go(int port) {
+        print(N.Outer(H, port))
+    }
+
+    pub string Done() => "done"
+}
+
+actor Left {
+    pub void Ask(Right other) {
+        print("left got {other.Value()}")
+    }
+
+    pub int Value() => 1
+}
+
+actor Right {
+    pub void Ask(Left other) {
+        print("right got {other.Value()}")
+    }
+
+    pub int Value() => 2
+}
+
+void | IoError Main() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    poker = spawn Helper()
+    napper = spawn Napper()
+    c = spawn Caller(napper, poker) on crash (e) {
+        match e.Reason {
+            RuntimeError r => print(r.Kind)
+        }
+
+        restart
+    }
+
+    send c.Go(listener.Port)
+    server = listener.Accept()
+    print(c.Done())
+    server.Write("x".Bytes)
+    l = spawn Left()
+    r = spawn Right()
+    send l.Ask(r)
+    send r.Ask(l)
+    print(l.Value())
+}
+
+Main() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/park-read-close.kz](../corpus/system/park-read-close.kz)
+```kurz
+// `Shut`, a call of the chain, is let in while `Run` waits in the poller on its read, and its `Close` shuts the socket down, whose
+// event wakes the read: the read in flight ends with the closed handle's error, `EBADF`, 9 (S5), at once and not at its bound of
+// 5 seconds (S9), since the shutdown reaches the poller as any event does (S10)
+actor Helper {
+    pub void Poke(Holder h) {
+        print("shut {h.Shut()}")
+    }
+}
+
+actor Holder {
+    mut TcpStream? held = null
+
+    pub string Run(Helper helper, int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return "connect {e.Kind}"
+        }
+
+        held = stream
+        send helper.Poke(this)
+        start = instant.Now
+        mut buffer = Bytes()
+        got = match stream.Read(mut buffer, 1) {
+            int n => "read {n}"
+            IoError e => "{e.Kind} {e.Code}"
+        }
+
+        return "{got} {instant.Now - start < 2s}"
+    }
+
+    pub int Shut() {
+        s = held
+        if s == null {
+            return 0
+        }
+
+        s.Close() else {
+            IoError e => return -e.Code
+        }
+
+        return 1
+    }
+}
+
+void | IoError Main() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    helper = spawn Helper()
+    h = spawn Holder()
+    print(h.Run(helper, listener.Port))
+}
+
+Main() else {
+    IoError e => print(e)
+}
+```
+
+Case: [tests/advance-read-bound.kz](../corpus/tests/advance-read-bound.kz)
+```kurz
+// the client's read of a connection that sends nothing waits in the poller with its bound of an hour among the runtime's timers,
+// so that the `advance` of an hour passes it and the read ends with `TimedOut` and the number 11 at the scheduler's turn after it,
+// in milliseconds (Y10, S10, S9); a read that blocked in the kernel would wait the hour out. The test's calls are of its chain,
+// which the client's waiting activation lets in (U17), so that the loop reads "reading" once the read waits, and the `advance`
+// comes after the read's bound stands among the timers
+actor Client {
+    mut string got = "none"
+
+    pub void Run(int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => {
+                got = "connect {e.Kind}"
+                return
+            }
+        }
+
+        stream.SetReadTimeout(1h) else {
+            IoError e => {
+                got = "bound {e.Kind}"
+                return
+            }
+        }
+
+        got = "reading"
+        mut buffer = Bytes()
+        match stream.Read(mut buffer, 1) {
+            int n => got = "read {n}"
+            IoError e => got = "{e.Kind} {e.Code}"
+        }
+    }
+
+    pub string Got() => got
+}
+
+test "a read's bound of an hour passes at the advance" {
+    match TcpListener.Bind("127.0.0.1:0") {
+        TcpListener listener => {
+            c = spawn Client()
+            send c.Run(listener.Port)
+            match listener.Accept() {
+                TcpStream server => {
+                    while c.Got() != "reading" {
+                        Environment.Sleep(1ms)
+                    }
+
+                    advance 1h
+                    check c.Got() == "TimedOut 11"
+                    server.Close() else {
+                        IoError e => print(e)
+                    }
+                }
+                IoError e => print(e)
+            }
+        }
+        IoError e => print(e)
+    }
+}
+```
 
 ### S11 (decided, §12) Not on Windows
 

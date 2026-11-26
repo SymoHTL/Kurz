@@ -1,0 +1,48 @@
+// expect: output
+// | read 1 x
+// rules: S10
+
+// the top-level code's `Accept` waits for a connection that only an actor makes: it parks the root actor under `epoll`, so that
+// the actor's `Run` runs, connects and parks on its own read, and the byte the top-level code writes after the `Accept` reaches
+// that read (S10); a thread that blocked in the `Accept` would run no actor and wait without end, since `Accept` has no bound
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+actor Client {
+    mut string got = ""
+
+    pub void Run(int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => {
+                got = "connect {e.Kind}"
+                return
+            }
+        }
+
+        mut buffer = Bytes()
+        match stream.Read(mut buffer, 1) {
+            int n => got = "read {n} {Text(buffer)}"
+            IoError e => got = "read {e.Kind}"
+        }
+    }
+
+    pub string Got() => got
+}
+
+void | IoError Main() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    c = spawn Client()
+    send c.Run(listener.Port)
+    server = listener.Accept()
+    server.Write("x".Bytes)
+    print(c.Got())
+}
+
+Main() else {
+    IoError e => print(e)
+}
