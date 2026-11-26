@@ -427,6 +427,51 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal("end", lines[1]);
     }
 
+    [Fact]
+    public void A_read_of_a_pipe_made_non_blocking_that_would_block_gives_would_block_at_once()
+    {
+        // S9, S10 (issue 658): a read that fails with `EAGAIN` waits in the poller on a socket alone, which `getsockopt` tells from
+        // a file or a pipe (`Ready`); the program makes its standard input, a pipe whose writer lives for 2 seconds and writes
+        // nothing, non-blocking by `fcntl` (`F_SETFL`, 4, with `O_NONBLOCK`, 2048, over `F_GETFL`, 3), and the read gives
+        // `WouldBlock` with the system's 11 at once, as every `EAGAIN` but a socket's bound keeps it, where a wait in the poller
+        // would end at the writer's end with 0 bytes, after 2 seconds
+        if (Builder.HostTarget == Target.Windows)
+        {
+            return;
+        }
+
+        const string text = """
+            extern "C" {
+                int fcntl(int fd, int command, ...)
+            }
+
+            void | IoError Some() {
+                raw {
+                    fcntl(0, 4, fcntl(0, 3) | 2048)
+                }
+
+                start = instant.Now
+                mut into = Bytes()
+                match Stdin.Read(mut into, 1) {
+                    int n => print(n)
+                    IoError e => print("{e.Kind} {e.Code}")
+                }
+
+                print(instant.Now - start < 1s)
+            }
+
+            Some() else {
+                IoError e => print(e)
+            }
+            """;
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), ["raw", "native"], toolchain.Runtime, testBuild: true);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, "stdin-pipe-nonblocking");
+        var (code, output, error) = Processes.Capture("/bin/sh", ["-c", "sleep 2 | { exec \"$0\"; }", executable], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" });
+        Assert.Equal((0, ""), (code, error));
+        Assert.Equal(["WouldBlock 11", "true"], Toolchain.Lines(output));
+    }
+
     [Theory]
     [InlineData("void | IoError | InvalidUtf8 Echo() {\n    for line in Stdin.Lines() {\n        print(line)\n    }\n}\n\nEcho() else {\n    IoError e => print(e)\n    InvalidUtf8 e => print(e)\n}\n", 2)]
     [InlineData("print(1)\nmatch Stdin.ReadLine() {\n    string l => print(l)\n    null => print(0)\n    IoError e => print(e)\n    InvalidUtf8 e => print(e)\n}\n", 2)]
