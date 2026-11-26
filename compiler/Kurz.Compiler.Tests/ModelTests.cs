@@ -236,15 +236,15 @@ public sealed class ModelTests
 
     /// <summary>
     /// <c>Enqueue</c>'s append of a message to the inbox, one move, as a queue of many senders appends, then its plain read of the actor's
-    /// life, which a restart's plain write races on threads, in the runtime's order, so that a sender that reads the life of an actor that
-    /// waits for its restart appended first, and the restart's <c>Ready</c> sees the message; then, where the actor does not wait for its
-    /// restart, the wake: one atomic <c>or</c> of QUEUED, and where the mark was clear the entry put in the run queue (<c>Wake</c>,
-    /// <c>Queue</c>).
+    /// life, which decides nothing on threads, where the sender wakes the actor whatever its life, since a restart's plain write of the
+    /// life and its read of the queue are a store and a load that no fence orders, which a sender's read can see in either order; then
+    /// the wake: one atomic <c>or</c> of QUEUED, and where the mark was clear the entry put in the run queue (<c>Wake</c>, <c>Queue</c>),
+    /// which a take that finds the actor waiting for its restart lets go of (<c>RunTake</c>).
     /// </summary>
     private static Strand Sender(string name, int at) => new(name, at,
     [
         new("Enqueue", "Pushed(state - 144, message)", _ => true, s => { s[Mail]++; s[at] = 1; }),
-        new("Enqueue", "int life = *Ptr<int>(state - 88)", _ => true, s => { s[at] = s[Life] != 0 ? -1 : 2; }, ["if life != 1 && life != 5 {"]),
+        new("Enqueue", "int life = *Ptr<int>(state - 88)", _ => true, s => { s[at] = 2; }, ["if Threaded() || (life != 1 && life != 5) {"]),
         .. Woken(at, 2, -1),
     ]);
 
@@ -347,7 +347,7 @@ public sealed class ModelTests
             s[at + 2] = 0;
             s[at] = 5;
         }, ["if life == 1 || life == 5 {"]),
-        new("Ready", "return *Ptr<byte*>(state - 32) != null", _ => true, s => { s[at + 2] = s[Mail] > 0 ? 1 : 0; s[at] = 5; }),
+        new("Ready", "byte* first = *Ptr<byte*>(state - 32)", _ => true, s => { s[at + 2] = s[Mail] > 0 ? 1 : 0; s[at] = 5; }),
         .. LetGone(at, 5, _ => 0, broken),
     ]);
 
@@ -378,7 +378,7 @@ public sealed class ModelTests
             }, ["if (seen & 1) == 0 {"]),
         new("Restart", "*Ptr<int>(state - 88) = 0", _ => true, s => { s[Life] = 0; s[at] = 4; }),
         new("Restart", "Start(state, message, null)", _ => true, s => { s[Fresh] = 0; s[at] = 5; }),
-        new("Ready", "return *Ptr<byte*>(state - 32) != null", _ => true, s => { s[at + 2] = s[Mail] > 0 ? 1 : 0; s[at] = 6; }),
+        new("Ready", "byte* first = *Ptr<byte*>(state - 32)", _ => true, s => { s[at + 2] = s[Mail] > 0 ? 1 : 0; s[at] = 6; }),
         .. LetGone(at, 6, _ => -1, broken),
     ]);
 
@@ -817,7 +817,7 @@ public sealed class ModelTests
     /// </summary>
     private static Strand QueueHolder(int at, Break broken) => new("holder", at,
     [
-        new("RunTake", "Moved(state)", s => s[Wakes] > 0, s => { s[Wakes]--; s[at] = 1; }),
+        new("RunTake", "Moved(state) if life == 1 || life == 5", s => s[Wakes] > 0, s => { s[Wakes]--; s[at] = 1; }),
         new("Popped", "mut byte* next = AtomicPtr<byte>.FromPtr(Ptr<byte*>(first)).Load(MemoryOrder.Acquire)", _ => true, s =>
         {
             var first = s[Out];
@@ -1080,18 +1080,17 @@ public sealed class ModelTests
     private const int ChildWaits = 4, ChildEnds = 5, Trespass = 6;
 
     /// <summary>
-    /// The end of the child's supervisor (<c>EndChildren</c>): the child's ENDING bit set by one atomic <c>or</c>, the hold of the child
-    /// outside the run queue (<c>HeldAlone</c>, waiting while a take holds it), the child ended where it has no activation and did not end
-    /// meanwhile, else its policy and supervisor cleared, and the end of the hold (<c>LetGo</c>).
+    /// The end of the child's supervisor (<c>EndChildren</c>): the hold of the child outside the run queue (<c>HeldAlone</c>, waiting while
+    /// a take holds it), then, where the child did not end meanwhile, its ENDING bit set by one atomic <c>or</c> and the child ended where
+    /// it has no activation, else its policy and supervisor cleared, and the end of the hold (<c>LetGo</c>).
     /// </summary>
     private static Strand Ender(int at, Break broken)
     {
         void Trespassed(int[] s) => s[Trespass] |= s[Holders] - s[at + 3] > 0 ? 1 : 0;
         return new("ender", at,
         [
-            new("EndChildren", "StateWord(at).FetchOr(16, MemoryOrder.AcqRel)", _ => true,
-                s => { s[Word] |= 16; s[at] = broken == Break.EndWithoutHold ? 3 : 1; }),
-            new("HeldAlone", "seen = word.Load(MemoryOrder.Acquire) } mut bool stored", _ => true, s => { s[at + 1] = s[Word]; s[at] = 2; }),
+            new("HeldAlone", "seen = word.Load(MemoryOrder.Acquire) } mut bool stored", _ => true,
+                s => { s[at + 1] = s[Word]; s[at] = broken == Break.EndWithoutHold ? 2 : 1; }),
             new("HeldAlone", "Exchanged(word, seen, seen | 1)", s => (s[at + 1] & Running) == 0 || s[Word] != s[at + 1], s =>
             {
                 var seen = s[at + 1];
@@ -1104,19 +1103,26 @@ public sealed class ModelTests
                 s[Word] = seen | Running;
                 s[Holders]++;
                 s[at + 3] = 1;
-                s[at] = 3;
+                s[at] = 2;
             }, ["if (seen & 1) == 0 {"]),
-            new("EndChildren", "if *Ptr<byte*>(at - 8) == null {", _ => true, s =>
+            new("EndChildren", "StateWord(at).FetchOr(16, MemoryOrder.AcqRel)", _ => true, s =>
             {
-                if (s[ChildEnds] == 0)
+                if (s[ChildEnds] != 0)
                 {
-                    Trespassed(s);
-                    s[ChildEnds] += s[ChildWaits] == 0 ? 1 : 0;
+                    s[at] = s[at + 3] != 0 ? 4 : -1;
+                    return;
                 }
 
+                s[Word] |= 16;
+                s[at] = 3;
+            }, ["HeldAlone(at) } if *Ptr<byte*>(at - 72) == state && *Ptr<int>(at - 88) != 3 {"]),
+            new("EndChildren", "if *Ptr<byte*>(at - 8) == null {", _ => true, s =>
+            {
+                Trespassed(s);
+                s[ChildEnds] += s[ChildWaits] == 0 ? 1 : 0;
                 s[at + 2] = 0;
                 s[at] = s[at + 3] != 0 ? 4 : -1;
-            }, ["if *Ptr<int>(at - 88) != 3 {"]),
+            }),
             .. LetGone(at, 4, s => { s[at + 3] = 0; return -1; }, broken),
         ]);
     }

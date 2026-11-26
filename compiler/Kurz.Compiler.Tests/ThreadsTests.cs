@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Text;
 using Xunit;
@@ -277,8 +279,8 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>
-    /// U13, U21, U22, U35: the crash of <c>Parent</c> on a worker thread ends its child, under the world that its crash's thread holds
-    /// while every other thread waits (the runtime's <c>WorldTried</c>, <c>EndChildren</c>), before its restart, so that the top-level
+    /// U13, U21, U22, U35: the crash of <c>Parent</c> on a worker thread ends its child, under a hold of the child that its crash's thread
+    /// takes (the runtime's <c>HeldAlone</c>, <c>EndChildren</c>), before its restart, so that the top-level
     /// code, whose call of <c>Kid</c> waits in the inbox behind <c>Boom</c> for that restart, finds the child ended: its call of
     /// <c>Get</c> raises <c>actor-gone</c>, as the case <c>actors/crash-children-end.kz</c> shows on one thread, whose <c>send</c> to the
     /// child after <c>Boom</c> has no order on more than one.
@@ -296,6 +298,220 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.EndsWith("error: actor-gone at program.kz:25\n", run.Error, StringComparison.Ordinal);
         }
     }
+
+    /// <summary>
+    /// U19, U35: the crash of <c>Flaky</c> and its restart hold <c>Flaky</c> alone, while <c>Busy</c> runs a message of three seconds on
+    /// another worker thread with no call and no wait in it (section 6, the owner, 2026-11-26, #519, comment 7194874125, "Per-actor holds
+    /// (Recommended)"), so that the top-level code's call of <c>Ping</c>, which waits in the inbox for the restart, returns well within
+    /// that message, where a world that waits for every other worker's turn would hold the crash to its end.
+    /// </summary>
+    [Fact]
+    public void A_crash_on_a_worker_thread_holds_only_its_actor_while_another_worker_runs_a_long_message()
+    {
+        const string text = """
+            void Hold(duration d) {
+                instant start = instant.Now
+                while start.Elapsed < d {
+                }
+            }
+
+            actor Busy {
+                pub void Spin() {
+                    Hold(3s)
+                }
+            }
+
+            actor Flaky {
+                pub void Fail() {
+                    throw "flaky"
+                }
+
+                pub int Ping() => 1
+            }
+
+            b = spawn Busy()
+            f = spawn Flaky() on crash restart after 1ms
+            send b.Spin()
+            instant begun = instant.Now
+            send f.Fail()
+            print(f.Ping())
+            print(begun.Elapsed < 2s)
+
+            """;
+        if (Ran(text, "threads-hold", "export KURZ_THREADS=4; ") is { } run)
+        {
+            Assert.Equal(0, run.Code);
+            Assert.Equal(["1", "true"], run.Output);
+            Assert.Equal(["Flaky#2 crashed: thrown \"flaky\" at program.kz:15"], Logged(run.Error));
+        }
+    }
+
+    /// <summary>
+    /// U25, U35: a crash that <c>Worker</c>'s policy escalates on a worker thread reaches <c>Boss</c> as a signal, which the holder of
+    /// <c>Boss</c> takes before its messages (the runtime's <c>Forwarded</c> and <c>Signaled</c>; section 6, the owner, 2026-11-26, #519,
+    /// comment 7194874125), so that <c>Boss</c> falls with <c>Worker</c>'s crash and writes the one log line in its own name with the
+    /// child's words, as one thread writes it, and restarts with its count at 0, which the top-level code's calls of <c>Count</c> find
+    /// once the restart ran.
+    /// </summary>
+    [Fact]
+    public void A_crash_a_child_escalates_on_a_worker_thread_reaches_its_supervisor_as_a_signal()
+    {
+        const string text = """
+            actor Worker {
+                pub void Fail() {
+                    throw "worker fails"
+                }
+            }
+
+            actor Boss {
+                mut int n = 0
+
+                pub void Go() {
+                    n = n + 1
+                    w = spawn Worker() on crash escalate
+                    send w.Fail()
+                }
+
+                pub int Count() => n
+            }
+
+            b = spawn Boss()
+            b.Go()
+            mut seen = b.Count()
+            mut tries = 0
+            while seen != 0 && tries < 1000000 {
+                seen = b.Count()
+                tries = tries + 1
+            }
+
+            print(seen)
+
+            """;
+        if (Ran(text, "threads-escalate", "export KURZ_THREADS=4; ") is { } run)
+        {
+            Assert.Equal(0, run.Code);
+            Assert.Equal(["0"], run.Output);
+            Assert.Equal(["Boss#1 crashed: thrown \"worker fails\" at program.kz:3"], Logged(run.Error));
+        }
+    }
+
+    /// <summary>
+    /// U26, U35: the crash of <c>Flaky</c> past its <c>max 1 in 1min</c> on a worker thread sends its supervisor <c>restart-limit</c> as a
+    /// signal (section 6, the owner, 2026-11-26, #519, comment 7194874125), so that <c>Boss</c> crashes with <c>restart-limit</c> at the
+    /// line of the <c>spawn</c> after the two log lines of <c>Flaky</c>'s crashes, as one thread writes them, and restarts with its count at 0.
+    /// </summary>
+    [Fact]
+    public void A_restart_limit_on_a_worker_thread_reaches_the_supervisor_as_a_signal()
+    {
+        const string text = """
+            actor Flaky {
+                pub void Fail() {
+                    throw "flaky"
+                }
+            }
+
+            actor Boss {
+                mut int n = 0
+
+                pub void Go() {
+                    n = n + 1
+                    f = spawn Flaky() on crash restart after 1ms max 1 in 1min
+                    send f.Fail()
+                    send f.Fail()
+                }
+
+                pub int Count() => n
+            }
+
+            b = spawn Boss()
+            b.Go()
+            mut seen = b.Count()
+            mut tries = 0
+            while seen != 0 && tries < 1000000 {
+                seen = b.Count()
+                tries = tries + 1
+            }
+
+            print(seen)
+
+            """;
+        if (Ran(text, "threads-restart-limit", "export KURZ_THREADS=4; ") is { } run)
+        {
+            Assert.Equal(0, run.Code);
+            Assert.Equal(["0"], run.Output);
+            Assert.Equal(
+                ["Flaky#2 crashed: thrown \"flaky\" at program.kz:3", "Flaky#2 crashed: thrown \"flaky\" at program.kz:3", "Boss#1 crashed: restart-limit at program.kz:12"],
+                Logged(run.Error));
+        }
+    }
+
+    /// <summary>
+    /// U35, U60: in each of 200 rounds <c>Left</c> and <c>Right</c> call each other at once on two worker threads, each holding its thread
+    /// to the same moment, 2 ms after the round's start, and the walk of each
+    /// wait, which runs with no lock, may find the loop at the same moment; the loop is confirmed under the lock of the process before a
+    /// wait raises (section 6, T72 2; the runtime's <c>LoopHeld</c>), so that at most one of the two raises <c>deadlock</c> in a round,
+    /// its new instance answering the other's call, as <c>actors/deadlock.kz</c> shows on one thread; a round whose call of
+    /// <c>Value</c> reaches the other's inbox before the top-level code's <c>send</c> of <c>Ask</c> closes no loop.
+    /// </summary>
+    [Fact]
+    public void A_loop_two_actors_close_at_once_on_worker_threads_raises_one_deadlock()
+    {
+        const string text = """
+            actor Left {
+                mut int got = 0
+
+                pub void Ask(Right other, instant start) {
+                    while start.Elapsed < 2ms {
+                    }
+
+                    got = other.Value()
+                }
+
+                pub int Value() => 1
+            }
+
+            actor Right {
+                mut int got = 0
+
+                pub void Ask(Left other, instant start) {
+                    while start.Elapsed < 2ms {
+                    }
+
+                    got = other.Value()
+                }
+
+                pub int Value() => 2
+            }
+
+            mut i = 0
+            mut sum = 0
+            while i < 200 {
+                l = spawn Left() on crash restart after 1ms
+                r = spawn Right() on crash restart after 1ms
+                begun = instant.Now
+                send l.Ask(r, begun)
+                send r.Ask(l, begun)
+                sum = sum + l.Value() + r.Value()
+                i = i + 1
+            }
+
+            print(sum)
+
+            """;
+        if (Ran(text, "threads-loop-once", "export KURZ_THREADS=4; ") is { } run)
+        {
+            Assert.Equal(0, run.Code);
+            Assert.Equal(["600"], run.Output);
+            var rounds = Logged(run.Error).Select(line => Regex.Match(line, "^(?:Left|Right)#([0-9]+) crashed: deadlock ")).ToList();
+            Assert.All(rounds, match => Assert.True(match.Success, match.Value));
+            Assert.NotEmpty(rounds);
+            Assert.All(rounds.GroupBy(match => (long.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) + 1) / 2), round => Assert.Single(round));
+        }
+    }
+
+    /// <summary>The lines of <paramref name="error"/>, each with the time of its log line taken off.</summary>
+    private static List<string> Logged(string error) =>
+        [.. error.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => Regex.Replace(line, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z Error Kurz\\.Actor: ", ""))];
 
     /// <summary>
     /// U35: with <c>KURZ_THREADS</c> set to 1 every actor runs on the main thread in the top-level code's waits, first in, first out, as a

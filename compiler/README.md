@@ -2311,24 +2311,28 @@ arguments are copied into the receiver's heap at its turn, and a result into the
 freed once every thread passed a turn since (T16 2: `Deferred`, `Reclaimed`, `Reclaims`), the main thread holding its
 epoch around a `send` or a call of the top-level code (`Pinned`). `ThreadsTests` runs these on four worker threads: calls
 and sends that cross strings and lists between heaps, the order of one sender's messages, a sleep, a `deadlock` and a
-start whose `eventfd` the system refuses. A thread that acts on the records of actors it does not hold, as a crash, its
-escalation and its restart, the end of an actor and of its children, the decision of a block of `on crash` and the walk
-for the places of a `deadlock` do (`Crashed`, `EndActor`, `EndChildren`, `PauseEnded`, `Restart`, `Decided`, `Kept`),
-holds the world, as Go's `stopTheWorld`: one compare-exchange of its owner, then the wait for every other worker to wait
-at the start of its turn or sleep in its poller and for the main thread to read no record (`WorldTried`, `WorldGathered`,
-`WorldEntered`, `Pinned`), so that the code of one thread runs there unchanged. A crash or an end whose thread finds the
-world held keeps it in the activation and queues its actor again, whose following take takes it (`CrashTaken`, `EndTaken`),
-the code of a block sleeps a millisecond at a time for it (`WorldHeld`), and the main thread's wait goes on once the
-world that set its reply is let go of (`WorldPassed`). The end of the process that the top-level code takes from a
-worker's crash is made by the main thread, whose stack holds the calls the trace names (`EndHanded`, `RootEnded`), at its
-turn in its wait, at its following read of a record or at its end. `RunTests` runs the cases of a crash, its log line, its
-escalation, its restart, the blocks of `on crash`, `attempt`, `per node` and the walk of a `deadlock` on four worker
-threads, held to their headers, and `ThreadsTests` the end of a crashed supervisor's children. What is not built on
-worker threads, each a reading of the code that no run checks (inferred): a timeout of a call while its callee copies
-the result leaks that result's heap; the reference that a `per node` lookup of the top-level code gives is read after
-its pin (`PerFind`); a world waits for the turn of every other worker to end, so that a turn that runs long holds a crash
-back that long; and a main thread whose code calls nothing of the runtime takes no end a worker handed it. The process
-ends with every actor's heap held, freeing none (`EndActors`). A build for
+start whose `eventfd` the system refuses. A crash, its escalation and its restart, the end of an actor and of its children
+and the decision of a block of `on crash` hold only the actors they touch (section 6, comment 7194874125, 1): the thread
+that runs an actor's crash holds that actor, and the end of its children holds each child before it ends it, a child that
+runs waiting for its holder to let go of it (`HeldAlone`, `EndChildren`). A crash that passes up, an escalation or the
+`restart-limit` of a `max N in`, goes to the supervisor as a signal, a block in a heap of its own pushed on the
+supervisor's queue of blocks before the fall of the actor that sends it, moved to the front of its inbox before its blocks
+and taken before its messages, as a BEAM process handles its signals before its messages and Akka keeps its system
+messages ahead of the mailbox (`Forwarded`, `SignalPushed`, `Moved`, `Signaled`), and dropped with its log line in
+its sender's name where the supervisor waits for its restart or for a block's decision (`SignalLeft`). The walk of a
+`deadlock` runs with no lock and confirms a loop it found under the lock of the process (T72 2: `LoopHeld`), which the
+wait of the top-level code that finds nothing left to run takes too (`Kept`, `Stuck`), and nothing else takes
+(`WorldTaken`). The end of the process that the top-level code takes from a worker's crash is made by the main thread,
+whose stack holds the calls the trace names (`EndHanded`, `RootEnded`), at its turn in its wait, at its following read
+of a record or at its end. `RunTests` runs the cases of a crash, its log line, its escalation, its restart, the blocks of
+`on crash`, `attempt`, `per node` and the walk of a `deadlock` on four worker threads, held to their headers, and
+`ThreadsTests` the end of a crashed supervisor's children, a crash whose restart a long message of another worker does
+not hold back, an escalation and a `restart-limit` that reach the supervisor as signals, and a loop that two actors close
+at once, which raises one `deadlock`. What is not built on worker threads, each a reading of the code that no run checks
+(inferred): a timeout of a call while its callee copies the result leaks that result's heap; the reference that a `per
+node` lookup of the top-level code gives is read after its pin (`PerFind`); and a main thread whose code calls nothing
+of the runtime takes no end a worker handed it. The process ends with every actor's heap held, freeing none, and the end
+of the process gives the memory back (section 6, comment 7194874125, 2: `EndActors`). A build for
 Windows starts no worker thread: its `Cores` gives 1 and its runtime reads no `KURZ_THREADS`. No run on Arm, and no
 ThreadSanitizer job, checks the orders of the atomic operations of the worker threads, and no run under a CPU quota of a
 control group checks their count.

@@ -2144,7 +2144,10 @@ actors the build kept before the table were ended newest first, which this order
 was taken again)*. A message parked in a wait when the top-level code ends
 is no current message that holds that end, and is dropped with the process, as a queued one is, its lines after the wait never running, as tokio
 drops its tasks when its runtime shuts down (§6, the owner, 2026-11-15, #519, comment 6892835500, Q5, "Rust:
-dropped").
+dropped"). The heap of every actor is freed whole at the end of the program on one thread; with worker
+threads, the end of the process gives the memory back, as a Rust or Go program's return from `main` ends its
+other threads with no join (§6, the owner, 2026-11-26, #519, comment 7194874125, "One thread only
+(Recommended)").
 
 No case: for the end of the top-level code, since which message runs when it ends is the scheduler's to
 say where actors run on more than one thread, so that a case's output would hang on it; the end of a
@@ -6146,7 +6149,13 @@ receiver at its turn, and a result into the waiter's heap as its wait returns (�
 ends (§6, the owner, 2026-11-26, #519, comment 7192965131), and an ended actor's first page is freed once every
 worker thread has passed a turn since its end (§6, the same comment, T16, 2). A wait of the top-level
 code raises `deadlock` at the line of its call where no worker thread has an actor to run, no timer is
-pending and no poller holds a registration, as Go's `checkdead` *(assumed in §6)*.
+pending and no poller holds a registration, as Go's `checkdead` *(assumed in §6)*. On worker threads a
+crash, an end, a restart and the decision of a block hold only the actors they touch, and a crash reaches
+its supervisor and its links as a signal, as Erlang's exit signals do, a check of the whole process left for
+the deadlock of the top-level code alone (§6, the owner, 2026-11-26, #519, comment 7194874125, "Per-actor
+holds (Recommended)"); the signal is taken before the supervisor's blocks and messages, and one that reaches
+a supervisor that waits for its restart or for the decision of a block is dropped, its log line written in
+the name of the actor that sent it *(assumed in §6)*.
 
 No case: for the count of the threads, since a case is a single file with no `project.kz` (chapter 0) and
 gives its program no environment, as `log-filter`'s place in chapter 12 says, and cannot make its system

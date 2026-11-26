@@ -1801,7 +1801,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // of them owns it, as tokio's `oneshot` decides by one word (not checked at source); the owner reads the waiter, then stores the
         // reply's word with release, then wakes (`Replied`, `Signal`), the waiter loads it with acquire (`ReplyState`), which the
         // waits, the readiness, the take and the crash call (`Answer`, its loop in the top-level code in `RootLoop`, its loop in an activation and its
-        // kind, `Ready`, `RunTake`, `Fall`), as the crash and the end take a reply by the swap (`Fall`, `EndActor`); a wake sets QUEUED by
+        // kind, `Ready`, `RunTake`, `Fall`), as the crash and the end take a reply by the swap (`Fall`, the end's `Drained`); a wake sets QUEUED by
         // one `or` (`Wake`), a take, a hold's end, a constructor's end and a restart's hold change the state word by one compare-exchange
         // (`Exchanged`) after a load with acquire, the restart's hold loading it with acquire again while a take holds the actor
         // (`HeldAlone`); the orders are Rust's for each, which a thread of their own needs and one thread does not show
@@ -1851,7 +1851,8 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         InOrder(Runtime("Ready"), state);
         InOrder(Runtime("RunTake"), state);
         InOrder(Runtime("Fall"), state, taken, state, taken);
-        InOrder(Runtime("EndActor"), taken);
+        InOrder(Runtime("EndActor"), @"call void @""rt\.common\.Drained\.\d+""");
+        InOrder(Runtime("Drained"), taken);
 
         Ran(Toolchain.Run(toolchain.Build(program, "reply-orders")), 0, ["2"], string.Empty);
     }
@@ -1866,8 +1867,8 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // release before the wake (`LockTried`, `LockSpun`, `Lock`, `Unlock`); the count of the actors is one relaxed add (`ActorNew`); a
         // slot is set with release, its state before its number, cleared with release, its number before its link, and looked up with
         // no lock by three loads with acquire, the number, the state and the number again (`SlotTake`, `SlotFree`, `Lookup`); the orders
-        // are what a thread of its own needs and one thread does not show; the end of a supervisor sets its child's ENDING bit by one `or`
-        // with acquire and release before it holds the child, and the child's holder loads it with acquire (`EndChildren`, `Ending`)
+        // are what a thread of its own needs and one thread does not show; the end of a supervisor holds its child, then sets its ENDING bit by
+        // one `or` with acquire and release, and the child's holder loads it with acquire (`EndChildren`, `Ending`)
         const string text = "actor Counter {\n    mut long count = 0\n\n    pub void Add(long n) {\n        count = count + n\n    }\n\n    pub long Get() => count\n}\n\n"
             + "c = spawn Counter()\nsend c.Add(2)\nprint(c.Get())\n";
         var program = Emit(text);
@@ -1906,7 +1907,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             @"store atomic i64 %[\w.]+, ptr %[\w.]+ release, align 8", @"call void @""rt\.common\.Unlock\.\d+""");
         InOrder(Runtime("Lookup"), @"load atomic i64, ptr %[\w.]+ acquire, align 8", @"load atomic ptr, ptr %[\w.]+ acquire, align 8",
             @"load atomic i64, ptr %[\w.]+ acquire, align 8");
-        InOrder(Runtime("EndChildren"), @"atomicrmw or ptr %[\w.]+, i32 16 acq_rel, align 4", @"call void @""rt\.common\.HeldAlone\.\d+""",
+        InOrder(Runtime("EndChildren"), @"call void @""rt\.common\.HeldAlone\.\d+""", @"atomicrmw or ptr %[\w.]+, i32 16 acq_rel, align 4",
             @"call void @""rt\.common\.LetGo\.\d+""");
         InOrder(Runtime("Ending"), @"load atomic i32, ptr %[\w.]+ acquire, align 4");
         Ran(Toolchain.Run(toolchain.Build(program, "shared-orders")), 0, ["2"], string.Empty);

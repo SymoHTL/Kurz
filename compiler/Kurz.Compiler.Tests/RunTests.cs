@@ -402,8 +402,9 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     /// <summary>
     /// U35, section 6: the cases of a crash and its log line, its escalation, its restart after its pause, the end of a supervisor's
     /// children, the blocks of <c>on crash</c>, <c>attempt</c>, <c>per node</c> and the walk for the places of a <c>deadlock</c>, run on
-    /// four worker threads, where the thread that acts on the records of actors it does not hold holds the world while every other thread
-    /// waits (the runtime's <c>WorldTried</c>), and held to their headers as on one thread; a case marked <c>// threads: 1</c> among them
+    /// four worker threads, where a crash, an end, a restart and a block's decision hold only the actors they touch and a crash that passes
+    /// up reaches its supervisor as a signal (the runtime's <c>HeldAlone</c>, <c>Signaled</c>), and held to their headers as on one thread;
+    /// a case marked <c>// threads: 1</c> among them
     /// holds one order of its lines that four threads keep, its actors running one at a time.
     /// </summary>
     public static TheoryData<string> CrashPathCases => new(
