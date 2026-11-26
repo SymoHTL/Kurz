@@ -5665,7 +5665,15 @@ top-level code ends runs to its end or its wait, a wait then dropped as a parked
 the process ends after it; a supervisor that is running acts on its child's crash once its own message
 ends or waits (U22) *(assumed in §6)*. In a case marked `// threads: 1` (chapter 0) one thread runs the
 actors that are ready first in, first out, the top-level code's wait running them (§6, the owner,
-2026-11-17, #570, comment 6961064167, Q1, "FIFO, as the build (Recommended)").
+2026-11-17, #570, comment 6961064167, Q1, "FIFO, as the build (Recommended)"). A program run with
+`KURZ_THREADS` set to 1 runs so too, and so do the tests of `kurz test` *(assumed in §6)*. Each worker
+thread has a poller and timers of its own, and a wake of an actor on another thread is a push to that
+thread's queue and one write of its `eventfd` (§6, the owner, 2026-11-26, #519, comment 7189038384,
+T88). A worker whose `eventfd` or record the system refuses ends the start with `thread-refused` too
+*(assumed in §6)*. A message to an actor on another thread is copied into the receiver's heap by the
+receiver at its turn, and a result into the waiter's heap as its wait returns (§6, the owner,
+2026-11-20, #519, comment 7051492844, T17, 1), and an ended actor's first page is freed once every
+worker thread has passed a turn since its end (§6, the same comment, T16, 2).
 
 No case: for the count of the threads, since a case is a single file with no `project.kz` (chapter 0) and
 gives its program no environment, as `log-filter`'s place in chapter 12 says, and cannot make its system

@@ -65,6 +65,260 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
     }
 
+    private const string Crossing = """
+        actor Counter {
+            mut int count = 0
+            mut string last = ""
+
+            pub void Add(int n, string tag) {
+                count = count + n
+                last = tag
+            }
+
+            pub int Get() => count
+
+            pub string Last() => "last {last}"
+        }
+
+        actor Hub {
+            pub void Fire(List<Counter> all, int rounds) {
+                for i in 0..<rounds {
+                    for c in all {
+                        send c.Add(1, "r{i}")
+                    }
+                }
+            }
+
+            pub int Total(List<Counter> all) {
+                mut total = 0
+                for c in all {
+                    total = total + c.Get()
+                }
+
+                return total
+            }
+        }
+
+        a = spawn Counter()
+        b = spawn Counter()
+        k = spawn Counter()
+        h = spawn Hub()
+        g = spawn Hub()
+        send h.Fire([a, b, k], 300)
+        send g.Fire([k, b, a], 300)
+        print(h.Total([a, b, k]) >= 900)
+        print(g.Total([a, b, k]))
+        print(a.Last())
+
+        """;
+
+    /// <summary>
+    /// U35, T17: on four worker threads two actors send 1800 messages, each with a <c>string</c> built in a heap of its own, to three
+    /// others, which copy it into their own heaps at their turn, and the top-level code's calls read the counts and a result that holds
+    /// a block, which the caller copies out of the callee's heap of its own: each hub's <c>Total</c> stands behind its <c>Fire</c> in its
+    /// inbox, and each of its calls of <c>Get</c> behind its own sends (U5, U15), so that the second total counts every message.
+    /// </summary>
+    [Fact]
+    public void Actors_on_worker_threads_take_messages_whose_arguments_and_results_cross_between_their_heaps()
+    {
+        if (Ran(Crossing, "threads-crossing", "export KURZ_THREADS=4; ") is { } run)
+        {
+            Assert.Equal((0, ""), (run.Code, run.Error));
+            Assert.Equal(["true", "1800", "last r299"], run.Output);
+        }
+    }
+
+    /// <summary>
+    /// U5, U35: the messages one sender sends to one actor run in the order it sent them on worker threads, a hub's sends and the
+    /// top-level code's alike, each receiver counting a message that does not follow the one before it.
+    /// </summary>
+    [Fact]
+    public void The_messages_of_one_sender_run_in_its_order_on_worker_threads()
+    {
+        const string text = """
+            actor Checker {
+                mut int expected = 0
+                mut int wrong = 0
+
+                pub void Take(int n) {
+                    if n != expected {
+                        wrong = wrong + 1
+                    }
+
+                    expected = n + 1
+                }
+
+                pub string Report() => "{expected} {wrong}"
+            }
+
+            actor Sender {
+                pub void Run(Checker target, int count) {
+                    for i in 0..<count {
+                        send target.Take(i)
+                    }
+                }
+
+                pub int Done() => 1
+            }
+
+            x = spawn Checker()
+            y = spawn Checker()
+            s = spawn Sender()
+            send s.Run(x, 3000)
+            for i in 0..<3000 {
+                send y.Take(i)
+            }
+
+            print(s.Done())
+            print(x.Report())
+            print(y.Report())
+
+            """;
+        if (Ran(text, "threads-order", "export KURZ_THREADS=4; ") is { } run)
+        {
+            Assert.Equal((0, ""), (run.Code, run.Error));
+            Assert.Equal(["1", "3000 0", "3000 0"], run.Output);
+        }
+    }
+
+    /// <summary>
+    /// S28, U35: an actor that sleeps on a worker thread parks among that thread's timers, which wake it there, while the others run,
+    /// and the top-level code sleeps on the main thread; the actor's sleep lasts at least its length.
+    /// </summary>
+    [Fact]
+    public void An_actor_that_sleeps_on_a_worker_thread_parks_while_the_others_run()
+    {
+        const string text = """
+            actor Napper {
+                pub void Nap() {
+                    Environment.Sleep(50ms)
+                    print("napped")
+                }
+
+                pub bool Measured() {
+                    start = instant.Now
+                    Environment.Sleep(20ms)
+                    return start.Elapsed >= 20ms
+                }
+            }
+
+            actor Quick {
+                pub int Get() => 7
+            }
+
+            a = spawn Napper()
+            q = spawn Quick()
+            send a.Nap()
+            print(q.Get())
+            print(a.Measured())
+            Environment.Sleep(10ms)
+            print("slept")
+
+            """;
+        if (Ran(text, "threads-sleep", "export KURZ_THREADS=4; ") is { } run)
+        {
+            Assert.Equal((0, ""), (run.Code, run.Error));
+            Assert.Equal(["7", "napped", "true", "slept"], run.Output);
+        }
+    }
+
+    /// <summary>
+    /// U18, U35: where the top-level code waits and every worker thread parked with no actor to run, no activation asleep, no registration
+    /// of its poller and no restart's pause, the last worker to park wakes the main thread, whose wait raises <c>deadlock</c> at its call's
+    /// line, the timers of the calls that wait counting for nothing, as on one thread (section 6, Go's <c>checkdead</c>): <c>Left</c> sleeps,
+    /// <c>Right</c>'s call of it waits in its inbox meanwhile, and <c>Left</c>'s call of <c>Right</c> then waits in <c>Right</c>'s, well within
+    /// the five seconds of the calls' default bound.
+    /// </summary>
+    [Fact]
+    public void A_wait_of_the_top_level_code_that_nothing_on_the_worker_threads_can_answer_raises_deadlock()
+    {
+        const string text = """
+            actor Left {
+                pub void Ask(Right other) {
+                    Environment.Sleep(50ms)
+                    print("left got {other.Value()}")
+                }
+
+                pub int Value() => 1
+            }
+
+            actor Right {
+                pub void Ask(Left other) {
+                    print("right got {other.Value()}")
+                }
+
+                pub int Value() => 2
+            }
+
+            l = spawn Left()
+            r = spawn Right()
+            send l.Ask(r)
+            send r.Ask(l)
+            print(l.Value())
+
+            """;
+        if (Ran(text, "threads-deadlock", "export KURZ_THREADS=4; ") is { } run)
+        {
+            Assert.Equal(1, run.Code);
+            Assert.StartsWith("error: deadlock at program.kz:22\n", run.Error, StringComparison.Ordinal);
+            Assert.Empty(run.Output);
+        }
+    }
+
+    /// <summary>
+    /// U35: with <c>KURZ_THREADS</c> set to 1 every actor runs on the main thread in the top-level code's waits, first in, first out, as a
+    /// case marked <c>// threads: 1</c> runs (assumed in section 6), so that the two actors <c>Go</c> wakes say their lines in the order it
+    /// woke them, where one worker thread would run the actor woken last first, from its waker's slot, as Go's <c>runnext</c> runs it
+    /// (section 6, Q5).
+    /// </summary>
+    [Fact]
+    public void KURZ_THREADS_set_to_1_runs_every_actor_on_the_main_thread_first_in_first_out()
+    {
+        const string text = """
+            actor Speaker {
+                pub void Say(string s) {
+                    print(s)
+                }
+
+                pub int Ping() => 1
+            }
+
+            actor Waker {
+                pub void Go(Speaker first, Speaker second) {
+                    send first.Say("a")
+                    send second.Say("b")
+                }
+            }
+
+            a = spawn Speaker()
+            b = spawn Speaker()
+            w = spawn Waker()
+            w.Go(a, b)
+            print(a.Ping() + b.Ping())
+
+            """;
+        if (Ran(text, "threads-one", "export KURZ_THREADS=1; ") is { } run)
+        {
+            Assert.Equal((0, ""), (run.Code, run.Error));
+            Assert.Equal(["a", "b", "2"], run.Output);
+        }
+    }
+
+    /// <summary>
+    /// U35: a start of the worker threads that the system refuses a descriptor for, here the <c>eventfd</c> of the second worker under a
+    /// limit of six descriptors, ends the process with <c>thread-refused</c> naming the count asked and the exit code 1, after what the
+    /// program printed before its first <c>spawn</c> (section 6, the owner, 2026-11-17, #572, comment 6961064484, Q2).
+    /// </summary>
+    [Fact]
+    public void A_start_of_the_worker_threads_the_system_refuses_ends_the_process_with_thread_refused()
+    {
+        if (Ran("print(\"start\")\n" + Spawns, "threads-refused-start", "export KURZ_THREADS=4; ulimit -n 6; ") is { } run)
+        {
+            Assert.Equal((1, "error: thread-refused (4)\n"), (run.Code, run.Error));
+            Assert.Equal(["start"], run.Output);
+        }
+    }
+
     /// <summary>
     /// A program with a <c>spawn</c>, started after <paramref name="setup"/>, ends with the exit code 1 and <paramref name="error"/> alone,
     /// before its first statement, while a program with no <c>spawn</c> under <paramref name="setup"/>, which reads no

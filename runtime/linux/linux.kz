@@ -98,7 +98,8 @@ static mut byte* argumentValues = null
 // The start of the process: first a closed standard descriptor opened again on `/dev/null`
 // (`Standard`), then the arguments kept, then the signal of a closed pipe, `SIGPIPE` (13), set to
 // ignored, so that a write to a closed pipe returns an error, which `print` raises as `print-failed`
-// (design record, section 6); `SIG_IGN` is the handler 1. Then the handler of a fault, `Faults`.
+// (design record, section 6); `SIG_IGN` is the handler 1. Then the handler of a fault, `Faults`, and the page of the words the
+// threads of the process share (`sysWords`), with the 1 that wakes a thread of the scheduler at 16 (`EventSignal`).
 pub void Start(int count, byte* values) {
     Standard()
     raw {
@@ -106,6 +107,10 @@ pub void Start(int count, byte* values) {
         argumentValues = values
         signal(13, Ptr<void>(1))
         Faults()
+        sysWords = Memory(4096)
+        if sysWords != null {
+            *Ptr<long>(sysWords + 16) = 1
+        }
     }
 }
 
@@ -3260,6 +3265,79 @@ long FileBytes(byte* path, mut byte* text, mut long room) {
     return count
 }
 
+// ---- the worker threads (U35) -------------------------------------------------------------------------
+
+// A worker thread of the scheduler started at `entry` with `argument` (section 6; U35), detached (1), with the stack the C library
+// gives a thread by default, since its actors' messages run on stacks of their own: 0, or the error `pthread_create` gave, negated,
+// where the system refuses it, -12 where the page of this thread cannot be mapped. The attributes of the start stand at 1280 of
+// that page (`Endpoints`) and the identity of the thread at 1408.
+pub long ThreadNew(extern "C" (byte*) => byte* entry, byte* argument) {
+    raw {
+        byte* held = Endpoints()
+        if held == null {
+            return -12
+        }
+
+        void* attributes = Ptr<void>(held + 1280)
+        pthread_attr_init(attributes)
+        pthread_attr_setdetachstate(attributes, 1)
+        int refused = pthread_create(Ptr<long>(held + 1408), attributes, entry, argument)
+        pthread_attr_destroy(attributes)
+        return -long(refused)
+    }
+}
+
+// The start of a worker thread (U35): the handler of a fault and the stack it runs on for this thread, as for the main thread
+// (`Faults`), the handler the process's already and the stack, its guard page and the bounds of the thread's own stack each
+// thread's own.
+pub void ThreadStart() {
+    raw {
+        Faults()
+    }
+}
+
+// An `eventfd` with `EFD_CLOEXEC | EFD_NONBLOCK` (526336), which a thread of the scheduler waits on in its poller and another
+// thread wakes it by (`EventSignal`; section 6, T88): its descriptor, or the failure negated.
+pub long EventNew() {
+    raw {
+        int made = eventfd(0, 526336)
+        if made < 0 {
+            return -long(*__errno_location())
+        }
+
+        return long(made)
+    }
+}
+
+// The thread that waits on the `eventfd` `fd` in its poller woken: 1 added to its count, the 8 bytes at 16 of `sysWords`, or at 232
+// of this thread's page where the start mapped no `sysWords`; a count that stands already wakes it all the same, and so does the
+// largest count, which refuses the write (`EAGAIN`).
+pub void EventSignal(long fd) {
+    raw {
+        if sysWords != null {
+            write(int(fd), sysWords + 16, 8)
+            return
+        }
+
+        byte* held = Endpoints()
+        if held != null {
+            *Ptr<long>(held + 232) = 1
+            write(int(fd), held + 232, 8)
+        }
+    }
+}
+
+// The count of the `eventfd` `fd` read, which sets it to 0, into 8 bytes at 240 of this thread's page, so that each event it
+// gives after this one comes from a wake after this read.
+pub void EventDrain(long fd) {
+    raw {
+        byte* held = Endpoints()
+        if held != null {
+            read(int(fd), held + 240, 8)
+        }
+    }
+}
+
 // ---- sockets (design record, section 12) ------------------------------------------------------------
 
 // The calls on sockets of a program built for Linux (S9), over TCP, as Rust 1.82's `TcpListener` and
@@ -3289,7 +3367,9 @@ long FileBytes(byte* path, mut byte* text, mut long room) {
 // poller at 176, 16 bytes, and the 8 bytes of its data at 192 (`PollAdd`, `PollWait`); the wait of a call that would
 // block at 200, 8 bytes (`Waiter`); the wait of a call handed to the pool of threads for blocking calls at 208 and
 // whether a call is handed at 216, 8 bytes each (`BlockingWaiter`); the wait of `Drive` in the poller at 224, 8 bytes
-// (`ManyWaiter`); and the events `epoll_wait` gives at 256, at most 64 of 16 bytes.
+// (`ManyWaiter`); the 8 bytes that wake a thread of the scheduler at 232 and those read off its `eventfd` at 240 (`EventSignal`,
+// `EventDrain`); the events `epoll_wait` gives at 256, at most 64 of 16 bytes; and the attributes of the start of a worker thread at
+// 1280 and its identity at 1408 (`ThreadNew`).
 thread static mut byte* endpoints = null
 
 // The page above, mapped where this thread has none yet: its address, or null where the system refuses it.
@@ -3306,12 +3386,13 @@ byte* Endpoints() {
     return held
 }
 
-// The poller of the process (section 6, assumed there: one poller per process, under `epoll` on Linux, waited on by the
-// scheduler where it runs out of work, as Tokio's driver; issue 658): the descriptor `epoll_create1` gave, with
-// `EPOLL_CLOEXEC` (524288), at the first socket (`Poller`), -1 before it.
-static mut int poller = -1
+// The poller of the thread (section 6, the owner, 2026-11-26, #519, comment 7189038384, T88: one poller under `epoll` for each
+// thread that runs actors, as Seastar's and Glommio's, so that the wake of a wait that parked on a thread stays on that thread; issue
+// 658): the descriptor `epoll_create1` gave, with `EPOLL_CLOEXEC` (524288), at the thread's first socket or, on a thread of the
+// scheduler, at its start (`Poller`), -1 before it.
+thread static mut int poller = -1
 
-// The poller of the process, made where it has none (`poller`): its descriptor, or the failure of `epoll_create1` or of
+// The poller of the thread, made where it has none (`poller`): its descriptor, or the failure of `epoll_create1` or of
 // `pthread_atfork`, which gives a child of a `fork` its own (`Forked`). The opening of a socket makes it first (`Attempt`), so
 // that it takes the descriptor before the first socket's in every run, as Go's `netpollGenericInit` makes its poller at the
 // first descriptor it polls, and a program with no socket opens none.
@@ -3369,8 +3450,9 @@ extern "C" void Forked() {
 // with room for either architecture's; at 128 and 136 the first and the last job queued; at 144 and 176 the first and the last
 // job done; at 152 the count of idle threads, at 156 the count of threads, at 160 the `eventfd` that a job done signals, at 168
 // the count of idle threads woken for a job that have not taken one (Tokio's `num_notify`); at 184 the 8 bytes the scheduler
-// reads that `eventfd` into, at 192 whether the `eventfd`'s registration in the poller is armed (`PoolFlag`), at 248 the
-// identity of a thread started and at 256 its attributes (`Started`), which only the thread that runs every actor writes (U35).
+// reads that `eventfd` into, and at 192 whether the `eventfd`'s registration in the poller is armed (`PoolFlag`). A job whose
+// word at 56 names the box of the jobs done of the thread that handed it, on worker threads (U35), goes to that box and wakes that
+// thread (`PoolThread`), which neither the pool's list of jobs done nor its `eventfd` hears of.
 static mut byte* pool = null
 
 // The pool of threads for blocking calls made where it is not (`pool`): 0, or the failure of the memory, of `eventfd`, made with
@@ -3487,20 +3569,21 @@ pub long Submit(byte* job) {
 }
 
 // A thread of the pool started for the job `job` (`Submit`), detached (1), with 2 MiB of stack, Tokio's default (issue 661, Q9,
-// *(assumed)*), and a page of its own (`PoolThread`): 0. Where the system refuses the page or the thread, the count of threads is
-// lowered again: 0 where another thread of the pool runs, which takes the job from the queue (issue 661, Q2, (c)), else -4101 with
-// the job taken out of the queue, where the scheduler ends the process (Q2, (a)).
+// *(assumed)*), and a page of its own (`PoolThread`), which holds at 64 the attributes of its start and at 256 its identity, so
+// that two threads that start one each write no word in common (U35): 0. Where the system refuses the page or the thread, the
+// count of threads is lowered again: 0 where another thread of the pool runs, which takes the job from the queue (issue 661, Q2,
+// (c)), else -4101 with the job taken out of the queue, where the scheduler ends the process (Q2, (a)).
 long Started(byte* job) {
     raw {
         byte* at = pool
         byte* own = Memory(4096)
         if own != null {
             *Ptr<byte*>(own) = at
-            void* attributes = Ptr<void>(at + 256)
+            void* attributes = Ptr<void>(own + 64)
             pthread_attr_init(attributes)
             pthread_attr_setstacksize(attributes, 2097152)
             pthread_attr_setdetachstate(attributes, 1)
-            int refused = pthread_create(Ptr<long>(at + 248), attributes, PoolThread, own)
+            int refused = pthread_create(Ptr<long>(own + 256), attributes, PoolThread, own)
             pthread_attr_destroy(attributes)
             if refused == 0 {
                 return 0
@@ -3564,6 +3647,19 @@ extern "C" byte* PoolThread(byte* own) {
 
                 pthread_mutex_unlock(Ptr<void>(at))
                 JobRun(job)
+                byte* box = *Ptr<byte*>(job + 56)
+                if box != null {
+                    // U35: the box of the jobs done of the worker thread that handed it, a queue of many producers and one
+                    // consumer as `runtime/common/`'s `Pushed` keeps one, at 0 its end and at 16 its stub, and at 24 that
+                    // thread's `eventfd`, which wakes it (`runtime/common/`'s `DoneDrain`)
+                    AtomicPtr<byte>.FromPtr(Ptr<byte*>(job)).Store(null, MemoryOrder.Relaxed)
+                    byte* before = AtomicPtr<byte>.FromPtr(Ptr<byte*>(box)).Swap(job, MemoryOrder.AcqRel)
+                    AtomicPtr<byte>.FromPtr(Ptr<byte*>(before)).Store(job, MemoryOrder.Release)
+                    write(int(*Ptr<long>(box + 24)), own + 32, 8)
+                    pthread_mutex_lock(Ptr<void>(at))
+                    continue
+                }
+
                 pthread_mutex_lock(Ptr<void>(at))
                 *Ptr<byte*>(job) = null
                 if *Ptr<byte*>(at + 144) == null {
@@ -3655,8 +3751,9 @@ pub byte* PoolDone() {
 // The wait of a call handed to the pool of threads for blocking calls set to `wait`, and whether a call is handed set to
 // `offloads`, which `runtime/common/` gives at the start of the process, as it gives `Waiter`: given the job, `wait` queues it
 // (`Submit`) and parks the actor that called, or the top-level code, until the job is done, and gives its result, or the failure of
-// the pool or of the poller. They stand in the page of the thread that starts the process at 208 and 216 (`Endpoints`), so that a
-// thread of the pool, whose page holds neither, makes its jobs' calls itself.
+// the pool or of the poller. They stand in the page of the thread that starts the process at 208 and 216 (`Endpoints`), and of each
+// worker thread, which sets them at its start (U35), so that a thread of the pool, whose page holds neither, makes its jobs' calls
+// itself.
 pub void BlockingWaiter(extern "C" (byte*) => long wait, extern "C" () => int offloads) {
     raw {
         byte* held = Endpoints()
@@ -3671,7 +3768,7 @@ pub void BlockingWaiter(extern "C" (byte*) => long wait, extern "C" () => int of
 // gives `Waiter`: given the `struct pollfd`s of `poll`, their count and the bound in nanoseconds, it parks the actor that called, or
 // the top-level code, until the first of their descriptors is ready or the bound passed, and gives what `poll` gives, each ready
 // descriptor's events set to those it waits for, or the failure of the poller, below 0. It stands in the page of the thread that
-// starts the process at 224 (`Endpoints`).
+// starts the process at 224 (`Endpoints`), and of each worker thread, which sets it at its start (U35).
 pub void ManyWaiter(extern "C" (int*, int, long) => int wait) {
     raw {
         byte* held = Endpoints()
@@ -3722,6 +3819,7 @@ byte* Handing(long kind, int fd, long count) {
         *Ptr<long>(job + 32) = size
         *Ptr<long>(job + 40) = long(fd)
         *Ptr<long>(job + 48) = count
+        *Ptr<byte*>(job + 56) = null
         return job
     }
 }
@@ -3783,12 +3881,13 @@ void Unhanded(byte* job) {
 }
 
 // The jobs of one page given back (`Unhanded`) and kept for the next (`Handing`), linked at 0, at most 64 (`keptJobCount`), so
-// that a small call maps and gives back no memory, as Tokio's blocking pool takes its task's memory from the allocator; read and
-// written by the thread that runs every actor alone (U35), which hands every job and takes every job back.
-static mut byte* keptJobs = null
+// that a small call maps and gives back no memory, as Tokio's blocking pool takes its task's memory from the allocator; each
+// thread's own, since a job is handed and taken back by the thread whose actor makes its call, its jobs done reaching that thread
+// on worker threads (U35, `PoolThread`).
+thread static mut byte* keptJobs = null
 
 // The count of `keptJobs`.
-static mut long keptJobCount = 0
+thread static mut long keptJobCount = 0
 
 // The job `job` given back by the scheduler where the call's actor fell while the job ran (`PoolDrain`), the descriptor an opening
 // gave closed, since no handle holds it (issue 661, Q3, *(assumed)*), as Rust drops the `File` of a result nobody takes.
@@ -3802,59 +3901,78 @@ pub void JobDropped(byte* job) {
     Unhanded(job)
 }
 
-// The sockets the runtime made, a byte for each descriptor, 1 for a socket (`Mark`), with `socketSlots` bytes: a call on a socket
-// that would block waits in the poller, so that it is handed to no thread of the pool (`Handing`).
-static mut byte* sockets = null
+// The words of the process this file shares between its threads, a page mapped at the start, while the main thread is the one
+// thread (`Start`), null where the system refused it: at 0 the table of the sockets the runtime made (`Mark`), stored with release
+// and loaded with acquire, and at 64 the mutex its changes hold, zeroed as the C library's initializer is.
+static mut byte* sysWords = null
 
-// The bytes of `sockets`.
-static mut long socketSlots = 0
-
-// Whether `fd` is a socket the runtime made (`sockets`).
+// The sockets the runtime made, a table at 0 of `sysWords`: its count of slots at 0, then an `int` for each descriptor, 1 for a
+// socket (`Mark`): a call on a socket that would block waits in the poller, so that it is handed to no thread of the pool
+// (`Handing`). Whether `fd` is one, its slot loaded through an atomic view, since another thread may mark one while this reads (U35).
 bool Socketed(int fd) {
     raw {
-        return fd >= 0 && long(fd) < socketSlots && int(sockets[long(fd)]) != 0
+        if sysWords == null || fd < 0 {
+            return false
+        }
+
+        byte* table = AtomicPtr<byte>.FromPtr(Ptr<byte*>(sysWords)).Load(MemoryOrder.Acquire)
+        if table == null || long(fd) >= *Ptr<long>(table) {
+            return false
+        }
+
+        return AtomicInt.FromPtr(Ptr<int>(table + 8 + long(fd) * 4)).Load(MemoryOrder.Relaxed) != 0
     }
 }
 
-// The descriptor `fd` marked as a socket the runtime made, or as none (`sockets`), the table grown to hold it, to twice its bytes
-// or to the descriptor's number and 1024 more, whichever is more. A mark the system gives no memory for is lost, and the socket's
-// calls are then handed to the pool, where a call that would block waits in `poll` (`Blocked`).
+// The descriptor `fd` marked as a socket the runtime made, or as none (`Socketed`), under the mutex of `sysWords`, the table grown to
+// hold it, to twice its slots or to the descriptor's number and 1024 more, whichever is more, the slots it held copied and the
+// table before it kept, never given back, since a thread may read it still (U35). A mark the system gives no memory for is lost,
+// and the socket's calls are then handed to the pool, where a call that would block waits in `poll` (`Blocked`).
 void Mark(int fd, bool on) {
     raw {
-        if fd < 0 || (!on && long(fd) >= socketSlots) {
+        if fd < 0 || sysWords == null {
             return
         }
 
-        if long(fd) >= socketSlots {
-            mut long slots = socketSlots * 2
-            if slots < long(fd) + 1024 {
-                slots = long(fd) + 1024
-            }
-
-            byte* grown = Memory(slots)
-            if grown == null {
-                return
-            }
-
-            mut long i = 0
-            while i < socketSlots {
-                grown[i] = sockets[i]
-                i = i + 1
-            }
-
-            if sockets != null {
-                Release(sockets, socketSlots)
-            }
-
-            sockets = grown
-            socketSlots = slots
+        pthread_mutex_lock(Ptr<void>(sysWords + 64))
+        AtomicPtr<byte> at = AtomicPtr<byte>.FromPtr(Ptr<byte*>(sysWords))
+        mut byte* table = at.Load(MemoryOrder.Relaxed)
+        mut long slots = 0
+        if table != null {
+            slots = *Ptr<long>(table)
         }
 
-        if on {
-            sockets[long(fd)] = byte(1)
-        } else {
-            sockets[long(fd)] = byte(0)
+        if long(fd) >= slots && on {
+            mut long grown = slots * 2
+            if grown < long(fd) + 1024 {
+                grown = long(fd) + 1024
+            }
+
+            byte* made = Memory(8 + grown * 4)
+            if made != null {
+                *Ptr<long>(made) = grown
+                mut long i = 0
+                while i < slots {
+                    *Ptr<int>(made + 8 + i * 4) = *Ptr<int>(table + 8 + i * 4)
+                    i = i + 1
+                }
+
+                at.Store(made, MemoryOrder.Release)
+                table = made
+                slots = grown
+            }
         }
+
+        if long(fd) < slots {
+            mut int mark = 0
+            if on {
+                mark = 1
+            }
+
+            AtomicInt.FromPtr(Ptr<int>(table + 8 + long(fd) * 4)).Store(mark, MemoryOrder.Relaxed)
+        }
+
+        pthread_mutex_unlock(Ptr<void>(sysWords + 64))
     }
 }
 
@@ -3862,7 +3980,7 @@ void Mark(int fd, bool on) {
 // process, since this file calls none of that file's functions: given the descriptor, the events of `epoll` it waits for,
 // `EPOLLIN` (1) or `EPOLLOUT` (4), and the bound in nanoseconds, it parks the actor that called, or the top-level code, until the
 // descriptor is ready, 1, or the bound passed, 0, or gives the failure of the poller, below 0. It stands in the page of the thread
-// that starts the process, at 200 (`Endpoints`), the thread that runs every actor (U35), since a function is no constant that a
+// that starts the process, at 200 (`Endpoints`), and of each worker thread, which sets it at its start (U35), since a function is no constant that a
 // `static` can start at (R13); a thread with no waiter in its page waits in `poll` (`Blocked`).
 pub void Waiter(extern "C" (int, int, long) => int wait) {
     raw {

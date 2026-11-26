@@ -724,16 +724,20 @@ public sealed partial class Emitter
         var message = MessageType(f);
         var block = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr {heap}, i64 {IrSize(message)})");
         var run = MessageRun(f);
-        var copy = MessageCopy(f, CopiesInto(c, info, f.Parameters.Select(p => p.Type).ToList()));
+        var copiesInto = CopiesInto(c, info, f.Parameters.Select(p => p.Type).ToList());
+        var copy = MessageCopy(f, copiesInto);
         var table = $"@\"message.table.{Number(++actorSites)}\"";
-        module.Global($"{table} = private unnamed_addr constant [3 x ptr] [ptr {run}, ptr {copy}, ptr {MessageDrop(f)}]");
+        var adopt = MessageCopy(f, copiesInto, inPlace: true);
+        module.Global($"{table} = private unnamed_addr constant [4 x ptr] [ptr {run}, ptr {copy}, ptr {MessageDrop(f)}, ptr {adopt}]");
         fn.Emit($"store ptr {table}, ptr {MessageField(message, block, 1)}");
+        fn.Emit($"store ptr {own ?? heap}, ptr {MessageField(message, block, 6)}"); // U35: the heap it is built in, which it names while queued on worker threads (the runtime's `Enqueue`; T17)
         for (var i = 0; i < arguments.Count; i++)
         {
             fn.Emit($"store {arguments[i]}, ptr {MessageField(message, block, MessageArguments + i)}");
         }
 
-        // a message built in a heap of its own: copied into the actor's heap of the moment it is queued, its own heap freed
+        // a message built in a heap of its own: on one thread copied into the actor's heap of the moment it is queued, its own heap
+        // freed, and on worker threads kept with its heap, which the receiver copies the arguments out of (the runtime's `MessageQueued`)
         string Queued()
         {
             if (own is null)
@@ -741,8 +745,7 @@ public sealed partial class Emitter
                 return block;
             }
 
-            var moved = fn.Value($"call ptr {copy}(ptr {block}, ptr {fn.Value($"call ptr {RuntimeFunction("ActorHeap")}({ReferenceWords(actor)})")})");
-            fn.Emit($"call void {RuntimeFunction("MessageHeapFree")}(ptr {own})");
+            var moved = fn.Value($"call ptr {RuntimeFunction("MessageQueued")}(ptr {own}, ptr {block}, {ReferenceWords(actor)})");
             fn.Emit($"store ptr null, ptr {left}");
             return moved;
         }
@@ -785,7 +788,32 @@ public sealed partial class Emitter
         block = Queued();
         fn.Emit($"call void {RuntimeFunction("Enqueue")}({ReferenceWords(actor)}, ptr {block}, i1 {(bound is null ? "false" : "true")}, i64 {bound ?? "0"}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
         fn.Emit($"call void {RuntimeFunction("Wait")}(ptr {reply}, ptr {block}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
-        return Types.IsVoid(result) ? "void" : fn.Value($"load {Ir(result)}, ptr {fn.Value($"getelementptr {Reply(result)}, ptr {reply}, i32 0, i32 {Number(ReplyHeap + 1)}")}");
+        if (Types.IsVoid(result))
+        {
+            return "void";
+        }
+
+        var answer = fn.Value($"load {Ir(result)}, ptr {fn.Value($"getelementptr {Reply(result)}, ptr {reply}, i32 0, i32 {Number(ReplyHeap + 1)}")}");
+        if (!Counted(result))
+        {
+            return answer;
+        }
+
+        // U35: on worker threads a result that holds a block crossed into a heap of its own, which the caller copies it out of into its
+        // own heap as its wait returns, and frees (the runtime's `ResultHeap` and `ResultOwn`; section 6, T17 1)
+        var resultHeap = fn.Value($"call ptr {RuntimeFunction("ResultOwn")}(ptr {reply})");
+        var slot = fn.Alloca(Ir(result), "result");
+        fn.Emit($"store {Ir(result)} {answer}, ptr {slot}");
+        var copied = fn.Label("result.copied");
+        var kept = fn.Label("result.kept");
+        fn.CondBranch(fn.Value($"icmp ne ptr {resultHeap}, null"), copied, kept);
+        fn.Block(copied);
+        var callerHeap = fn.Value($"load ptr, ptr {fn.Value($"getelementptr {Reply(result)}, ptr {reply}, i32 0, i32 {Number(ReplyHeap)}")}");
+        fn.Emit($"store {Ir(result)} {Crossed(answer, result, callerHeap)}, ptr {slot}");
+        fn.Emit($"call void {StdFunction("HeapFree")}(ptr {resultHeap})");
+        fn.Branch(kept);
+        fn.Block(kept);
+        return fn.Value($"load {Ir(result)}, ptr {slot}");
     }
 
     /// <summary>
@@ -838,7 +866,9 @@ public sealed partial class Emitter
                 // no function value reaches here, since a call that waits on a method whose result does not cross with no word, a
                 // function type among them, is `send-needs-word` at the call, and a `send` of a method with a result is `send-result`
                 // (U6; `Checker.Actors.cs`, the stage of the result)
-                var heap = fn.Value($"load ptr, ptr {fn.Value($"getelementptr {Reply(f.ReturnType)}, ptr {reply}, i32 0, i32 {Number(ReplyHeap)}")}");
+                // the caller's heap, or on worker threads a heap of its own that the caller copies the result out of (the runtime's
+                // `ResultHeap`; U35, T17)
+                var heap = fn.Value($"call ptr {RuntimeFunction("ResultHeap")}(ptr {reply}, ptr {fn.Value($"getelementptr {Reply(f.ReturnType)}, ptr {reply}, i32 0, i32 {Number(ReplyHeap)}")})");
                 answer = Crossed(result, f.ReturnType, heap); // in a session of its own, not the call's, whose fault ends the process (O11)
             }
 
@@ -875,16 +905,22 @@ public sealed partial class Emitter
     /// message built in a heap of its own (<see cref="EmitMessage"/>): a block of that heap with the message's table,
     /// reply, chain ID and deadlines, and a copy of each argument, every counted block it reaches copied there in one session (U12, Q2), a function
     /// value by the environment of its lambda (<paramref name="copiesInto"/>); the message's own block goes with the crashed heap, or with
-    /// the message's own heap.
+    /// the message's own heap. Where <paramref name="inPlace"/> holds, the fourth function of the table, which the runtime calls at the
+    /// turn of a message queued with its heap of its own on worker threads (the runtime's <c>Adopted</c>; U35, T17): each argument's copy
+    /// stored in the message's own block, in the place the method reads, and nothing given.
     /// </summary>
-    private string MessageCopy(FunctionSymbol f, List<string?> copiesInto) => Helper($"message.copy.{f.Owner!.Name}.{f.Name}.{Number(++actorSites)}", "ptr", ["ptr", "ptr"], () =>
+    private string MessageCopy(FunctionSymbol f, List<string?> copiesInto, bool inPlace = false) => Helper($"message.{(inPlace ? "adopt" : "copy")}.{f.Owner!.Name}.{f.Name}.{Number(++actorSites)}", inPlace ? "void" : "ptr", ["ptr", "ptr"], () =>
     {
         var message = MessageType(f);
-        var moved = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr %a1, i64 {IrSize(message)})");
-        fn.Emit($"store ptr null, ptr {MessageField(message, moved, 0)}");
-        foreach (var (index, type) in new[] { (1, "ptr"), (2, "ptr"), (3, "i64"), (4, "i64"), (5, "i64"), (6, "i64") })
+        var moved = "%a0";
+        if (!inPlace)
         {
-            fn.Emit($"store {type} {fn.Value($"load {type}, ptr {MessageField(message, "%a0", index)}")}, ptr {MessageField(message, moved, index)}");
+            moved = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr %a1, i64 {IrSize(message)})");
+            fn.Emit($"store ptr null, ptr {MessageField(message, moved, 0)}");
+            foreach (var (index, type) in new[] { (1, "ptr"), (2, "ptr"), (3, "i64"), (4, "i64"), (5, "i64"), (6, "i64") })
+            {
+                fn.Emit($"store {type} {fn.Value($"load {type}, ptr {MessageField(message, "%a0", index)}")}, ptr {MessageField(message, moved, index)}");
+            }
         }
 
         var session = CallSession(f.Parameters.Count(p => Counted(p.Type)), "%a1", noExit: true);
@@ -901,7 +937,7 @@ public sealed partial class Emitter
             fn.Emit($"store {Ir(type)} {value}, ptr {MessageField(message, moved, MessageArguments + i)}");
         }
 
-        fn.Return($"ptr {moved}");
+        fn.Return(inPlace ? null : $"ptr {moved}");
     });
 
     /// <summary>
@@ -1045,6 +1081,7 @@ public sealed partial class Emitter
         fn.Emit($"store ptr null, ptr {fn.Value($"getelementptr {replyType}, ptr {reply}, i32 0, i32 {Number(ReplyHeap + 1)}")}");
         fn.Emit($"call void {RuntimeFunction("ReplyWaiter")}(ptr {reply})"); // the waiter before the message is queued
         fn.Emit($"store ptr {reply}, ptr {MessageField(message, queued, 2)}");
+        fn.Emit($"store ptr null, ptr {MessageField(message, queued, 6)}"); // U35: built in the child's heap, no heap of its own (the runtime's `Enqueue`)
         fn.Emit($"call void {RuntimeFunction("Enqueue")}({ReferenceWords(reference)}, ptr {queued}, i1 true, i64 9223372036854775807, %kz.str {StringValue(unit.File)}, i32 {Number(a.Line)})");
         var crash = fn.Value($"call ptr {RuntimeFunction("Attempted")}(ptr {reply}, ptr {queued}, %kz.str {StringValue(unit.File)}, i32 {Number(a.Line)})");
         var result = fn.Alloca(Ir(union), "attempt");

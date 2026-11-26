@@ -504,8 +504,9 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // S10, issue 658: the data of an `epoll_event` stands at byte 4 of x86-64's struct, which the kernel packs, and at byte 8 of
         // AArch64's, the kernel's generic one; each Linux architecture's file gives the byte (`EpollDataAt`), and every call of the
-        // registration (`PollAdd`, from `SocketWaited`, `Rearm` and the wait for a child, `ManyWaited`, and for the pool of
-        // threads for blocking calls from `PoolArm`; issue 661) and of the wait (`PollWait`, from `Polled`) is given, in the
+        // registration (`PollAdd`, from `SocketWaited`, `Rearm` and the wait for a child, `ManyWaited`, for the pool of
+        // threads for blocking calls from `PoolArm`, issue 661, and for the event of a worker thread from `WakeArmed`, U35) and of the
+        // wait (`PollWait`, from `Polled`) is given, in the
         // function that makes it, what a call of `EpollDataAt` gave there
         const string text = "actor A {\n    pub int Get() => 1\n}\n\na = spawn A()\nprint(a.Get())\n";
         foreach (var (arch, at) in new[] { (Arch.X64, 4), (Arch.Arm64, 8) })
@@ -532,7 +533,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
                     }
                 }
 
-                Assert.True(calls == (callee == "PollAdd" ? 4 : 1), $"{arch}: {calls} calls of `{callee}`");
+                Assert.True(calls == (callee == "PollAdd" ? 5 : 1), $"{arch}: {calls} calls of `{callee}`");
             }
         }
     }
@@ -1732,13 +1733,15 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     /// <summary>The lines of a program's IR that hold an atomic instruction of the program's own, which the values given mark.</summary>
     private static List<string> AtomicLines(EmittedProgram program) =>
-        program.Ir.ReplaceLineEndings("\n").Split('\n').Where(l => Regex.IsMatch(l, @"\b(load atomic|store atomic|atomicrmw|cmpxchg|fence) .*\b7000\d\b|^\s*fence ")).ToList();
+        Regex.Match(program.Ir.ReplaceLineEndings("\n"), @"^define [^\n]*@kz\.main\([^\n]*\n(.*?)\n\}\n", RegexOptions.Multiline | RegexOptions.Singleline).Groups[1].Value
+            .Split('\n').Where(l => Regex.IsMatch(l, @"\b(load atomic|store atomic|atomicrmw|cmpxchg|fence) .*\b7000\d\b|^\s*fence ")).ToList();
 
     [Fact]
     public void An_atomic_member_with_its_order_written_is_one_llvm_instruction_of_that_order_aligned_to_its_word()
     {
         // R19 (section 6, 2026-11-17, comment 6946657505, Q1): Rust's lowering, `Relaxed` LLVM's `monotonic`; the values 70001 to
-        // 70009 mark the program's own instructions among the runtime's
+        // 70009 mark the program's own instructions among the runtime's, which are read in the program's `main`, where its fence stands
+        // apart from the runtime's of the worker threads (U35)
         const string text = "mut long w = 5\nmut int i = 1\nmut bool b = false\nmut long* slot = &w\na = AtomicLong.FromPtr(&w)\nn = AtomicInt.FromPtr(&i)\n"
             + "c = AtomicBool.FromPtr(&b)\np = AtomicPtr<long>.FromPtr(&slot)\nraw {\n"
             + "    a.Store(70001, MemoryOrder.Release)\n    print(a.Swap(70002, MemoryOrder.AcqRel))\n    print(a.FetchAdd(70003, MemoryOrder.Acquire))\n"
@@ -1798,7 +1801,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // of them owns it, as tokio's `oneshot` decides by one word (not checked at source); the owner reads the waiter, then stores the
         // reply's word with release, then wakes (`Replied`, `Signal`), the waiter loads it with acquire (`ReplyState`), which the
         // waits, the readiness, the take and the crash call (`Answer`, its loop in the top-level code in `RootLoop`, its loop in an activation and its
-        // kind, `Ready`, `RunOne`, `Fall`), as the crash and the end take a reply by the swap (`Fall`, `EndActor`); a wake sets QUEUED by
+        // kind, `Ready`, `RunTake`, `Fall`), as the crash and the end take a reply by the swap (`Fall`, `EndActor`); a wake sets QUEUED by
         // one `or` (`Wake`), a take, a hold's end, a constructor's end and a restart's hold change the state word by one compare-exchange
         // (`Exchanged`) after a load with acquire, the restart's hold loading it with acquire again while a take holds the actor
         // (`HeldAlone`); the orders are Rust's for each, which a thread of their own needs and one thread does not show
@@ -1846,7 +1849,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         InOrder(Runtime("Answer"), state, state);
         InOrder(Runtime("RootLoop"), state);
         InOrder(Runtime("Ready"), state);
-        InOrder(Runtime("RunOne"), state);
+        InOrder(Runtime("RunTake"), state);
         InOrder(Runtime("Fall"), state, taken, state, taken);
         InOrder(Runtime("EndActor"), taken);
 

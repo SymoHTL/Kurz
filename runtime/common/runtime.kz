@@ -3179,6 +3179,11 @@ void LogRefused(byte* entry, long count) {
 // The count of worker threads of a program with a `spawn` (U35), which its start reads (`ThreadsRead`); 0 in any other program.
 static mut int workerCount = 0
 
+// The count of worker threads the first `spawn` starts (`WorkersStart`), the count `KURZ_THREADS` set where it is more than 1, else 0,
+// so that a program run with no `KURZ_THREADS`, or with 1, runs every actor on the main thread in its waits, first in, first out,
+// as a case marked `// threads: 1` runs (U35), and `kurz test`, which sets it to 0, too (`RunTests`).
+static mut int workersAsked = 0
+
 // The count of worker threads of a program with a `spawn` (U35), `found` as the target's `Variable` gave it for `KURZ_THREADS`:
 // its value, a whole number written in digits alone, above 0 and no greater than 2147483647, the greatest `int`, as tokio reads
 // `TOKIO_WORKER_THREADS`, or the cores the process may use where the variable is not set (`sys.Cores`). Any other value, an empty
@@ -3225,6 +3230,9 @@ pub void ThreadsRead(int found, string text) {
         }
 
         workerCount = int(value)
+        if value > 1 {
+            workersAsked = int(value)
+        }
     }
 }
 
@@ -3725,6 +3733,11 @@ thread static mut byte* messageHeaps = null
 // of the builder frees it, as a crashed Erlang process takes the message it was building with its heap. A
 // heap the system refuses ends the process as a refused allocation does.
 pub byte* MessageHeapNew() {
+    return OwnHeapNew()
+}
+
+// A heap of its own of a message, listed with the running actor (`MessageHeapNew`, `ActorHeap`).
+byte* OwnHeapNew() {
     byte* heap = std.HeapNew(24)
     if heap == null {
         AllocationFailed(24)
@@ -3849,6 +3862,7 @@ pub byte* ActorNew(byte* heap, long size, long stack, byte* side, byte* name) {
         number = number + 1
     }
 
+    WorkersStart()
     sys.Entered()
     mut byte* state = std.HeapFirst(heap)
     raw {
@@ -4167,8 +4181,13 @@ pub byte* Building(byte* state) {
 // The heap of the actor whose reference is the slot `index` and the number `number`, which a message to it is
 // made in (U12); where that actor ended, the heap the running code allocates in, which the message and its
 // copies then stay in at the raise of `actor-gone` at its queueing (`Enqueue`), to the crash that raise is or
-// to the end of the process.
+// to the end of the process. On worker threads a heap of its own (`MessageHeapNew`), whichever thread runs the actor, which the
+// receiver copies the message's arguments out of at its turn (`Adopted`; section 6, T17 1).
 pub byte* ActorHeap(long index, long number) {
+    if Threaded() {
+        return OwnHeapNew()
+    }
+
     byte* state = Lookup(index, number)
     if state == null {
         return std.HeapCurrent()
@@ -4187,8 +4206,13 @@ pub byte* ActorHeap(long index, long number) {
 // heap of an actor that ends (design record, section 6, assumed: the end of the root actor read as the end
 // of every actor it stops), the messages queued in it with it, as tokio drops its tasks when its runtime
 // shuts down, and, after a crash, the first heap, which holds its record, its slot cleared; no message runs
-// after it, and no restart whose pause runs (U22).
+// after it, and no restart whose pause runs (U22). On worker threads nothing: the actors on them run on to the exit, which
+// frees their heaps with the process (U35).
 void EndActors() {
+    if Threaded() {
+        return
+    }
+
     raw {
         mut byte* queued = runFirst
         while queued != null {
@@ -4265,8 +4289,10 @@ pub string ActorText(string name, long number) {
 pub void Enqueue(long index, long number, byte* message, bool bounded, long bound, string file, int line) {
     sys.Entered()
     long fileCount = long(file.Bytes.Count)
+    Pinned()
     byte* state = Lookup(index, number)
     if state == null {
+        Unpinned()
         sys.Left()
         Raise("actor-gone", file, line)
     }
@@ -4308,15 +4334,27 @@ pub void Enqueue(long index, long number, byte* message, bool bounded, long boun
         }
 
         *Ptr<long>(message + 40) = deadline
+        mut byte* built = null
+        if Threaded() {
+            built = *Ptr<byte*>(message + 48)
+        }
+
         *Ptr<long>(message + 48) = 0
         if deadline <= now {
             Discard(message)
+            MessageHeapFree(built)
+            Unpinned()
             sys.Left()
             if reply != null {
                 Raise("call-timeout", file, line)
             }
 
             return
+        }
+
+        if built != null {
+            Unlisted(built)
+            *Ptr<byte*>(message + 48) = built
         }
 
         Pushed(state - 144, message)
@@ -4326,6 +4364,7 @@ pub void Enqueue(long index, long number, byte* message, bool bounded, long boun
         }
     }
 
+    Unpinned()
     sys.Left()
 }
 
@@ -4483,8 +4522,9 @@ byte* Taken(byte* list) {
 // ENDING, the actor ends after its current message, which the end of its supervisor sets by one atomic `or` and
 // no thread clears (`EndChildren`, `Ending`); 32 REBUILDING, its constructor runs at a restart (U22), set by one
 // atomic `or` where the thread that holds it starts the restart (`Restart`) and cleared by one atomic `and` at the
-// end of that constructor (`Rebuilt`), so that a call of its chain waits in its inbox (`Moved`, `Rebuilding`). With
-// none of the first four set the actor is idle.
+// end of that constructor (`Rebuilt`), so that a call of its chain waits in its inbox (`Moved`, `Rebuilding`); 64
+// RECLAIMED, on worker threads the first page of the ended actor given to its free, by the one thread that frees it
+// (`Reclaims`, `LetGo`), after which no wake queues it (T16). With none of the first four set the actor is idle.
 AtomicInt StateWord(byte* state) {
     raw {
         return AtomicInt.FromPtr(Ptr<int>(state - 84))
@@ -4549,8 +4589,12 @@ void Wake(byte* state) {
         before = StateWord(state).FetchOr(2, MemoryOrder.AcqRel)
     }
 
-    if (before & 2) == 0 {
-        Queue(state)
+    if (before & 66) == 0 {
+        if Threaded() {
+            QueueLocal(state)
+        } else {
+            Queue(state)
+        }
     }
 }
 
@@ -4606,12 +4650,18 @@ void LetGo(byte* state, bool ready) {
     }
 
     mut bool queue = false
+    mut bool free = false
     mut bool stored = false
     while !stored {
         queue = (seen & 2) == 0 && ((seen & 4) != 0 || ready) && !ended
+        free = ended && (seen & 2) == 0
         mut int wanted = seen & ~5
         if queue {
             wanted = wanted | 2
+        }
+
+        if free {
+            wanted = wanted | 64
         }
 
         int found = Exchanged(word, seen, wanted)
@@ -4621,15 +4671,19 @@ void LetGo(byte* state, bool ready) {
 
     if queue {
         Queue(state)
-    } else if ended && (seen & 2) == 0 {
-        raw {
-            std.HeapFree(state - 192)
-        }
+    } else if free {
+        RecordFreed(state)
     }
 }
 
-// The actor whose state is `state` at the end of the run queue, which its state word marks QUEUED.
+// The actor whose state is `state` at the end of the run queue, which its state word marks QUEUED, by the thread that holds it or
+// held it last (`LetGo`, `ActorBuilt`); on worker threads in the queue its activations say (`QueueHeld`).
 void Queue(byte* state) {
+    if Threaded() {
+        QueueHeld(state)
+        return
+    }
+
     raw {
         *Ptr<byte*>(state - 16) = null
         if runLast == null {
@@ -4639,6 +4693,1090 @@ void Queue(byte* state) {
         }
 
         runLast = state
+    }
+}
+
+// ---- the worker threads (design record, section 6; U35) ----------------------------------------------------
+//
+// A program whose count of worker threads is more than 1 (`workersAsked`) starts them at its first `spawn` (`WorkersStart`), and from
+// then on they run its actors while the main thread runs the top-level code alone and sleeps in its waits (section 6, the owner,
+// 2026-11-17, #519, comment 6946657505, Q3). Each thread of the scheduler, the main thread among them, has a record of its own
+// (`RecordNew`), and the scheduler a block of the process (`scheduler`), as tokio's multi-thread scheduler gives each worker its
+// `Core` beside the `Shared` of the runtime (not checked at source). The queues of an actor that can go on, its state word marked
+// QUEUED, as on one thread (`Wake`, `Claimed`, `LetGo`): on each worker a ring of 256 that its own thread pushes at the tail and
+// takes from the head and that another thread steals half of, tokio's `queue::Local` (`RingPush`, `RingPop`, `StealInto`), and
+// the slot of the actor woken last, Go's `runnext`, which another thread can steal too (section 6, the owner, 2026-11-13, #519,
+// comment 6847932993, Q5); on each thread a queue that no other thread takes from, for an actor whose activation parked on that
+// thread (`PinnedPush`; section 6, Q2 of comment 6946532526, the mechanism assumed there); and one shared queue under a lock for
+// the actors queued outside a worker, by the top-level code, and for the half of a full ring (`InjectPush`), which a worker reads
+// every 61st turn and where its own queues are empty, as tokio reads its inject queue (`NextActor`). A worker that finds nothing
+// parks in its poller, with its timers' first deadline as its bound (section 6, T88), and another thread wakes it through its
+// `eventfd` (`Notified`, `NotifyOne`). The first page of an ended actor, which a thread that looked the actor up before its end
+// may still read, and the heap of its own of a message, which the actor that waits on its reply may read, are freed once every
+// thread passed a turn since (`Deferred`, `Reclaimed`; T16).
+
+// The block of the scheduler of a program whose actors run on worker threads, a page of the system the first `spawn` maps
+// (`WorkersStart`), null while every actor runs on the main thread: at 0 the epoch of the frees (`Deferred`), at 8 the lock of
+// the parked threads (`IdleLock`), at 12 the lock of the shared queue (`InjectLock`), at 16 the count of the workers parked with
+// nothing pending, no activation asleep among their timers, no registration of their poller and no restart's pause, at 20 whether
+// the top-level code waits, both
+// changed under the lock of the parked threads, at 24 and 32 the first and the last actor of the shared queue, at 40 its count, at
+// 48 the count of the workers, at 64 the main thread's record, at 72 the time the first restart's pause ends, the largest `long`
+// for none (`PauseNoted`), at 80 the count of the parked workers, at 84 the count of the workers woken to look for work that have
+// found none since (`NotifyOne`), and from 128 the record of each worker. Written by the main thread before the first worker starts,
+// and read by every thread after it.
+static mut byte* scheduler = null
+
+// The record of the thread in the scheduler (`RecordNew`), null on a thread outside it and while every actor runs on the main thread.
+thread static mut byte* threadRecord = null
+
+// The `eventfd` of the thread's record, which its poller waits on (`WakeArmed`, `Polled`), -1 on a thread outside the scheduler.
+thread static mut long wakeEvent = -1
+
+// Whether the actors run on worker threads (U35): the scheduler's block made (`WorkersStart`).
+bool Threaded() {
+    raw {
+        return scheduler != null
+    }
+}
+
+// The lock of the parked threads of the scheduler.
+int* IdleLock() {
+    raw {
+        return Ptr<int>(scheduler + 8)
+    }
+}
+
+// The lock of the shared queue of the scheduler.
+int* InjectLock() {
+    raw {
+        return Ptr<int>(scheduler + 12)
+    }
+}
+
+// The record of the worker of index `index`.
+byte* Worker(long index) {
+    raw {
+        return *Ptr<byte*>(scheduler + 128 + index * 8)
+    }
+}
+
+// The start of the worker threads at the first `spawn` of a program whose count of them is more than 1 (`workersAsked`; section 6, the
+// owner, 2026-11-17, #572, comment 6961064484, Q2, the start at the first `spawn` assumed there): the scheduler's block, the main
+// thread's record, its `eventfd` armed in its poller (`WakeArmed`), and a record and a thread for each worker (`WorkerMain`). A
+// worker that the system refuses, its thread, the page of its record or its `eventfd`, ends the process with `error: thread-refused
+// (<the count of worker threads asked>)` on standard error and the exit code 1, the workers started before it ending with the process
+// (Q2, "Error line + exit 1", the line assumed there), as tokio's `Builder::build` gives an `io::Error`.
+void WorkersStart() {
+    raw {
+        if scheduler != null || workersAsked <= 1 {
+            return
+        }
+
+        long count = long(workersAsked)
+        byte* block = sys.Memory(128 + count * 8)
+        if block == null {
+            ThreadRefused(count)
+        }
+
+        *Ptr<long>(block + 48) = count
+        *Ptr<long>(block + 72) = Never()
+        byte* main = RecordNew(-1)
+        if main == null {
+            ThreadRefused(count)
+        }
+
+        *Ptr<byte*>(block + 64) = main
+        threadRecord = main
+        wakeEvent = *Ptr<long>(main + 72)
+        if WakeArmed() < 0 {
+            ThreadRefused(count)
+        }
+
+        mut long i = 0
+        while i < count {
+            byte* record = RecordNew(i)
+            if record == null {
+                ThreadRefused(count)
+            }
+
+            *Ptr<byte*>(block + 128 + i * 8) = record
+            i = i + 1
+        }
+
+        scheduler = block
+        i = 0
+        while i < count {
+            if sys.ThreadNew(WorkerMain, Worker(i)) < 0 {
+                ThreadRefused(count)
+            }
+
+            i = i + 1
+        }
+    }
+}
+
+// The end of a start whose worker the system refused (`WorkersStart`): `error: thread-refused (<count>)` and the exit code 1.
+void ThreadRefused(long count) {
+    WriteError("error: thread-refused (")
+    WriteNumber(ulong(count))
+    WriteError(")\n")
+    sys.Exit(1)
+}
+
+// The record of a thread of the scheduler, the worker of index `index`, -1 for the main thread, a page of the system, zeroed: at 0
+// the head of its ring, two counters of 31 bits, where its thread and the thread that steals take from, and at 8 its tail, where
+// its thread pushes (`RingPush`); at 16 the slot of the actor woken last; at 24 the queue of the actors whose activation parked on
+// the thread, many senders and one consumer as an inbox's (`Pushed`, `Popped`), its end at 24, the first to take at 32 and its stub at 40; at
+// 48 the box of the jobs done of the pool of threads for blocking calls that this thread handed, the same shape at 48, 56 and 64,
+// and at 72 the thread's `eventfd`, which the pool's thread writes after its push (`sys.PoolThread`, `DoneDrain`); at 80 whether
+// it is parked and at 84 whether it parked with nothing pending (`WorkerPark`); at 88 the epoch it read at its last turn, the largest `long`
+// while it holds no record (`Reclaimed`); at 96 its index; at 104 whether it was woken to look for work and has found none since
+// (`NotifyOne`); and from 128 the 256 slots of its ring. Null where the system refuses the page or the `eventfd`.
+byte* RecordNew(long index) {
+    raw {
+        byte* record = sys.Memory(4096)
+        if record == null {
+            return null
+        }
+
+        long event = sys.EventNew()
+        if event < 0 {
+            sys.Release(record, 4096)
+            return null
+        }
+
+        *Ptr<byte*>(record + 24) = record + 40
+        *Ptr<byte*>(record + 32) = record + 40
+        *Ptr<byte*>(record + 48) = record + 64
+        *Ptr<byte*>(record + 56) = record + 64
+        *Ptr<long>(record + 72) = event
+        *Ptr<long>(record + 88) = Never()
+        *Ptr<long>(record + 96) = index
+        return record
+    }
+}
+
+// The registration of the thread's `eventfd` in its poller armed for `EPOLLIN` (1), at the thread's start and again after each of its
+// events, since `EPOLLONESHOT` disarms it (`sys.PollAdd`, `Polled`): 0, or the failure of the poller.
+long WakeArmed() {
+    raw {
+        return sys.PollAdd(int(wakeEvent), 1, sys.EpollDataAt())
+    }
+}
+
+// A worker thread (`WorkersStart`), its record at `record`: the handler of a fault for its own stack (`sys.ThreadStart`), the waits of
+// the calls on sockets, of the calls handed to the pool and of `Drive` in its page, as the start of the process sets the main
+// thread's (`Start`), its `eventfd` armed in its own poller, and then its turns, without end, the process ending it (`WorkerTurn`).
+extern "C" byte* WorkerMain(byte* record) {
+    sys.ThreadStart()
+    sys.Waiter(SocketWaited)
+    sys.BlockingWaiter(BlockingWaited, BlockingOffloads)
+    sys.ManyWaiter(ManyWaited)
+    raw {
+        threadRecord = record
+        wakeEvent = *Ptr<long>(record + 72)
+        if WakeArmed() < 0 {
+            ThreadRefused(*Ptr<long>(scheduler + 48))
+        }
+    }
+
+    mut bool going = true
+    while going {
+        WorkerTurn()
+    }
+
+    return null
+}
+
+// One turn of a worker thread: the epoch of the frees read and stored for the thread (`Reclaimed`), the frees whose epoch every thread
+// passed made, the clock read and the thread's timers fired (`Fire`), a restart whose pause ended run (`PauseEnded`, `Restart`), and
+// at every 61st turn a look at the poller with no wait while a registration waits, as on one thread (`RunTurn`), and the shared queue
+// read first; then an actor it can take run (`NextActor`, `RunTake`), or the thread parked (`WorkerPark`).
+void WorkerTurn() {
+    raw {
+        byte* record = threadRecord
+        long epoch = AtomicLong.FromPtr(Ptr<long>(scheduler)).Load(MemoryOrder.Acquire)
+        AtomicLong.FromPtr(Ptr<long>(record + 88)).Store(epoch, MemoryOrder.Release)
+        Reclaimed()
+        long now = PauseClock()
+        tick = now
+        Fire(now)
+        if AtomicLong.FromPtr(Ptr<long>(scheduler + 72)).Load(MemoryOrder.Acquire) <= now {
+            byte* ended = PauseEnded(now)
+            if ended != null {
+                Restart(ended)
+                return
+            }
+        }
+
+        turns = turns + 1
+        mut bool shared = false
+        if turns >= 61 {
+            turns = 0
+            shared = true
+            if polled > 0 {
+                Polled(0)
+            }
+        }
+
+        byte* state = NextActor(record, shared)
+        if state != null {
+            if *Ptr<int>(record + 104) != 0 {
+                *Ptr<int>(record + 104) = 0
+                if AtomicInt.FromPtr(Ptr<int>(scheduler + 84)).FetchSub(1, MemoryOrder.SeqCst) == 1 {
+                    NotifyOne()
+                }
+            }
+
+            RunTake(state)
+            return
+        }
+
+        WorkerPark(record, now)
+    }
+}
+
+// The actor the thread of the record `record` takes at its turn, null where none is left: one of its queue of the actors whose activation
+// parked on it, read before the queues others steal from (section 6, Q2 of comment 6946532526, assumed there); where `shared`, at every
+// 61st turn, one of the shared queue, as tokio reads its inject queue every `global_queue_interval` ticks, 61 by default; the slot of
+// the actor woken last; the head of its ring; one of the shared queue; and one stolen from another worker (`Stolen`).
+byte* NextActor(byte* record, bool shared) {
+    raw {
+        byte* node = Popped(record + 24)
+        if node != null {
+            return node + 16
+        }
+
+        if shared {
+            byte* first = InjectPop()
+            if first != null {
+                return first
+            }
+        }
+
+        byte* last = AtomicPtr<byte>.FromPtr(Ptr<byte*>(record + 16)).Swap(null, MemoryOrder.AcqRel)
+        if last != null {
+            return last
+        }
+
+        byte* popped = RingPop(record)
+        if popped != null {
+            return popped
+        }
+
+        byte* injected = InjectPop()
+        if injected != null {
+            return injected
+        }
+
+        return Stolen(record)
+    }
+}
+
+// An actor stolen by the worker of the record `record` from another worker, null where none is: half of the ring of the first worker
+// that has one, from a worker drawn at random on, as tokio's `steal_work` starts at a random worker (`StealInto`), and else the slot
+// of the actor woken last of one of them, which Go's scheduler steals as `runnext` on its last attempt, so that a worker's own slot
+// is taken by its own thread first where it can be.
+byte* Stolen(byte* record) {
+    raw {
+        long count = *Ptr<long>(scheduler + 48)
+        long first = long(NextChainWord(Generator()) % ulong(count))
+        mut long i = 0
+        while i < count {
+            byte* victim = Worker((first + i) % count)
+            if victim != record {
+                byte* got = StealInto(victim, record)
+                if got != null {
+                    return got
+                }
+            }
+
+            i = i + 1
+        }
+
+        i = 0
+        while i < count {
+            byte* victim = Worker((first + i) % count)
+            if victim != record {
+                byte* slot = AtomicPtr<byte>.FromPtr(Ptr<byte*>(victim + 16)).Swap(null, MemoryOrder.AcqRel)
+                if slot != null {
+                    return slot
+                }
+            }
+
+            i = i + 1
+        }
+
+        return null
+    }
+}
+
+// The head of a ring: two counters of 31 bits in one word, the one where a thread that steals takes from, `steal`, and the one
+// where the ring's own thread takes from, `real`, which are the same while nobody steals, as tokio packs its two `u32` heads.
+long HeadOf(long steal, long real) => steal * 2147483648 + real
+
+long StealOf(long head) => head / 2147483648
+
+long RealOf(long head) => head % 2147483648
+
+// The counter `n` one or more slots on, modulo 2^31.
+long Wrapped(long n) => n % 2147483648
+
+// The actor whose state is `state` at the tail of the ring of the record `record`, by the ring's own thread, as tokio's
+// `push_back_or_overflow`: stored in its slot and the tail stored with release; where the ring is full, half of it, 128 actors, taken
+// from the head by one compare-exchange and put on the shared queue with this one (`InjectBatch`), and where a thread steals from it
+// meanwhile, this one alone on the shared queue.
+void RingPush(byte* record, byte* state) {
+    raw {
+        AtomicLong head = AtomicLong.FromPtr(Ptr<long>(record))
+        AtomicLong tail = AtomicLong.FromPtr(Ptr<long>(record + 8))
+        mut bool pushed = false
+        while !pushed {
+            long seen = head.Load(MemoryOrder.Acquire)
+            long steal = StealOf(seen)
+            long real = RealOf(seen)
+            long at = tail.Load(MemoryOrder.Relaxed)
+            if Wrapped(at - steal + 2147483648) < 256 {
+                AtomicPtr<byte>.FromPtr(Ptr<byte*>(record + 128 + (at % 256) * 8)).Store(state, MemoryOrder.Relaxed)
+                tail.Store(Wrapped(at + 1), MemoryOrder.Release)
+                pushed = true
+            } else if steal != real {
+                InjectBatch(record, 0, 0, state)
+                pushed = true
+            } else {
+                long half = Wrapped(real + 128)
+                match head.CompareExchange(seen, HeadOf(half, half), MemoryOrder.Release, MemoryOrder.Relaxed) {
+                    long stored => {
+                        InjectBatch(record, real, 128, state)
+                        pushed = true
+                    }
+                    NotExchanged<long> missed => {}
+                }
+            }
+        }
+    }
+}
+
+// The actor at the head of the ring of the record `record`, taken by the ring's own thread, as tokio's `pop`: the head's `real`
+// moved on by one compare-exchange, and `steal` with it where no thread steals; null where the ring is empty.
+byte* RingPop(byte* record) {
+    raw {
+        AtomicLong head = AtomicLong.FromPtr(Ptr<long>(record))
+        mut long seen = head.Load(MemoryOrder.Acquire)
+        mut bool going = true
+        while going {
+            long steal = StealOf(seen)
+            long real = RealOf(seen)
+            if real == AtomicLong.FromPtr(Ptr<long>(record + 8)).Load(MemoryOrder.Relaxed) {
+                return null
+            }
+
+            long next = Wrapped(real + 1)
+            mut long wanted = HeadOf(steal, next)
+            if steal == real {
+                wanted = HeadOf(next, next)
+            }
+
+            match head.CompareExchange(seen, wanted, MemoryOrder.AcqRel, MemoryOrder.Acquire) {
+                long stored => {
+                    return AtomicPtr<byte>.FromPtr(Ptr<byte*>(record + 128 + (real % 256) * 8)).Load(MemoryOrder.Relaxed)
+                }
+                NotExchanged<long> missed => seen = missed.Value
+            }
+        }
+
+        return null
+    }
+}
+
+// Half of the ring of the record `from`, rounded up, stolen into the ring of the record `into` by its own thread, as tokio's
+// `steal_into`: the half claimed by one compare-exchange of `from`'s head that moves its `real` on and leaves its `steal`, which
+// keeps `from`'s own thread off the slots, copied into `into`'s ring, and the claim ended by a compare-exchange that moves `steal` to
+// `real`; the last actor copied taken, the others left in `into`'s ring, its tail stored with release. Null where `from` holds none,
+// another thread steals from it already or `into`'s ring has no room for half of a ring.
+byte* StealInto(byte* from, byte* into) {
+    raw {
+        long intoTail = AtomicLong.FromPtr(Ptr<long>(into + 8)).Load(MemoryOrder.Relaxed)
+        long intoSteal = StealOf(AtomicLong.FromPtr(Ptr<long>(into)).Load(MemoryOrder.Acquire))
+        if Wrapped(intoTail - intoSteal + 2147483648) > 128 {
+            return null
+        }
+
+        AtomicLong head = AtomicLong.FromPtr(Ptr<long>(from))
+        mut long seen = head.Load(MemoryOrder.Acquire)
+        mut long count = 0
+        mut long claimed = 0
+        mut bool going = true
+        while going {
+            long steal = StealOf(seen)
+            long real = RealOf(seen)
+            if steal != real {
+                return null
+            }
+
+            long held = Wrapped(AtomicLong.FromPtr(Ptr<long>(from + 8)).Load(MemoryOrder.Acquire) - real + 2147483648)
+            count = held - held / 2
+            if count == 0 {
+                return null
+            }
+
+            claimed = HeadOf(steal, Wrapped(real + count))
+            match head.CompareExchange(seen, claimed, MemoryOrder.AcqRel, MemoryOrder.Acquire) {
+                long stored => going = false
+                NotExchanged<long> missed => seen = missed.Value
+            }
+        }
+
+        long first = StealOf(claimed)
+        mut long i = 0
+        while i < count {
+            byte* state = AtomicPtr<byte>.FromPtr(Ptr<byte*>(from + 128 + (Wrapped(first + i) % 256) * 8)).Load(MemoryOrder.Relaxed)
+            AtomicPtr<byte>.FromPtr(Ptr<byte*>(into + 128 + (Wrapped(intoTail + i) % 256) * 8)).Store(state, MemoryOrder.Relaxed)
+            i = i + 1
+        }
+
+        seen = claimed
+        going = true
+        while going {
+            long real = RealOf(seen)
+            match head.CompareExchange(seen, HeadOf(real, real), MemoryOrder.AcqRel, MemoryOrder.Acquire) {
+                long stored => going = false
+                NotExchanged<long> missed => seen = missed.Value
+            }
+        }
+
+        byte* taken = AtomicPtr<byte>.FromPtr(Ptr<byte*>(into + 128 + (Wrapped(intoTail + count - 1) % 256) * 8)).Load(MemoryOrder.Relaxed)
+        if count > 1 {
+            AtomicLong.FromPtr(Ptr<long>(into + 8)).Store(Wrapped(intoTail + count - 1), MemoryOrder.Release)
+        }
+
+        return taken
+    }
+}
+
+// The actors of the slots of the ring of the record `record` from `first` on, `count` of them, which its own thread claimed, and the
+// actor whose state is `state` after them, at the end of the shared queue, under its lock, linked at 16 in front of each state, as
+// tokio's `push_overflow` moves half of a full queue to its inject queue in one batch; the workers that park woken for them.
+void InjectBatch(byte* record, long first, long count, byte* state) {
+    raw {
+        Lock(InjectLock())
+        mut long i = 0
+        while i < count {
+            InjectLinked(AtomicPtr<byte>.FromPtr(Ptr<byte*>(record + 128 + (Wrapped(first + i) % 256) * 8)).Load(MemoryOrder.Relaxed))
+            i = i + 1
+        }
+
+        InjectLinked(state)
+        Unlock(InjectLock())
+    }
+}
+
+// The actor whose state is `state` at the end of the shared queue, whose lock the caller holds, and its count raised.
+void InjectLinked(byte* state) {
+    raw {
+        *Ptr<byte*>(state - 16) = null
+        byte* last = *Ptr<byte*>(scheduler + 32)
+        if last == null {
+            *Ptr<byte*>(scheduler + 24) = state
+        } else {
+            *Ptr<byte*>(last - 16) = state
+        }
+
+        *Ptr<byte*>(scheduler + 32) = state
+        AtomicLong count = AtomicLong.FromPtr(Ptr<long>(scheduler + 40))
+        count.Store(count.Load(MemoryOrder.Relaxed) + 1, MemoryOrder.Release)
+    }
+}
+
+// The actor whose state is `state` at the end of the shared queue (`InjectLinked`).
+void InjectPush(byte* state) {
+    Lock(InjectLock())
+    InjectLinked(state)
+    Unlock(InjectLock())
+}
+
+// The first actor of the shared queue taken off it, null where it holds none, which its count, read with no lock, says first.
+byte* InjectPop() {
+    raw {
+        AtomicLong count = AtomicLong.FromPtr(Ptr<long>(scheduler + 40))
+        if count.Load(MemoryOrder.Acquire) == 0 {
+            return null
+        }
+
+        Lock(InjectLock())
+        byte* state = *Ptr<byte*>(scheduler + 24)
+        if state != null {
+            byte* after = *Ptr<byte*>(state - 16)
+            *Ptr<byte*>(scheduler + 24) = after
+            if after == null {
+                *Ptr<byte*>(scheduler + 32) = null
+            }
+
+            *Ptr<byte*>(state - 16) = null
+            count.Store(count.Load(MemoryOrder.Relaxed) - 1, MemoryOrder.Release)
+        }
+
+        Unlock(InjectLock())
+        return state
+    }
+}
+
+// The actor whose state is `state`, marked QUEUED by the thread that holds it or held it last (`Queue`), in the queue its activations
+// say: where its top activation parked on a thread, the queue of that thread that nobody steals from, and that thread woken
+// (`PinnedPush`; section 6, Q2 of comment 6946532526); else the queues of this thread (`QueueLocal`).
+void QueueHeld(byte* state) {
+    raw {
+        byte* top = *Ptr<byte*>(state - 8)
+        if top != null {
+            PinnedPush(*Ptr<byte*>(top + 272), state)
+            return
+        }
+    }
+
+    QueueLocal(state)
+}
+
+// The actor whose state is `state`, marked QUEUED, in the queues of this thread: on a worker in the slot of the actor woken last, the
+// actor that stood there at the tail of its ring (`RingPush`), as Go's `runqput` puts the goroutine it replaces in `runnext` in its
+// queue; outside a worker, on the main thread or another, at the end of the shared queue; and a worker that parks woken to take it
+// where none looks for work (`NotifyOne`).
+void QueueLocal(byte* state) {
+    raw {
+        byte* record = threadRecord
+        if record == null || *Ptr<long>(record + 96) < 0 {
+            InjectPush(state)
+        } else {
+            byte* before = AtomicPtr<byte>.FromPtr(Ptr<byte*>(record + 16)).Swap(state, MemoryOrder.AcqRel)
+            if before != null {
+                RingPush(record, before)
+            }
+        }
+    }
+
+    NotifyOne()
+}
+
+// The actor whose state is `state`, marked QUEUED, in the queue of the thread of the record `home` that nobody steals from, as an
+// inbox's message is pushed (`Pushed`), linked at 16 in front of the state; that thread woken where it is another (`Notified`).
+void PinnedPush(byte* home, byte* state) {
+    raw {
+        Pushed(home + 24, state - 16)
+        if home != threadRecord {
+            Notified(home)
+        }
+    }
+}
+
+// The wake of the actor whose state is `state`, whose top activation parked on the thread of the record `home` (`Replied`, `Signal`,
+// `Fire`, `Ended`): one atomic `or` marks it QUEUED, as `Wake` marks it, and the waker that found the mark clear puts it in that
+// thread's queue that nobody steals from (`PinnedPush`), so that it goes on on that thread (section 6, Q2 of comment 6946532526).
+void WakeHome(byte* state, byte* home) {
+    mut int before = 0
+    raw {
+        before = StateWord(state).FetchOr(2, MemoryOrder.AcqRel)
+    }
+
+    if (before & 66) == 0 {
+        PinnedPush(home, state)
+    }
+}
+
+// The wake of the actor whose state is `state`, whose top activation parked on this thread, by a timer or the poller of this thread:
+// into this thread's own queue on worker threads (`WakeHome`), as `Wake` wakes it on one thread.
+void WakeHere(byte* state) {
+    if Threaded() {
+        raw {
+            WakeHome(state, threadRecord)
+        }
+
+        return
+    }
+
+    Wake(state)
+}
+
+// The main thread woken where it waits in its poller (`RootSlept`), by its `eventfd`: an answer of a call of the top-level code, a
+// block for it to run, or the last worker to park finding nothing left to run (`WorkerPark`).
+void MainWoken() {
+    raw {
+        sys.EventSignal(*Ptr<long>(*Ptr<byte*>(scheduler + 64) + 72))
+    }
+}
+
+// The thread of the record `record` woken where it is parked, by another thread that put an actor in its queue that nobody steals
+// from (`PinnedPush`): one fence with sequential consistency between that push and the load of the mark, against the one between
+// the park's mark and its look at its queues (`WorkerPark`), so that either the parker sees the push or this sees the mark; the mark
+// cleared under the lock of the parked threads and its `eventfd` written.
+void Notified(byte* record) {
+    raw {
+        Fence(MemoryOrder.SeqCst)
+        if AtomicInt.FromPtr(Ptr<int>(record + 80)).Load(MemoryOrder.SeqCst) == 0 {
+            return
+        }
+
+        Lock(IdleLock())
+        if AtomicInt.FromPtr(Ptr<int>(record + 80)).Load(MemoryOrder.Relaxed) != 0 {
+            Woken(record)
+        }
+
+        Unlock(IdleLock())
+        sys.EventSignal(*Ptr<long>(record + 72))
+    }
+}
+
+// One parked worker woken to look for work, after an actor was put where any worker can take it (`QueueLocal`), where a worker is
+// parked and none woken so before looks for work still, as tokio's `notify_parked` wakes one where no worker is searching (not checked
+// at source): the fence of `Notified`, the first parked worker but this thread taken off the parked ones under their lock, marked as
+// one that looks, which wakes one more where it finds work (`WorkerTurn`), and its `eventfd` written.
+void NotifyOne() {
+    raw {
+        if scheduler == null {
+            return
+        }
+
+        Fence(MemoryOrder.SeqCst)
+        if AtomicInt.FromPtr(Ptr<int>(scheduler + 80)).Load(MemoryOrder.SeqCst) == 0 ||
+            AtomicInt.FromPtr(Ptr<int>(scheduler + 84)).Load(MemoryOrder.SeqCst) != 0 {
+            return
+        }
+
+        mut byte* chosen = null
+        Lock(IdleLock())
+        long count = *Ptr<long>(scheduler + 48)
+        mut long i = 0
+        while i < count && chosen == null {
+            byte* record = Worker(i)
+            if record != threadRecord && AtomicInt.FromPtr(Ptr<int>(record + 80)).Load(MemoryOrder.Relaxed) != 0 {
+                Woken(record)
+                *Ptr<int>(record + 104) = 1
+                AtomicInt.FromPtr(Ptr<int>(scheduler + 84)).FetchAdd(1, MemoryOrder.SeqCst)
+                chosen = record
+            }
+
+            i = i + 1
+        }
+
+        Unlock(IdleLock())
+        if chosen != null {
+            sys.EventSignal(*Ptr<long>(chosen + 72))
+        }
+    }
+}
+
+// The worker of the record `record` taken off the parked ones, under their lock: its mark cleared, the count of the parked workers
+// lowered, and the count of those parked with nothing pending too where it parked so.
+void Woken(byte* record) {
+    raw {
+        AtomicInt.FromPtr(Ptr<int>(record + 80)).Store(0, MemoryOrder.SeqCst)
+        AtomicInt parked = AtomicInt.FromPtr(Ptr<int>(scheduler + 80))
+        parked.Store(parked.Load(MemoryOrder.Relaxed) - 1, MemoryOrder.SeqCst)
+        if *Ptr<int>(record + 84) != 0 {
+            *Ptr<int>(record + 84) = 0
+            *Ptr<int>(scheduler + 16) = *Ptr<int>(scheduler + 16) - 1
+        }
+    }
+}
+
+// The park of the worker of the record `record` that found nothing to take at `now` (`WorkerTurn`): under the lock of the parked
+// threads it marks itself parked, and parked with nothing pending where no activation sleeps among its timers (`Sleeping`), the timers
+// of its calls that wait counting for nothing, as on one thread (`RootLoop`; U18, U42), its poller holds no registration and no
+// restart's pause pends (section 6: Go's `checkdead` counts the timers and the poller); a worker that looked for work stops
+// looking; then the fence of `Notified` and a last look at the queues it takes from, which ends the park where one holds an actor.
+// Where it is the last worker to park with nothing pending while the top-level code waits, it wakes the main thread, which then
+// reads whether anything is left (`RootSlept`; section 6, the owner's `deadlock` of the top-level code, the mechanism assumed there,
+// Go's `checkdead` run by the thread that goes idle last). Its epoch is then the largest `long`, since a parked thread reads no
+// record (`Reclaimed`), and it waits in its poller to the first of its timers' deadlines and the restarts' pauses, or without end, its
+// `eventfd` ending the wait, and is taken off the parked ones (`Woken`).
+void WorkerPark(byte* record, long now) {
+    raw {
+        long pause = AtomicLong.FromPtr(Ptr<long>(scheduler + 72)).Load(MemoryOrder.Acquire)
+        long due = Earliest(Next(), pause)
+        bool empty = pause == Never() && polled == 0 && !Sleeping()
+        Lock(IdleLock())
+        AtomicInt.FromPtr(Ptr<int>(record + 80)).Store(1, MemoryOrder.SeqCst)
+        AtomicInt parked = AtomicInt.FromPtr(Ptr<int>(scheduler + 80))
+        parked.Store(parked.Load(MemoryOrder.Relaxed) + 1, MemoryOrder.SeqCst)
+        if empty {
+            *Ptr<int>(record + 84) = 1
+            *Ptr<int>(scheduler + 16) = *Ptr<int>(scheduler + 16) + 1
+        }
+
+        if *Ptr<int>(record + 104) != 0 {
+            *Ptr<int>(record + 104) = 0
+            AtomicInt.FromPtr(Ptr<int>(scheduler + 84)).FetchSub(1, MemoryOrder.SeqCst)
+        }
+
+        bool last = empty && long(*Ptr<int>(scheduler + 16)) == *Ptr<long>(scheduler + 48) && *Ptr<int>(scheduler + 20) != 0
+        Unlock(IdleLock())
+        Fence(MemoryOrder.SeqCst)
+        if HasWork(record) {
+            Unparked(record)
+            return
+        }
+
+        if last {
+            MainWoken()
+        }
+
+        AtomicLong.FromPtr(Ptr<long>(record + 88)).Store(Never(), MemoryOrder.Release)
+        mut long wait = Never()
+        if due != Never() {
+            wait = due - now
+            if wait < 0 {
+                wait = 0
+            }
+        }
+
+        Polled(wait)
+        Unparked(record)
+    }
+}
+
+// The worker of the record `record` taken off the parked ones where a waker did not take it off first (`Woken`).
+void Unparked(byte* record) {
+    raw {
+        Lock(IdleLock())
+        if AtomicInt.FromPtr(Ptr<int>(record + 80)).Load(MemoryOrder.Relaxed) != 0 {
+            Woken(record)
+        }
+
+        Unlock(IdleLock())
+    }
+}
+
+// Whether any queue the worker of the record `record` takes from holds an actor: its queue that nobody steals from, its slot of the
+// actor woken last, its ring, or the shared queue.
+bool HasWork(byte* record) {
+    raw {
+        byte* next = *Ptr<byte*>(record + 32)
+        if next != record + 40 || AtomicPtr<byte>.FromPtr(Ptr<byte*>(record + 40)).Load(MemoryOrder.Acquire) != null {
+            return true
+        }
+
+        if AtomicPtr<byte>.FromPtr(Ptr<byte*>(record + 16)).Load(MemoryOrder.Acquire) != null {
+            return true
+        }
+
+        long head = AtomicLong.FromPtr(Ptr<long>(record)).Load(MemoryOrder.Acquire)
+        if RealOf(head) != AtomicLong.FromPtr(Ptr<long>(record + 8)).Load(MemoryOrder.Acquire) {
+            return true
+        }
+
+        return AtomicLong.FromPtr(Ptr<long>(scheduler + 40)).Load(MemoryOrder.Acquire) != 0
+    }
+}
+
+// The jobs of the pool of threads for blocking calls that this thread handed and that are done, taken off its box at the event of its
+// `eventfd` (`Polled`; `sys.PoolThread`): each job's wait ended with 1 (`Ended`), or the job given back where its actor fell while it
+// ran, as `PoolDrain` takes them on one thread.
+void DoneDrain() {
+    raw {
+        byte* record = threadRecord
+        mut byte* done = Popped(record + 48)
+        while done != null {
+            handed = handed - 1
+            byte* block = *Ptr<byte*>(done + 24)
+            if block == null {
+                sys.JobDropped(done)
+            } else {
+                Ended(block, 1)
+            }
+
+            done = Popped(record + 48)
+        }
+    }
+}
+
+// The first pages of the ended actors and the heaps of their own of the messages that this thread let go of while another thread may
+// still read them, from the first deferred on (T16; section 6, the owner, 2026-11-20, #519, comment 7051492844, T16 2): each the 16
+// bytes of its link, the epoch at its free and its kind, then the link of the one after it; a record's link at 56 and 48 in front of its state, words its
+// end leaves to nobody, a message's heap's in its first block, whose list of the heaps being built it left at its queueing.
+thread static mut byte* deferredFirst = null
+thread static mut byte* deferredLast = null
+
+// The first page of the ended actor whose state is `state`, which holds its record and its state, freed: at once on one thread; on
+// worker threads once every thread passed a turn since (`Deferred`), so that a sender on another thread that looked the actor up
+// before its end and pushes to its queue after it, and a callee that answers a waiter of it, read no freed page.
+void RecordFreed(byte* state) {
+    if Threaded() {
+        raw {
+            Deferred(state - 56, 0)
+        }
+
+        return
+    }
+
+    raw {
+        std.HeapFree(state - 192)
+    }
+}
+
+// The heap of its own `own` of a message that ran, was dropped or ended with its actor (`Adopted`), freed once every thread passed a
+// turn since (`Deferred`), since the actor that waits on the message's reply reads the message's block in its fall (`Fall`); nothing
+// for null, a message built in its actor's heap.
+void OwnLeft(byte* own) {
+    if own == null {
+        return
+    }
+
+    raw {
+        Deferred(std.HeapFirst(own), 1)
+    }
+}
+
+// The 16 bytes at `link` of a page to free, of the kind `kind`, 0 for an actor's first page and 1 for a message's heap of its own, at
+// the end of the thread's list of the frees, stamped with the epoch of the process, which the free raises by one, so that a thread
+// whose turn read the epoch after it reads no page the free let go of (`Reclaimed`).
+void Deferred(byte* link, long kind) {
+    raw {
+        long epoch = AtomicLong.FromPtr(Ptr<long>(scheduler)).FetchAdd(1, MemoryOrder.SeqCst)
+        *Ptr<long>(link) = epoch * 2 + kind
+        *Ptr<byte*>(link + 8) = null
+        if deferredLast == null {
+            deferredFirst = link
+        } else {
+            *Ptr<byte*>(deferredLast + 8) = link
+        }
+
+        deferredLast = link
+    }
+}
+
+// The frees of the thread's list made whose epoch is less than the epoch every thread of the scheduler read at its last turn, the main
+// thread's held while it reads records (`Pinned`), the largest `long` for a thread that is parked or reads none, as Erlang's thread
+// progress delays a free to the moment every scheduler has passed a point it reports (not checked at source): each its page's heap freed
+// whole (`std.HeapFree`).
+void Reclaimed() {
+    raw {
+        if deferredFirst == null {
+            return
+        }
+
+        Fence(MemoryOrder.SeqCst)
+        mut long least = AtomicLong.FromPtr(Ptr<long>(*Ptr<byte*>(scheduler + 64) + 88)).Load(MemoryOrder.Acquire)
+        long count = *Ptr<long>(scheduler + 48)
+        mut long i = 0
+        while i < count {
+            least = Earliest(least, AtomicLong.FromPtr(Ptr<long>(Worker(i) + 88)).Load(MemoryOrder.Acquire))
+            i = i + 1
+        }
+
+        while deferredFirst != null && *Ptr<long>(deferredFirst) / 2 < least {
+            byte* link = deferredFirst
+            deferredFirst = *Ptr<byte*>(link + 8)
+            if deferredFirst == null {
+                deferredLast = null
+            }
+
+            if *Ptr<long>(link) % 2 == 0 {
+                std.HeapFree(link - 136)
+            } else {
+                std.HeapFree(link - 48)
+            }
+        }
+    }
+}
+
+// The main thread's epoch held while the top-level code reads an actor's record (`Enqueue`): the epoch of the process stored with a
+// fence with sequential consistency after it, against the one before a free reads the epochs (`Reclaimed`), so that either the free
+// sees the main thread's epoch or the main thread reads no record the free let go of; nothing on a worker, whose turn holds its
+// epoch, nor on one thread.
+void Pinned() {
+    raw {
+        byte* record = threadRecord
+        if record != null && *Ptr<long>(record + 96) < 0 {
+            AtomicLong.FromPtr(Ptr<long>(record + 88)).Store(AtomicLong.FromPtr(Ptr<long>(scheduler)).Load(MemoryOrder.Acquire), MemoryOrder.SeqCst)
+            Fence(MemoryOrder.SeqCst)
+        }
+    }
+}
+
+// The main thread's epoch let go of where it read the records it held it for (`Pinned`).
+void Unpinned() {
+    raw {
+        byte* record = threadRecord
+        if record != null && *Ptr<long>(record + 96) < 0 {
+            AtomicLong.FromPtr(Ptr<long>(record + 88)).Store(Never(), MemoryOrder.Release)
+        }
+    }
+}
+
+// The time the first restart's pause ends stored for the workers (`WorkerTurn`, `WorkerPark`), the largest `long` for none, under the lock
+// of the pauses, which the caller holds, on worker threads.
+void PauseNoted() {
+    raw {
+        if scheduler != null {
+            mut long due = Never()
+            if paused != null {
+                due = *Ptr<long>(*Ptr<byte*>(paused - 80) + 32)
+            }
+
+            AtomicLong.FromPtr(Ptr<long>(scheduler + 72)).Store(due, MemoryOrder.Release)
+        }
+    }
+}
+
+// The wait of the top-level code on worker threads for the reply `reply` to the deadline `deadline`, or, where `reply` is null, its
+// sleep to that deadline (`RootLoop`; section 6, Q3 of comment 6946532526, "tokio block_on"): at each turn the block of a child the
+// top-level code spawned run (`RootBlock`; U33), else, under the lock of the parked threads, the mark that it waits set and whether
+// anything is left read: a worker that is not parked with nothing pending, an actor in the shared queue, a restart's pause, a
+// registration of its own poller or a block to run; where nothing is, `false`, so that `Answer` raises `deadlock`, as on one thread;
+// else the wait in its poller to the deadline, which its `eventfd` ends (`MainWoken`). True where the reply was set or the deadline
+// passed.
+bool RootSlept(byte* reply, long deadline) {
+    raw {
+        while reply == null || ReplyState(reply) == 0 {
+            long now = PauseClock()
+            if deadline <= now {
+                RootWaitEnded()
+                return true
+            }
+
+            byte* block = RootTaken()
+            if block != null {
+                RootBlock(block)
+            } else {
+                Lock(IdleLock())
+                *Ptr<int>(scheduler + 20) = 1
+                bool dead = reply != null && polled == 0 && long(*Ptr<int>(scheduler + 16)) == *Ptr<long>(scheduler + 48) &&
+                    AtomicLong.FromPtr(Ptr<long>(scheduler + 40)).Load(MemoryOrder.Acquire) == 0 &&
+                    AtomicLong.FromPtr(Ptr<long>(scheduler + 72)).Load(MemoryOrder.Acquire) == Never()
+                Unlock(IdleLock())
+                if dead && ReplyState(reply) == 0 && !RootPending() {
+                    RootWaitEnded()
+                    return false
+                }
+
+                Polled(deadline - now)
+            }
+        }
+
+        RootWaitEnded()
+    }
+
+    return true
+}
+
+// The mark that the top-level code waits cleared, under the lock of the parked threads (`RootSlept`).
+void RootWaitEnded() {
+    raw {
+        Lock(IdleLock())
+        *Ptr<int>(scheduler + 20) = 0
+        Unlock(IdleLock())
+    }
+}
+
+// Whether a block waits for the top-level code to run it (`Post`), read under the lock of those blocks.
+bool RootPending() {
+    mut bool pending = false
+    raw {
+        Lock(RootLock())
+        pending = rootBlocks != null && *Ptr<byte*>(rootBlocks) != null
+        Unlock(RootLock())
+    }
+
+    return pending
+}
+
+// Whether the thread that frees the first page of the ended actor whose state is `state` is the one that frees it (`RunTake`,
+// `EndActor`): always on one thread; on worker threads where no thread holds the actor and, unless the caller took its entry off a
+// queue (`entry`), none stands there, the RECLAIMED bit, 64, set by a compare-exchange that clears QUEUED, so that a wake after it
+// queues the actor no more (`Wake`, `WakeHome`) and no second thread frees the page (T16).
+bool Reclaims(byte* state, bool entry) {
+    if !Threaded() {
+        return true
+    }
+
+    AtomicInt word = StateWord(state)
+    mut int seen = 0
+    raw {
+        seen = word.Load(MemoryOrder.Acquire)
+    }
+
+    while (seen & 1) == 0 && (entry || (seen & 2) == 0) {
+        int found = Exchanged(word, seen, (seen & ~2) | 64)
+        if found == seen {
+            return true
+        }
+
+        seen = found
+    }
+
+    return false
+}
+
+// The message `block` of a call or a `send` built in the heap of its own `own` (`Emitter.EmitMessage`) at its queueing: on one thread
+// copied into the heap of the actor whose reference is the slot `index` and the number `number` (`ActorHeap`) by the second function
+// of its call site's table, and its heap of its own freed (`MessageHeapFree`), as Erlang copies a message into the receiver's heap at
+// its send (U12, U21); on worker threads, where another thread may run that actor and allocate in its heap, the block itself, its heap
+// of its own kept to the message's end, which the receiver copies the arguments out of at its turn (`Adopted`; section 6, T17 1).
+pub byte* MessageQueued(byte* own, byte* block, long index, long number) {
+    if Threaded() {
+        return block
+    }
+
+    mut byte* moved = null
+    raw {
+        extern "C" (byte*, byte*) => byte* copy = *Ptr<extern "C" (byte*, byte*) => byte*>(*Ptr<byte*>(block + 8) + 8)
+        moved = copy(block, ActorHeap(index, number))
+    }
+
+    MessageHeapFree(own)
+    return moved
+}
+
+// The heap of its own of the message `message` that starts on worker threads, which it names at 48 from its queueing (`Enqueue`), null
+// for none: the message's arguments copied into the heap of the actor whose state is `state`, in their places in the message's block,
+// by the fourth function of its call site's table, the word at 48 cleared for the deadline of a `within` block that runs while the
+// message runs (`BlockEnter`), and that heap given, which the activation frees at its end, with the message's block in it (`Run`,
+// `OwnLeft`; section 6, T17 1: the receiver copies at its turn).
+byte* Adopted(byte* state, byte* message) {
+    raw {
+        byte* own = *Ptr<byte*>(message + 48)
+        if own == null {
+            return null
+        }
+
+        *Ptr<long>(message + 48) = 0
+        extern "C" (byte*, byte*) => void adopt = *Ptr<extern "C" (byte*, byte*) => void>(*Ptr<byte*>(message + 8) + 24)
+        adopt(message, *Ptr<byte*>(state - 64))
+        return own
+    }
+}
+
+// The heap a method's result that holds a block crosses into at its reply `reply` (`Emitter.MessageRun`; U12): on one thread the
+// caller's, which the reply holds at `field`; on worker threads a heap of its own, made here and named by the reply at 40, which the
+// waiter copies the result out of as its wait returns and then frees (`ResultOwn`; section 6, T17 1), since the caller's heap is the
+// waiter's thread's to allocate in. A heap the system refuses ends the process as a refused allocation does.
+pub byte* ResultHeap(byte* reply, byte* field) {
+    if !Threaded() {
+        raw {
+            return *Ptr<byte*>(field)
+        }
+    }
+
+    byte* heap = std.HeapNew(16)
+    if heap == null {
+        AllocationFailed(16)
+    }
+
+    raw {
+        *Ptr<byte*>(reply + 40) = heap
+    }
+
+    return heap
+}
+
+// The heap of its own of the result of the reply `reply` that its wait read set (`ResultHeap`), which the emitted call copies the result
+// out of into the caller's heap and frees; null on one thread, where the result crossed into the caller's heap.
+pub byte* ResultOwn(byte* reply) {
+    if !Threaded() {
+        return null
+    }
+
+    raw {
+        return *Ptr<byte*>(reply + 40)
     }
 }
 
@@ -4702,9 +5840,9 @@ int ReplyState(byte* reply) {
 // beside it, and the actor of the activation that waits on it woken where that activation is its top, as
 // tokio's `oneshot::Sender::send` stores the value and wakes the receiver's task; it never switches. The waiter
 // and its actor are read before the word's release store, since after it the waiter may go on and its frame
-// and its stack be gone, while the actor's record stays, which holds on the build's one thread alone, where
-// nothing runs between the store and the wake: on threads of their own the waiter's message could end its
-// actor and free that record before the wake reads it (compiler/README.md). An activation below another goes on once the ones
+// and its stack be gone, while the actor's record stays, which holds on one thread, where nothing runs between
+// the store and the wake, and on worker threads, where the waiter's message can end its actor meanwhile, since
+// its first page is freed once every thread passed a turn since (`RecordFreed`; T16). An activation below another goes on once the ones
 // above it end (`Run`); the top-level code reads the word in its loop (`Wait`). A reply is that word, an `int`,
 // the activation that waits on it, null for the top-level code (`ReplyWaiter`), and the result.
 pub void Replied(byte* reply) {
@@ -4712,17 +5850,37 @@ pub void Replied(byte* reply) {
     raw {
         byte* waiter = *Ptr<byte*>(reply + 8)
         mut byte* state = null
+        mut byte* home = null
         if waiter != null {
             state = *Ptr<byte*>(waiter + 320)
+            if Threaded() {
+                home = *Ptr<byte*>(waiter + 272)
+            }
         }
 
         AtomicInt.FromPtr(Ptr<int>(reply)).Store(1, MemoryOrder.Release)
-        if state != null && *Ptr<byte*>(state - 8) == waiter {
+        if Threaded() {
+            Answered(state, home)
+        } else if state != null && *Ptr<byte*>(state - 8) == waiter {
             Wake(state)
         }
     }
 
     sys.Left()
+}
+
+// The wake of the waiter of a reply set on worker threads (`Replied`, `Signal`): the main thread where the top-level code waits, its
+// actor `state` null (`MainWoken`), else that actor in the queue of the thread its activation parked on, `home` (`WakeHome`), both
+// read before the reply's word was stored, whether that activation is its actor's top or not and whatever its actor's life, since a
+// waker reads no field of another thread's actor but its state word: a take that finds nothing to go on with lets go of it, and one
+// that finds it ended frees it (`RunTake`).
+void Answered(byte* state, byte* home) {
+    if state == null {
+        MainWoken()
+        return
+    }
+
+    WakeHome(state, home)
 }
 
 // The reply `reply` of a call, which its owner took (`ReplyTaken`), set to `kind` with no result: 2 where its
@@ -4732,19 +5890,25 @@ pub void Replied(byte* reply) {
 // holds a crash or an end to the call's deadline by, not the time the waiter reads the word (U43; assumed: T7 of
 // comment 6967625156, "the earlier of the two"); and the activation that waits on it woken as `Replied` wakes it, where its actor
 // neither waits for its restart or for the decision of its block nor ended, as C#'s `TaskCompletionSource` is
-// set faulted; its reads of that actor's record after the store hold on the build's one thread alone, as
-// `Replied`'s do.
+// set faulted; its reads of that actor's record after the store hold on one thread alone, and on worker threads
+// it reads none but the state word (`Answered`), as `Replied` does.
 void Signal(byte* reply, int kind) {
     raw {
         byte* waiter = *Ptr<byte*>(reply + 8)
         mut byte* state = null
+        mut byte* home = null
         if waiter != null {
             state = *Ptr<byte*>(waiter + 320)
+            if Threaded() {
+                home = *Ptr<byte*>(waiter + 272)
+            }
         }
 
         *Ptr<long>(reply + 40) = PauseClock()
         AtomicInt.FromPtr(Ptr<int>(reply)).Store(kind, MemoryOrder.Release)
-        if state != null {
+        if Threaded() {
+            Answered(state, home)
+        } else if state != null {
             int life = *Ptr<int>(state - 88)
             if life != 1 && life != 3 && life != 5 && *Ptr<byte*>(state - 8) == waiter {
                 Wake(state)
@@ -4918,7 +6082,7 @@ void Fire(long now) {
         while timers != null && *Ptr<long>(timers + 16) <= now {
             byte* reply = timers
             TimerRemove(reply)
-            Wake(*Ptr<byte*>(*Ptr<byte*>(reply + 8) + 320))
+            WakeHere(*Ptr<byte*>(*Ptr<byte*>(reply + 8) + 320))
         }
     }
 }
@@ -4935,12 +6099,18 @@ bool Waited(byte* reply) {
 // set `dropped`, which wakes its waiter, whose wait raises `call-timeout` (`Wait`), and the message let go of.
 void Dropped(byte* message) {
     raw {
+        mut byte* own = null
+        if Threaded() {
+            own = *Ptr<byte*>(message + 48)
+        }
+
         byte* reply = ReplyTaken(message)
         if reply != null {
             Signal(reply, 4)
         }
 
         Discard(message)
+        OwnLeft(own)
     }
 }
 
@@ -5071,8 +6241,13 @@ bool RootWait(byte* reply) {
 }
 
 // The loop of `RootWait` for the reply `reply` to the deadline `deadline`, or, where `reply` is null, the top-level code's sleep to
-// that deadline (`Slept`; S28), which runs what the loop runs and, with nothing left, sleeps to the first timer or the deadline.
+// that deadline (`Slept`; S28), which runs what the loop runs and, with nothing left, sleeps to the first timer or the deadline; on
+// worker threads the main thread's sleep in its poller while they run the actors (`RootSlept`).
 bool RootLoop(byte* reply, long deadline) {
+    if Threaded() {
+        return RootSlept(reply, deadline)
+    }
+
     raw {
         while reply == null || ReplyState(reply) == 0 {
             long now = PauseClock()
@@ -5192,9 +6367,8 @@ void Park(long deadline) {
 // The registrations of the poller whose wait has not ended (`SocketWaited`): where it is above 0, the scheduler that has nothing
 // to run waits in the poller (`IdleWait`), and the top-level code's wait that finds nothing else left waits there too and
 // raises no `deadlock` (`RootLoop`; section 6: a deadlock where no timer is pending and the poller holds no registration, as Go's
-// `checkdead` counts its netpoller). The count and the waits are the thread's, and the poller is the process's: this build runs
-// every actor on its one thread (U35, `compiler/README.md`), where the two are the same; a second thread that waited in the
-// poller would take the events of the first one's registrations.
+// `checkdead` counts its netpoller). The count, the waits and the poller are the thread's, each worker thread's its own, as the main
+// thread's (section 6, T88), so that no thread takes the events of another one's registrations.
 thread static mut long polled = 0
 
 // The events that `sys.PollWait` gives, at most 64 of two words, a descriptor and the events it gives, taken of the thread's own
@@ -5274,7 +6448,7 @@ void Ended(byte* block, long result) {
 
         byte* header = *Ptr<byte*>(block + 8)
         if header != null {
-            Wake(*Ptr<byte*>(header + 320))
+            WakeHere(*Ptr<byte*>(header + 320))
         }
     }
 }
@@ -5567,7 +6741,9 @@ thread static mut long poolEvent = -1
 // job queued (`sys.Submit`) with a block shaped as `SocketWaited`'s, with no deadline, at 40 the mark -1, so that a fall drops the
 // job (`Fall`), and at 48 the job, whose block at 24 it is. Inside a message the activation parks until the job is done, and the
 // calls of its chain are let in above it (U17); the top-level code runs what its wait on a call runs (`RootLoop`); and the wait
-// counts among the registrations of the poller (`polled`), so that it raises no `deadlock` (U18). The job's result, or the failure
+// counts among the registrations of the poller (`polled`), so that it raises no `deadlock` (U18). On worker threads the job names the
+// box of the thread's record at 56, which the pool's thread pushes it to and wakes the thread through (`sys.PoolThread`, `DoneDrain`),
+// and no `eventfd` of the pool is armed (section 6, T88). The job's result, or the failure
 // of the pool or of the poller; a thread the system refuses while no thread of the pool runs ends the process with
 // `error: thread-refused (1)` on standard error and the exit code 1, as U35 ends it at a worker thread the system refuses (issue
 // 661, Q2, *(assumed)*).
@@ -5575,19 +6751,24 @@ extern "C" long BlockingWaited(byte* job) {
     mut long result = 0
     sys.Entered()
     raw {
-        long event = sys.PoolEvent()
-        if event < 0 {
-            sys.Left()
-            return event
+        if threadRecord != null {
+            *Ptr<byte*>(job + 56) = threadRecord + 48
+        } else {
+            long event = sys.PoolEvent()
+            if event < 0 {
+                sys.Left()
+                return event
+            }
+
+            long armed = PoolArm(event)
+            if armed < 0 {
+                sys.Left()
+                return armed
+            }
+
+            poolEvent = event
         }
 
-        long armed = PoolArm(event)
-        if armed < 0 {
-            sys.Left()
-            return armed
-        }
-
-        poolEvent = event
         byte* block = Allocate(64)
         byte* header = running
         *Ptr<long>(block) = 0
@@ -5641,9 +6822,14 @@ extern "C" long BlockingWaited(byte* job) {
 // Whether a call on a file or a pipe is handed to the pool of threads for blocking calls (`sys.BlockingWaiter`): 0 where the
 // top-level code makes it with nothing else left to run, no actor queued, asleep among the timers, waiting in the poller or on the
 // pool, no restart pausing and no child's block for the top-level code to run, since no actor could run while it waits, so that a
-// program with no other actor that runs pays no hop between threads; 1 otherwise, an actor's message always handing it.
+// program with no other actor that runs pays no hop between threads, and on worker threads, which run the actors while the main
+// thread waits in the call (U35); 1 otherwise, an actor's message always handing it.
 extern "C" int BlockingOffloads() {
     raw {
+        if running == null && scheduler != null {
+            return 0
+        }
+
         if running == null && runFirst == null && timers == null && polled == 0 && PauseDue() == Never() &&
             (rootBlocks == null || *Ptr<byte*>(rootBlocks) == null) {
             return 0
@@ -5704,7 +6890,9 @@ long PoolArm(long event) {
 // `ScheduledIo` wakes the readers at a read's readiness and the writers at a write's; where the poller fails, every wait of every
 // descriptor ended with the failure (`Fail`), as each call's `IoError` of the system's kind and number (S1). The event of the pool's
 // `eventfd` takes the jobs done (`PoolDrain`) where that descriptor is the pool's still (`sys.PoolHeld`): the child of a `fork`
-// drops the pool, and a descriptor that takes its number there reaches its own waits.
+// drops the pool, and a descriptor that takes its number there reaches its own waits. On worker threads the event of the thread's
+// own `eventfd` ends its wait, drains it, takes the jobs done that it handed (`DoneDrain`) and arms its registration again
+// (`WakeArmed`).
 void Polled(long nanoseconds) {
     raw {
         if readied == null {
@@ -5730,7 +6918,11 @@ void Polled(long nanoseconds) {
         while i < count {
             long fd = *Ptr<long>(readied + i * 16)
             long given = *Ptr<long>(readied + i * 16 + 8)
-            if fd == poolEvent && fd == sys.PoolHeld() {
+            if fd == wakeEvent {
+                sys.EventDrain(wakeEvent)
+                DoneDrain()
+                WakeArmed()
+            } else if fd == poolEvent && fd == sys.PoolHeld() {
                 PoolDrain()
             } else if fd >= 0 && fd < waitSlots {
                 byte* slot = waits + fd * 8
@@ -6023,8 +7215,18 @@ void RunOne() {
         }
 
         *Ptr<byte*>(state - 16) = null
-        if (StateWord(state).Load(MemoryOrder.Acquire) & 1) == 0 && *Ptr<int>(state - 88) == 3 {
-            std.HeapFree(state - 192)
+        RunTake(state)
+    }
+}
+
+// The take of the actor whose state is `state`, off the run queue (`RunOne`) or off a queue of a worker thread (`WorkerTurn`), as
+// `RunOne` has it; on worker threads an actor whose top activation parked on another thread is let go of at once, which puts it in
+// that thread's queue that nobody steals from (`LetGo`, `QueueHeld`; section 6, Q2 of comment 6946532526), and the record of an
+// ended one is freed by the one thread that sets its RECLAIMED bit (`Reclaims`, `RecordFreed`; T16).
+void RunTake(byte* state) {
+    raw {
+        if (StateWord(state).Load(MemoryOrder.Acquire) & 1) == 0 && *Ptr<int>(state - 88) == 3 && Reclaims(state, true) {
+            RecordFreed(state)
             return
         }
 
@@ -6034,7 +7236,13 @@ void RunOne() {
 
         int life = *Ptr<int>(state - 88)
         if life == 3 {
-            std.HeapFree(state - 192)
+            LetGo(state, false)
+            return
+        }
+
+        byte* parked = *Ptr<byte*>(state - 8)
+        if parked != null && Threaded() && *Ptr<byte*>(parked + 272) != threadRecord {
+            LetGo(state, true)
             return
         }
 
@@ -6105,6 +7313,11 @@ void Start(byte* state, byte* message, byte* below) {
         }
 
         *Ptr<byte*>(state - 8) = header
+        if Threaded() {
+            *Ptr<byte*>(header + 272) = threadRecord
+            *Ptr<byte*>(header + 264) = Adopted(state, message)
+        }
+
         sys.Enter(header, header, ActorStart)
         Run(state, header)
     }
@@ -6143,6 +7356,10 @@ void Run(byte* state, byte* header) {
             if below != null {
                 *Ptr<byte*>(below + 376) = *Ptr<byte*>(header + 376)
                 *Ptr<byte*>(below + 384) = *Ptr<byte*>(header + 384)
+            }
+
+            if Threaded() {
+                OwnLeft(*Ptr<byte*>(header + 264))
             }
 
             Give(header)
@@ -6257,6 +7474,7 @@ byte* PauseEnded(long now) {
             paused = *Ptr<byte*>(*Ptr<byte*>(paused - 80) + 40)
         }
 
+        PauseNoted()
         Unlock(PauseLock())
     }
 
@@ -6824,6 +8042,8 @@ void EndActor(byte* state) {
 
             if *Ptr<byte*>(m + 8) == BlockTable() {
                 BlockLeft(m)
+            } else if Threaded() {
+                OwnLeft(*Ptr<byte*>(m + 48))
             }
 
             m = *Ptr<byte*>(m)
@@ -6834,8 +8054,8 @@ void EndActor(byte* state) {
         EndChildren(state)
         Emptied(state)
         SlotFree(*Ptr<long>(state - 56))
-        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {
-            std.HeapFree(state - 192)
+        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 && Reclaims(state, false) {
+            RecordFreed(state)
         }
     }
 }
@@ -6934,6 +8154,7 @@ void Pause(byte* state) {
             *Ptr<byte*>(*Ptr<byte*>(before - 80) + 40) = state
         }
 
+        PauseNoted()
         Unlock(PauseLock())
     }
 }
@@ -6958,6 +8179,7 @@ void Unpause(byte* state) {
             }
         }
 
+        PauseNoted()
         Unlock(PauseLock())
     }
 }
@@ -7787,6 +9009,7 @@ pub void RunTests(byte* table, long count, string file) {
     mut byte* run = null
     mut byte* reply = null
     raw {
+        workersAsked = 0
         name = AllocateOwn(16)
         *Ptr<byte*>(name) = "test".Pointer
         *Ptr<long>(name + 8) = 4
