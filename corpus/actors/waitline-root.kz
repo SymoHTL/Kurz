@@ -1,0 +1,28 @@
+// expect: throws callee-crashed at 27
+// threads: 1
+// rules: U20, U62
+
+// `Right`'s `Ask`, which the top-level code waits on, gets `deadlock`: the top-level code's call raises `callee-crashed`, and
+// the `deadlock` stands in `Right`'s log line (U62, U20)
+
+actor Left {
+    pub void Ask(Right other) {
+        print("left got {other.Value()}")
+    }
+
+    pub int Value() => 1
+}
+
+actor Right {
+    pub void Ask(Left other) {
+        print("right got {other.Value()}")
+    }
+
+    pub int Value() => 2
+}
+
+l = spawn Left()
+r = spawn Right()
+send l.Ask(r)
+r.Ask(l)
+print("after")

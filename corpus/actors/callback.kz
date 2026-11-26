@@ -1,6 +1,6 @@
 // expect: output
 // | 41
-// rules: U17, U57
+// rules: U17, U57, U61
 
 actor A(B Other) {
     mut int saved = 0

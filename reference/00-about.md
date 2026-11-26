@@ -87,6 +87,9 @@ header (Recommended)"), and `compiler/README.md` says whether a runner reads it.
 line where it has one and before its `// rules:` line, and takes no other count *(assumed: the line as that answer
 gives it, in the place of the other optional lines, which the answer did not name)*. A header out of the shape this
 chapter gives, a `// threads:` line of another count among it, is refused by the gate `reference`.
+A case that expects `deadlock` and whose `// rules:` line names U63 or U64 writes each chain's ID in its output lines as
+`<chain>`, after ` in chain `, since a thread draws the IDs at random (U17), and the runner reads every ID it prints there
+as that word *(assumed: the form the runner gives the IDs of the loop below such a case's error line)*.
 
 The ids of both kinds are listed in chapter 12. The compiler's test suite parses each file and checks the errors of its
 front end, `syntax`, `semicolon`, `reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, or the absence of any diagnostic, against the header,

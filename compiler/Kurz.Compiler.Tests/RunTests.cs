@@ -118,8 +118,10 @@ public sealed class Toolchain : IDisposable
 /// 6926929175, which the answer of 2026-11-16 on pull request 554, comment 6926986795, gave to the change that follows it); a
 /// <c>throws</c> case exits with 1, and its error stream
 /// is the one line <c>error: &lt;id&gt; at &lt;file&gt;:&lt;n&gt;</c> of the design record's section 6, with the header's id and line and
-/// the case's path under <c>corpus/</c> as the file, or for <c>thrown</c> that line ending in a colon with the thrown text below it, and
-/// for <c>not-char-boundary</c> that line ending in a colon with the position of the cut below it (X10). A case that expects an error the
+/// the case's path under <c>corpus/</c> as the file, or for <c>thrown</c> that line ending in a colon with the thrown text below it,
+/// for <c>not-char-boundary</c> that line ending in a colon with the position of the cut below it (X10), and for a <c>deadlock</c>
+/// that names its loop, layer 3's or U18's, in a case whose <c>rules:</c> line names U63 or U64, that line ending in a colon with
+/// the loop's text below it, each line's chain ID read as one placeholder (<see cref="LoopTexts"/>, <see cref="Chains"/>). A case that expects an error the
 /// build raises once clang refuses the program (<see cref="CorpusTests.BuildIds"/>) is built, and its build ends with that error alone, at the
 /// header's line; it is no case run.
 /// A case the checker says <c>not supported</c> to is held by the checker's theory in <see cref="CorpusTests"/> and is not built here; a
@@ -138,6 +140,16 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     [GeneratedRegex(@"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z Error Kurz\.Actor: [^\n]*\n", RegexOptions.Multiline)]
     private static partial Regex CrashLine();
 
+    /// <summary>U63: the chain ID that ends a line of the text of layer 3's <c>deadlock</c>, <c> in chain </c> and 32 lowercase hexadecimal digits.</summary>
+    [GeneratedRegex(@" in chain [0-9a-f]{32}$", RegexOptions.Multiline)]
+    private static partial Regex ChainId();
+
+    /// <summary>
+    /// U63: <paramref name="error"/> with the chain ID that ends each of its lines, which differs on every run, read as the one
+    /// placeholder <c> in chain &lt;chain&gt;</c>; an ID of another length or with an uppercase digit stays, so that the case turns red.
+    /// </summary>
+    internal static string Chains(string error) => ChainId().Replace(error, " in chain <chain>");
+
     /// <summary>
     /// E3: what a case wrote on standard error, <paramref name="written"/>, with the log line of each crash left out where its <c>rules:</c>
     /// line, <paramref name="rules"/>, names a rule of a crash, U19 to U34 or the rules of <c>attempt</c>, U46 to U50, and whole in every
@@ -150,7 +162,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             ? CrashLine().Replace(written, string.Empty) : written;
 
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the cases whose <c>system:</c> line names Linux, the stack overflows', nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls, the reads of standard input and running a program. The number for Linux is the count measured with no margin in an image built locally from <c>ci/Dockerfile</c>, whose clang is the point release of the day it was built and not always the one of the image the gates job pulls by its digest (knowledge/the-gates-job-runs-in-its-image.md), so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156); a green gates job shows only that its own image counts at least this number, and a count in that image is one run of the job on a pushed head with the number at 999. The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 715 : 878;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 725 : 889;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -180,7 +192,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         "http/client-limits.kz", "http/client-redirects.kz", "http/client-timeout.kz", "http/client-timeout-body.kz",
         "http/http-query.kz",
         "system/command-env-dir.kz",
-        "system/park-accept-first.kz", "system/park-two-readers.kz", "system/park-read-close.kz", "system/park-read-crash.kz", "system/park-write.kz",
+        "system/park-accept-first.kz", "system/park-two-readers.kz", "system/park-read-close.kz", "system/park-read-crash.kz", "system/park-crash-deadlock.kz", "system/park-write.kz",
         "system/park-read-write.kz", "system/park-two-accepts.kz", "system/park-busy-scheduler.kz",
         "tests/advance-read-bound.kz",
     ];
@@ -274,6 +286,8 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         ["actors/restart-reentrant-one-place.kz"] = (47, "main"),
         ["actors/restart-reentrant-cap.kz"] = (68, "main"),
         ["actors/timeout-chain-left.kz"] = (24, "Front.Ask"),
+        ["actors/waitline-escalate.kz"] = (18, "Right.Ask"),
+        ["actors/waitline-vouch.kz"] = (20, "Right.Ask"),
     };
 
     /// <summary>
@@ -304,6 +318,29 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             "... and 2 more",
         ]),
     };
+
+    /// <summary>
+    /// U63, U25, U64: the cases whose process ends with a <c>deadlock</c> that names its loop, layer 3's that a policy escalates to the
+    /// top-level code and U18's whose walk finds a loop, each with the loop's text below its error line, each line's chain ID as the
+    /// placeholder of <see cref="Chains"/>.
+    /// </summary>
+    private static readonly Dictionary<string, string> LoopTexts = new(StringComparer.Ordinal)
+    {
+        ["actors/waitline-escalate.kz"] = "Right#2 waits at actors/waitline-escalate.kz:18 on Left#1 in chain <chain>\n" +
+            "Left#1 waits at actors/waitline-escalate.kz:10 on Right#2 in chain <chain>",
+        ["actors/waitline-vouch.kz"] = "Right#2 waits at actors/waitline-vouch.kz:20 on Left#1 in chain <chain>\n" +
+            "Left#1 waits at actors/waitline-vouch.kz:12 on Right#2 in chain <chain>",
+        ["actors/deadlock-pending-crash.kz"] = "Boss#1 waits at actors/deadlock-pending-crash.kz:25 on Worker#2 in chain <chain>\n" +
+            "Worker#2 waits for the decision of Boss#1 on its crash in chain <chain>",
+        ["actors/waitline-into-loop.kz"] = "Boss#1 waits at actors/waitline-into-loop.kz:30 on Worker#4 in chain <chain>\n" +
+            "Worker#4 waits for the decision of Boss#1 on its crash in chain <chain>",
+        ["system/park-crash-deadlock.kz"] = "Boss#4 waits at system/park-crash-deadlock.kz:62 on Worker#5 in chain <chain>\n" +
+            "Worker#5 waits for the decision of Boss#4 on its crash in chain <chain>",
+    };
+
+    /// <summary>U63, U64: a case whose <c>deadlock</c> names its loop below its error line, by its <c>rules:</c> line.</summary>
+    private static bool NamesALoop(CaseHeader header) =>
+        header.ErrorId == "deadlock" && (header.Rules.Contains("U63") || header.Rules.Contains("U64"));
 
     public static TheoryData<string> RunnableCases()
     {
@@ -392,7 +429,9 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         // nothing for it
         var (code, output, written) = Toolchain.Run(executable, null);
         var all = LeftOut(written, header.Rules);
-        Assert.Equal(header.OutputLines, output);
+        // U63, U64: in a case that names its loop, a chain's ID, which a thread draws at random (U17), stands in the header as `<chain>`,
+        // where the words under a test's `FAILED` line list the loop's waits (Y5; chapter 0)
+        Assert.Equal(header.OutputLines, NamesALoop(header) ? output.Select(l => Chains(l)).ToList() : output);
         if (header.Tests)
         {
             // Y3, E3: what `kurz test` writes is its standard output, which the header's lines hold, and nothing on standard error but the
@@ -436,6 +475,12 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         {
             // U40, U41: the bound of zero or less on the line below, written as a duration's text is (assumed: T78 of comment 7055305138)
             Assert.Matches($"^{Regex.Escape(line)}:\nthe bound of `within` is -?[0-9a-z]+; a bound is positive\n$", error);
+        }
+        else if (NamesALoop(header))
+        {
+            // U63, U64: the loop's text below the error line, each line's chain ID as one placeholder
+            Assert.True(LoopTexts.TryGetValue(relativePath, out var loop), $"{relativePath}: a `deadlock` of U63 or U64 with no text of its loop listed");
+            Assert.Equal($"{line}:\n{loop}\n", Chains(error));
         }
         else
         {
@@ -500,6 +545,21 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             Assert.True(header.Expectation == Expectation.Throws && header.ErrorId == "deadlock" && !NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with calls kept out, and the run does not run it as a `throws` case of `deadlock`");
         }
 
+        // a case listed with the text of its loop is a `throws deadlock` case of U63 or U64 the run runs, where the build
+        // builds it: a build for Windows says `not supported` to a case of sockets (S11)
+        Assert.NotEmpty(LoopTexts);
+        foreach (var (relativePath, _) in LoopTexts)
+        {
+            var header = Header(relativePath);
+            Assert.True(header.Expectation == Expectation.Throws && NamesALoop(header), $"{relativePath}: listed with the text of its loop, and it is no `throws deadlock` case of U63 or U64");
+            if (NotEmitted.ContainsKey(relativePath))
+            {
+                continue;
+            }
+
+            Assert.True(!NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with the text of its loop, and the run does not run it as a `throws deadlock` case of U63 or U64");
+        }
+
         // a case listed as run under the plain allocator alone is one the plain run runs
         Assert.NotEmpty(NotFenced);
         foreach (var (relativePath, why) in NotFenced)
@@ -541,6 +601,20 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         Assert.Equal(crash, LeftOut(crash, ["U45"]));
         Assert.Equal(crash, LeftOut(crash, ["U51"]));
         Assert.Equal(crash, LeftOut(crash, ["P3"]));
+    }
+
+    [Fact]
+    public void The_runner_reads_a_chain_ID_of_32_lowercase_hexadecimal_digits_at_a_line_end_alone_as_the_placeholder()
+    {
+        // U63: the ID of a chain differs on every run, so the runner holds the text of a `deadlock` with each line's ID as one
+        // placeholder; an ID of 31 or 33 digits, with an uppercase digit, or with more on its line stays, so that its case turns red
+        const string id = "0123456789abcdef0123456789abcdef";
+        Assert.Equal("error: deadlock at a.kz:3:\nA#1 waits at a.kz:3 on B#2 in chain <chain>\nB#2 waits at a.kz:7 on A#1 in chain <chain>\n",
+            Chains($"error: deadlock at a.kz:3:\nA#1 waits at a.kz:3 on B#2 in chain {id}\nB#2 waits at a.kz:7 on A#1 in chain {id}\n"));
+        foreach (var other in new[] { id[1..], id + "0", "0123456789ABCDEF0123456789abcdef", id + " " })
+        {
+            Assert.Equal($"A#1 waits at a.kz:3 on B#2 in chain {other}\n", Chains($"A#1 waits at a.kz:3 on B#2 in chain {other}\n"));
+        }
     }
 
     [Fact]
