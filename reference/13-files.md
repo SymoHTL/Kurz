@@ -2469,7 +2469,7 @@ Main() else {
 Case: [system/park-command-fifo.kz](../corpus/system/park-command-fifo.kz)
 ```kurz
 // `Runner` waits for a child, `cat` of a FIFO, which ends only once a writer opens the FIFO and closes it, and the wait for the
-// child and its output runs on the pool of threads for blocking calls while `Runner` parks (S10), so that the one thread runs
+// child and its output parks `Runner` in the poller (S10), so that the one thread runs
 // `Ticker` meanwhile and the top-level code goes on to write the FIFO. A runtime that waited for the child on the thread that runs
 // every actor would wait without end, since nothing could open the FIFO to write
 string Text(Bytes bytes) {
@@ -2509,6 +2509,88 @@ void | IoError | ExitError Main() {
     w.Close()
     print(r.Got())
     File.Delete("park-command-fifo")
+}
+
+Main() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}
+```
+
+Case: [system/park-command-crash.kz](../corpus/system/park-command-crash.kz)
+```kurz
+// `Boom`, a call `Helper` makes in the chain of `Outer`'s message (U17), is let in while `Outer` waits in the poller for a child,
+// `cat` of a FIFO, and its output, and its crash takes those waits out of the poller and gives both its callers `callee-crashed`
+// (U20): `Caller`, whose policy prints it, and `Helper`, whose policy stops it (U25). The child ends once the top-level code opens
+// the FIFO to write, with no wait left to wake, and `Runner`'s wait for a child of its own after it gives that child's output
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+actor Helper {
+    pub void Poke(Napper n) {
+        print(n.Boom())
+    }
+}
+
+actor Napper {
+    pub int Outer(Helper helper) {
+        send helper.Poke(this)
+        o = Command.New("cat").Arg("park-command-crash").Output() else {
+            IoError e => return -1
+            ExitError e => return -2
+        }
+
+        return o.Stdout.Count
+    }
+
+    pub int Boom() {
+        throw "boom"
+    }
+}
+
+actor Caller(Napper N, Helper H) {
+    pub void Go() {
+        print(N.Outer(H))
+    }
+
+    pub string Done() => "done"
+}
+
+actor Runner {
+    pub string Run() {
+        o = Command.New("printf").Arg("y").Output() else {
+            IoError e => return "run {e.Kind}"
+            ExitError e => return "exit {e}"
+        }
+
+        return "out {Text(o.Stdout)}"
+    }
+}
+
+void | IoError | ExitError Main() {
+    Command.New("mkfifo").Arg("park-command-crash").Status()
+    poker = spawn Helper() on crash stop
+    napper = spawn Napper()
+    c = spawn Caller(napper, poker) on crash (e) {
+        match e.Reason {
+            RuntimeError r => print(r.Kind)
+        }
+
+        restart
+    }
+
+    send c.Go()
+    print(c.Done())
+    w = File.Create("park-command-crash")
+    w.Close()
+    r = spawn Runner()
+    print(r.Run())
+    File.Delete("park-command-crash")
 }
 
 Main() else {
@@ -3352,6 +3434,8 @@ Run() else {
 ```
 
 Case: [system/park-command-fifo.kz](../corpus/system/park-command-fifo.kz)
+
+Case: [system/park-command-crash.kz](../corpus/system/park-command-crash.kz)
 
 ### S19 (decided, §12) A child beside the program, and its input
 

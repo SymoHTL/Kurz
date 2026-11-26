@@ -5,7 +5,7 @@
 // rules: S10, S18
 
 // `Runner` waits for a child, `cat` of a FIFO, which ends only once a writer opens the FIFO and closes it, and the wait for the
-// child and its output runs on the pool of threads for blocking calls while `Runner` parks (S10), so that the one thread runs
+// child and its output parks `Runner` in the poller (S10), so that the one thread runs
 // `Ticker` meanwhile and the top-level code goes on to write the FIFO. A runtime that waited for the child on the thread that runs
 // every actor would wait without end, since nothing could open the FIFO to write
 string Text(Bytes bytes) {

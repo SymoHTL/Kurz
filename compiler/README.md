@@ -1732,9 +1732,13 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the descriptor an opening gave). The pool starts a thread where none is idle and fewer than 512 run, detached and with 2 MiB of
   stack, and ends one that waited 10 seconds idle, Tokio's defaults, under a mutex and a condition of the C library; where the
   system refuses a thread and no thread of the pool runs, the process ends with `error: thread-refused (1)`. A child of a `fork`
-  drops the pool (`Forked`). The wait for a child and its output hands its `poll` of the child's pipes and its descriptor
-  (`Drive`, `ChildPolled`), the four `struct pollfd`s copied to the job and back, and reads the output on its own thread into
-  the actor's heap; a build for Windows hands nothing (S11), and its runtime's functions of the pool are stubs;
+  drops the pool (`Forked`). The wait for a child and its output (`Drive`, `ChildPolled`) waits in the poller instead, where
+  the thread's page holds the waiter `Start` puts in at 224 (`ManyWaiter`) and `BlockingOffloads` says so, as Go's `os/exec`
+  reads a child's pipes through its netpoller: each of the child's pipes and its descriptor (`pidfd_open`) registered with a
+  block of its own, which `Ended` marks in the block that holds them (`ManyWaited`, -2 at 40, each wait -3), the actor parked
+  until the first event or the bound, and the waits whose event did not come taken out again (`ManyUnwait`), at a fall too;
+  the output is read on the actor's thread into its heap, and the last look of a bound is a `poll` of 0 milliseconds. A build
+  for Windows hands nothing (S11), and its runtime's functions of the pool are stubs;
 - logging (P1 to P7 and P9), in a build for Linux: a program with a log call in one of its files reads
   `KURZ_LOG` alone, since the compiler builds no settings type whose `Logging` part P4 has win, through
   `Variable` before its first statement, after `args`, and hands it to `LogFilter`,

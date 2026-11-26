@@ -35,6 +35,7 @@ pub void Start(int count, byte* values) {
     sys.Start(count, values)
     sys.Waiter(SocketWaited)
     sys.BlockingWaiter(BlockingWaited, BlockingOffloads)
+    sys.ManyWaiter(ManyWaited)
     raw {
         byte* words = std.AllocateIn(null, 48)
         if words != null {
@@ -5199,12 +5200,20 @@ int Interest(byte* first) {
     return int(events)
 }
 
-// The wait `block` ended with `result`, 1 where its event came, the failure of the poller below 0: its word set and the actor of the
-// activation that waits on it woken, which goes on where that activation is its top (`SocketWaited`); the top-level code's block
-// names no waiter, and its wait reads the word (`RootLoop`).
+// The wait `block` ended with `result`, 1 where its event came, the failure of the poller below 0: its word set, with the word of the
+// block that holds it where it is one of the waits of `Drive` (`ManyWaited`, -3 at 40) and no other wait of it set that word first,
+// and the actor of the activation that waits on it woken, which goes on where that activation is its top (`SocketWaited`); the
+// top-level code's block names no waiter, and its wait reads the word (`RootLoop`).
 void Ended(byte* block, long result) {
     raw {
         *Ptr<long>(block) = result
+        if *Ptr<long>(block + 40) == -3 {
+            byte* holder = *Ptr<byte*>(block + 16)
+            if *Ptr<long>(holder) == 0 {
+                *Ptr<long>(holder) = result
+            }
+        }
+
         byte* header = *Ptr<byte*>(block + 8)
         if header != null {
             Wake(*Ptr<byte*>(header + 320))
@@ -5354,6 +5363,137 @@ extern "C" int SocketWaited(int fd, int events, long nanoseconds) {
 
     sys.Left()
     return result
+}
+
+// The wait of `Drive` for its child and its output in the poller (`sys.ManyWaiter`; issue 661, Q14 (a); S10, S18): each of the
+// `count` `struct pollfd`s of `poll` at `pollfds` whose descriptor is not below 0 registered for its events with a block shaped as
+// `SocketWaited`'s, whose word its event sets (`Polled`), at 16 the block `holder` that holds the waits, at 24 the descriptor and at
+// 40 the mark -3, so that its event sets the word of `holder` too (`Ended`); `holder` shaped as `SocketWaited`'s block, with the
+// deadline `nanoseconds` from now, at 40 the mark -2, so that a fall takes each wait out (`Fall`, `ManyUnwait`), at 48 the waits and
+// at 56 their count. Inside a message the activation parks until the first event or the deadline, as a call on a socket does, and the
+// calls of its chain are let in above it (U17); the top-level code runs what its wait on a call runs (`RootLoop`). Each wait whose
+// event came gives back at 6 of its `struct pollfd` the events it waited for, and the others are taken out of their lists
+// (`Unwait`), so that no thread of the pool waits for a child, as Go's `os/exec` reads a child's pipes through its netpoller: the count
+// of descriptors whose event came, 0 where the deadline passed first, or the failure of the poller, each wait registered before it
+// taken out again where the poller refuses one.
+extern "C" int ManyWaited(int* pollfds, int count, long nanoseconds) {
+    long now = PauseClock()
+    mut long deadline = Never()
+    if nanoseconds < Never() - now {
+        deadline = now + nanoseconds
+    }
+
+    mut long result = 0
+    sys.Entered()
+    raw {
+        byte* header = running
+        byte* holder = Allocate(64)
+        byte* each = Allocate(long(count) * 64)
+        *Ptr<long>(holder) = 0
+        *Ptr<byte*>(holder + 8) = header
+        *Ptr<long>(holder + 16) = deadline
+        *Ptr<byte*>(holder + 24) = null
+        *Ptr<byte*>(holder + 32) = null
+        *Ptr<long>(holder + 40) = -2
+        *Ptr<byte*>(holder + 48) = each
+        *Ptr<long>(holder + 56) = long(count)
+        byte* at = Ptr<byte>(pollfds)
+        mut long i = 0
+        while i < long(count) {
+            byte* block = each + i * 64
+            int fd = *Ptr<int>(at + i * 8)
+            *Ptr<long>(block) = 0
+            *Ptr<long>(block + 40) = 0
+            *Ptr<short>(at + i * 8 + 6) = 0
+            if fd >= 0 && result == 0 {
+                byte* slot = WaitsOf(fd)
+                if slot == null {
+                    result = -12
+                } else {
+                    *Ptr<byte*>(block + 8) = header
+                    *Ptr<byte*>(block + 16) = holder
+                    *Ptr<long>(block + 24) = long(fd)
+                    *Ptr<byte*>(block + 32) = null
+                    *Ptr<long>(block + 40) = -3
+                    *Ptr<byte*>(block + 48) = *Ptr<byte*>(slot)
+                    *Ptr<long>(block + 56) = long(*Ptr<short>(at + i * 8 + 4))
+                    *Ptr<byte*>(slot) = block
+                    long added = sys.PollAdd(fd, Interest(block), sys.EpollDataAt())
+                    if added < 0 {
+                        *Ptr<byte*>(slot) = *Ptr<byte*>(block + 48)
+                        *Ptr<long>(block + 40) = 0
+                        result = added
+                    }
+                }
+            }
+
+            i = i + 1
+        }
+
+        if result == 0 {
+            polled = polled + 1
+            if header == null {
+                RootLoop(holder, deadline)
+            } else {
+                *Ptr<byte*>(header + 360) = holder
+                *Ptr<byte*>(header + 432) = null
+                TimerAdd(holder)
+                byte* heap = std.HeapUse(null)
+                while *Ptr<long>(holder) == 0 && !Waited(holder) {
+                    long entries = sys.Inside(0)
+                    sys.Switch(header, threadSide)
+                    sys.Inside(entries)
+                }
+
+                TimerRemove(holder)
+                std.HeapUse(heap)
+                *Ptr<byte*>(header + 360) = null
+            }
+
+            polled = polled - 1
+        }
+
+        i = 0
+        while i < long(count) {
+            byte* block = each + i * 64
+            long word = *Ptr<long>(block)
+            if *Ptr<long>(block + 40) == -3 && word == 1 {
+                *Ptr<short>(at + i * 8 + 6) = *Ptr<short>(at + i * 8 + 4)
+                if result >= 0 {
+                    result = result + 1
+                }
+            } else if *Ptr<long>(block + 40) == -3 && word < 0 {
+                result = word
+            }
+
+            i = i + 1
+        }
+
+        ManyUnwait(holder)
+        std.Free(each, long(count) * 64)
+        std.Free(holder, 64)
+    }
+
+    sys.Left()
+    return int(result)
+}
+
+// Each wait of `Drive` that `holder` holds (`ManyWaited`) whose event did not come taken out of its descriptor's list and the
+// registration set to the waits left (`Unwait`), where the bound passed, an event of another descriptor came, the poller refused a
+// registration or the actor fell.
+void ManyUnwait(byte* holder) {
+    raw {
+        byte* each = *Ptr<byte*>(holder + 48)
+        mut long i = 0
+        while i < *Ptr<long>(holder + 56) {
+            byte* block = each + i * 64
+            if *Ptr<long>(block + 40) == -3 && *Ptr<long>(block) == 0 {
+                Unwait(int(*Ptr<long>(block + 24)), block)
+            }
+
+            i = i + 1
+        }
+    }
 }
 
 // The jobs handed to the pool of threads for blocking calls whose end the scheduler has not taken (`BlockingWaited`, `PoolDrain`),
@@ -6426,6 +6566,13 @@ void Fall(byte* state, byte* header, byte* kept) {
             // makes to its end in the job's own bytes and the scheduler gives back once it is done (`PoolDrain`)
             if waited != null && *Ptr<byte*>(at + 432) == null && *Ptr<long>(waited + 40) == -1 {
                 *Ptr<byte*>(*Ptr<byte*>(waited + 48) + 24) = null
+                polled = polled - 1
+            }
+
+            // the wait of `Drive` for its child (`ManyWaited`): each of its waits whose event did not come taken out of its
+            // descriptor's list (`ManyUnwait`), so that no event writes a block the fall frees with the heap
+            if waited != null && *Ptr<byte*>(at + 432) == null && *Ptr<long>(waited + 40) == -2 {
+                ManyUnwait(waited)
                 polled = polled - 1
             }
 

@@ -2701,8 +2701,8 @@ pub int Variable(byte* key, mut string value) {
 // `struct timespec` of the monotonic clock at 160, 16 bytes; the `struct epoll_event` of a registration in the
 // poller at 176, 16 bytes, and the 8 bytes of its data at 192 (`PollAdd`, `PollWait`); the wait of a call that would
 // block at 200, 8 bytes (`Waiter`); the wait of a call handed to the pool of threads for blocking calls at 208 and
-// whether a call is handed at 216, 8 bytes each (`BlockingWaiter`); and the events `epoll_wait` gives at 256, at most
-// 64 of 16 bytes.
+// whether a call is handed at 216, 8 bytes each (`BlockingWaiter`); the wait of `Drive` in the poller at 224, 8 bytes
+// (`ManyWaiter`); and the events `epoll_wait` gives at 256, at most 64 of 16 bytes.
 thread static mut byte* endpoints = null
 
 // The page above, mapped where this thread has none yet: its address, or null where the system refuses it.
@@ -3011,8 +3011,7 @@ extern "C" byte* PoolThread(byte* own) {
 
 // The call of the job `job` made on the thread of the pool that took it (`PoolThread`), by the code that makes it on any thread,
 // since that thread's page holds no waiter of blocking calls (`Handing`), its result put at 16: kind 1 a read of the descriptor at
-// 40 into the job's bytes at 64, 2 a write of them, 3 the opening of the path at 64, to write where 40 holds 1, 4 a `poll` of the
-// `struct pollfd`s at 64 for the milliseconds at 40 (`ChildPolled`).
+// 40 into the job's bytes at 64, 2 a write of them, 3 the opening of the path at 64, to write where 40 holds 1.
 void JobRun(byte* job) {
     mut long result = -22
     raw {
@@ -3025,13 +3024,6 @@ void JobRun(byte* job) {
             result = WriteFile(fd, job + 64, count)
         } else if kind == 3 {
             result = OpenFile(job + 64, *Ptr<long>(job + 40) == 1)
-        } else if kind == 4 {
-            int ready = poll(Ptr<void>(job + 64), ulong(count / 8), int(*Ptr<long>(job + 40)))
-            if ready < 0 {
-                result = -long(*__errno_location())
-            } else {
-                result = long(ready)
-            }
         }
 
         *Ptr<long>(job + 16) = result
@@ -3072,6 +3064,20 @@ pub void BlockingWaiter(extern "C" (byte*) => long wait, extern "C" () => int of
         if held != null {
             *Ptr<extern "C" (byte*) => long>(held + 208) = wait
             *Ptr<extern "C" () => int>(held + 216) = offloads
+        }
+    }
+}
+
+// The wait of `Drive` for its child in the poller set to `wait`, which `runtime/common/` gives at the start of the process, as it
+// gives `Waiter`: given the `struct pollfd`s of `poll`, their count and the bound in nanoseconds, it parks the actor that called, or
+// the top-level code, until the first of their descriptors is ready or the bound passed, and gives what `poll` gives, each ready
+// descriptor's events set to those it waits for, or the failure of the poller, below 0. It stands in the page of the thread that
+// starts the process at 224 (`Endpoints`).
+pub void ManyWaiter(extern "C" (int*, int, long) => int wait) {
+    raw {
+        byte* held = Endpoints()
+        if held != null {
+            *Ptr<extern "C" (int*, int, long) => int>(held + 224) = wait
         }
     }
 }
@@ -3131,48 +3137,35 @@ long Handed(byte* job) {
     }
 }
 
-// The wait of `Drive` on its four descriptors, `poll` of the four `struct pollfd`s at `polled` for `wait` milliseconds, handed to
-// the pool of threads for blocking calls as a call on a file is (`Handing`; issue 661), so that the actor that waits for its child
-// parks while its output, which it reads into its own heap, comes: their 32 bytes copied to the job and back with the events
-// `poll` gave. What `poll` gives, or -1 with `errno` set to its failure or to the pool's.
+// The wait of `Drive` on its four descriptors, the four `struct pollfd`s at `polled`, for `wait` milliseconds, -1 for no bound: in
+// the poller where the thread's page holds its waiter (`ManyWaiter`) and the scheduler hands calls (`BlockingWaiter`'s `offloads`),
+// so that the actor that waits for its child parks while its output, which it reads into its own heap, comes (issue 661, Q14 (a));
+// `poll` on this thread otherwise, and for the last look of a bound, 0 milliseconds, which waits for nothing. What `poll` gives, or
+// -1 with `errno` set to its failure or to the poller's.
 int ChildPolled(int* polled, int wait) {
-    byte* job = Handing(4, -1, 32)
-    if job == null {
-        raw {
-            return poll(Ptr<void>(polled), 4, wait)
-        }
-    }
-
     raw {
-        byte* at = Ptr<byte>(polled)
-        mut long i = 0
-        while i < 32 {
-            job[64 + i] = at[i]
-            i = i + 1
+        byte* held = Endpoints()
+        if held != null && wait != 0 && *Ptr<long>(held + 224) != 0 {
+            extern "C" () => int offloads = *Ptr<extern "C" () => int>(held + 216)
+            if offloads() != 0 {
+                mut long nanoseconds = 9223372036854775807
+                if wait > 0 {
+                    nanoseconds = long(wait) * 1000000
+                }
+
+                extern "C" (int*, int, long) => int many = *Ptr<extern "C" (int*, int, long) => int>(held + 224)
+                int got = many(polled, 4, nanoseconds)
+                if got < 0 {
+                    *__errno_location() = -got
+                    return -1
+                }
+
+                return got
+            }
         }
 
-        *Ptr<long>(job + 40) = long(wait)
+        return poll(Ptr<void>(polled), 4, wait)
     }
-
-    long got = Handed(job)
-    mut int ready = -1
-    raw {
-        byte* at = Ptr<byte>(polled)
-        mut long i = 0
-        while i < 32 {
-            at[i] = job[64 + i]
-            i = i + 1
-        }
-
-        if got < 0 {
-            *__errno_location() = int(-got)
-        } else {
-            ready = int(got)
-        }
-    }
-
-    Unhanded(job)
-    return ready
 }
 
 // The job `job` given back (`Handing`) by its call once it read the result: a job of one page kept for the next (`keptJobs`), any

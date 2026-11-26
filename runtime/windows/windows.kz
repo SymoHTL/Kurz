@@ -300,6 +300,9 @@ pub long EpollDataAt() => 0
 pub void BlockingWaiter(extern "C" (byte*) => long wait, extern "C" () => int offloads) {
 }
 
+pub void ManyWaiter(extern "C" (int*, int, long) => int wait) {
+}
+
 pub long PoolEvent() => -4099
 
 pub int* PoolFlag() => null
