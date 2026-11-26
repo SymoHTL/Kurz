@@ -2522,7 +2522,9 @@ Case: [system/park-file-fork.kz](../corpus/system/park-file-fork.kz)
 // `Filer`'s read of a file runs on the pool of threads for blocking calls (S10), so that the scheduler takes the events of the
 // pool's `eventfd`. The child of a `fork` drops the pool and its `eventfd`, whose number its accepted connection then takes, and
 // the child's read of that connection waits in the poller of its own: the event of the connection reaches the read, and not the
-// pool the child does not have, so that the read ends within 2 seconds of the write and not at its bound of 5
+// pool the child does not have. The child writes `w` before its read, and the parent writes its byte 0.2 seconds after it reads
+// `w`, so that the read waits for the byte. That the read ends as its byte comes, and not at its bound of 5 seconds, is a bound
+// of time, which `FileTests` holds
 extern "C" {
     int fork()
     int waitpid(int pid, long status, int options)
@@ -2588,10 +2590,20 @@ void | IoError Main() {
             }
         }
 
+        conn.Write("w".Bytes) else {
+            IoError e => {
+                print("child write {e.Kind}")
+                raw {
+                    _exit(1)
+                }
+
+                return
+            }
+        }
+
         mut buffer = Bytes()
-        start = instant.Now
         match conn.Read(mut buffer, 1) {
-            int n => print("child read {Text(buffer)} {instant.Now - start < 2s}")
+            int n => print("child read {Text(buffer)}")
             IoError e => print("child read {e.Kind}")
         }
 
@@ -2601,8 +2613,14 @@ void | IoError Main() {
     }
 
     stream = TcpStream.Connect("127.0.0.1:{port}")
+    mut ready = Bytes()
+    match stream.Read(mut ready, 1) {
+        int n => print("parent got {Text(ready)}")
+        IoError e => print("parent read {e.Kind}")
+    }
+
     raw {
-        usleep(300000)
+        usleep(200000)
     }
 
     stream.Write("r".Bytes)
