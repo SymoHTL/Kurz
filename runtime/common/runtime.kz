@@ -433,6 +433,33 @@ pub void NotCharBoundary(long at, string file, int line) {
     sys.Exit(1)
 }
 
+// The error line of `invalid-input` for a bound of `within` of zero or less that is no literal, a block's or a call's clause's (U40,
+// U41; design record, section 6, the owner, 2026-11-20, "T4 (2)"; assumed: T78 of comment 7055305138): `error: invalid-input at
+// <file>:<n>:`, the bound on the line below it, `the bound of `within` is <bound>; a bound is positive`, written as a duration's text
+// is (A12), where the text of a `throw` stands (O6), the trace of the calls below that, and the end of the process with the exit code
+// 1; inside a message, the crash of the actor that runs it, which keeps that text for its log line (U19, U24).
+pub void InvalidBound(long bound, string file, int line) {
+    mut string sign = ""
+    mut ulong magnitude = 0
+    if bound < 0 {
+        sign = "-"
+        magnitude = ulong(-(bound + 1)) + 1
+    }
+
+    string text = "the bound of `within` is {sign}{TextOfDuration(magnitude, 0)}; a bound is positive"
+    CrashActor("invalid-input", file, line, true, text)
+    sys.Crashing()
+    WriteError("error: invalid-input at ")
+    WriteError(file)
+    WriteError(":")
+    WriteNumber(ulong(line))
+    WriteError(":\n")
+    WriteError(text)
+    WriteError("\n")
+    sys.Trace()
+    sys.Exit(1)
+}
+
 // The text of a signed integer (A2): its decimal digits, with a leading `-` when it is negative, in
 // one block, as Rust's `Display` writes the sign and the digits into one `String`.
 pub string TextOfLong(long value) {
@@ -3611,8 +3638,9 @@ thread static mut byte* running = null
 thread static mut byte* holding = null
 
 // The heap of an actor `spawn` makes, whose first block holds the actor's record and a state of `size`
-// bytes behind it (design record, section 3), made before the arguments of `spawn`, which cross into it
-// (U12). A heap the system refuses ends the process as a refused allocation does.
+// bytes behind it (design record, section 3), made just before the first argument of `spawn` that crosses
+// into it (U12), or after the last where none crosses (section 6, T87 3). A heap the system refuses ends the
+// process as a refused allocation does.
 pub byte* ActorHeapNew(long size) {
     byte* heap = std.HeapNew(144 + size)
     if heap == null {
@@ -3623,26 +3651,53 @@ pub byte* ActorHeapNew(long size) {
 }
 
 // The first of the heaps of their own that messages are built in by the actors of the thread
-// (`MessageHeapNew`), each one's first block the heap after it, the one before it and the actor whose code
-// builds the message, so that a crash of that actor frees them (`Crashed`).
+// (`MessageHeapNew`), and of the heaps of the `spawn`s whose arguments they evaluate (`SpawnHeapNew`), each
+// one's first block the heap after it, the one before it and the actor whose code builds the message or
+// spawns, so that a crash of that actor frees them (`Crashed`).
 thread static mut byte* messageHeaps = null
 
 // The heap of its own a message is built in where any of its arguments or the bound of its call's clause
 // can wait, or that bound can raise with no call in it (`Emitter.EmitMessage`), which
 // the copy at its queueing leaves and the emitted code then frees, as Erlang copies a message into the
 // receiver's heap at its send (U12, U21): a crash or an end of the actor it goes to, during that wait, frees
-// no block of it. Built inside a message, it is listed with the running actor, so that the crash of the
-// builder frees it, as a crashed Erlang process takes the message it was building with its heap; the
-// top-level code's is not, its raise ending the process. A heap the system refuses ends the process as a
-// refused allocation does. The change of the list raises the count of the entries under way, as `Enqueue`
-// does, so that a stack fault between its writes ends the process and is no crash whose walk meets the list
-// half changed (O11).
+// no block of it. Built inside a message, it is listed with the running actor (`Listed`), so that the crash
+// of the builder frees it, as a crashed Erlang process takes the message it was building with its heap. A
+// heap the system refuses ends the process as a refused allocation does.
 pub byte* MessageHeapNew() {
     byte* heap = std.HeapNew(24)
     if heap == null {
         AllocationFailed(24)
     }
 
+    Listed(heap)
+    return heap
+}
+
+// The heap of a `spawn` whose first argument that crosses into it (U12), or one after it, can raise or wait
+// (`Emitter.EmitActorSpawn`), made as `ActorHeapNew` makes it, just before that first crossing argument, and
+// listed with the running actor as a message's heap of its own is (`Listed`), so that a raise of such an
+// argument, which crashes the actor whose code spawns, frees it with the copies made into it (`Fall`), as
+// Rust drops the parts of a value it was building (design record, section 6, T82 1, T87 3); `SpawnHeapTaken` takes it off the list
+// once the last argument is evaluated, and a case propagated out of a later argument frees it as a
+// message's (`MessageHeapFree`).
+pub byte* SpawnHeapNew(long size) {
+    byte* heap = ActorHeapNew(size)
+    Listed(heap)
+    return heap
+}
+
+// The heap of a `spawn` (`SpawnHeapNew`) taken off the list of the heaps being built once its last argument
+// is evaluated, before `ActorNew` writes the actor's record over the words that list it.
+pub void SpawnHeapTaken(byte* heap) {
+    Unlisted(heap)
+}
+
+// The heap `heap`, of a message's own or of a `spawn`, listed with the running actor in the first 24 bytes of
+// its first block, the heap after it, the one before it and that actor; the top-level code's is not, its
+// raise ending the process. The change of the list raises the count of the entries under way, as `Enqueue`
+// does, so that a stack fault between its writes ends the process and is no crash whose walk meets the list
+// half changed (O11).
+void Listed(byte* heap) {
     sys.Entered()
     raw {
         byte* first = std.HeapFirst(heap)
@@ -3661,18 +3716,24 @@ pub byte* MessageHeapNew() {
     }
 
     sys.Left()
-    return heap
 }
 
-// The heap of its own of a message, taken off the list of the heaps being built where it stands there, and
-// freed whole: after the copy at the message's queueing, at the end of a region a case propagated out of an
-// argument after it left, and at the crash of its builder; nothing for null, the heap of a message that was queued.
-// The change of the list raises the count of the entries under way, as in `MessageHeapNew`.
+// The heap of its own of a message, or of a `spawn` (`SpawnHeapNew`), taken off the list of the heaps being
+// built where it stands there, and freed whole: after the copy at the message's queueing, at the end of a
+// region a case propagated out of an argument after it left, and at the crash of its builder; nothing for
+// null, the heap of a message that was queued or of a `spawn` whose actor took it.
 pub void MessageHeapFree(byte* heap) {
     if heap == null {
         return
     }
 
+    Unlisted(heap)
+    std.HeapFree(heap)
+}
+
+// The heap `heap` taken off the list of the heaps being built where it stands there (`Listed`). The change of
+// the list raises the count of the entries under way, as in `Listed`.
+void Unlisted(byte* heap) {
     sys.Entered()
     raw {
         byte* first = std.HeapFirst(heap)
@@ -3692,7 +3753,6 @@ pub void MessageHeapFree(byte* heap) {
     }
 
     sys.Left()
-    std.HeapFree(heap)
 }
 
 // The heap of a `spawn` whose arguments did not all cross, by a case propagated out of a later one,
@@ -3930,13 +3990,15 @@ pub void ActorBuilt(byte* state) {
 // The cell of a `per node` actor type (U51, U52), a global of the emitted program, 24 bytes: a lock word, then
 // the index of the slot of its one actor and that actor's number, which a reference holds (`Lookup`), 0 before
 // its first start, the slot stored before the number and the number with release (`PerStarted`). The actor of
-// the cell `cell` where one stands, ended or not, its state found by its slot and its number as a reference finds
-// its actor, with no lock, as Rust's `OnceLock` reads its value after one acquire load of its state (not
-// checked at source); else the cell's lock taken and the cell read again under it, and null, the lock still held,
-// where no actor stands there either, so that the code that called starts one (the emitter's `PerStart`) and
-// `PerStarted` lets go of the lock once that actor stands in the cell: the lock is held around the check and the
-// publication alone, never around the constructor or a wait (assumed: T27 to T33 of issue 519, comment
-// 6983903100, the defaults said back, a lock of the type on the threads of section 6). A number of 0 is no actor's,
+// the cell `cell` where one stands and has not ended, its state found by its slot and its number as a reference finds
+// its actor, null where it ended and `EndActor` freed its slot (`Lookup`), with no lock, as Rust's `OnceLock`
+// reads its value after one acquire load of its state (not checked at source); else the cell's lock taken and
+// the cell read again under it, and null, the lock still held, where no actor stands there either, so that the
+// code that called starts one (the emitter's `PerStart`) and `PerStarted` lets go of the lock once that actor
+// stands in the cell: the lock is held around the check, the making of the actor's heap and record and the
+// publication, never around the constructor or a wait (assumed: T27 to T33 of issue 519, comment 6983903100, the
+// defaults said back, a lock of the type on the threads of section 6 "around the check and the publication alone",
+// the making of the heap and the record under it a reading of the build beyond those words). A number of 0 is no actor's,
 // and is read before the slot, since `Slot` reads the directory of the table, which no take made before the first
 // actor's.
 pub byte* PerFind(byte* cell) {
@@ -4136,8 +4198,10 @@ pub string ActorText(string name, long number) {
 // unqueued (`Discard`), and a call raises `call-timeout` at its line, the crash of the actor that makes it,
 // while a `send` raises nothing (U37, U45; assumed: T1 of comment 6967147952, T10 of comment 6967625156), as
 // tonic's client fails a call whose deadline passed and a send on tokio's channel reads no deadline (neither
-// checked at source). A call's reply holds the actor it reaches, the call's file and its line too, the edge
-// and the place of its wait that the wait line reads (`Looped`, `LoopText`; U60, U63).
+// checked at source). A call's reply holds its place too, the file `file` at 48 and 56 and the line `line` at 64,
+// which the top-level code's wait that finds nothing left to run names where an actor's start keeps the call out
+// (`Kept`; U18, U22, U52; section 6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and the actor it reaches
+// at 72, the edge of its wait, whose place the wait line reads too (`Looped`, `LoopText`; U60, U63).
 pub void Enqueue(long index, long number, byte* message, bool bounded, long bound, string file, int line) {
     sys.Entered()
     long fileCount = long(file.Bytes.Count)
@@ -4178,10 +4242,10 @@ pub void Enqueue(long index, long number, byte* message, bool bounded, long boun
             *Ptr<long>(reply + 16) = deadline
             *Ptr<byte*>(reply + 24) = null
             *Ptr<byte*>(reply + 32) = null
-            *Ptr<byte*>(reply + 48) = state
-            *Ptr<byte*>(reply + 56) = file.Pointer
-            *Ptr<long>(reply + 64) = fileCount
-            *Ptr<int>(reply + 72) = line
+            *Ptr<byte*>(reply + 48) = file.Pointer
+            *Ptr<long>(reply + 56) = fileCount
+            *Ptr<long>(reply + 64) = long(line)
+            *Ptr<byte*>(reply + 72) = state
         }
 
         *Ptr<long>(message + 40) = deadline
@@ -4263,7 +4327,11 @@ byte* Popped(byte* queue) {
 // `EndActor`): each block at the front of the inbox, after the blocks there, in the order of its posts, so that
 // it runs after the current message and before the queued ones (U28, U34); then each message, a call that waits
 // of the chain the actor's top activation waits in to the end of that activation's side list (layer 1; section
-// 6, "One-shot reply slot"), every other message to the end of the inbox, as tokio's `mpsc` channel pushes a
+// 6, "One-shot reply slot"), except while its constructor runs at a restart (`Rebuilding`), when such a call
+// waits in the inbox for that constructor's end, so that a constructor that waits for it is `deadlock`, which the
+// top-level code's wait names at that call's line (`Kept`; U22; section 6, the owner, 2026-11-20, #599, comment
+// 7051501153, "Option 1", and 2026-11-21, comment 7060156109, Q6 1), and every
+// other message to the end of the inbox, as tokio's `mpsc` channel pushes a
 // value at the tail of its list (not checked at source), so that an inbox keeps the order in which its messages were sent (U5, U15).
 // `Fall` and `EndActor` move them on a supervisor that the thread does not hold too, where a child's crash
 // escalates through it or ends it as the crash's taker (`Fell`): that holds while one thread runs every program
@@ -4293,10 +4361,11 @@ void Moved(byte* state) {
             block = Popped(state - 120)
         }
 
+        bool rebuilding = Rebuilding(state)
         mut byte* message = Popped(state - 144)
         while message != null {
             byte* top = *Ptr<byte*>(state - 8)
-            if top != null && *Ptr<byte*>(message + 16) != null && *Ptr<long>(message + 24) == *Ptr<long>(top + 344) && *Ptr<long>(message + 32) == *Ptr<long>(top + 352) {
+            if top != null && !rebuilding && CallOf(message, *Ptr<long>(top + 344), *Ptr<long>(top + 352)) {
                 Append(top + 376, message)
             } else {
                 Append(state - 32, message)
@@ -4304,6 +4373,15 @@ void Moved(byte* state) {
 
             message = Popped(state - 144)
         }
+    }
+}
+
+// Whether the message `message` is a call that waits, its reply named, made in the chain whose ID is `high` and `low`, the words a
+// message carries at 24 and 32 and an activation at 344 and 352 (`Enqueue`; section 6, "Deadlocks", layer 1): the test by which a
+// waiting chain lets a call in (`Moved`) and by which a start keeps one out (`Kept`).
+bool CallOf(byte* message, long high, long low) {
+    raw {
+        return *Ptr<byte*>(message + 16) != null && *Ptr<long>(message + 24) == high && *Ptr<long>(message + 32) == low
     }
 }
 
@@ -4344,7 +4422,10 @@ byte* Taken(byte* list) {
 // queue; 4 NOTIFIED, a take found the actor held and dropped its entry, so that whoever holds it queues it
 // again as it lets go of it (`LetGo`, `ActorBuilt`); 8 BUILDING, its constructor runs at its `spawn` (U3); 16
 // ENDING, the actor ends after its current message, which the end of its supervisor sets by one atomic `or` and
-// no thread clears (`EndChildren`, `Ending`). With none of the first four set the actor is idle.
+// no thread clears (`EndChildren`, `Ending`); 32 REBUILDING, its constructor runs at a restart (U22), set by one
+// atomic `or` where the thread that holds it starts the restart (`Restart`) and cleared by one atomic `and` at the
+// end of that constructor (`Rebuilt`), so that a call of its chain waits in its inbox (`Moved`, `Rebuilding`). With
+// none of the first four set the actor is idle.
 AtomicInt StateWord(byte* state) {
     raw {
         return AtomicInt.FromPtr(Ptr<int>(state - 84))
@@ -4359,6 +4440,28 @@ bool Ending(byte* state) {
     }
 
     return (word & 16) != 0
+}
+
+// Whether the constructor of the actor runs at its restart, its REBUILDING bit set (`Restart`, `Rebuilt`), loaded with
+// acquire.
+bool Rebuilding(byte* state) {
+    mut int word = 0
+    raw {
+        word = StateWord(state).Load(MemoryOrder.Acquire)
+    }
+
+    return (word & 32) != 0
+}
+
+// Whether the constructor of the actor runs at its `spawn` or at the first start of a `per node` actor, its BUILDING bit set
+// (`ActorNew`, `ActorBuilt`), loaded with acquire.
+bool Constructing(byte* state) {
+    mut int word = 0
+    raw {
+        word = StateWord(state).Load(MemoryOrder.Acquire)
+    }
+
+    return (word & 8) != 0
 }
 
 // The value the compare-exchange of the state word `word` from `seen` to `wanted` found there, `seen` where
@@ -4597,7 +4700,8 @@ void Signal(byte* reply, int kind) {
 long Never() => 9223372036854775807
 
 // The deadline `bound` nanoseconds after `now`, the bound rounded up to whole milliseconds (U36): `now` for a
-// bound of zero or less, a deadline that has passed (U40; assumed: T4 of comment 6967147952), and none where it
+// bound of zero or less, a deadline that has passed, which no bound of a `within` gives it, since the emitted code refuses
+// one where it is read (U40, U41), and none where it
 // would pass the largest time the clock holds, as Tokio's `timeout` falls back on a far future where its sum
 // overflows (not checked at source) (U40; assumed in section 6, proposed with the record and not put to the owner).
 long Due(long now, long bound) {
@@ -4796,7 +4900,13 @@ void Discard(byte* message) {
 // thread's stack, which never parks (section 6, "Deadlocks", assumed there); where the run queue is empty
 // and the reply is not set, nothing is left that could set it, and the process ends with
 // `error: deadlock at <file>:<n>` at that call's line and the exit code 1 (section 6, the owner,
-// 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level wait"). The reply's waiter stands in it
+// 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level wait"), or at the place of a call that an
+// actor's start keeps out where one waits, the call that closes the loop (`Kept`; U22, U52; section 6, the owner,
+// 2026-11-21, #599, comment 7060156109, Q6 1), and where more than one waits at the first's in source order, each
+// further place on a line of its own under it, at most 10 (`DeadlockKept`, `KeptLines`; section 6, the owner, 2026-11-21,
+// #599, comment 7067131310, several 2, and comment 7067139953, the form 1; comment 7067639209, the order 1, the same
+// place 1 and the cap 1), the chain of the top-level code's call read before the wait, since a
+// crash of its callee moves the message into a new heap. The reply's waiter stands in it
 // since before the call's `Enqueue` (`ReplyWaiter`), and its word is loaded with acquire (`ReplyState`), so
 // that the answer is seen with the result stored before it. Inside a message the
 // activation parks: the thread switches from its stack to the scheduler's, as corosensei's
@@ -4857,7 +4967,15 @@ int Answer(byte* reply, byte* message, string file, int line) {
     sys.Entered()
     raw {
         if running == null {
+            long high = *Ptr<long>(message + 24)
+            long low = *Ptr<long>(message + 32)
             if !RootWait(reply) {
+                mut found = List<long>()
+                Kept(high, low, mut found)
+                if found.Count > 0 {
+                    DeadlockKept(found)
+                }
+
                 Stuck(reply, file, line)
             }
         } else {
@@ -4897,11 +5015,20 @@ int Answer(byte* reply, byte* message, string file, int line) {
 // fired, then the block of a child the top-level code spawned, a restart whose pause ended, the sleep to the first pause's end, the
 // first timer or the deadline, or the run queue's first actor, as long as the reply is not set and its deadline has not passed; true
 // where one of those ends the loop, false where none of them is left, so that nothing could set the reply, where `Answer` raises
-// `deadlock` at the call's line and the test runner fails the test at its own (`RunTests`; Y5).
+// `deadlock` at the call's line and the test runner fails the test at its own (`RunTests`; Y5), or each at the lines of the calls
+// an actor's start keeps out where such calls close the loop (`Kept`). An actor that sleeps is something left: with nothing else
+// to run, the loop sleeps to the first timer or the deadline (`Sleeping`; S28).
 bool RootWait(byte* reply) {
     raw {
-        long deadline = *Ptr<long>(reply + 16)
-        while ReplyState(reply) == 0 {
+        return RootLoop(reply, *Ptr<long>(reply + 16))
+    }
+}
+
+// The loop of `RootWait` for the reply `reply` to the deadline `deadline`, or, where `reply` is null, the top-level code's sleep to
+// that deadline (`Slept`; S28), which runs what the loop runs and, with nothing left, sleeps to the first timer or the deadline.
+bool RootLoop(byte* reply, long deadline) {
+    raw {
+        while reply == null || ReplyState(reply) == 0 {
             long now = PauseClock()
             if deadline <= now {
                 return true
@@ -4925,17 +5052,320 @@ bool RootWait(byte* reply) {
                 } else {
                     RunOne()
                 }
-            } else {
-                if runFirst == null {
-                    return false
-                }
-
+            } else if runFirst != null {
                 RunOne()
+            } else if reply == null || Sleeping() {
+                PauseSleep(Earliest(deadline, Next()) - now)
+            } else {
+                return false
             }
         }
     }
 
     return true
+}
+
+// Whether an actor's activation sleeps among the timers (`Slept`), its waiter naming no message, where one that waits for a call
+// names the message it waits on (`Answer`).
+bool Sleeping() {
+    raw {
+        mut byte* at = timers
+        while at != null {
+            if *Ptr<byte*>(*Ptr<byte*>(at + 8) + 432) == null {
+                return true
+            }
+
+            at = *Ptr<byte*>(at + 32)
+        }
+    }
+
+    return false
+}
+
+// S28: `Environment.Sleep(time)`, `nanoseconds` slept from now, none for zero or less (section 12, the owner, 2026-11-25, issue 627,
+// comment 7158347789, Q3, as Go's `time.Sleep`). Inside a message the activation parks, as a call that waits parks it (`Answer`; Q2, U4),
+// on a block of its heap shaped as a reply that is never set: its word 0, its waiter, its deadline, and its links among the
+// timers, which the scheduler's turn fires (`Fire`, `Waited`); its header names the block and no message, so that its actor's fall
+// takes it off the timers and waits for no answer (`Fall`), and the calls of its chain are let in above it while it parks, as above
+// an activation that waits (`Moved`; U17). The top-level code runs what its wait on a call runs to the deadline, and sleeps where
+// nothing is left (`RootLoop`), since every actor runs on its thread (U35), as tokio's `sleep` in `block_on` lets the runtime's
+// other tasks run; a deadline past the clock's range is the largest one, a sleep with no end.
+pub void Slept(long nanoseconds) {
+    if nanoseconds <= 0 {
+        return
+    }
+
+    long now = PauseClock()
+    mut long deadline = Never()
+    if nanoseconds < Never() - now {
+        deadline = now + nanoseconds
+    }
+
+    Park(deadline)
+}
+
+// The wait of `Slept` to the clock's `deadline`, and of `Advance` to the turn after it (Y10): inside a message the activation parked
+// among the timers, after every one whose deadline is not later (`TimerAdd`), which the scheduler's turn fires in that order (`Fire`);
+// the top-level code's run of what its wait runs to the deadline (`RootLoop`).
+void Park(long deadline) {
+    sys.Entered()
+    raw {
+        if running == null {
+            RootLoop(null, deadline)
+            sys.Left()
+            return
+        }
+
+        byte* sleep = Allocate(48)
+        byte* header = running
+        *Ptr<long>(sleep) = 0
+        *Ptr<byte*>(sleep + 8) = header
+        *Ptr<long>(sleep + 16) = deadline
+        *Ptr<byte*>(sleep + 24) = null
+        *Ptr<byte*>(sleep + 32) = null
+        *Ptr<long>(sleep + 40) = 0
+        *Ptr<byte*>(header + 360) = sleep
+        *Ptr<byte*>(header + 432) = null
+        TimerAdd(sleep)
+        byte* heap = std.HeapUse(null)
+        while !Waited(sleep) {
+            long entries = sys.Inside(0)
+            sys.Switch(header, threadSide)
+            sys.Inside(entries)
+        }
+
+        TimerRemove(sleep)
+        std.HeapUse(heap)
+        *Ptr<byte*>(header + 360) = null
+        std.Free(sleep, 48)
+    }
+
+    sys.Left()
+}
+
+// The replies of the calls that an actor's start keeps out, each address added to `found` in the order the walk finds them, which the
+// top-level code's wait that found nothing left to run names in place of its own call, in source order and not in the walk's, the
+// first on the error line and every further place under it (`KeptSorted`, `DeadlockKept`; section 6, the owner, 2026-11-21, #599,
+// comment 7067131310, several 2, and comment 7067139953, the form 1; comment 7067639209, the order 1), since such a call closes a
+// loop: a call that waits in the actor's lists, made in the chain of the code that runs the
+// constructor, which that chain would let in were the actor not starting (U17), so that the error names the call a developer changes
+// (`Wait`; U18, U22, U52; section 6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and so the words under a test's `FAILED`
+// line where the runner's wait for it finds nothing left to run (`TestRan`; Y5; section 11, the owner, 2026-11-21, #599, comment
+// 7063693195, Y5's line 1). The code that runs the constructor is the
+// actor's own top activation at a restart (REBUILDING); at a first start (BUILDING) it is the top-level code, whose chain is that of its
+// call that waits, `high` and `low`, where the top-level code runs it, else the activation whose header names the actor at 424
+// (`Building`), each walked from the actor its stack builds up the supervisors that stack builds too (`KeptBuilt`). The walk's order:
+// the starts the top-level code runs, then the actors by the index of their slots, each actor's restart before the starts its
+// activations run, from its top activation down. None is added where none waits, a loop of chains that passes no start among them.
+// The lists are read with plain loads, which holds while one thread runs every program (U35): nothing runs while the top-level
+// code's wait finds nothing left to run.
+void Kept(long high, long low, mut List<long> found) {
+    raw {
+        KeptBuilt(rootBuilding, high, low, mut found)
+    }
+
+    long used = SlotsUsed()
+    mut long index = 0
+    while index < used {
+        raw {
+            byte* slot = Slot(index)
+            if *Ptr<long>(slot + 8) != 0 {
+                byte* state = *Ptr<byte*>(slot)
+                mut byte* at = *Ptr<byte*>(state - 8)
+                if at != null && Rebuilding(state) {
+                    KeptIn(state, *Ptr<long>(at + 344), *Ptr<long>(at + 352), mut found)
+                }
+
+                while at != null {
+                    KeptBuilt(*Ptr<byte*>(at + 424), *Ptr<long>(at + 344), *Ptr<long>(at + 352), mut found)
+                    at = *Ptr<byte*>(at + 368)
+                }
+            }
+        }
+
+        index = index + 1
+    }
+}
+
+// The replies of the calls of the chain `high` and `low` that the start of the actor whose state is `state`, built on a stack of that
+// chain, keeps out, then those of the start of each actor whose constructor that stack runs around it, its supervisor while it is
+// built (`ActorNew`, `Supervisor`), as a start nested in a constructor has it, added to `found`; none where none waits, and none for an
+// actor whose constructor no longer runs.
+void KeptBuilt(byte* state, long high, long low, mut List<long> found) {
+    mut byte* at = state
+    while at != null && Constructing(at) {
+        KeptIn(at, high, low, mut found)
+        raw {
+            at = *Ptr<byte*>(at - 72)
+        }
+    }
+}
+
+// The replies of the calls of the chain `high` and `low` that wait in the inbox of the actor whose state is `state`, then on its queue
+// of many senders, read from the message its holder takes next (`Popped`), since an actor whose constructor runs at its first start
+// is not taken (`Claimed`), added to `found`; none where none waits. A block of a decision has no reply (`Pending`).
+void KeptIn(byte* state, long high, long low, mut List<long> found) {
+    raw {
+        KeptFrom(*Ptr<byte*>(state - 32), null, high, low, mut found)
+        KeptFrom(*Ptr<byte*>(state - 136), state - 128, high, low, mut found)
+    }
+}
+
+// The replies of the calls of the chain `high` and `low` among the messages linked from `first`, in their order, the stub `stub` of a
+// queue of many senders passed over, which links its messages and is none (`Pushed`), each address added to `found`; none where none
+// stands there.
+void KeptFrom(byte* first, byte* stub, long high, long low, mut List<long> found) {
+    raw {
+        mut byte* at = first
+        while at != null {
+            if at != stub && CallOf(at, high, low) {
+                found.Add(long(*Ptr<byte*>(at + 16)))
+            }
+
+            at = *Ptr<byte*>(at)
+        }
+    }
+}
+
+// The place of a call whose reply's address is `reply` (`Kept`), `<file>:<n>`, the file at 48 and 56 and the line at 64, which
+// `Enqueue` stores.
+string KeptPlace(long reply) {
+    mut string file = ""
+    mut long line = 0
+    raw {
+        byte* at = Ptr<byte>(reply)
+        file = TextAt(*Ptr<byte*>(at + 48), *Ptr<long>(at + 56))
+        line = *Ptr<long>(at + 64)
+    }
+
+    return "{file}:{line}"
+}
+
+// The order of the places of two calls an actor's start keeps out, their replies `first` and `second` (`Kept`), less than 0, 0 or
+// more than 0: by the file, its path as the error line writes it, compared byte for byte as `<` compares two strings (`Order`; T32; assumed in
+// section 6), then by the line (section 6, the owner, 2026-11-21, #599, comment 7067639209, the order 1).
+int KeptOrder(long first, long second) {
+    mut string firstFile = ""
+    mut string secondFile = ""
+    mut long firstLine = 0
+    mut long secondLine = 0
+    raw {
+        byte* a = Ptr<byte>(first)
+        byte* b = Ptr<byte>(second)
+        firstFile = TextAt(*Ptr<byte*>(a + 48), *Ptr<long>(a + 56))
+        secondFile = TextAt(*Ptr<byte*>(b + 48), *Ptr<long>(b + 56))
+        firstLine = *Ptr<long>(a + 64)
+        secondLine = *Ptr<long>(b + 64)
+    }
+
+    int order = Order(firstFile, secondFile)
+    if order != 0 {
+        return order
+    }
+
+    if firstLine < secondLine {
+        return -1
+    }
+
+    if firstLine > secondLine {
+        return 1
+    }
+
+    return 0
+}
+
+// The replies `found` as `Kept` gives them, in the walk's order, put in source order (`KeptOrder`), each inserted in its turn after
+// those of its place, so that the walk's order stays among the calls of one place (section 6, the owner, 2026-11-21, #599, comment
+// 7067639209, the order 1).
+List<long> KeptSorted(List<long> found) {
+    mut sorted = List<long>()
+    for reply in found {
+        mut int at = sorted.Count
+        while at > 0 && KeptOrder(sorted[at - 1], reply) > 0 {
+            at = at - 1
+        }
+
+        sorted.Insert(at, reply)
+    }
+
+    return sorted
+}
+
+// The words that name the calls an actor's start keeps out, `sorted` as `KeptSorted` gives them, at least one (`DeadlockKept`,
+// `RunTests`): one for each place, in that order, `<file>:<n>` followed by ` (<k> calls)` where k calls stand at it, more than one,
+// and by nothing where one does (the same place 1); the first is the place the error line names, each further one stands on a line
+// `kept out at <place>`, at most 10 such lines, and one line `... and <k> more` follows them for the k places past those (the cap 1),
+// places and not calls (assumed in section 6) (section 6, the owner, 2026-11-21, #599, comment 7067639209).
+List<string> KeptLines(List<long> sorted) {
+    mut lines = List<string>()
+    mut int more = 0
+    mut int index = 0
+    while index < sorted.Count {
+        mut int calls = 1
+        while index + calls < sorted.Count && KeptOrder(sorted[index], sorted[index + calls]) == 0 {
+            calls = calls + 1
+        }
+
+        mut string place = KeptPlace(sorted[index])
+        if calls > 1 {
+            place = "{place} ({calls} calls)"
+        }
+
+        if lines.Count == 0 {
+            lines.Add(place)
+        } else if lines.Count <= 10 {
+            lines.Add("kept out at {place}")
+        } else {
+            more = more + 1
+        }
+
+        index = index + calls
+    }
+
+    if more > 0 {
+        lines.Add("... and {more} more")
+    }
+
+    return lines
+}
+
+// The `deadlock` of the top-level code's wait that names the calls an actor's start keeps out, `found` as `Kept` gives them (`Wait`):
+// one keeps the error line of `Raise`, at its place (section 6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1); of more than
+// one, the error line names the first place in source order, with the count of its calls where more than one, and ends with a colon,
+// as a thrown value's does (`Throw`), also where that place is the only one, and the further lines of `KeptLines` stand under it,
+// before the trace, the exit code 1 as `Raise` ends (U18, U22, U52; section 6, the owner, 2026-11-21, #599, comment 7067131310,
+// several 2, and comment 7067139953, the form 1; comment 7067639209, the order 1, the same place 1 and the cap 1).
+void DeadlockKept(List<long> found) {
+    sorted = KeptSorted(found)
+    mut string file = ""
+    mut int line = 0
+    raw {
+        byte* first = Ptr<byte>(sorted[0])
+        file = TextAt(*Ptr<byte*>(first + 48), *Ptr<long>(first + 56))
+        line = int(*Ptr<long>(first + 64))
+    }
+
+    if found.Count == 1 {
+        Raise("deadlock", file, line)
+    }
+
+    lines = KeptLines(sorted)
+    string place = lines[0]
+    mut string under = ""
+    mut int further = 1
+    while further < lines.Count {
+        under = "{under}{lines[further]}\n"
+        further = further + 1
+    }
+
+    CrashActor("deadlock", file, line, false, "")
+    sys.Crashing()
+    WriteError("error: deadlock at ")
+    WriteError(place)
+    WriteError(":\n")
+    WriteError(under)
+    sys.Trace()
+    sys.Exit(1)
 }
 
 // The wait line from the call that the activation `header` of a message waits on, whose reply is `reply` (U60, U61; section 6,
@@ -4948,7 +5378,7 @@ bool RootWait(byte* reply) {
 long Looped(byte* header, byte* reply) {
     raw {
         byte* home = *Ptr<byte*>(header + 320)
-        mut byte* callee = *Ptr<byte*>(reply + 48)
+        mut byte* callee = *Ptr<byte*>(reply + 72)
         if !Reached(callee, header) {
             return 0
         }
@@ -5070,7 +5500,7 @@ byte* Onward(byte* callee) {
             return null
         }
 
-        return *Ptr<byte*>(next + 48)
+        return *Ptr<byte*>(next + 72)
     }
 }
 
@@ -5124,10 +5554,10 @@ string WaitText(byte* state) {
         } else {
             byte* top = *Ptr<byte*>(state - 8)
             byte* at = *Ptr<byte*>(top + 360)
-            to = ActorNamed(*Ptr<byte*>(at + 48))
+            to = ActorNamed(*Ptr<byte*>(at + 72))
             chain = ChainText(top + 344)
-            place = TextAt(*Ptr<byte*>(at + 56), *Ptr<long>(at + 64))
-            line = long(*Ptr<int>(at + 72))
+            place = TextAt(*Ptr<byte*>(at + 48), *Ptr<long>(at + 56))
+            line = *Ptr<long>(at + 64)
         }
     }
 
@@ -5143,7 +5573,8 @@ string WaitText(byte* state) {
 }
 
 // U18's end of the process (section 6, "Deadlocks"; the owner, 2026-11-15, #519, comment 6892812780, Q4): the top-level code's
-// wait on the call whose reply is `reply` finds nothing left to run. One walk follows the wait line from that call (`Along`), the
+// wait on the call whose reply is `reply` finds nothing left to run, and no call that an actor's start keeps out closes the loop
+// (`Kept`, `DeadlockKept`; U22). One walk follows the wait line from that call (`Along`), the
 // top-level code no point of it (T64 of comment 7051071630), and where it runs into a loop, the error line ends with a colon and
 // the loop's waits stand below it as layer 3 writes them, from the first wait of the loop the walk meets (`LoopText`,
 // `Deadlocked`; U64; the owner, 2026-11-21, #519, comment 7060155980, T85 2): Brent's check finds the loop's length, and a second
@@ -5153,7 +5584,7 @@ void Stuck(byte* reply, string file, int line) {
     mut byte* first = null
     mut long length = 0
     raw {
-        byte* start = *Ptr<byte*>(reply + 48)
+        byte* start = *Ptr<byte*>(reply + 72)
         if Reached(start, null) {
             mut byte* tortoise = start
             mut byte* hare = Along(start)
@@ -5651,14 +6082,15 @@ void Crashed(byte* state, byte* header) {
 // falls (`Fall`), and after it each supervisor its policy crashes on the way up, `escalate` passing the
 // crash up whole, and an actor whose constructor runs at its `spawn` passing it to its spawner, whose fall
 // ends it (U3, U25). The actor that takes the crash writes the log line (U24), the supervisor that escalated
-// writing none, and a test's own actor none either, whose crash's words the test runner keeps (`TestCrashKept`; Y5), and
+// writing none (nor does a test's own actor, whose crash's words the test runner keeps, `TestCrashKept`; Y5), and
 // restarts after its pause (U22, U23), or ends where its policy is `stop`, where it was to
 // end after its current message or where its supervisor crashed (U25); where its crash passes the limit of
 // its `max N in`, its supervisor crashes with `restart-limit` at the line of its `spawn` (U26), and it ends in
 // that fall, as a child with no activation, its own fall having cleared it, which `EndChildren` ends at once,
 // a call queued to it set `gone`; at the top level the process ends; but the one actor of a `per node` type,
 // whose knobs hold 1 at 80, which ends there as at a `stop`, with no `restart-limit`, so that the first message
-// to its name after that starts a fresh one (U54; section 6, the owner, 2026-11-17, #561, comment 6945857315, Q2).
+// to its name after that starts a fresh one (U54; section 6, the owner, 2026-11-17, #561, comment 6945857315, Q2;
+// assumed: the one actor of a `per node` type read as the key of that answer, the product pass, comment 6983506072).
 // Where the actor that takes the crash runs and its policy is a block, the crash, the thrown value among it,
 // is copied into that heap, the actor waits for the block's decision, its stack that raised kept, and the
 // block runs as a message of its supervisor, or in the wait of the top-level code (`Pending`; U28, U33).
@@ -5842,7 +6274,8 @@ void Ends(bool hasText, byte* id, long idCount, byte* file, long fileCount, long
 // a wait that its deadline ended leaves (`Wait`), the reply is taken off the message it waits on by
 // the swap the callee takes it by (`ReplyTaken`), so that the callee runs to its end and its reply goes
 // nowhere, and where the callee took it first, the callee owns it and writes into the activation's frame,
-// whose stack stays out of the pool while the word is 0; the call it runs, whose reply it takes the same
+// whose stack stays out of the pool while the word is 0, but for the reply of a sleep, which names no message
+// and is only taken off the timers (`Slept`; S28); the call it runs, whose reply it takes the same
 // way, is answered `callee crashed`, which wakes its caller (U20); and its stack goes back to the pool. The
 // heaps of their own of the messages the actor's code was building are freed (`MessageHeapNew`). The calls
 // of the top activation's side list go to the front of the inbox, which is kept, the crashing message
@@ -5879,7 +6312,7 @@ void Fall(byte* state, byte* header, byte* kept) {
                 TimerRemove(waited)
             }
 
-            if waited != null && ReplyState(waited) == 0 && ReplyTaken(*Ptr<byte*>(at + 432)) == null {
+            if waited != null && ReplyState(waited) == 0 && *Ptr<byte*>(at + 432) != null && ReplyTaken(*Ptr<byte*>(at + 432)) == null {
                 while ReplyState(waited) == 0 {
                 }
             }
@@ -6241,9 +6674,15 @@ void HeldAlone(byte* state) {
 // runs again. A crash there is the actor's own (U3). The take off the queue of the pauses lets go of that
 // queue's lock before this hold, and the life is not read again under it, which holds while one thread runs
 // every program (U35): on more than one, the end of the actor's supervisor could end and free it in that gap.
+// Its state word says REBUILDING from before the activation starts to the end of the constructor (`Rebuilt`), so
+// that a call of the restart's chain that reaches the actor meanwhile waits in its inbox (`Moved`; U22; section
+// 6, the owner, 2026-11-20, #599, comment 7051501153, "Option 1"); a crash of the constructor leaves the bit set,
+// which `Moved` reads only while the actor has an activation, and a crashed actor has none: it waits for a restart,
+// which sets the bit again, or it ends.
 void Restart(byte* state) {
     HeldAlone(state)
     raw {
+        StateWord(state).FetchOr(32, MemoryOrder.AcqRel)
         byte* side = *Ptr<byte*>(state - 80)
         *Ptr<int>(state - 88) = 0
         *Ptr<long>(side + 24) = PauseClock()
@@ -6258,15 +6697,72 @@ void Restart(byte* state) {
     }
 }
 
-// The clock every pause and every deadline reads (U23, U36): the system's monotonic clock, in nanoseconds, 0
-// where it cannot be read.
+// The end of the constructor of the actor whose state is `state` at its restart, which the function of its restart
+// calls once the constructor and the defaults of its body ran (U22): its state word clears REBUILDING by one atomic
+// `and`, so that a call of its chain gets in again where layer 1 lets it in (`Moved`; U17).
+pub void Rebuilt(byte* state) {
+    raw {
+        StateWord(state).FetchAnd(~32, MemoryOrder.AcqRel)
+    }
+}
+
+// The clock every pause and every deadline reads (U23, U36): the system's monotonic clock, in nanoseconds, with the offset that
+// `advance` added in a test (`ahead`; Y10), 0 where it cannot be read.
 long PauseClock() {
     mut long now = 0
     if !sys.MonotonicNow(mut now) {
         return 0
     }
 
-    return now
+    raw {
+        return now + ahead
+    }
+}
+
+// The offset that `advance` adds to the runtime's clock in a test, in nanoseconds (Y10, section 11): `PauseClock`, the program's
+// `instant.Now` and `timestamp.Now` and the time stamp of a crash's log line read it in the build `kurz test` makes, and only that
+// build writes it, through `Advance` and at each test's end (`TestEnded`; F6 of issue 586, comment 6993110710), so that in every
+// other build nothing writes it and it stays 0, and the program's own reads of the clock read the system's alone (D8 of comment
+// 6992687784).
+static mut long ahead = 0
+
+// `advance d` (Y10, section 11): the runtime's clock moved by `nanoseconds`, zero or more, which the emitted code checked; false where
+// the monotonic or the wall clock it moves would pass the range of a `long`, which the emitted code raises as `overflow` at the
+// statement (section 4). The timers and the pauses the moved clock passed fire at the scheduler's turn after it, in the order of their
+// deadlines (F12 of comment 6993110710): the test's actor parks to the moved clock, after every timer whose deadline is not later
+// (`Park`), so that the actors they wake run before it goes on, as tokio's `time::advance` yields once after it moves the clock.
+pub bool Advance(long nanoseconds) {
+    mut long wall = 0
+    if !sys.Now(mut wall) {
+        wall = 0
+    }
+
+    mut long now = 0
+    if !sys.MonotonicNow(mut now) {
+        now = 0
+    }
+
+    if now > wall {
+        wall = now
+    }
+
+    raw {
+        if nanoseconds > 9223372036854775807 - wall - ahead {
+            return false
+        }
+
+        ahead = ahead + nanoseconds
+    }
+
+    Park(PauseClock())
+    return true
+}
+
+// The offset of `ahead`, which the build `kurz test` adds to the program's reads of the clock (Y10).
+pub long Ahead() {
+    raw {
+        return ahead
+    }
 }
 
 // The sleep of the top-level code until a restart's pause ends, or a deadline before it passes, `nanoseconds`
@@ -6300,6 +6796,10 @@ void Logged(byte* state, byte* id, long idCount, byte* file, long fileCount, lon
     mut long now = 0
     if !sys.Now(mut now) {
         now = 0
+    }
+
+    raw {
+        now = now + ahead
     }
 
     LogLine(4, "Kurz.Actor", "{name}#{number} crashed: {what}", CrashFields(file, fileCount, line, hasText, text, count), now)
@@ -6934,7 +7434,12 @@ thread static mut long testWordsRoom = 0
 // own, a child of the top-level code with the policy `stop`, named `test` (Q2, F2), as Rust's harness runs each test on a thread of
 // its own and catches its panic (`TestRan`). It passes where its actor answered, and fails where that actor crashed, the words of the
 // crash under its `FAILED` line (`TestCrashKept`), or where the wait found nothing left that could answer it, `deadlock at
-// <file>:<the test's line>` under it, since a parked wait keeps no place of its own (F5); then every actor the test made ends at once
+// <file>:<the test's line>` under it, since a parked wait keeps no place of its own (F5), or the place of the call an actor's start
+// keeps out where that call closes the loop, as the top-level code's wait names it (`Kept`; Y5; section 11, the owner,
+// 2026-11-21, #599, comment 7063693195, Y5's line 1), in any file (the same comment 7067131310, the file 1), and where more than
+// one closes it, the first place in source order so and the further lines of `KeptLines` under it, each indented by four spaces
+// (comment 7067131310, several 2, and comment 7067139953, the form 1; comment 7067639209, the order 1, the same place 1, the cap 1
+// and the indent 1); then every actor the test made ends at once
 // (`TestEnded`; F6). The line of its result is written on standard output after the lines the test printed (F4), `test "name" ...
 // ok` or `test "name" ... FAILED`, the words indented by four spaces under a failed one, and after the last test the counts, `2 tests:
 // 1 passed, 1 failed`, `1 test:` for one (Q3, F21); the process then ends with the exit code 0 where every test passed, else 1 (Q4).
@@ -6967,20 +7472,30 @@ pub void RunTests(byte* table, long count, string file) {
             line = int(*Ptr<long>(entry + 24))
         }
 
-        int kind = TestRan(test, name, run, reply, file, line)
+        mut kept = List<long>()
+        int kind = TestRan(test, name, run, reply, file, line, mut kept)
         if kind == 1 {
             passed = passed + 1
             Print(1, "test {written} ... ok", file, line)
         } else {
             mut string words = "deadlock at {file}:{line}"
+            mut lines = List<string>()
             if kind != 0 {
                 raw {
                     words = TextAt(testWords, testWordsCount)
                 }
+            } else if kept.Count > 0 {
+                lines = KeptLines(KeptSorted(kept))
+                words = "deadlock at {lines[0]}"
             }
 
             Print(1, "test {written} ... FAILED", file, line)
             Print(1, "    {words}", file, line)
+            mut int further = 1
+            while further < lines.Count {
+                Print(1, "    {lines[further]}", file, line)
+                further = further + 1
+            }
         }
 
         TestEnded()
@@ -7006,11 +7521,14 @@ pub void RunTests(byte* table, long count, string file) {
 // table `run` names the runtime's `TestRun` and whose function stands at 56, queued as a call of the top-level code is, its reply
 // `reply` in the thread's own heap, with no deadline (D6), and the top-level code's wait for it (`RootWait`), which runs the messages
 // of the test's actors meanwhile; the reply's word once the wait ended, 1 where the test answered and 2 where its actor crashed (U20),
-// and 0 where nothing was left that could answer it.
-int TestRan(byte* test, byte* name, byte* run, byte* reply, string file, int line) {
+// and 0 where nothing was left that could answer it, the replies of the calls an actor's start keeps out then added to `kept`, none
+// where none closes the loop, looked for with the chain of the test's message read before the wait, as `Wait` reads its call's (`Kept`).
+int TestRan(byte* test, byte* name, byte* run, byte* reply, string file, int line, mut List<long> kept) {
     byte* heap = ActorHeapNew(0)
     byte* state = ActorNew(heap, 0, 2097152, null, name)
     ActorBuilt(state)
+    mut long high = 0
+    mut long low = 0
     raw {
         byte* message = AllocateIn(heap, 64)
         *Ptr<byte*>(message + 8) = run
@@ -7021,10 +7539,16 @@ int TestRan(byte* test, byte* name, byte* run, byte* reply, string file, int lin
         testActor = state
         ReplyWaiter(reply)
         Enqueue(*Ptr<long>(state - 56), *Ptr<long>(state - 40), message, true, Never(), file, line)
+        high = *Ptr<long>(message + 24)
+        low = *Ptr<long>(message + 32)
     }
 
     sys.Entered()
     bool answered = RootWait(reply)
+    if !answered {
+        Kept(high, low, mut kept)
+    }
+
     sys.Left()
     raw {
         testActor = null
@@ -7163,6 +7687,7 @@ void TestEnded() {
         }
 
         tick = 0
+        ahead = 0
         rootBlock = 0
         thrownNumber = 0
         thrownSlot = null

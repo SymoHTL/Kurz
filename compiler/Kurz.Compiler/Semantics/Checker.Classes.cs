@@ -25,6 +25,9 @@ public sealed partial class Checker
     private readonly Dictionary<string, InterfaceSymbol> interfaces = new(StringComparer.Ordinal);
     private readonly List<InterfaceSymbol> interfaceDeclared = [];
 
+    /// <summary>T19: the names of the generic interfaces, which the checker does not read (K6), so that one named as a limit is refused by its form.</summary>
+    private readonly HashSet<string> genericInterfaces = new(StringComparer.Ordinal);
+
     /// <summary>
     /// K1, K7: a class the checker reads is declared with its methods; one that writes what the checker does not read is <c>not
     /// supported</c> at that line, and its name joins the types the checker does not read, so that a use of it carries nothing more (E1).
@@ -86,6 +89,11 @@ public sealed partial class Checker
         {
             NotSupported(unread.Line, unread.Construct);
             unsupportedTypes.Add(d.Name);
+            if (d.TypeParameters.Count > 0)
+            {
+                genericInterfaces.Add(d.Name); // T19: one named as a limit is refused there by its form, which section 14 leaves open
+            }
+
             return;
         }
 
@@ -1831,6 +1839,26 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>
+    /// N3, N5: the type a path of a name and fields has as <see cref="PathType"/> reads it, where a nullable step was read known not null
+    /// or after <c>?.</c>: each member is read from the case other than <c>null</c> of the step before it, and the type is the last
+    /// member's as declared; null for any other expression (issue 630).
+    /// </summary>
+    private KurzType? NarrowedPathType(Expression e)
+    {
+        if (Unwrap(e) is not MemberAccess m)
+        {
+            return PathType(e);
+        }
+
+        return NarrowedPathType(m.Target) is { } target ? (Types.NonNull(target) ?? target) switch
+        {
+            DataType d when d.Symbol.Field(m.Member) is { } field => SubstituteData(d, field.Type),
+            ClassType c when c.Symbol.Field(m.Member) is { } field => field.Type,
+            _ => null,
+        } : null;
+    }
+
     /// <summary>Whether the path, read as <see cref="PathType"/> reads it, runs through an instance of a class before its last member.</summary>
     private bool RunsThroughInstance(IReadOnlyList<MemberAccess> members) =>
         members.Any(m => PathType(m.Target) is ClassType);
@@ -1913,11 +1941,14 @@ public sealed partial class Checker
     /// M5 with K2: the receiver of a <c>mut</c> method that is a <c>mut</c> field of an instance, <c>node.Children.Add(x)</c>, which every
     /// reference reaches (M5's reading of K2 for paths); a field without <c>mut</c> is <c>mut-required</c>, a path that goes on into a
     /// data value after the field is <c>not supported</c>, and a lambda that captured the instance changes the field too (F11).
-    /// Returns false where the receiver is no such field.
+    /// <paramref name="narrowed"/> reads an instance held by a nullable variable or field as the checker read it known not null or after
+    /// <c>?.</c> (<see cref="NarrowedPathType"/>, N3, N5), so that <c>if cfg != null { cfg.Items.Add(2) }</c> changes the instance's field
+    /// (issue 630). Returns false where the receiver is no such field.
     /// </summary>
-    private bool MutReceiverThroughInstance(Expression receiver, List<MemberAccess> members, int line, string what)
+    private bool MutReceiverThroughInstance(Expression receiver, List<MemberAccess> members, int line, string what, bool narrowed = false)
     {
-        if (members.Count == 0 || !RunsThroughInstance(members))
+        KurzType? Step(MemberAccess m) => narrowed ? NarrowedPathType(m.Target) is { } t ? Types.NonNull(t) ?? t : null : PathType(m.Target);
+        if (members.Count == 0 || !members.Any(m => Step(m) is ClassType))
         {
             if (Unwrap(receiver) is NameExpression n && Lookup(n.Name).Variable is null && ImplicitField(n.Name) is { } implicitField)
             {
@@ -1933,14 +1964,14 @@ public sealed partial class Checker
             return false;
         }
 
-        var lastInstance = members.FindLastIndex(m => PathType(m.Target) is ClassType);
+        var lastInstance = members.FindLastIndex(m => Step(m) is ClassType);
         if (lastInstance < members.Count - 1)
         {
             NotSupported(line, "a `mut` method on a value held by a field of an instance (K2, M5)");
             return true;
         }
 
-        var owner = (ClassType)PathType(members[^1].Target)!;
+        var owner = (ClassType)Step(members[^1])!;
         if (owner.Symbol.Field(members[^1].Member) is not { } field)
         {
             if (Property(owner.Symbol, members[^1].Member) is not null)
@@ -2046,11 +2077,14 @@ public sealed partial class Checker
     // N9: the calls read so far, so that a condition knows whether one ran in it
     private int callsRun;
 
-    /// <summary>N9: a call ran, which ends what was known of every path a call can change, and counts for the end of a condition.</summary>
-    private void CallRan()
+    // N9: the call of a function or a method that ended what was known last, which a help line names, null where something else did
+    private CallExpression? endedBy;
+
+    /// <summary>N9: a call ran, <paramref name="by"/> where it is a call of a function or a method, which ends what was known of every path a call can change, and counts for the end of a condition.</summary>
+    private void CallRan(CallExpression? by = null)
     {
         callsRun++;
-        EndChangeableNarrowing();
+        EndChangeableNarrowing(by);
     }
 
     /// <summary>
@@ -2068,8 +2102,12 @@ public sealed partial class Checker
     private static ImmutableHashSet<NullPath> Unweak(ImmutableHashSet<NullPath> known) =>
         known.Any(ThroughWeak) ? known.Where(p => !ThroughWeak(p)).ToImmutableHashSet() : known;
 
-    /// <summary>N9: a call or an assignment ends what was known of every path through a <c>mut</c> field of an instance.</summary>
-    private void EndChangeableNarrowing() => frame.Known = Unchangeable(frame.Known);
+    /// <summary>N9: a call or an assignment ends what was known of every path through a <c>mut</c> field of an instance; <paramref name="by"/> is the call of a function or a method that did.</summary>
+    private void EndChangeableNarrowing(CallExpression? by = null)
+    {
+        frame.Known = Unchangeable(frame.Known);
+        endedBy = by;
+    }
 
     /// <summary>N9: what is known of paths that no call can change.</summary>
     private static ImmutableHashSet<NullPath> Unchangeable(ImmutableHashSet<NullPath> known) =>

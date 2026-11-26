@@ -41,6 +41,12 @@ public sealed partial class Checker
     // N5: the type of each member, and of each item of `?[`, of a chain before the chain makes it nullable, which the next member of the chain reads
     private readonly Dictionary<Expression, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
 
+    // N5: the value each call after `?.` or `?[` is called on, of the type the chain makes nullable; each such call by the call it is
+    // read as, with its member and the calls read before its arguments; and those of them that write the place their chain names
+    private readonly Dictionary<ChainValue, Typed> chainValues = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<CallExpression, (CallExpression Chain, MemberAccess Member, int Calls)> chainCalls = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<CallExpression> placeCalls = new(ReferenceEqualityComparer.Instance);
+
     // N3, N7: what was known after the right side of each `&&` and `||`, which a path the left side showed must still be in
     private readonly Dictionary<BinaryExpression, ImmutableHashSet<NullPath>> afterRight = new(ReferenceEqualityComparer.Instance);
 
@@ -422,8 +428,11 @@ public sealed partial class Checker
         return Typed.Error;
     }
 
-    /// <summary>N5: whether the member is read in a chain of <c>?.</c> or <c>?[</c>: the chain goes on through members until a parenthesis ends it.</summary>
-    private static bool InChain(Expression e) => e is IndexExpression { Conditional: true } || (e is MemberAccess m && (m.Conditional || InChain(m.Target)));
+    /// <summary>N5: whether the member is read in a chain of <c>?.</c> or <c>?[</c>: the chain goes on through members and the calls of members until a parenthesis ends it.</summary>
+    private static bool InChain(Expression e) =>
+        e is IndexExpression { Conditional: true }
+        || (e is MemberAccess m && (m.Conditional || InChain(m.Target)))
+        || (e is CallExpression { Callee: MemberAccess c } && (c.Conditional || InChain(c.Target)));
 
     /// <summary>
     /// N5: <c>a?.M</c> is null where <c>a</c> is and <c>a.M</c> otherwise, and each member after it in the chain is read only where the
@@ -488,6 +497,239 @@ public sealed partial class Checker
         model.RecordChainMember(m, member.Type);
         return new Typed(Types.NonNull(member.Type) is null ? Types.Nullable(member.Type) : member.Type);
     }
+
+    /// <summary>
+    /// N5: <c>a?.M(x)</c> is null where <c>a</c> is, its arguments not run, and otherwise the call <c>M(x)</c> on <c>a</c>'s case other
+    /// than <c>null</c>, of its result made nullable, a <c>T?</c> as it is and a union with <c>null</c> among its cases, and the rest of the
+    /// chain is skipped at null, as C# reads a call after <c>?.</c> (section 4, the owner, 2026-11-24, #624, comment 7130490403, "yes support
+    /// calls after ?. like c#"); a call in the chain, after a member or <c>?[</c>, is read from the value before it as a member is
+    /// (<see cref="CheckChainMember"/>). The call is read as the same call on a <see cref="ChainValue"/>, so it is every call's reading
+    /// (<paramref name="read"/>), its errors among it: a <c>void</c> call gives <c>void</c>, which as a value is O10's, and a <c>mut</c>
+    /// one writes the place the chain names (<see cref="ChainReceiver"/>).
+    /// </summary>
+    private Typed CheckChainCall(MemberAccess m, CallExpression c, Func<CallExpression, Typed> read)
+    {
+        // N9: a call in the chain's index or key runs before the place is taken, as one in the arguments does, so it is counted with
+        // them (the owner, 2026-11-24, pull request 631, comment 7143447670, "Refuse it in the push (Recommended)")
+        var callsBefore = callsRun;
+        var target = m.Conditional ? CheckNullable(m.Target) : CheckExpression(m.Target, null);
+        if (target.IsError)
+        {
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        KurzType from;
+        if (m.Conditional)
+        {
+            if (Types.NonNull(target.Type) is not { } inner)
+            {
+                Report(ErrorIds.TypeMismatch, m.Line, $"`?.` needs a nullable left side; `{target.Type}` is not one (N5)");
+                CheckArgumentsLoosely(c);
+                return Typed.Error;
+            }
+
+            from = inner;
+        }
+        else
+        {
+            from = chainMembers[m.Target];
+            if (Types.NonNull(from) is { } known && PathOf(m.Target) is { } path && frame.Known.Contains(path))
+            {
+                from = known; // N3, as a member after it reads
+            }
+            else if (Types.NonNull(from) is not null)
+            {
+                Report(ErrorIds.NullableUnchecked, m.Line, $"`{m.Member}` is read from {Types.A(from)} without a check (N2)");
+                CheckArgumentsLoosely(c);
+                return Typed.Error;
+            }
+        }
+
+        var receiver = new ChainValue(m.Target.Line, m.Target);
+        chainValues[receiver] = new Typed(from);
+        var call = c with { Callee = new MemberAccess(m.Line, receiver, m.Member, false) };
+        chainCalls[call] = (c, m, callsBefore);
+        var outer = sending;
+        if (ReferenceEquals(c, sending))
+        {
+            sending = call; // U6: `send a?.M()`, a message where the chain did not stop
+        }
+
+        var result = read(call);
+        sending = outer;
+        if (result.IsError)
+        {
+            return Typed.Error;
+        }
+
+        if (Types.NonNull(result.Type) is null && result.Type is PointerType or CFunctionType)
+        {
+            NotSupported(m.Line, $"`?.` to {Types.A(result.Type)}, which no `?` makes nullable (N1, N5)");
+            return Typed.Error;
+        }
+
+        chainMembers[c] = result.Type;
+        model.RecordChainCall(c, new ChainCall(call, receiver, result.Type, placeCalls.Contains(c)));
+        return new Typed(Types.IsVoid(result.Type) || Types.NonNull(result.Type) is not null ? result.Type : Types.Nullable(result.Type));
+    }
+
+    /// <summary>
+    /// N5, M5: the receiver of a <c>mut</c> method after <c>?.</c> (<see cref="CheckChainCall"/>). Where the chain names a place, a
+    /// variable, a path of fields from one, or an item of a list or an entry of a map such a path holds, the call changes that place, so
+    /// that <c>groups[key]?.Add(n)</c> adds to the map's list, as Rust's <c>get_mut</c> and <c>push</c> do (section 4, the owner,
+    /// 2026-11-24, #624, comment 7131301981, "Write the place (Recommended)"); the place is read as M5 reads the receiver of the same call
+    /// without <c>?.</c>, so that a value that is no place is the error that call gets. A place a call can change (N9) whose call's
+    /// arguments run a call is N2's <c>nullable-unchecked</c>, the error the call gets in a test's branch with that call on the line before
+    /// it (the owner, 2026-11-24, #624, comment 7131654435, "Refuse it (Recommended)"). After a member of the chain on a path of fields
+    /// from a variable, <c>cfg?.Items.Add(3)</c>, the call changes the field's place in the value the chain read, as the same call in a
+    /// test's branch does (<see cref="MutPlace"/>; #624, comment 7135538740, issue 630), and a call in its arguments that can set a nullable
+    /// variable or field on the way to <c>null</c> is <c>nullable-unchecked</c>, as in that branch (<see cref="NullableStepOnTheWay"/>).
+    /// After an item or a call of the chain, the receiver is what the same call in a test's branch reaches: an item of a list, a value.
+    /// </summary>
+    private void ChainReceiver(CallExpression call, ChainValue value, int line, string what)
+    {
+        var (chain, member, callsBefore) = chainCalls[call];
+        var of = Unwrap(value.Of);
+        if (!member.Conditional && of is MemberAccess && PathRoot(of) is NameExpression or ThisExpression)
+        {
+            Push();
+            MutReceiver(chain, of, line, what);
+            if (Pop(commit: true).Count > 0)
+            {
+                return;
+            }
+
+            if (callsRun > callsBefore && NullableStepOnTheWay(of) is var (step, declared))
+            {
+                Add(Diagnostic.Error(ErrorIds.NullableUnchecked, step.Line, $"`{step.Member}` is read from {Types.A(declared)} without a check (N2)") with { OwnHelp = EndedHelp(step.Target) });
+                return;
+            }
+
+            placeCalls.Add(chain);
+            return;
+        }
+
+        if (!member.Conditional)
+        {
+            if (of is IndexExpression)
+            {
+                NotSupported(line, "a `mut` method on an element of a list (M5, M9)");
+            }
+            else if (of is MemberAccess)
+            {
+                NotSupported(line, "a `mut` method on a path through a nullable item, entry or call's result (N3, M5)");
+            }
+            else
+            {
+                Report(ErrorIds.MutRequired, line, $"{what}, and only a value reachable through a `mut` variable changes (M5)");
+            }
+
+            return;
+        }
+
+        var place = of is IndexExpression { Conditional: false } i && model.HasType(i.Target) && model.TypeOf(i.Target).Type is ListType or MapType ? Unwrap(i.Target) : of;
+        Push();
+        MutReceiver(chain, place, line, what);
+        if (Pop(commit: true).Count > 0)
+        {
+            return;
+        }
+
+        if (PathOf(place) is { } path && Changeable(path) && callsRun > callsBefore)
+        {
+            Add(Diagnostic.Error(ErrorIds.NullableUnchecked, member.Line, $"`{member.Member}` is read from {Types.A(model.TypeOf(of).Type)} without a check (N2)") with { OwnHelp = EndedHelp(of) });
+            return;
+        }
+
+        placeCalls.Add(chain);
+    }
+
+    /// <summary>The root of a path of members, conditional or not: the expression the first member is read from.</summary>
+    private static Expression PathRoot(Expression e)
+    {
+        var root = Unwrap(e);
+        while (root is MemberAccess m)
+        {
+            root = Unwrap(m.Target);
+        }
+
+        return root;
+    }
+
+    /// <summary>
+    /// N9: the first member, from the root, of the path to a <c>mut</c> method's receiver after <c>?.</c> that is read from a nullable
+    /// variable or field a call can change, with that step's declared type: a call in the arguments can set it to <c>null</c> before the
+    /// call takes the place (issue 630); null where no step is so.
+    /// </summary>
+    private (MemberAccess Step, KurzType Declared)? NullableStepOnTheWay(Expression place)
+    {
+        var steps = new List<MemberAccess>();
+        for (var e = Unwrap(place); e is MemberAccess m; e = Unwrap(m.Target))
+        {
+            steps.Insert(0, m);
+        }
+
+        foreach (var m in steps)
+        {
+            if (PathOf(m.Target) is { } path && Changeable(path) && NarrowedPathType(m.Target) is { } declared && Types.NonNull(declared) is not null)
+            {
+                return (m, declared);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// N9: a write into a path a call can change, a <c>mut</c> method on it or an item or an entry written into it, read where the path
+    /// was known not null, after a call in the write's arguments or value ended that (<see cref="EndChangeableNarrowing"/>): the write
+    /// meets what it meets with that call on the line before it, N2's <c>nullable-unchecked</c>, <paramref name="written"/> naming the
+    /// write (the owner, 2026-11-24, #628, comment 7131654741, "Refuse it (Recommended)", and comment 7131713661). A longer path through
+    /// such a field is refused before (K2, M4, M5). <paramref name="throughNullable"/> reads the declared type of a path that runs through
+    /// a nullable step before it (<see cref="NarrowedPathType"/>), for a step on the way to a <c>mut</c> method's receiver (issue 630).
+    /// Returns whether it reported.
+    /// </summary>
+    private bool NarrowingEnded(Expression receiver, Func<KurzType, string> written, int line, bool throughNullable = false)
+    {
+        var e = Unwrap(receiver);
+        if (PathOf(e) is { } path && Changeable(path) && !frame.Known.Contains(path) && model.HasType(e) && Types.NonNull(model.TypeOf(e).Type) is null
+            && (throughNullable ? NarrowedPathType(e) : PathType(e)) is { } declared && Types.NonNull(declared) is not null)
+        {
+            Add(Diagnostic.Error(ErrorIds.NullableUnchecked, line, $"{written(declared)} without a check (N2)") with { OwnHelp = EndedHelp(e) });
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// N9: the help line of a write that a call in its arguments or its value refused (<see cref="ChainReceiver"/>,
+    /// <see cref="NarrowingEnded"/>): that call can set the path to <c>null</c>, and it runs into a variable first (section 4, the owner,
+    /// 2026-11-24, #624, comment 7135538740, "A help line of its own (Recommended)"), the call and the path as the source writes them, or
+    /// "a call in this line" where the last call to end the check is no call of a function or a method (section 4, an assumption there).
+    /// </summary>
+    private string EndedHelp(Expression path) =>
+        $"{(endedBy is { } call && SourceOf(call) is { } text ? $"`{text}`" : "a call in this line")} can set {(SourceOf(path) is { } p ? $"`{p}`" : "the path")} to `null`: run it into a variable before this line";
+
+    /// <summary>N9: an expression as its source writes it, for a help line: a name, a member, an item, a call and the forms of <see cref="DefaultText"/>; null for another form.</summary>
+    private static string? SourceOf(Expression e) => e switch
+    {
+        NameExpression n => n.Name,
+        ThisExpression => "this",
+        ParenthesizedExpression p => SourceOf(p.Inner) is { } inner ? $"({inner})" : null,
+        MemberAccess m => SourceOf(m.Target) is { } target ? $"{target}{(m.Conditional ? "?." : ".")}{m.Member}" : null,
+        IndexExpression i => SourceOf(i.Target) is { } target && SourceOf(i.Index) is { } index ? $"{target}{(i.Conditional ? "?[" : "[")}{index}]" : null,
+        CallExpression { TypeArguments.Count: 0, Within: null } c => SourceOf(c.Callee) is { } callee && c.Arguments.Select(ArgumentSource).ToList() is var arguments && arguments.All(a => a is not null)
+            ? $"{callee}({string.Join(", ", arguments)})" : null,
+        _ => DefaultText(e) is var text && !text.Contains("...", StringComparison.Ordinal) ? text : null,
+    };
+
+    /// <summary>An argument as its source writes it, its name and its word in front (D11, M7, U12), or null (<see cref="SourceOf"/>).</summary>
+    private static string? ArgumentSource(Argument a) =>
+        SourceOf(a.Value) is { } value
+            ? (a.Name is null ? "" : $"{a.Name}: ") + a.Word switch { ArgumentWord.Mut => "mut ", ArgumentWord.Copy => "copy ", ArgumentWord.Move => "move ", _ => "" } + value
+            : null;
 
     /// <summary>
     /// N5: <c>xs?[i]</c> is null where <c>xs</c> is and its item at <c>i</c> otherwise, and the rest of the chain is skipped with it, as

@@ -816,7 +816,7 @@ value widens. *(assumed, §4: the defaults of the product pass that the answer t
 among them, and NaN and an infinity read as Rust's `try_from_secs_f64` reads them, one error with the
 overflow, and a constant one as T6 reads `int(1.0 / 0.0)`.)* A constructor of one time type called on
 the other, `timestamp.FromSeconds(5)`, is `unknown-name` (V10). How a program reads a count back from
-a time is open (§14).
+a duration is T39's, and from a timestamp open (§14).
 
 Case: [types/duration-from-count.kz](../corpus/types/duration-from-count.kz)
 ```kurz
@@ -915,6 +915,109 @@ Case: [types/timestamp-from-seconds.kz](../corpus/types/timestamp-from-seconds.k
 ```kurz
 // a timestamp counts from 1970 with `FromUnixSeconds`; `FromSeconds` is a duration's, and no member of `timestamp`
 print(timestamp.FromSeconds(5))
+```
+
+### T39 (decided, §4) The count of a duration
+
+`d.TotalSeconds` is the count of seconds in the duration `d`, a `double`, as C#'s
+`TimeSpan.TotalSeconds`, and there is one for each unit of a duration literal (L14):
+`TotalNanoseconds`, `TotalMicroseconds`, `TotalMilliseconds`, `TotalSeconds`, `TotalMinutes`,
+`TotalHours` and `TotalDays`. Each is the count of nanoseconds as a `double` divided by the
+nanoseconds of the unit, as `TimeSpan` divides its ticks, and a `double` holds a count of
+nanoseconds exactly up to 2^53, about 104 days. `d.WholeNanoseconds` is the exact count, a `long`
+(§4, the owner, 2026-11-25, issue 629, comment 7158347507, Q1 "C# TotalX doubles" and Q2
+"WholeNanoseconds long"). The `TotalX` members stand on a `longduration` too (T29), and
+`WholeNanoseconds` on a `duration` alone, since no integer type holds the count of a
+`longduration`, where the name is `unknown-name` (V10). `d / 1ms` stays `type-mismatch` under T18,
+and so does a duration converted to a number, `long(d)`, under T10, each with a help line that names
+`TotalMilliseconds` and, on a `duration`, `WholeNanoseconds` (§4, the owner, 2026-11-25, issue 629,
+comment 7159373153, "TotalX on both" and "Add a help line").
+*(assumed, §4: the defaults of the product pass, issue 629, comment 7158421176: C#'s component
+members, `d.Seconds` and the others that give the part of one unit, are no members of a duration,
+and such a name is `unknown-name` (V10); a count past 2^53 nanoseconds is rounded without a word,
+no warning and no raise; the texts of an unknown member and of a write to a member are the ones
+of a member of any primitive; a write to a count, `d.TotalSeconds = 1.0`, is `assign-immutable`,
+as a write to a list's `Count` is; a negative duration gives a negative count, and a zero one `0`.
+And readings nobody was asked: "as `TimeSpan` divides its ticks" is read as the count converted to
+the nearest `double`, ties to even, then divided, two roundings, and a `longduration`'s 128 bits
+are rounded to the nearest `double` once, ties to even; the help line reads "read its count with a
+member: `.TotalMilliseconds` or another unit's, a `double`", with ", or `.WholeNanoseconds`, the
+exact `long`" where no operand is a `longduration`.)* A count read back from a timestamp is open
+(§14).
+
+Case: [types/duration-total.kz](../corpus/types/duration-total.kz)
+```kurz
+d = 1500000ns
+print(d.TotalNanoseconds)
+print(d.TotalMicroseconds)
+print(d.TotalMilliseconds)
+print(d.TotalSeconds)
+print(90s.TotalMinutes)
+print(90min.TotalHours)
+print(36h.TotalDays)
+
+// a negative duration gives a negative count, and a zero one 0
+neg = -1500ms
+print(neg.TotalSeconds)
+print(neg.WholeNanoseconds)
+z = 0ns
+print(z.TotalSeconds)
+
+// `WholeNanoseconds` is the exact `long`; a `double` holds a count of nanoseconds exactly up to 2^53, and 2^53 + 1 is
+// rounded to 2^53
+long n = d.WholeNanoseconds
+print(n)
+odd = duration.FromNanoseconds(9007199254740993)
+print(odd.TotalNanoseconds)
+print(odd.WholeNanoseconds)
+```
+
+Case: [types/longduration-total.kz](../corpus/types/longduration-total.kz)
+```kurz
+// the `TotalX` members stand on a `longduration` too, beyond the range of a `duration`
+w = 110000days
+print(w.TotalDays)
+longduration nw = -1500ms
+print(nw.TotalSeconds)
+
+// the nearest `double` of the 128 bits, ties to even: 2^64 + 2^63 + 2049 is 2^64 + 2^63 + 4096, where a conversion of the
+// two 64-bit halves, the lower one rounded to 2^63 + 2048 first, would make a tie and give 2^64 + 2^63; 2^64 + 2^63 + 2047
+// is 2^64 + 2^63
+big = 27670116110564329473ns
+print(big.TotalNanoseconds)
+print((-big).TotalNanoseconds)
+low = 27670116110564329471ns
+print(low.TotalNanoseconds)
+
+// 2^63, the first count beyond 64 bits signed; 2^64 + 2048, a tie, to the even 2^64; 2^127 - 1, the largest, is 2^127
+first = 9223372036854775808ns
+print(first.TotalNanoseconds)
+tie = 18446744073709553664ns
+print(tie.TotalNanoseconds)
+largest = 170141183460469231731687303715884105727ns
+print(largest.TotalNanoseconds)
+```
+
+Case: [types/longduration-whole.kz](../corpus/types/longduration-whole.kz)
+```kurz
+// no integer type holds the count of a `longduration`, so it has no `WholeNanoseconds`
+longduration w = 1s
+print(w.WholeNanoseconds)
+```
+
+Case: [types/duration-total-write.kz](../corpus/types/duration-total-write.kz)
+```kurz
+// a count is read from a duration, never written into it
+mut d = 1500ms
+d.TotalSeconds = 1.0
+print(d)
+```
+
+Case: [types/duration-component.kz](../corpus/types/duration-component.kz)
+```kurz
+// C#'s component members, the part of one unit such as `Seconds`, are no members of a duration
+d = 1500ms
+print(d.Seconds)
 ```
 
 ### T36 (decided, §12) `instant`, a reading of the monotonic clock
@@ -1416,8 +1519,102 @@ argument whose type does not meet the limit is the compile error `type-mismatch`
 may take type parameters too, and each list of type arguments gives each class that implements it
 a table of its own (§4, the owner, 2026-11-02, #110, comment 6573113786, against a compile error).
 Whether one class may implement such an interface with two lists of type arguments, whether a
-generic class may implement it with its own type parameter, whether it may stand as a limit, and
-what a class that names it without type arguments is stand open (§14).
+generic class may implement it with its own type parameter, and what a class that names it without
+type arguments is stand open (§14).
+
+The owner's answers of 2026-11-20 on issue 605 (comment 7051071380) decide the rest of this rule
+(§4), each named by its question, Qn of issue 605, or as one of the six defaults the issue states.
+Several limits are joined by `+`: `T: Shape + Named` limits `T` to the types that implement both,
+and `&` there is `syntax`, as any other token there is (Q4). A limit names an interface, or a class
+that can have derived classes (Q5): every class, since Kurz has no `sealed` (K7), and no actor,
+since no class derives from an actor (U1). A class of `std/` that the prelude brings, `HttpHeaders`
+(W1, W4), stands as a limit as any class does *(assumed: a reading of Q5 (b) under W1)*. A limit
+that names any other type, a `data` type, an
+`enum`, a number type, an actor, a type parameter or a nullable type, is the compile error
+`limit-not-interface` at the limit (Q6), and so are a union and a function type there *(assumed: a
+reading of Q6 (c) of comment 7051071380)*. An interface or a class named twice in one list is
+`syntax` (Q19), and a name no declaration gives is `unknown-name` (V10, a default of issue 605). The
+build says `not supported` to a second class in one list, "a second class, `Plant`, among the limits
+of `T` (T19)", and to a class after an interface, "the class `Animal` after an interface among the
+limits of `T` (T19)" *(assumed: a reading of the build, proposed with this record and not put to the
+owner)*. A parameter that holds a constant (T35) takes no limit (a default of issue 605). A generic
+interface whose type argument is the parameter itself, `T: Comparable<T>`, stands as a limit (Q15),
+and the build says `not supported` to it, "a generic interface as a limit (Q15 of issue 605, T19)",
+as it does to a generic class, a generic interface, a generic actor and a method with type
+parameters of its own, with their limits, each by a text that names it (Q18).
+
+The body of a generic function is checked once, at its definition, on its text (Q1): a value of `T`
+has the methods of its limits, the visible methods of a class limit and of its bases among them, and
+a method no limit declares is `unknown-name` at its line, whether a call reaches the function or
+not. A body reaches a limit's properties and its `static` members too, `T.Make()` (Q2), and the
+build says `not supported` to a property of a class limit read through a value of `T`, "the property
+`Count` of the limit `Bag` of `T`, read through a value of it (Q2 of issue 605, T19)", and to a
+`static` member of a class limit reached through `T`, "the `static` member `Create` of the limit
+`Maker`, reached through `T` (Q2 of issue 605, T19)". `T.Make` names T33's construction, so
+`T.Make()` is T33's `syntax` in a copy *(assumed: a reading of the build: Q2 writes `T.Make()` for a
+`static` member, and T33 gives that name to the construction of a copy's type)*. A field of a class
+limit read through a value of `T` is `not supported` too, "the field `Legs` of the limit `Animal` of
+`T`, read through a value of it (T19)" *(assumed: a reading of the build: Q2 names methods,
+properties and `static` members, and no field)*. A name through `T` that no limit declares as a
+`static` member is `unknown-name`, "`T.Create` names no `static` member of a limit of `T` (V10,
+T19)" *(assumed: the wording of this change, proposed with this record and not put to the owner)*. A
+method of a limit named without a call is `not supported`, as a class's method named so is (K7, F11)
+*(assumed: a reading of the build, proposed with this record and not put to the owner)*. A method
+that two limits declare with the same parameters is `ambiguous-call` at the call (F13), as C#'s
+CS0121 (a default of issue 605), "`M` is declared with the same parameters by the limits `A` and `B`
+of `T`, so the call fits both (F13, T19)" *(assumed: the wording of this change, proposed with this
+record and not put to the owner)*, and a class limit and an interface that both declare it are two
+such limits *(assumed: a reading of the build, where C# takes the class's member)*. No operator
+reaches through a limit: `a < b` on two values of `T` is `type-mismatch` (T18), and `a.CompareTo(b)
+< 0` compares them (Q3). A value of `T` stands where an interface among its limits is required, as
+C# converts it, and a member of a `T?` needs its check (N2) (two defaults of issue 605); it stands
+where its class limit, a base of the class or an interface the class implements is required, and has
+the class's text (A10) *(assumed: a reading of the build, as C# converts a value of a type parameter
+to its class constraint)*.
+
+A function that reads its type (T33), which is checked in its copies alone, reaches in each copy the
+limits' members alone through a value whose type its text writes `T` (Q13). Q8 holds in its copies
+too, so such a function writes the limits its calls need (Q22): a call that passes on a value whose
+type the function's text writes with `T`, or that writes `T` as a type argument, to a function whose
+limit the function's own limits do not meet, is `type-mismatch` at the call's line, with Q9's text
+for a type parameter of the caller, whatever the copy binds. Such a value is one that a parameter, a
+local, a parameter of a lambda, the name of a loop, an item, a field, a call, `Id(item)` among them,
+a `with`, a `??`, a list, a `match` or an `else` gives, and one of `T?` that a check narrowed to `T`
+(N2), since Q22 holds Q8 for every value of `T`.
+In a copy that binds an interface type, which a value whose type is the interface gives `T`,
+`T.Kind`, a loop over `T.Fields` and `T.Make` are `not supported`, since T33 names no kind of an
+interface type *(assumed: a reading of the build, proposed with this record and not put to the
+owner)*.
+
+A type argument, inferred or written, meets an interface limit where it is a class that names the
+interface, itself or through a base (K6), or the interface itself (Q11, Q17), or a type parameter of
+the caller whose own limits name the interface, or name a class that implements it (Q8); it meets a
+class limit where it is the class or a class derived from it, itself or through a base (Q5, K6), or
+a type parameter of the caller whose class limit is one of them (Q8). A `data` type, a built-in
+type, a union and a nullable type meet no limit (Q12, Q17), but an interface whose only member is
+`string Text()`, which every type with a text meets (A10). Through such a limit a call of its method
+gives, in each copy, the text of the type the copy binds, and a value of `T` where the interface is
+required is `not supported`, since a type without the interface meets it (Q21). Inference comes
+first (T27): `cannot-infer` is reported before a limit, which takes no part in the inference (a
+default of issue 605), and the type inferred, or written (Q20), is checked against it. An argument
+whose type does not meet the limit is `type-mismatch` at the first line of the call, "`int` does not
+implement `Shape`, the limit of `T` of `AreaOf` (T19)", and for a type parameter of the caller "`U`
+has no limit `Shape`, which `T` of `AreaOf` requires (T19)" (Q9); for a class limit it says "`Rock`
+does not derive from `Animal`, the limit of `T` of `Speak` (T19)" *(assumed: the wording of this
+change, proposed with this record and not put to the owner)*. A function whose limit a call does not
+meet does not fit the call (F13), so that another function of the name can take it, and a call that
+fits none of them is `argument-mismatch` (Q10).
+
+The limit of a generic `data` type's parameter, `data Box<T: Shape>(T Item)`, is checked at every
+use that names the type with its arguments, written or inferred: a construction, and the type of a
+parameter, a field or a variable, with the type's name in the text, "`int` does not implement
+`Shape`, the limit of `T` of `Box` (T19)" (Q16). It is never implied: a signature over `Box<U>`
+writes the limit on its own `U` (Q7).
+
+In each copy (§4, "Copy per instance"), a call through a limit calls the method of the type the copy
+binds: the class's method, the one a class derived from a class limit runs among them, directly, or
+through the class's own table where the method is `virtual` and the class has derived classes (K7),
+and through the interface's table where the copy binds the interface (Q14).
 
 Case: [types/generic-function.kz](../corpus/types/generic-function.kz)
 ```kurz
@@ -1464,6 +1661,1312 @@ interface Shape {
 int AreaOf<T: Shape>(T item) => item.Area()
 
 print(AreaOf(5))
+```
+
+Case: [types/generic-limit-several.kz](../corpus/types/generic-limit-several.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+interface Named {
+    string Name()
+}
+
+class Square(int Side) : Shape, Named {
+    pub int Area() => Side * Side
+    pub string Name() => "square"
+}
+
+void Show<T: Shape + Named>(T item) {
+    print(item.Area())
+    print(item.Name())
+}
+
+Show(Square(3))
+```
+
+Case: [types/generic-limit-several-unmet.kz](../corpus/types/generic-limit-several-unmet.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+interface Named {
+    string Name()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape + Named>(T item) => item.Area()
+
+print(AreaOf(Square(3)))
+```
+
+Case: [types/generic-limit-ampersand.kz](../corpus/types/generic-limit-ampersand.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+interface Named {
+    string Name()
+}
+
+int AreaOf<T: Shape & Named>(T item) => item.Area()
+
+print(1)
+```
+
+Case: [types/generic-limit-twice.kz](../corpus/types/generic-limit-twice.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+int AreaOf<T: Shape + Shape>(T item) => item.Area()
+
+print(1)
+```
+
+Case: [types/generic-limit-class.kz](../corpus/types/generic-limit-class.kz)
+```kurz
+class Animal {
+    pub virtual string Sound() => "quiet"
+}
+
+class Dog : Animal {
+    pub override string Sound() => "woof"
+}
+
+string Speak<T: Animal>(T a) => a.Sound()
+
+Animal pet = Dog()
+print(Speak(Dog()))
+print(Speak(Animal()))
+print(Speak(pet))
+```
+
+Case: [types/generic-limit-class-unmet.kz](../corpus/types/generic-limit-class-unmet.kz)
+```kurz
+class Animal {
+    pub virtual string Sound() => "quiet"
+}
+
+class Dog : Animal {
+    pub override string Sound() => "woof"
+}
+
+class Rock {
+}
+
+string Speak<T: Animal>(T a) => a.Sound()
+
+print(Speak(Rock()))
+```
+
+Case: [types/generic-limit-std-class.kz](../corpus/types/generic-limit-std-class.kz)
+```kurz
+string Host<T: HttpHeaders>(T headers) => headers.Get("host") ?? "none"
+
+void | HttpError Fill(HttpHeaders headers) {
+    headers.Add("Host", "example.com")
+}
+
+h = HttpHeaders()
+Fill(h) else {
+    HttpError e => print(e.Detail)
+}
+print(Host(h))
+```
+
+Case: [types/generic-limit-type-parameter.kz](../corpus/types/generic-limit-type-parameter.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+U Pick<T: Shape, U: T>(U u) => u
+
+print(1)
+```
+
+Case: [types/generic-limit-number.kz](../corpus/types/generic-limit-number.kz)
+```kurz
+int Twice<T: int>(T n) => 2
+
+print(Twice(1))
+```
+
+Case: [types/generic-limit-member-missing.kz](../corpus/types/generic-limit-member-missing.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+int Perim<T: Shape>(T item) => item.Perimeter()
+
+print(1)
+```
+
+Case: [types/generic-limit-static.kz](../corpus/types/generic-limit-static.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+int Fresh<T: Shape>() => T.Create()
+
+print(1)
+```
+
+Case: [types/generic-limit-operator.kz](../corpus/types/generic-limit-operator.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+bool Before<T: Shape>(T a, T b) => a < b
+
+print(1)
+```
+
+Case: [types/generic-limit-ambiguous.kz](../corpus/types/generic-limit-ambiguous.kz)
+```kurz
+interface A {
+    int M()
+}
+
+interface B {
+    int M()
+}
+
+int Both<T: A + B>(T x) => x.M()
+
+print(1)
+```
+
+Case: [types/generic-limit-to-interface.kz](../corpus/types/generic-limit-to-interface.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int Describe(Shape s) => s.Area()
+
+int Pass<T: Shape>(T item) => Describe(item)
+
+print(Pass(Square(3)))
+```
+
+Case: [types/generic-limit-reader.kz](../corpus/types/generic-limit-reader.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+    pub int Perimeter() => 4 * Side
+}
+
+int Measure<T: Shape>(T item) {
+    print(T.Kind)
+    return item.Perimeter()
+}
+
+print(Measure(Square(3)))
+```
+
+Case: [types/generic-limit-reader-call.kz](../corpus/types/generic-limit-reader-call.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int Measure<T: Shape>(T item) {
+    print(T.Kind)
+    return item.Area()
+}
+
+print(Measure(Square(3)))
+```
+
+Case: [types/generic-limit-reader-passes.kz](../corpus/types/generic-limit-reader-passes.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Measure<T>(T item) {
+    print(T.Kind)
+    return AreaOf(item)
+}
+
+print(Measure(Square(3)))
+```
+
+Case: [types/generic-limit-reader-result.kz](../corpus/types/generic-limit-reader-result.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+T Id<T>(T x) => x
+
+int Measure<T>(T item) {
+    print(T.Kind)
+    return AreaOf(Id(item))
+}
+
+print(Measure(Square(3)))
+```
+
+Case: [types/generic-limit-reader-result-member.kz](../corpus/types/generic-limit-reader-result-member.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+    pub int Perimeter() => 4 * Side
+}
+
+T Id<T>(T x) => x
+
+int Measure<T: Shape>(T item) {
+    print(T.Kind)
+    return Id(item).Perimeter()
+}
+
+print(Measure(Square(3)))
+```
+
+Case: [types/generic-limit-reader-field.kz](../corpus/types/generic-limit-reader-field.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+data Box<T>(T Item)
+
+int Measure<T>(Box<T> b) {
+    print(T.Kind)
+    return AreaOf(b.Item)
+}
+
+print(Measure(Box(Square(3))))
+```
+
+Case: [types/generic-limit-reader-made.kz](../corpus/types/generic-limit-reader-made.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+data Box<T>(T Item)
+
+int Measure<T>(T item) {
+    print(T.Kind)
+    b = Box(item)
+    return AreaOf(b.Item)
+}
+
+print(Measure(Square(3)))
+```
+
+Case: [types/generic-limit-reader-map.kz](../corpus/types/generic-limit-reader-map.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Opt<U: Shape>(U? v) {
+    if v != null {
+        return v.Area()
+    }
+    return 0
+}
+
+int Measure<T>(Map<string, T> m) {
+    print(T.Kind)
+    return Opt(m["a"])
+}
+
+mut squares = Map<string, Square>()
+squares["a"] = Square(3)
+print(Measure(squares))
+```
+
+Case: [types/generic-limit-reader-with.kz](../corpus/types/generic-limit-reader-with.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+data Box<T>(T Item)
+
+int Measure<T>(Box<T> b) {
+    print(T.Kind)
+    return AreaOf((b with { Item = b.Item }).Item)
+}
+
+print(Measure(Box(Square(3))))
+```
+
+Case: [types/generic-limit-reader-function.kz](../corpus/types/generic-limit-reader-function.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Measure<T>(T item, (T) => T f) {
+    print(T.Kind)
+    return AreaOf(f(item))
+}
+
+print(Measure(Square(3), s => s))
+```
+
+Case: [types/generic-limit-reader-coalesce.kz](../corpus/types/generic-limit-reader-coalesce.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Measure<T>(T? item, T other) {
+    print(T.Kind)
+    return AreaOf(item ?? other)
+}
+
+print(Measure(null, Square(2)))
+```
+
+Case: [types/generic-limit-reader-narrowed.kz](../corpus/types/generic-limit-reader-narrowed.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Measure<T>(T? item) {
+    print(T.Kind)
+    if item != null {
+        return AreaOf(item)
+    }
+    return 0
+}
+
+print(Measure(Square(3)))
+```
+
+Case: [types/generic-limit-reader-match.kz](../corpus/types/generic-limit-reader-match.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Measure<T>(T item) {
+    print(T.Kind)
+    return AreaOf(match T.Kind {
+        TypeKind.Class => item
+        else => item
+    })
+}
+
+print(Measure(Square(3)))
+```
+
+Case: [types/generic-limit-reader-else.kz](../corpus/types/generic-limit-reader-else.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+data Missing(int Code)
+
+T | Missing First<T>(List<T> items) {
+    if items.Count == 0 {
+        return Missing(1)
+    }
+    return items[0]
+}
+
+int Measure<T>(List<T> items, T other) {
+    print(T.Kind)
+    return AreaOf(First(items) else {
+        Missing e => other
+    })
+}
+
+print(Measure([Square(3)], Square(2)))
+```
+
+Case: [types/generic-limit-reader-list.kz](../corpus/types/generic-limit-reader-list.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Sum<U: Shape>(List<U> items) => items[0].Area()
+
+int Measure<T>(T item) {
+    print(T.Kind)
+    return Sum([item, item])
+}
+
+print(Measure(Square(3)))
+```
+
+Case: [types/generic-limit-reader-conditional.kz](../corpus/types/generic-limit-reader-conditional.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+data Box<T>(T Item)
+
+int Measure<T>(Box<T>? b, T other) {
+    print(T.Kind)
+    return AreaOf(b?.Item ?? other)
+}
+
+print(Measure(Box(Square(3)), Square(2)))
+```
+
+Case: [types/generic-limit-reader-local.kz](../corpus/types/generic-limit-reader-local.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Measure<T>(List<T> items) {
+    print(T.Kind)
+    List<T> xs = items
+    return AreaOf(xs[0])
+}
+
+print(Measure([Square(3)]))
+```
+
+Case: [types/generic-limit-reader-local-nullable.kz](../corpus/types/generic-limit-reader-local-nullable.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Measure<T>(T item) {
+    print(T.Kind)
+    T? x = item
+    if x != null {
+        return AreaOf(x)
+    }
+    return 0
+}
+
+print(Measure(Square(3)))
+```
+
+Case: [types/generic-limit-reader-local-map.kz](../corpus/types/generic-limit-reader-local-map.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Opt<U: Shape>(U? v) {
+    if v != null {
+        return v.Area()
+    }
+    return 0
+}
+
+int Measure<T>(Map<string, T> m) {
+    print(T.Kind)
+    Map<string, T> held = m
+    return Opt(held["a"])
+}
+
+mut squares = Map<string, Square>()
+squares["a"] = Square(3)
+print(Measure(squares))
+```
+
+Case: [types/generic-limit-reader-local-data.kz](../corpus/types/generic-limit-reader-local-data.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+data Box<T>(T Item)
+
+int Measure<T>(Box<T> b) {
+    print(T.Kind)
+    Box<T> held = b
+    return AreaOf(held.Item)
+}
+
+print(Measure(Box(Square(3))))
+```
+
+Case: [types/generic-limit-reader-local-function.kz](../corpus/types/generic-limit-reader-local-function.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Measure<T>(T item, (T) => T f) {
+    print(T.Kind)
+    (T) => T g = f
+    return AreaOf(g(item))
+}
+
+print(Measure(Square(3), s => s))
+```
+
+Case: [types/generic-limit-reader-lambda.kz](../corpus/types/generic-limit-reader-lambda.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Measure<T>(T item) {
+    print(T.Kind)
+    f = (T x) => AreaOf(x)
+    return f(item)
+}
+
+print(Measure(Square(3)))
+```
+
+Case: [types/generic-limit-reader-lambda-inferred.kz](../corpus/types/generic-limit-reader-lambda-inferred.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Apply<U>(U v, (U) => int f) => f(v)
+
+int Measure<T>(T item) {
+    print(T.Kind)
+    return Apply(item, x => AreaOf(x))
+}
+
+print(Measure(Square(3)))
+```
+
+Case: [types/generic-limit-reader-loop.kz](../corpus/types/generic-limit-reader-loop.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Measure<T>(List<T> items) {
+    print(T.Kind)
+    mut total = 0
+    for x in items {
+        total = total + AreaOf(x)
+    }
+    return total
+}
+
+print(Measure([Square(3)]))
+```
+
+Case: [types/generic-limit-reader-loop-entry.kz](../corpus/types/generic-limit-reader-loop-entry.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Measure<T>(Map<string, T> m) {
+    print(T.Kind)
+    mut total = 0
+    for e in m {
+        total = total + AreaOf(e.Value)
+    }
+    return total
+}
+
+mut squares = Map<string, Square>()
+squares["a"] = Square(3)
+print(Measure(squares))
+```
+
+Case: [types/generic-limit-reader-loop-map.kz](../corpus/types/generic-limit-reader-loop-map.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Measure<T>(Map<string, T> m) {
+    print(T.Kind)
+    mut total = 0
+    for k, v in m {
+        total = total + AreaOf(v)
+    }
+    return total
+}
+
+mut squares = Map<string, Square>()
+squares["a"] = Square(3)
+print(Measure(squares))
+```
+
+Case: [types/generic-limit-reader-type-argument.kz](../corpus/types/generic-limit-reader-type-argument.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Count<U: Shape>() => 1
+
+int Measure<T>(T item) {
+    print(T.Kind)
+    return Count<T>()
+}
+
+print(Measure(Square(3)))
+```
+
+Case: [types/generic-limit-reader-data-type-argument.kz](../corpus/types/generic-limit-reader-data-type-argument.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+data Tag<U: Shape>(int Count)
+
+int Measure<T>(T item) {
+    print(T.Kind)
+    t = Tag<T>(1)
+    return t.Count
+}
+
+print(Measure(Square(3)))
+```
+
+Case: [types/generic-limit-reader-values.kz](../corpus/types/generic-limit-reader-values.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+T Id<T>(T x) => x
+
+data Box<T>(T Item)
+
+data Missing(int Code)
+
+T | Missing First<T>(List<T> items) {
+    if items.Count == 0 {
+        return Missing(1)
+    }
+    return items[0]
+}
+
+int Opt<U: Shape>(U? v) {
+    if v != null {
+        return v.Area()
+    }
+    return 0
+}
+
+int Sum<U: Shape>(List<U> items) => items[0].Area()
+
+int Apply<U>(U v, (U) => int f) => f(v)
+
+int Count<U: Shape>() => 1
+
+data Tag<U: Shape>(int Count)
+
+int ByResult<T: Shape>(T item) {
+    print(T.Kind)
+    return AreaOf(Id(item))
+}
+
+int ByField<T: Shape>(Box<T> b) {
+    print(T.Kind)
+    return AreaOf(b.Item)
+}
+
+int ByMade<T: Shape>(T item) {
+    print(T.Kind)
+    b = Box(item)
+    return AreaOf(b.Item)
+}
+
+int ByMap<T: Shape>(Map<string, T> m) {
+    print(T.Kind)
+    return Opt(m["a"])
+}
+
+int ByWith<T: Shape>(Box<T> b) {
+    print(T.Kind)
+    return AreaOf((b with { Item = b.Item }).Item)
+}
+
+int ByFunction<T: Shape>(T item, (T) => T f) {
+    print(T.Kind)
+    return AreaOf(f(item))
+}
+
+int ByCoalesce<T: Shape>(T? item, T other) {
+    print(T.Kind)
+    return AreaOf(item ?? other)
+}
+
+int ByNarrowed<T: Shape>(T? item) {
+    print(T.Kind)
+    if item != null {
+        return AreaOf(item)
+    }
+    return 0
+}
+
+int ByMatch<T: Shape>(T item) {
+    print(T.Kind)
+    return AreaOf(match T.Kind {
+        TypeKind.Class => item
+        else => item
+    })
+}
+
+int ByElse<T: Shape>(List<T> items, T other) {
+    print(T.Kind)
+    return AreaOf(First(items) else {
+        Missing e => other
+    })
+}
+
+int ByList<T: Shape>(T item) {
+    print(T.Kind)
+    return Sum([item, item])
+}
+
+int ByConditional<T: Shape>(Box<T>? b, T other) {
+    print(T.Kind)
+    return AreaOf(b?.Item ?? other)
+}
+
+int ByLocal<T: Shape>(List<T> items) {
+    print(T.Kind)
+    List<T> xs = items
+    return AreaOf(xs[0])
+}
+
+int ByLocalNullable<T: Shape>(T item) {
+    print(T.Kind)
+    T? x = item
+    if x != null {
+        return AreaOf(x)
+    }
+    return 0
+}
+
+int ByLocalMap<T: Shape>(Map<string, T> m) {
+    print(T.Kind)
+    Map<string, T> held = m
+    return Opt(held["a"])
+}
+
+int ByLocalData<T: Shape>(Box<T> b) {
+    print(T.Kind)
+    Box<T> held = b
+    return AreaOf(held.Item)
+}
+
+int ByLocalFunction<T: Shape>(T item, (T) => T f) {
+    print(T.Kind)
+    (T) => T g = f
+    return AreaOf(g(item))
+}
+
+int ByLambda<T: Shape>(T item) {
+    print(T.Kind)
+    f = (T x) => AreaOf(x)
+    return f(item)
+}
+
+int ByLambdaInferred<T: Shape>(T item) {
+    print(T.Kind)
+    return Apply(item, x => AreaOf(x))
+}
+
+int ByLoop<T: Shape>(List<T> items) {
+    print(T.Kind)
+    mut total = 0
+    for x in items {
+        total = total + AreaOf(x)
+    }
+    return total
+}
+
+int ByLoopEntry<T: Shape>(Map<string, T> m) {
+    print(T.Kind)
+    mut total = 0
+    for e in m {
+        total = total + AreaOf(e.Value)
+    }
+    return total
+}
+
+int ByLoopMap<T: Shape>(Map<string, T> m) {
+    print(T.Kind)
+    mut total = 0
+    for k, v in m {
+        total = total + AreaOf(v)
+    }
+    return total
+}
+
+int ByTypeArgument<T: Shape>(T item) {
+    print(T.Kind)
+    return Count<T>()
+}
+
+int ByDataTypeArgument<T: Shape>(T item) {
+    print(T.Kind)
+    t = Tag<T>(1)
+    return t.Count
+}
+
+mut squares = Map<string, Square>()
+squares["a"] = Square(3)
+print(ByResult(Square(3)))
+print(ByField(Box(Square(3))))
+print(ByMade(Square(3)))
+print(ByMap(squares))
+print(ByWith(Box(Square(3))))
+print(ByFunction(Square(3), s => s))
+print(ByCoalesce(null, Square(2)))
+print(ByNarrowed(Square(3)))
+print(ByMatch(Square(3)))
+print(ByElse([Square(3)], Square(2)))
+print(ByList(Square(3)))
+print(ByConditional(Box(Square(3)), Square(2)))
+print(ByLocal([Square(3)]))
+print(ByLocalNullable(Square(3)))
+print(ByLocalMap(squares))
+print(ByLocalData(Box(Square(3))))
+print(ByLocalFunction(Square(3), s => s))
+print(ByLambda(Square(3)))
+print(ByLambdaInferred(Square(3)))
+print(ByLoop([Square(3)]))
+print(ByLoopEntry(squares))
+print(ByLoopMap(squares))
+print(ByTypeArgument(Square(3)))
+print(ByDataTypeArgument(Square(3)))
+```
+
+Case: [types/generic-limit-interface-argument.kz](../corpus/types/generic-limit-interface-argument.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+Shape s = Square(3)
+print(AreaOf(s))
+```
+
+Case: [types/generic-limit-caller-limited.kz](../corpus/types/generic-limit-caller-limited.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Wrap<U: Shape>(U item) => AreaOf(item)
+
+print(Wrap(Square(3)))
+```
+
+Case: [types/generic-limit-caller-unlimited.kz](../corpus/types/generic-limit-caller-unlimited.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Wrap<U>(U item) => AreaOf(item)
+
+print(1)
+```
+
+Case: [types/generic-limit-union.kz](../corpus/types/generic-limit-union.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+class Dot : Shape {
+    pub int Area() => 0
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Use(Square | Dot u) => AreaOf(u)
+
+print(Use(Dot()))
+```
+
+Case: [types/generic-limit-nullable.kz](../corpus/types/generic-limit-nullable.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+int Use(Square? s) => AreaOf(s)
+
+print(Use(Square(3)))
+```
+
+Case: [types/generic-limit-written.kz](../corpus/types/generic-limit-written.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+print(AreaOf<int>(5))
+```
+
+Case: [types/generic-limit-unmet-line.kz](../corpus/types/generic-limit-unmet-line.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+print(AreaOf(
+    5))
+```
+
+Case: [types/generic-limit-overload.kz](../corpus/types/generic-limit-overload.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+string F<T: Shape>(T x) => "generic"
+
+string F(long n) => "long"
+
+print(F(5))
+```
+
+Case: [types/generic-limit-overload-none.kz](../corpus/types/generic-limit-overload-none.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+string F<T: Shape>(T x) => "generic"
+
+string F(bool b) => "bool"
+
+print(F(5))
+```
+
+Case: [types/generic-limit-data.kz](../corpus/types/generic-limit-data.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+data Box<T: Shape>(T Item)
+
+b = Box(5)
+print(b.Item)
+```
+
+Case: [types/generic-limit-data-use.kz](../corpus/types/generic-limit-data-use.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+data Box<T: Shape>(T Item)
+
+int Count(Box<int> b) => 1
+
+print(1)
+```
+
+Case: [types/generic-limit-data-not-implied.kz](../corpus/types/generic-limit-data-not-implied.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+data Box<T: Shape>(T Item)
+
+int Count<U>(Box<U> b) => 1
+
+print(1)
+```
+
+Case: [types/generic-limit-virtual.kz](../corpus/types/generic-limit-virtual.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Base : Shape {
+    pub virtual int Area() => 1
+}
+
+class Big : Base {
+    pub override int Area() => 4
+}
+
+int AreaOf<T: Shape>(T item) => item.Area()
+
+Base b = Big()
+print(AreaOf(b))
+```
+
+Case: [classes/text-through-limit.kz](../corpus/classes/text-through-limit.kz)
+```kurz
+interface Texty {
+    string Text()
+}
+
+void Show<T: Texty>(T item) {
+    print(item)
+}
+
+Show(1)
+```
+
+Case: [classes/text-through-limit-union.kz](../corpus/classes/text-through-limit-union.kz)
+```kurz
+interface Texty {
+    string Text()
+}
+
+void Show<T: Texty>(T item) {
+    print(item)
+}
+
+void Use(int | string u) {
+    Show(u)
+}
+
+Use("hi")
+```
+
+Case: [classes/text-call-through-limit.kz](../corpus/classes/text-call-through-limit.kz)
+```kurz
+interface Texty {
+    string Text()
+}
+
+class Tag {
+    pub string Text() => "tag"
+}
+
+data Point(int X, int Y)
+
+string Show<T: Texty>(T item) => item.Text()
+
+print(Show(1))
+print(Show("ok"))
+print(Show(Point(1, 2)))
+print(Show(Tag()))
+n = 4
+s = "n={n}"
+print(Show(s))
+print(s)
 ```
 
 Case: [actors/generic-reference.kz](../corpus/actors/generic-reference.kz)

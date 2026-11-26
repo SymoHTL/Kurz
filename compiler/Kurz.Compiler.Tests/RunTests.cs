@@ -162,7 +162,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             ? CrashLine().Replace(written, string.Empty) : written;
 
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the cases whose <c>system:</c> line names Linux, the stack overflows', nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls, the reads of standard input and running a program. The number for Linux is the count measured with no margin in an image built locally from <c>ci/Dockerfile</c>, whose clang is the point release of the day it was built and not always the one of the image the gates job pulls by its digest (knowledge/the-gates-job-runs-in-its-image.md), so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156); a green gates job shows only that its own image counts at least this number, and a count in that image is one run of the job on a pushed head with the number at 999. The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 657 : 797;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 724 : 999;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -194,7 +194,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         "system/command-env-dir.kz",
     ];
 
-    /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11), the cases of the deadlines that hold their thread by the clock among them (U36 to U45, U49).</summary>
+    /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11), the cases of the deadlines that hold their thread by the clock among them (U36 to U45, U49), and the cases of <c>advance</c>, which moves the clock (Y10); a case of a deadline that reads no clock, a <c>within</c> that bounds a call with no such hold, is none of them, and a build for Windows runs it.</summary>
     private static readonly string[] ProcessCases =
     [
         "system/arguments.kz", "system/args-parameter.kz", "system/args-in-lambda.kz", "system/args-new-list.kz", "system/clock.kz", "system/environment-missing.kz",
@@ -202,7 +202,9 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         "actors/timeout-block.kz", "actors/timeout-callee-crash.kz", "actors/timeout-capped.kz", "actors/timeout-carried.kz", "actors/timeout-crashed.kz",
         "actors/timeout-crashed-early.kz", "actors/timeout-default.kz", "actors/timeout-send.kz", "actors/within-clauses.kz",
         "actors/attempt-deadline.kz", "actors/attempt-dropped.kz", "actors/attempt-dropped-queued.kz",
-        "actors/timeout-chain-nested.kz",
+        "actors/timeout-chain-nested.kz", "actors/timeout-chain-left.kz", "actors/timeout-gone-queued.kz",
+        "system/sleep.kz", "actors/sleep-parks.kz", "actors/sleep-top-level-runs.kz", "actors/sleep-within.kz", "actors/sleep-chain-crash.kz",
+        "tests/advance-sleep.kz", "tests/advance-call-timeout.kz", "tests/advance-clock.kz", "tests/advance-negative.kz", "tests/advance-overflow.kz",
     ];
 
     /// <summary>The cases of log calls that expect a run, which a build for Windows says <c>not supported</c> to (S11, P6).</summary>
@@ -263,7 +265,10 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     /// (section 6, the owner, 2026-11-17, #570, comment 6961064167, Q4; no case pins that trace's line, where it is taken being Q13 of
     /// comment 6964678868 on #573),
     /// and the root's <c>restart-limit</c>, whose trace is the top-level code's where it waits, and
-    /// not at the line of the <c>spawn</c> that its error line names (assumed readings of section 6, "Policy at <c>spawn</c>").
+    /// not at the line of the <c>spawn</c> that its error line names (assumed readings of section 6, "Policy at <c>spawn</c>"), and a
+    /// <c>deadlock</c> that names the call an actor's start keeps out, whose trace is the top-level code's where it waits, on a line that
+    /// call does not stand on, so that the error line is held to be the call's and not the wait's (U22; section 6, the owner,
+    /// 2026-11-21, #599, comment 7060156109, Q6 1, and comment 7063693195, the trace 1).
     /// </summary>
     private static readonly Dictionary<string, (int First, string Last)> OwnTraces = new(StringComparer.Ordinal)
     {
@@ -271,8 +276,43 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         ["actors/block-escalate-root.kz"] = (6, "Worker.Fail"),
         ["actors/per-node-escalate.kz"] = (7, "Cache.Fail"), // U53: a `per node` actor's, whose supervisor is the root
         ["actors/crash-restart-limit.kz"] = (18, "main"),
+        ["actors/restart-reentrant.kz"] = (44, "main"),
+        ["actors/restart-reentrant-two.kz"] = (79, "main"),
+        ["actors/restart-reentrant-places.kz"] = (58, "main"),
+        ["actors/restart-reentrant-one-place.kz"] = (47, "main"),
+        ["actors/restart-reentrant-cap.kz"] = (68, "main"),
+        ["actors/timeout-chain-left.kz"] = (24, "Front.Ask"),
         ["actors/waitline-escalate.kz"] = (18, "Right.Ask"),
         ["actors/waitline-vouch.kz"] = (20, "Right.Ask"),
+    };
+
+    /// <summary>
+    /// U22: the <c>deadlock</c> cases that more than one call an actor's start keeps out closes, each with the words of its error
+    /// line after the place it names, the first in source order, before the colon that ends it, the count of the calls at that place
+    /// where more than one, and the lines between the error line and the trace as the runtime writes them: one line <c>kept out at</c>
+    /// each further place, in source order, with its count where more than one, at most 10, then <c>... and K more</c>, each call on a
+    /// line nothing else of the case stands on (section 6, the owner, 2026-11-21, #599, comment 7067131310, several 2, and comment
+    /// 7067139953, the form 1; comment 7067639209, the order 1, the same place 1 and the cap 1).
+    /// </summary>
+    private static readonly Dictionary<string, (string Calls, string[] Under)> KeptOut = new(StringComparer.Ordinal)
+    {
+        ["actors/restart-reentrant-two.kz"] = ("", ["kept out at actors/restart-reentrant-two.kz:38"]),
+        ["actors/restart-reentrant-places.kz"] = (" (2 calls)", ["kept out at actors/restart-reentrant-places.kz:25 (2 calls)", "kept out at actors/restart-reentrant-places.kz:26"]),
+        ["actors/restart-reentrant-one-place.kz"] = (" (2 calls)", []),
+        ["actors/restart-reentrant-cap.kz"] = ("",
+        [
+            "kept out at actors/restart-reentrant-cap.kz:25",
+            "kept out at actors/restart-reentrant-cap.kz:26",
+            "kept out at actors/restart-reentrant-cap.kz:27",
+            "kept out at actors/restart-reentrant-cap.kz:28",
+            "kept out at actors/restart-reentrant-cap.kz:29",
+            "kept out at actors/restart-reentrant-cap.kz:30",
+            "kept out at actors/restart-reentrant-cap.kz:31",
+            "kept out at actors/restart-reentrant-cap.kz:32",
+            "kept out at actors/restart-reentrant-cap.kz:33",
+            "kept out at actors/restart-reentrant-cap.kz:34",
+            "... and 2 more",
+        ]),
     };
 
     /// <summary>
@@ -419,6 +459,15 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             // the error lines alone: the trace was split off above and is held below
             Assert.Matches($"^{Regex.Escape(line)}:\nbyte [0-9]+ is inside a code point\n$", error);
         }
+        else if (KeptOut.TryGetValue(relativePath, out var kept))
+        {
+            Assert.Equal(line + kept.Calls + ":\n" + string.Concat(kept.Under.Select(u => u + "\n")), error);
+        }
+        else if (header.ErrorId == ErrorIds.InvalidInput)
+        {
+            // U40, U41: the bound of zero or less on the line below, written as a duration's text is (assumed: T78 of comment 7055305138)
+            Assert.Matches($"^{Regex.Escape(line)}:\nthe bound of `within` is -?[0-9a-z]+; a bound is positive\n$", error);
+        }
         else if (NamesALoop(header))
         {
             // U63, U64: the loop's text below the error line, each line's chain ID as one placeholder
@@ -465,12 +514,27 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             Assert.True(program is null && notSupported == construct, $"{relativePath}: listed as `{construct}`, and the emitter {(program is null ? notSupported is null ? "is never asked: the checker does not read the case" : $"says `{notSupported}`" : "lays it out")}");
         }
 
-        // a case listed with a trace of its own is a `throws` case the run runs
+        // a case listed with a trace of its own is a `throws` case the run runs, but on a system whose build says
+        // `not supported` to it, as the list of cases not emitted holds it (the loop of that list checks the refusal)
         Assert.NotEmpty(OwnTraces);
         foreach (var (relativePath, _) in OwnTraces)
         {
             var header = Header(relativePath);
-            Assert.True(header.Expectation == Expectation.Throws && !NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with a trace of its own, and the run does not run it as a `throws` case");
+            Assert.True(header.Expectation == Expectation.Throws, $"{relativePath}: listed with a trace of its own, and it is no `throws` case");
+            if (NotEmitted.ContainsKey(relativePath))
+            {
+                continue;
+            }
+
+            Assert.True(!NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with a trace of its own, and the run does not run it as a `throws` case");
+        }
+
+        // a case listed with calls kept out is a `throws` case of `deadlock` the run runs
+        Assert.NotEmpty(KeptOut);
+        foreach (var (relativePath, _) in KeptOut)
+        {
+            var header = Header(relativePath);
+            Assert.True(header.Expectation == Expectation.Throws && header.ErrorId == "deadlock" && !NotRun(header) && Emit(relativePath, header).Program is not null, $"{relativePath}: listed with calls kept out, and the run does not run it as a `throws` case of `deadlock`");
         }
 
         // a case listed with the text of its loop is a `throws deadlock` case of U63 or U64 the run runs

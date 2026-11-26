@@ -40,16 +40,24 @@ public sealed record Diagnostic(DiagnosticKind Kind, string Id, int Line, string
     public bool IsNotSupported => Kind == DiagnosticKind.NotSupported;
 
     /// <summary>
-    /// What to do about the error, the line below it, or null: <c>nullable-unchecked</c> says how to check (section 4, the owner,
-    /// 2026-10-30, "Text + help line"), indented by two spaces as the command's own failures indent their <c>help:</c> (section 2, an
-    /// assumption in section 4).
+    /// The help line the place of an error gives it, or null: N9's, of a <c>nullable-unchecked</c> whose check a call in its line ended,
+    /// in place of the one that says how to check (section 4, the owner, 2026-11-24, #624, comment 7135538740, "A help line of its own
+    /// (Recommended)"), and T39's, of a duration divided by a duration or converted to a number (section 4, the owner, 2026-11-25,
+    /// #629, comment 7159373153, "Add a help line (Recommended)").
     /// </summary>
-    public string? Help => IsError && Id == ErrorIds.NullableUnchecked ? "check it with `!= null`, or give a value for null with `??`" : null;
+    public string? OwnHelp { get; init; }
+
+    /// <summary>
+    /// What to do about the error, the line below it, or null: <see cref="OwnHelp"/>, or for <c>nullable-unchecked</c> how to check
+    /// (section 4, the owner, 2026-10-30, "Text + help line"), indented by two spaces as the command's own failures indent their
+    /// <c>help:</c> (section 2, an assumption in section 4).
+    /// </summary>
+    public string? Help => !IsError ? null : OwnHelp ?? (Id == ErrorIds.NullableUnchecked ? "check it with `!= null`, or give a value for null with `??`" : null);
 
     /// <summary>
     /// The diagnostic as the command writes it, the file's name and the line in front: <c>hello.kz:3: &lt;id&gt;: &lt;text&gt;</c> (design
     /// record, section 2), <c>hello.kz:3: warning: &lt;id&gt;: &lt;text&gt;</c> (H5), or <c>hello.kz:3: not supported: &lt;text&gt;</c>; an
-    /// error that has a <see cref="Help"/>, N2's <c>nullable-unchecked</c>, gets it on the line below.
+    /// error that has a <see cref="Help"/>, N2's <c>nullable-unchecked</c> and T39's <c>type-mismatch</c> among them, gets it on the line below.
     /// </summary>
     public string At(string file) => Kind switch
     {
@@ -145,6 +153,7 @@ public static class ErrorIds
     public const string CaptureNeedsWord = "capture-needs-word";
     public const string ReversedRange = "reversed-range";
     public const string AmbiguousCall = "ambiguous-call";
+    public const string LimitNotInterface = "limit-not-interface";
     public const string CannotInfer = "cannot-infer";
     public const string EqualByUnknown = "equal-by-unknown";
     public const string EqualsMethod = "equals-method";
@@ -186,8 +195,10 @@ public static class ErrorIds
     public const string UsedAfterMove = "used-after-move";
     public const string MoveReachable = "move-reachable";
     public const string MoveAtCall = "move-at-call";
+    public const string BoundNotPositive = "bound-not-positive";
     public const string PointerCrosses = "pointer-crosses";
     public const string CallLoop = "call-loop";
+    public const string AdvanceOutside = "advance-outside";
 
     /// <summary>L1 names this id in its rule and keeps it out of the table, which lists the ids cases expect: no corpus file can be a file that is not UTF-8.</summary>
     public const string InvalidSource = "invalid-source";
@@ -202,6 +213,8 @@ public static class ErrorIds
     public const string InvalidOrderingAtRunTime = "invalid-ordering-at-run-time";
     public const string StackOverflow = "stack-overflow";
     public const string CheckFailed = "check-failed";
+    public const string InvalidInput = "invalid-input";
+    public const string AdvanceNegative = "advance-negative";
 }
 
 /// <summary>The ids of the lints, which warn and build the program (H5): no case expects one, and the error table keeps them out.</summary>

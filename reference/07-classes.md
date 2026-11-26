@@ -645,6 +645,22 @@ class Box(int Side) {
 print(Box(3).Area())
 ```
 
+Case: [actors/constructor-this-refused.kz](../corpus/actors/constructor-this-refused.kz)
+```kurz
+actor B {
+    pub int Ask(A x) => 0
+}
+
+actor A(B Other) {
+    int first = Other.Ask(this)
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+}
+
+print(spawn A(spawn B()).Peek())
+```
+
 Case: [classes/interface-method-inherited-private.kz](../corpus/classes/interface-method-inherited-private.kz)
 ```kurz
 interface Shape {

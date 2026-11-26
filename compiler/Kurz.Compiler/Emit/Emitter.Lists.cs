@@ -556,7 +556,17 @@ public sealed partial class Emitter
     }
 
     /// <summary>M9: the item of the list at the index <paramref name="index"/> names, read in place; a position outside its items raises <c>index-out-of-range</c> at the line.</summary>
-    private string ListItem(string list, IndexExpression index, ListType type)
+    private string ListItem(string list, IndexExpression index, ListType type) => ListItem(list, ItemPosition(list, index), type);
+
+    /// <summary>M9: the item of the list at <paramref name="position"/>, one <see cref="ItemPosition"/> gave, read in place.</summary>
+    private string ListItem(string list, string position, ListType type)
+    {
+        var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {list})");
+        return fn.Value($"load {Ir(type.Element)}, ptr {fn.Value($"getelementptr {Ir(type.Element)}, ptr {items}, i64 {position}")}");
+    }
+
+    /// <summary>T14: the position the index <paramref name="index"/> names in the list, inside its items; a position outside them raises <c>index-out-of-range</c> at the line.</summary>
+    private string ItemPosition(string list, IndexExpression index)
     {
         var indexType = TypeOf(index.Index);
         var position = Resize(EmitExpression(index.Index), indexType, Types.IsSigned(indexType) ? Types.Long : Types.ULong);
@@ -567,9 +577,16 @@ public sealed partial class Emitter
         fn.Block(outside);
         Raise(ErrorIds.IndexOutOfRange, index.Line);
         fn.Block(inside);
-        var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {list})");
-        return fn.Value($"load {Ir(type.Element)}, ptr {fn.Value($"getelementptr {Ir(type.Element)}, ptr {items}, i64 {position}")}");
+        return position;
     }
+
+    /// <summary>
+    /// N5, M3: the helper that gives the place of the item at the position in <c>%a1</c> of the list at the place in <c>%a0</c>, in a block
+    /// no other value holds (<see cref="OwnItems"/>), for a <c>mut</c> call after <c>?.</c> that changes the item; the position is inside
+    /// the items, which the read before the call tested.
+    /// </summary>
+    private string ItemPlace(ListType type) =>
+        Helper($"item.{Lower.Mangle(type)}", "ptr", ["ptr", "i64"], () => fn.Return($"ptr {fn.Value($"getelementptr {Ir(type.Element)}, ptr {OwnItems(type)}, i64 %a1")}"));
 
     /// <summary>
     /// M9, M4, T14: <c>xs[i] = value</c> on a <c>mut</c> variable or parameter, or on a path of fields from one, as C# and Rust write an item (section 4, the owner,
@@ -2921,13 +2938,19 @@ public sealed partial class Emitter
         fn.Value($"insertvalue %kz.str {fn.Value($"insertvalue %kz.str undef, ptr {bytes}, 0")}, i64 {marked}, 1");
 
     /// <summary>
-    /// X4: the part of a string from the position <paramref name="start"/> to <paramref name="end"/>, a string with a count of its own:
-    /// the string itself, held once more, where the part is all of it; the empty string where it is nothing; its bytes in place where the
-    /// string holds no block, a literal, whose bytes are never freed; else a new block with a copy, the standard library's
+    /// X4: the part of a string from the position <paramref name="start"/>, <paramref name="length"/> bytes of it, a string with a count of
+    /// its own: the string itself, held once more, where the part is all of it; the empty string where it is nothing; its bytes in place
+    /// where the string holds no block, a literal, whose bytes are never freed; else a new block with a copy, the standard library's
     /// <c>StringOf</c>, as Rust's <c>trim</c> gives a slice and Kurz has no view into a block (section 4). A block the system refuses
-    /// ends the process (M9).
+    /// ends the process (M9). The helper takes the part's count, not its end, so that LLVM puts it into a caller that passes the count as
+    /// a constant, as <c>s.Substring(i, 8)</c> does: given the end, it cost 310 in LLVM's inliner, against the threshold of 225 that
+    /// LLVM takes at <c>-O2</c>, and stayed a call at every <c>Substring</c>, and given the count it costs 160 where the count is a
+    /// constant (clang 23.1.4, <c>-Rpass-missed=inline</c>). The owner took it on 2026-11-20 (issue 157, comment 7051500158, S1, "the
+    /// piece takes its count"), against holding it to "no row slower beyond noise", with the row it made slower named:
+    /// <c>compare-less</c> of issue 157's strings program, +7.1%, whose loop shares a function with an inlined piece, while
+    /// <c>substring</c> took 16.0% less and <c>hex-decode-64-digits</c> 19.4% less.
     /// </summary>
-    private string Piece(string text, string start, string end)
+    private string Piece(string text, string start, string length)
     {
         var name = Helper("piece.string", "%kz.str", ["%kz.str", "i64", "i64"], () =>
         {
@@ -2939,11 +2962,11 @@ public sealed partial class Emitter
             Retain("%a0", Types.String);
             fn.Return("%kz.str %a0");
             fn.Block(part);
-            var length = fn.Value("sub i64 %a2, %a1");
+            var size = "%a2";
             var from = fn.Value($"getelementptr i8, ptr {bytes}, i64 %a1");
             var empty = fn.Label("empty");
             var some = fn.Label("some");
-            fn.CondBranch(fn.Value($"icmp eq i64 {length}, 0"), empty, some);
+            fn.CondBranch(fn.Value($"icmp eq i64 {size}, 0"), empty, some);
             fn.Block(empty);
             fn.Return($"%kz.str {StringValue(string.Empty)}");
             fn.Block(some);
@@ -2951,15 +2974,15 @@ public sealed partial class Emitter
             var literal = fn.Label("literal");
             fn.CondBranch(block, copy, literal);
             fn.Block(literal);
-            fn.Return($"%kz.str {MakeString(from, length)}");
+            fn.Return($"%kz.str {MakeString(from, size)}");
             fn.Block(copy);
             var asked = fn.Alloca("i64", "asked");
             fn.Emit($"store i64 0, ptr {asked}");
-            var made = fn.Value($"call ptr {StdFunction("StringOf")}(ptr {from}, i64 {length}, ptr {asked})");
+            var made = fn.Value($"call ptr {StdFunction("StringOf")}(ptr {from}, i64 {size}, ptr {asked})");
             Refused(fn.Value($"icmp eq ptr {made}, null"), asked);
-            fn.Return($"%kz.str {MakeString(made, fn.Value($"or i64 {length}, -9223372036854775808"))}");
+            fn.Return($"%kz.str {MakeString(made, fn.Value($"or i64 {size}, -9223372036854775808"))}");
         });
-        return fn.Value($"call %kz.str {name}(%kz.str {text}, i64 {start}, i64 {end})");
+        return fn.Value($"call %kz.str {name}(%kz.str {text}, i64 {start}, i64 {length})");
     }
 
     /// <summary>
@@ -3049,7 +3072,7 @@ public sealed partial class Emitter
             end = member.Member is "TrimStart" or "TrimStartAscii" ? n : fn.Value($"call i64 {StdFunction("TrimEnd")}(ptr {bytes}, i64 {start}, i64 {n}, i1 {ascii})");
         }
 
-        return Piece(text, start, end);
+        return Piece(text, start, fn.Value($"sub i64 {end}, {start}"));
     }
 
     /// <summary>
@@ -3184,7 +3207,7 @@ public sealed partial class Emitter
         fn.Emit($"call void {RuntimeFunction("NotCharBoundary")}(i64 {cut}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
         fn.Unreachable();
         fn.Block(stands);
-        return Piece(text, start, fn.Value($"add i64 {start}, {length}"));
+        return Piece(text, start, length);
     }
 
     /// <summary>

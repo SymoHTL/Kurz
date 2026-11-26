@@ -1,0 +1,50 @@
+// expect: throws deadlock at 23
+// | 0
+// | test "restarts into a call it keeps out" ... FAILED
+// |     deadlock at tests/test-restart-reentrant.kz:23
+// | 1 test: 0 passed, 1 failed
+// command: test
+// threads: 1
+// rules: Y5, U22
+
+// at its restart `A`'s constructor waits on `B.Ask`, whose call of `Peek` waits in `A`'s inbox for that constructor, so that the
+// runner's wait for the test finds nothing left to run, and the words under its `FAILED` line name that call of `Peek`, not the test
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return vouch x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+test "restarts into a call it keeps out" {
+    b = spawn B()
+    a = spawn A(b)
+    print(a.Get())
+    b.Set(a)
+    send a.Fail()
+    print(a.Get())
+}

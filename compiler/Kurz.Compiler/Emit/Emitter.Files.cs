@@ -1601,6 +1601,22 @@ public sealed partial class Emitter
         return null;
     }
 
+    /// <summary>
+    /// S28: <c>Environment.Sleep(time)</c>, the runtime's <c>Slept</c> with the duration's nanoseconds, which parks an actor's activation
+    /// and runs the top-level code's queue to the deadline; a build for Windows reads no clock (S11, S25).
+    /// </summary>
+    private string? EmitSleep(CallExpression c, CallInfo info)
+    {
+        if (target != Target.Linux)
+        {
+            throw Unsupported(c.Line, ProcessNotOnWindows);
+        }
+
+        var time = Arguments(c, info, _ => Types.Duration, _ => false, _ => null, cConvention: false, owned: false).Single()[(Ir(Types.Duration).Length + 1)..];
+        fn.Emit($"call void {RuntimeFunction("Slept")}(i64 {time})");
+        return null;
+    }
+
     /// <summary>F17: a <c>return</c> with a value among the top-level statements ends the program with that <c>int</c>, at once, as S23's call does.</summary>
     private void EmitExitCode(Expression value)
     {
@@ -1704,7 +1720,8 @@ public sealed partial class Emitter
 
     /// <summary>
     /// S15: <c>timestamp.Now</c>, the wall clock in nanoseconds from 1970-01-01; where the runtime cannot map the page the system writes
-    /// the time into, the process ends as an allocation the system refused does, with the bytes of the page (O11).
+    /// the time into, the process ends as an allocation the system refused does, with the bytes of the page (O11); in the build of
+    /// <c>kurz test</c> with the offset that <c>advance</c> added (<see cref="Ahead"/>; Y10).
     /// </summary>
     private string EmitNow(int line)
     {
@@ -1721,12 +1738,13 @@ public sealed partial class Emitter
         fn.Emit($"call void {RuntimeFunction("AllocationFailed")}(i64 4096)");
         fn.Unreachable();
         fn.Block(read);
-        return fn.Value($"load i64, ptr {slot}");
+        return Ahead(fn.Value($"load i64, ptr {slot}"));
     }
 
     /// <summary>
     /// S25: <c>instant.Now</c>, the monotonic clock in nanoseconds; where the runtime cannot map the page the system writes the time
-    /// into, the process ends as an allocation the system refused does, with the bytes of the page (O11), as <see cref="EmitNow"/>.
+    /// into, the process ends as an allocation the system refused does, with the bytes of the page (O11), as <see cref="EmitNow"/>, and
+    /// with the offset that <c>advance</c> added in the build of <c>kurz test</c> (<see cref="Ahead"/>; Y10).
     /// </summary>
     private string EmitMonotonicNow(int line)
     {
@@ -1743,8 +1761,16 @@ public sealed partial class Emitter
         fn.Emit($"call void {RuntimeFunction("AllocationFailed")}(i64 4096)");
         fn.Unreachable();
         fn.Block(read);
-        return fn.Value($"load i64, ptr {slot}");
+        return Ahead(fn.Value($"load i64, ptr {slot}"));
     }
+
+    /// <summary>
+    /// Y10: a read of the clock, <paramref name="now"/>, with the offset of the runtime's clock that <c>advance</c> added, in the build of
+    /// <c>kurz test</c> alone, every build of it, <c>--release</c> among them; every other build reads the system's clock directly (D8 of
+    /// issue 586, comment 6992687784).
+    /// </summary>
+    private string Ahead(string now) =>
+        runsTests ? fn.Value($"add i64 {now}, {fn.Value($"call i64 {RuntimeFunction("Ahead")}()")}") : now;
 
     /// <summary>S14: in the helper of the text of an <c>EnvError</c> in <c>%a0</c>: the words of its kind in lower case, a colon and the name, <c>not present: HOME</c>.</summary>
     private void EnvErrorText(DataType error)

@@ -38,19 +38,24 @@ its operands leaves (the Rust Reference, "Destructors", `destructors.scope.opera
 2026-11-19: "Tuple expression doesn't finish evaluating so operands drop in reverse order"), the callee
 and the receiver being operands of the call as Rust's function operand and receiver are
 (`expr.call.intro`, "an expression, called the *function operand*", and `expr.method.intro`, "an
-expression (the *receiver*)", read the same day). The memo of a call's one copy ends when that copy is made,
-and the memo of a call of more than one copy once its last copy is made; where a jump out of the call comes
+expression (the *receiver*)", read the same day). The memo of the one copy of a call that is no message ends when that copy is made,
+and the memo of such a call of more than one copy once its last copy is made; where a jump out of such a call comes
 after its first copy and before its last, the memo ends before the jump lets go of anything, the values made
 after the first copy among them; so each copy goes after the end of its call's memo, which points the `weak`
 references of the call's copies (U12) *(assumed: a reading of the build, proposed with `kurz-design.md`
-section 3, the bullet "Lifetimes", and not put to the owner)*. What becomes of the copies a message's
-arguments made, and where the memo of those copies ends, at a jump out of a message before its last
-argument, is T24 of issue 519 (comment 6981296432), a question put to the owner, of which this rule states
-nothing; its options there are four: the copies freed where the raise leaves, by building the message in a
-heap of its own; freed by the crash path; every argument evaluated before any is copied, so that a raise
-leaves no copy; or kept in the callee's heap to its restart or its end, as the record reads it. No case shows
-that order either: nothing of the program runs at a release, nor between the end of a memo and the release
-of the copies.
+section 3, the bullet "Lifetimes", and not put to the owner)*. The copies a message's
+arguments made before a jump out of it are freed where the builder leaves, with the heap of the message's
+own they were built in, which a message takes wherever an argument after one that crosses can wait (U21;
+§6, the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)"), the memo of those copies ending before
+that heap is freed *(assumed: a reading of the build, as for a call that is no message)*; where such an
+argument can raise with no call in it, the crossing arguments are copied after the last, so that none is
+made before the raise (U21; §6, the owner, 2026-11-21, #519, comment 7060155980, "T83 1"). The copies
+a `spawn`'s arguments made before such a raise are freed with the heap of the actor it was making, which
+the crash of its spawner frees where its first crossing argument, or an argument after it, can raise or
+wait, a raise before that argument finding no heap (U21; §6, the same comment, "T82 1", and 2026-11-23,
+comment 7095825398, "T87 3") *(assumed: a reading of T82 1, the heap freed whole)*. No case shows
+that order either: nothing of the program runs at a release, nor between a jump
+and the releases it makes.
 
 Case: [memory/long-chain-freed.kz](../corpus/memory/long-chain-freed.kz)
 ```kurz

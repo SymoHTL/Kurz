@@ -1,0 +1,23 @@
+// expect: throws overflow at 22
+// | test "a long wait" ... ok
+// | test "a long wait again" ... ok
+// | test "two long waits" ... FAILED
+// |     overflow at tests/advance-overflow.kz:22
+// | 3 tests: 2 passed, 1 failed
+// command: test
+// rules: Y10
+
+// the clock's offset goes back to 0 for each test, so that the second test's `advance` fits as the first's did, while two in one
+// test move the wall clock past the range of a `timestamp`, at the second
+test "a long wait" {
+    advance 50000days
+}
+
+test "a long wait again" {
+    advance 50000days
+}
+
+test "two long waits" {
+    advance 50000days
+    advance 50000days
+}

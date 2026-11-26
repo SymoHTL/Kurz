@@ -18,6 +18,11 @@ public sealed partial class Emitter
             return construction is null ? null : EmitCall(construction); // T33: `T.Make` is the constructor's call it became; a type with no fields, its constant
         }
 
+        if (Model.IsChainCall(c, out var chain))
+        {
+            return EmitChainCall(c, chain); // N5
+        }
+
         var info = Model.CallOf(c);
         var result = Sub(info.Result);
         var copied = c.Arguments.Where(a => Model.IsCopied(a.Value) && ReachesInstance(Sub(Model.TypeOf(a.Value).Type))).ToList();
@@ -96,6 +101,7 @@ public sealed partial class Emitter
             CallKind.EnvironmentArgs => EmitArguments(0, c.Line),
             CallKind.EnvironmentVariable => EmitVariable(c, info),
             CallKind.EnvironmentExit => EmitExit(c, info),
+            CallKind.EnvironmentSleep => EmitSleep(c, info),
             CallKind.Hash or CallKind.HmacHash or CallKind.HexEncode or CallKind.HasherNew or CallKind.HmacNew or CallKind.HasherUpdate or CallKind.HasherFinish
                 or CallKind.HmacVerify or CallKind.FixedTimeEqual => EmitHashCall(c, info),
             _ => throw new InvalidOperationException(info.Kind.ToString()),
@@ -332,14 +338,24 @@ public sealed partial class Emitter
     /// takes is a value of its own (<see cref="HeldCopy"/>). With <paramref name="into"/>, the heap of an actor, the arguments cross into
     /// it (U12): a value that holds a block is its copy there, every block it reaches copied (<see cref="Crossed"/>; the owner, 2026-11-15,
     /// #519, comment 6902210646, Q5, "Copy all, share big unbuilt"), which the slot owns, or which is a temporary where the callee borrows
-    /// it.
+    /// it. With <paramref name="after"/>, the copies of a message with an argument that can raise after one that crosses, each crossing
+    /// argument is held as it was evaluated, a value read from a name with no copy, and copied after the last argument, so that a raise
+    /// leaves no copy (section 6, the owner, 2026-11-21, #519, comment 7060155980, "T83 1"); no argument of such a message runs a call,
+    /// which can wait and builds the message in a heap of its own (<see cref="EmitMessage"/>), so that nothing but a raise runs between a
+    /// crossing argument and its copy, and a read of what an argument after it changes is <c>changed-while-held</c> (M7). With
+    /// <paramref name="making"/>, the heap of a <c>spawn</c>'s actor, which <paramref name="into"/> then names once it is made, is made by
+    /// it, given the place of the argument evaluated next, just before the first argument that crosses into it, or after the last
+    /// argument where none crosses, the call's session begun with it (section 6, the owner, 2026-11-23, #519, comment 7095825398,
+    /// "T87 3").
     /// </summary>
-    private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, (Expression Value, Unit File)?> slotDefault, bool cConvention, bool owned, string? into = null)
+    private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, (Expression Value, Unit File)?> slotDefault, bool cConvention, bool owned, string? into = null, bool after = false, Func<int, string>? making = null)
     {
         var values = new string?[c.Arguments.Count];
-        var session = into is null ? null : CallSession(Enumerable.Range(0, c.Arguments.Count).Count(i => info.Binding[i] >= 0 && !slotMut(info.Binding[i]) && Counted(Sub(slotType(info.Binding[i])))), into);
+        var copies = Enumerable.Range(0, c.Arguments.Count).Count(i => info.Binding[i] >= 0 && !slotMut(info.Binding[i]) && Counted(Sub(slotType(info.Binding[i]))));
+        var session = into is null ? null : CallSession(copies, into);
         var late = new List<(int Index, Func<string, string> Read)>(); // U12: the copies read after the call's last copy (Late)
         var taken = new List<string>(); // the values the slots took, temporaries of the region until the last argument (Taken)
+        var held = new List<Action>(); // T83 1: the copies of the crossing arguments, made after the last argument where `after`
         string? copied = null;
 
         // U12: a function value crosses with the environment of the lambda the checker saw for it, the argument itself or the one an
@@ -349,6 +365,28 @@ public sealed partial class Emitter
         string? CrossingEnvironment(Expression a, KurzType type) => (Types.NonNull(type) ?? type) is FunctionType
             ? CopyEnvironmentInto(Model.LambdaOf(Model.CrossingLambda(a) ?? throw new InvalidOperationException($"a function value crosses at line {a.Line} with no lambda the checker saw")).Captures.Select(v => Sub(v.Type)).ToList())
             : null;
+
+        // T83 1: a crossing argument's copy, made where it is evaluated, or after the last argument where `after`
+        void Copying(Action copy)
+        {
+            if (after)
+            {
+                held.Add(copy);
+                return;
+            }
+
+            copy();
+        }
+
+        // T87 3: the heap of a `spawn` made where the argument at `from` is evaluated next, and the call's session in it
+        void MakeHeap(int from)
+        {
+            if (making is not null && into is null)
+            {
+                into = making(from);
+                session = CallSession(copies, into);
+            }
+        }
 
         void Cross(int i, string value, KurzType type, string? environment, bool keep)
         {
@@ -372,21 +410,31 @@ public sealed partial class Emitter
                 var a = c.Arguments[i].Value;
                 var type = Sub(slotType(slot));
                 var takes = owned || TakesSlot(c, info, slot); // U12: a parameter written `move` owns its argument
+                var crosses = (into is not null || making is not null) && Counted(type);
+                if (crosses)
+                {
+                    MakeHeap(i);
+                }
+
                 if (Model.IsMove(a))
                 {
                     // U12: the value goes to a parameter's place with no copy and, of a value whose place it empties, no count changed
                     // (comment 6895076937); across into an actor's heap, a copy there, and the moved value let go of, which frees it
                     // (section 6, assumed on comment 6902210646, Q5)
                     var moved = Convert(MovedValue(a), TypeOf(a), type, a.Line, owned: true);
-                    if (into is not null && Counted(type))
+                    if (crosses)
                     {
                         // a function value with its environment copied, as an argument with no word crosses (comment 6902210646, Q5)
-                        Cross(i, moved, type, CrossingEnvironment(a, type), takes);
+                        var (at, environment) = (i, CrossingEnvironment(a, type));
+                        Copying(() =>
+                        {
+                            Cross(at, moved, type, environment, takes);
 
-                        // in a session of more than one copy, the memo holds a count of every block it maps until the session's end
-                        // (`CopyKeep`, runtime/common/runtime.kz), so that this frees no block whose address a later argument's copy
-                        // could take
-                        Release(moved, type);
+                            // in a session of more than one copy, the memo holds a count of every block it maps until the session's end
+                            // (`CopyKeep`, runtime/common/runtime.kz), so that this frees no block whose address a later argument's copy
+                            // could take
+                            Release(moved, type);
+                        });
                         continue;
                     }
 
@@ -394,12 +442,13 @@ public sealed partial class Emitter
                     continue;
                 }
 
-                if (into is not null && Counted(type))
+                if (crosses)
                 {
-                    // U12: each argument copied where it is evaluated, left to right, in the call's session; a function value with the
-                    // environment of the lambda the checker saw for it
+                    // U12: each argument copied where it is evaluated, or after the last where `after` (T83 1), left to right, in the
+                    // call's session; a function value with the environment of the lambda the checker saw for it
                     var crossing = Convert(EmitExpression(a), TypeOf(a), type, a.Line, owned: false);
-                    Cross(i, crossing, type, CrossingEnvironment(a, type), owned);
+                    var (at, environment) = (i, CrossingEnvironment(a, type));
+                    Copying(() => Cross(at, crossing, type, environment, owned));
                     continue;
                 }
 
@@ -421,6 +470,13 @@ public sealed partial class Emitter
                     Taken(values[i]!, type, taken);
                 }
             }
+        }
+
+        MakeHeap(c.Arguments.Count); // T87 3: where no argument crossed, the heap after the last
+
+        foreach (var copy in held)
+        {
+            copy(); // T83 1: the call has its last argument, and its crossing ones are copied
         }
 
         ReadLate(session ?? copied, (k, v) => values[late[k].Index] = late[k].Read(v));
@@ -445,9 +501,28 @@ public sealed partial class Emitter
             var type = Sub(slotType(j));
             if (slotMut(j))
             {
-                if (argument < 0 || Unwrap(c.Arguments[argument].Value) is not NameExpression n)
+                var given = argument < 0 ? null : Unwrap(c.Arguments[argument].Value);
+                if (FieldPath(given) is (var root, var members))
                 {
-                    throw Unsupported(c.Line, "a `mut` parameter given anything but a variable (M7)");
+                    if (EndsAtWeakField(members[^1]))
+                    {
+                        // M7 (the owner, 2026-11-25, issue 646, "Data fields only"): a `weak` reference on the path stays out; the
+                        // checker types the path as the strong `T?` its read gives (R3), so a callee of `mut T?` would write a strong
+                        // reference into the field's weak place
+                        throw Unsupported(c.Line, "a path to a `weak` field passed as `mut` (M7, R3)");
+                    }
+
+                    // M7 (the owner, 2026-11-25, issue 646, "Decide + build" and "Copy if shared"): a path of `data` fields from a `mut`
+                    // variable or parameter, the place at its end, taken after the other arguments ran; a block on the path that another
+                    // value holds is copied first (M4) and one the variable holds alone is written where it stands, so that the place of
+                    // the first of two paths of one variable, `Two(mut p.A, mut p.B)`, stays where the second is taken
+                    arguments.Add($"ptr {WritablePath(root, members, shared: true).Place}");
+                    continue;
+                }
+
+                if (given is not NameExpression n)
+                {
+                    throw Unsupported(c.Line, MutArgumentLeftOut(given));
                 }
 
                 if (Model.IsImplicitField(n, out _, out var field) && field is not null)
@@ -480,6 +555,54 @@ public sealed partial class Emitter
     }
 
     private static (Expression Value, Unit File)? Default(Expression? d, Unit declaredIn) => d is null ? null : (d, declaredIn);
+
+    /// <summary>
+    /// M7 (issue 646): the root and the members of a path of <c>data</c> fields from a variable or a parameter, <c>b.Home.Tags</c>, each
+    /// member read on a <c>data</c> value; null for a name alone and for any other argument, a path through an item, an entry, a call's
+    /// result, a field of the instance named alone or a class instance among them.
+    /// </summary>
+    private (NameExpression Root, List<MemberAccess> Members)? FieldPath(Expression? given)
+    {
+        var members = new List<MemberAccess>();
+        var target = given;
+        while (target is MemberAccess m)
+        {
+            if (m.Conditional || (Types.NonNull(TypeOf(m.Target)) ?? TypeOf(m.Target)) is not DataType)
+            {
+                return null;
+            }
+
+            members.Insert(0, m);
+            target = Unwrap(m.Target);
+        }
+
+        return members.Count > 0 && target is NameExpression root && !Model.IsImplicitField(root, out _, out _) ? (root, members) : null;
+    }
+
+    /// <summary>M7, R3: whether the last member of a path of <c>data</c> fields names a <c>weak</c> field.</summary>
+    private bool EndsAtWeakField(MemberAccess last)
+    {
+        var data = (DataType)(Types.NonNull(TypeOf(last.Target)) ?? TypeOf(last.Target));
+        return Layout.Fields(data)[Layout.FieldIndex(data, last.Member)] is WeakRefType;
+    }
+
+    /// <summary>
+    /// M7: the text of a <c>mut</c> argument the build does not pass, naming its form: the owner's answer of 2026-11-25 on issue 646,
+    /// "Data fields only", leaves a path from a field of the instance named alone in its method (K7) out. The checker refuses an item, an
+    /// entry, a path through a class instance reached from a variable and a path through a `weak` reference before the emitter.
+    /// </summary>
+    private string MutArgumentLeftOut(Expression? given)
+    {
+        var at = given;
+        while (at is MemberAccess m)
+        {
+            at = Unwrap(m.Target);
+        }
+
+        return given is MemberAccess && at is NameExpression root && Model.IsImplicitField(root, out _, out _)
+            ? "a path through a class instance passed as `mut` (M7)"
+            : "a `mut` parameter given anything but a variable or a path of `data` fields from one (M7)";
+    }
 
     /// <summary>A parameter's or a field's default (D11), read in the file that declares it.</summary>
     private string EmitDefault(Unit declaredIn, Expression d, KurzType type, bool owned)

@@ -232,6 +232,7 @@ public sealed partial class Checker
         RawBlock r => Muts(r.Body),
         WithinStatement w => Muts(w.Bound).Concat(Muts(w.Body)),
         AssertionStatement a => Muts(a.Condition),
+        AdvanceStatement a => Muts(a.Duration),
         _ => [],
     };
 
@@ -243,7 +244,35 @@ public sealed partial class Checker
 
     /// <summary>What a call holds while its arguments run: the receiver of a method, or the value of a variable or a field it calls (F11).</summary>
     private IReadOnlyList<Held> Callee(CallExpression c) =>
-        c.Callee is MemberAccess { Conditional: false } m && (FieldOf(m) is null || (model.HasCall(c) && model.CallOf(c).Kind == CallKind.DataMethod)) ? HeldBy(m.Target) : HeldBy(c.Callee);
+        model.IsChainCall(c, out _) ? ChainHeld((MemberAccess)c.Callee)
+        : c.Callee is MemberAccess { Conditional: false } m && (FieldOf(m) is null || (model.HasCall(c) && model.CallOf(c).Kind == CallKind.DataMethod)) ? HeldBy(m.Target) : HeldBy(c.Callee);
+
+    /// <summary>
+    /// N5: what a call after <c>?.</c> or <c>?[</c> holds while its arguments run: the value it is called on, of an entry of a map the
+    /// map and the key, and after a member, an item or a call of the chain the value the chain started from.
+    /// </summary>
+    private IReadOnlyList<Held> ChainHeld(MemberAccess m)
+    {
+        var target = Unwrap(m.Target);
+        if (!m.Conditional)
+        {
+            while (target is MemberAccess { Conditional: false } or CallExpression { Callee: MemberAccess { Conditional: false } })
+            {
+                target = Unwrap(target is MemberAccess member ? member.Target : ((MemberAccess)((CallExpression)target).Callee).Target);
+            }
+
+            target = Unwrap(target switch
+            {
+                MemberAccess member => member.Target,
+                IndexExpression index => index.Target,
+                CallExpression call => ((MemberAccess)call.Callee).Target,
+                _ => target,
+            });
+            return HeldBy(target);
+        }
+
+        return target is IndexExpression i && model.HasType(i.Target) && model.TypeOf(i.Target).Type is MapType ? [.. HeldBy(i.Target), .. HeldBy(i.Index)] : HeldBy(target);
+    }
 
     /// <summary>The field of a data value a member names, or null for any other member.</summary>
     private FieldSymbol? FieldOf(MemberAccess m) =>

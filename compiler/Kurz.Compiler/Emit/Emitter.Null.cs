@@ -137,9 +137,11 @@ public sealed partial class Emitter
     /// <summary>
     /// N5: a member of a chain of <c>?.</c>, a value of its own that the caller makes a temporary of: <c>null</c> where the value it is
     /// read from is null, which stops the rest of the chain, and otherwise the member of that value's case, of its own type
-    /// <paramref name="member"/>, made a value of the chain's nullable type.
+    /// <paramref name="member"/>, made a value of the chain's nullable type. Without <paramref name="retain"/> the member is borrowed from
+    /// the value it was read from, for a <c>mut</c> call on its place (<see cref="EmitChainCall"/>), so that the call finds a list or a map
+    /// no other value holds and changes it where it is (M3, issue 630).
     /// </summary>
-    private string EmitChainMember(MemberAccess m, KurzType member, UnionType result)
+    private string EmitChainMember(MemberAccess m, KurzType member, UnionType result, bool retain = true)
     {
         var targetType = (UnionType)TypeOf(m.Target);
         var inner = Types.NonNull(targetType)!;
@@ -157,12 +159,115 @@ public sealed partial class Emitter
         {
             var payload = Payload(target, targetType, inner);
             var value = MemberOf(m, () => payload, inner, member);
-            var owned = Counted(member) && !Take(value) ? Retained(value, member) : value;
+            var owned = retain && Counted(member) && !Take(value) ? Retained(value, member) : value;
             fn.Emit($"store {Ir(result)} {Convert(owned, member, result, m.Line)}, ptr {slot}");
         });
         fn.Branch(done);
         fn.Block(done);
         return fn.Value($"load {Ir(result)}, ptr {slot}");
+    }
+
+    // N5: while a call after `?.` or `?[` is emitted, the value it is called on, and of a `mut` call the place it changes, taken when the call takes it
+    private readonly Dictionary<ChainValue, string> chainPayloads = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<ChainValue, Func<string>> chainPlaces = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
+    /// N5: a call after <c>?.</c> or <c>?[</c>, a value of its own that the caller makes a temporary of, none of a <c>void</c> call:
+    /// <c>null</c> where the value before it is null, its arguments not run, which stops the rest of the chain, and otherwise the call it
+    /// is read as on that value's case, its result made a value of the chain's nullable type. A call that changes its receiver tests the
+    /// place the chain names in place, a variable, a path of fields, an item of a list or an entry of a map, holding no count of its
+    /// value, and takes the place where the call takes it, after its arguments for <c>Add</c> (M3), an item's or an entry's in a block
+    /// no other value holds (<see cref="ItemPlace"/>, <see cref="EntryPlace"/>), so that a list or a map no other value holds is changed
+    /// where it is, as Rust's <c>get_mut</c> reaches it; the index or the key runs once, before the arguments. "No count" is that place
+    /// alone: N9 makes such a call on a path a call can change, whose arguments run a call, <c>nullable-unchecked</c>. Every other call is made on the value the chain's target gave,
+    /// kept as the value before the dot of any call is (<see cref="EmitDataMethodCall"/>): one read through a field of an instance holds a
+    /// count of its own to the end of its statement (<c>InstanceField</c>, K2), so that an argument that sets the field to <c>null</c>
+    /// frees nothing the call reads (the line <c>chain-receiver-fenced</c> of the fenced program), and one read from a variable or a path
+    /// of data fields from one is held, a change of it in the arguments being <c>changed-while-held</c> (M7).
+    /// </summary>
+    private string? EmitChainCall(CallExpression c, ChainCall chain)
+    {
+        var target = Unwrap(((MemberAccess)Unwrap(c.Callee)).Target);
+        var result = TypeOf(c) as UnionType;
+        var own = TypeOf(chain.Call);
+        var slot = result is null ? null : fn.Alloca(Ir(result), "chain");
+        var read = fn.Label("read");
+        var stop = fn.Label("stop");
+        var done = fn.Label("chained");
+        var stored = (UnionType)TypeOf(target);
+        string value;
+        Func<string>? place = null;
+        if (chain.Place && target is IndexExpression { Target: var map } entry && TypeOf(map) is MapType mapType)
+        {
+            var key = Convert(EmitExpression(entry.Index), TypeOf(entry.Index), mapType.Key, entry.Index.Line);
+            var at = fn.Value($"call ptr {EntryPeek(mapType)}(ptr {EmitExpression(map)}, {Ir(mapType.Key)} {key})");
+            var found = fn.Label("found");
+            fn.CondBranch(fn.Value($"icmp eq ptr {at}, null"), stop, found);
+            fn.Block(found);
+            value = AsResult(stored, mapType.Value, fn.Value($"load {Ir(mapType.Value)}, ptr {at}"), entry.Line);
+            place = () => NarrowedPlace(fn.Value($"call ptr {EntryPlace(mapType)}(ptr {CollectionPlace(map)}, {Ir(mapType.Key)} {key})"), mapType.Value, TypeOf(chain.Receiver), entry.Line).Place;
+        }
+        else if (chain.Place && target is IndexExpression { Target: var list } item && TypeOf(list) is ListType listType)
+        {
+            var items = EmitExpression(list);
+            var position = ItemPosition(items, item);
+            value = ListItem(items, position, listType);
+            place = () => NarrowedPlace(fn.Value($"call ptr {ItemPlace(listType)}(ptr {CollectionPlace(list)}, i64 {position})"), listType.Element, TypeOf(chain.Receiver), item.Line).Place;
+        }
+        else if (chain.Place)
+        {
+            // issue 630: after a member of the chain, `cfg?.Items`, the place holds the member's own type, which the chain made nullable,
+            // and the member is borrowed for the test of `null`, so that the call changes a list no temporary holds
+            KurzType held = stored;
+            if (target is MemberAccess member && Model.IsChainMember(member, out var memberType))
+            {
+                held = Sub(memberType);
+                value = EmitChainMember(member, held, stored, retain: false);
+            }
+            else
+            {
+                value = InstanceFieldPlace(target) is { } field ? fn.Value($"load {Ir(stored)}, ptr {field}") : EmitExpression(target);
+            }
+
+            place = () => NarrowedPlace(CollectionPlace(target), held, TypeOf(chain.Receiver), target.Line).Place;
+        }
+        else
+        {
+            value = EmitExpression(target);
+        }
+
+        fn.CondBranch(IsCase(Tag(value, stored), stored, Types.Null), stop, read);
+        fn.Block(stop);
+        if (slot is not null)
+        {
+            fn.Emit($"store {Ir(result!)} {MakeUnion(result!, Types.Null, "zeroinitializer")}, ptr {slot}");
+        }
+
+        fn.Branch(done);
+        fn.Block(read);
+        chainPayloads[chain.Receiver] = WithoutNull(value, stored);
+        if (place is not null)
+        {
+            chainPlaces[chain.Receiver] = place;
+        }
+
+        InRegion(() =>
+        {
+            if (slot is null)
+            {
+                EmitCall(chain.Call);
+                return;
+            }
+
+            var made = EmitExpression(chain.Call);
+            var owned = Counted(own) && !Take(made) ? Retained(made, own) : made;
+            fn.Emit($"store {Ir(result!)} {Convert(owned, own, result!, c.Line)}, ptr {slot}");
+        });
+        chainPayloads.Remove(chain.Receiver);
+        chainPlaces.Remove(chain.Receiver);
+        fn.Branch(done);
+        fn.Block(done);
+        return slot is null ? null : fn.Value($"load {Ir(result!)}, ptr {slot}");
     }
 
     /// <summary>

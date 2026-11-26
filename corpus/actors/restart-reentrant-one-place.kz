@@ -1,0 +1,47 @@
+// expect: throws deadlock at 19
+// | 0
+// threads: 1
+// rules: U22
+
+// at their restarts two `A`s' constructors each wait on `B.Ask`, whose call back waits in the inbox for that constructor, both from
+// one place of `Ask`: the error line names that place with the count of its calls and ends with a colon, and no line stands under it
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return vouch x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+d = spawn B()
+c = spawn A(d)
+print(a.Get() + c.Get())
+b.Set(a)
+d.Set(c)
+send a.Fail()
+send c.Fail()
+print(a.Get())

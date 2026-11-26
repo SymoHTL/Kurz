@@ -1,0 +1,51 @@
+// expect: output
+// | 0
+// | 5
+// | note 3
+// | 5
+// threads: 1
+// rules: U22
+
+// at its restart `A`'s constructor waits on `B.Ask`, whose `send` of `Note` waits in `A`'s inbox behind that constructor and behind the
+// top-level code's `Get`, and runs on the new instance
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            send x.Note()
+            return 5
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+    List<int> items = [1, 2, 3]
+
+    pub void Note() {
+        print("note {items.Count}")
+    }
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Get())
+b.Set(a)
+send a.Fail()
+print(a.Get())
+print(a.Get())

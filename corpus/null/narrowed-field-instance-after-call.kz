@@ -1,0 +1,20 @@
+// expect: error nullable-unchecked at 19
+// rules: N9
+
+// a `mut` call on a narrowed path through a nullable `mut` field of an instance, whose arguments run a call, reads the path
+// after that call, which ends the narrowing: the error it gets with that call on the line before it
+class Box {
+    pub mut List<int> Items = [1]
+}
+
+class Shelf(mut Box? B)
+
+int Drop(Shelf s) {
+    s.B = null
+    return 5
+}
+
+shelf = Shelf(Box())
+if shelf.B != null {
+    shelf.B.Items.Add(Drop(shelf))
+}

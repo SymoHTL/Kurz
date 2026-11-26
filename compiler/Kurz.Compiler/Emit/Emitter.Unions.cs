@@ -243,6 +243,10 @@ public sealed partial class Emitter
                     return null;
                 }
 
+            case TypePattern tp when type is UnionType voidUnion && Sub(Model.PatternTypeOf(tp)) is VoidType:
+                // the `void` case has no payload: its arm takes the value whose tag is the case's, with no slot (issue 625, the owner, comment 7141775138)
+                fn.CondBranch(IsCase(tag!, voidUnion, voidUnion.Cases.First(c => c is VoidType)), body, next);
+                return null;
             case TypePattern tp:
                 {
                     var armType = Sub(Model.PatternTypeOf(tp));
@@ -423,13 +427,24 @@ public sealed partial class Emitter
             {
                 var armType = Sub(Model.PatternTypeOf(tp));
                 taken.Add(armType);
-                elseCase = (fn.Value($"load {Ir(armType)}, ptr {caseSlot}"), armType);
-                held = (caseSlot!, armType);
+                if (armType is VoidType)
+                {
+                    // the `void` case has no payload, so `Test` made no slot: the arm holds nothing and loads nothing, as a `match` arm of it
+                    // (issue 625, the owner, comment 7141775138), and a bare `throw` in it reaches the text of a `void`, which is not supported
+                    elseCase = (string.Empty, armType);
+                }
+                else
+                {
+                    elseCase = (fn.Value($"load {Ir(armType)}, ptr {caseSlot}"), armType);
+                    held = (caseSlot!, armType);
+                }
             }
             else if (arm.Pattern is ElsePattern)
             {
                 hasElse = true;
-                elseCase = (value, union);
+                elseCase = success is VoidType ? Reached(value, union, tag, rest)
+                    : rest.FirstOrDefault(c => c is VoidType) is { } none ? Beside(value, union, tag, none, taken, rest.Where(c => !taken.Any(t => TakesCase(c, t))).ToList())
+                    : (value, union);
                 if (Counted(union))
                 {
                     held = (fn.Alloca(Ir(union), "case"), union);
@@ -469,6 +484,41 @@ public sealed partial class Emitter
             Leave(value, union, left, line);
         }
     }
+
+    /// <summary>
+    /// O7 with A7: the case value that reached the arm <c>else</c> over a union whose success is <c>void</c>, which has no text, as a value
+    /// of the cases beside the success, which a bare <c>throw</c> there throws: of one case, its value; of more, a union of them, by the
+    /// tag. A union whose success has a value has a text, the text of its case, and is thrown as it is.
+    /// </summary>
+    private (string Value, KurzType Type) Reached(string value, UnionType union, string tag, List<KurzType> rest)
+    {
+        if (rest.Count == 1)
+        {
+            return (Payload(value, union, rest[0]), rest[0]);
+        }
+
+        var cases = new UnionType(rest);
+        var slot = fn.Alloca(Ir(cases), "case");
+        var done = fn.Label("reached");
+        ByCase(tag, union, rest, c =>
+        {
+            fn.Emit($"store {Ir(cases)} {MakeUnion(cases, c, Payload(value, union, c))}, ptr {slot}");
+            fn.Branch(done);
+        });
+        fn.Block(done);
+        return (fn.Value($"load {Ir(cases)}, ptr {slot}"), cases);
+    }
+
+    /// <summary>
+    /// O7 with A7: the case value that reached the arm <c>else</c> over a union whose success has a value and which holds a <c>void</c> case
+    /// beside it, which has no text, so that the union has none either. Where an arm before it <paramref name="taken"/> took the <c>void</c>
+    /// case, the <paramref name="reached"/> cases, those no arm before it took, are the cases that reach the arm, and its value is theirs, as
+    /// <see cref="Reached"/> gives it, which the throw sets read too. Where none took it, the <c>void</c> case reaches the arm, whose bare
+    /// <c>throw</c> the checker refuses (O7, issue 650), so nothing reads its case: the <c>void</c> case, which holds nothing, and no code,
+    /// since <see cref="Reached"/> branches to nothing on a tag outside its cases.
+    /// </summary>
+    private (string Value, KurzType Type) Beside(string value, UnionType union, string tag, KurzType none, List<KurzType> taken, List<KurzType> reached) =>
+        !taken.Any(t => t is VoidType) || reached.Count == 0 ? (string.Empty, none) : Reached(value, union, tag, reached);
 
     /// <summary>O5: what an arm of <c>else</c> does; in a block, its last statement: the value it recovers with, or what it does.</summary>
     private void ElseArm(Statement body, KurzType success, string? slot)

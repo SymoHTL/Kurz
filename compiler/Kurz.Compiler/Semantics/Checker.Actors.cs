@@ -186,7 +186,7 @@ public sealed partial class Checker
     {
         foreach (var d in unreadActors)
         {
-            typeContext = [.. d.TypeParameters.Where(p => p.Constant is null).Select(p => new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null })];
+            typeContext = [.. d.TypeParameters.Where(p => p.Constant is null).Select(p => new TypeParameterSymbol(p.Name, p.Line))];
             var error = ActorDeclarationError(d);
             typeContext = null;
             if (!error && UnreadActorPart(d) is { } part)
@@ -671,6 +671,8 @@ public sealed partial class Checker
             return Typed.Error; // U12: the constructor's arguments cross as a call's do (Q13 of comment 6847932993)
         }
 
+        RecordWaits(s.Call); // section 6, T82 1, T87 3: the heap of a `spawn` made before an argument that can wait is freed at its builder's crash
+
         if (s.Policy is { } policy && !reported && CheckPolicy(policy))
         {
             return Typed.Error; // U25, U16: the policy is read after the arguments, as it is written after them
@@ -905,7 +907,7 @@ public sealed partial class Checker
         sending = outer;
         CallRan();
         RecordThrough(s.Call, typed);
-        if (typed.IsError || model.TryCallOf(s.Call) is not { } call)
+        if (typed.IsError || model.TryCallOf(model.IsChainCall(s.Call, out var chain) ? chain.Call : s.Call) is not { } call) // N5: after `?.`, the call it is read as
         {
             return;
         }
@@ -1039,8 +1041,10 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// U4, U17: each argument of the message <paramref name="c"/> that runs a call as it is evaluated (<see cref="Calls"/>), which can wait,
-    /// recorded for the emitter, which builds the message in a heap of its own where any argument is such (U12, U21). The arguments written
+    /// U4, U17: each argument of the message or the <c>spawn</c> <paramref name="c"/> that runs a call as it is evaluated (<see cref="Calls"/>),
+    /// which can wait, recorded for the emitter, which builds the message in a heap of its own where any argument is such, and lists the
+    /// heap of the <c>spawn</c> with its builder where such an argument is its first crossing one or comes after it (U12, U21; section 6,
+    /// "T82 1", assumed there, and "T87 3"). The arguments written
     /// at the call are all: a parameter's default is a constant expression (F12), which runs no call and cannot wait.
     /// </summary>
     private void RecordWaits(CallExpression c)
@@ -1053,11 +1057,11 @@ public sealed partial class Checker
 
     /// <summary>
     /// U39, U41: the clause <c>within d</c> on a call bounds a call of an actor's method through a reference that waits (U4), its bound read
-    /// as a block's is (U40, <see cref="CheckBound"/>), after the call's arguments, and recorded as one that can wait where it runs a call,
+    /// as a block's is (U40, <see cref="CheckBound"/>, <see cref="Positive"/>), after the call's arguments, and recorded as one that can wait where it runs a call,
     /// as an argument is (<see cref="RecordWaits"/>); on any other call, a <c>send</c>'s (U6), a function's, a class's method's or an
     /// actor's own method called inside it, it is <c>syntax</c>, as <c>send</c> before what is no call of an actor's method is (U14) (U41;
-    /// assumed: T11 of comment 6967625156), the bound then read with no diagnostic, as is that of a call that reported its own error (U41;
-    /// E1), so that a variable it reads counts as read.
+    /// assumed: T11 of comment 6967625156), the bound then read with no diagnostic, as is that of a call that reported its own error (U41,
+    /// E1; assumed: a reading of the build), so that a variable it reads counts as read.
     /// </summary>
     private void CallClause(CallExpression c, Expression bound, Typed result)
     {
@@ -1078,6 +1082,7 @@ public sealed partial class Checker
         }
 
         CheckBound(bound);
+        Positive(bound, "the bound of the call's `within`", "U41, U40");
         if (Calls(bound))
         {
             model.RecordWaitingArgument(bound);
@@ -1111,11 +1116,11 @@ public sealed partial class Checker
 
     /// <summary>
     /// U39, U41: the clause <c>within d</c> on a declaration bounds every call through a reference of a message, a <c>pub</c> method of an
-    /// actor (U4, U9), its number literal, its sign included, read as a block's bound is (U40, <see cref="CheckBound"/>; U41, assumed: a
-    /// reading of the build); on any other declaration, a function's, a class's, a data type's or an interface's method, or an actor's
+    /// actor (U4, U9), its number literal, its sign included, read as a block's bound is (U40, <see cref="CheckBound"/>, <see cref="Positive"/>;
+    /// U41, assumed: a reading of the build); on any other declaration, a function's, a class's, a data type's or an interface's method, or an actor's
     /// method without <c>pub</c>, it is <c>syntax</c>, as <c>send</c> before what is no call of an actor's method is (U14) (U41; assumed:
-    /// T11 of comment 6967625156). An actor the checker does not read has its one diagnostic (<see cref="RefuseUnreadActors"/>; U41, E1),
-    /// and a <c>static</c> method of an actor its <c>not supported</c> (U1).
+    /// T11 of comment 6967625156). An actor the checker does not read has its one diagnostic (<see cref="RefuseUnreadActors"/>; U41, E1;
+    /// assumed: a reading of the build), and a <c>static</c> method of an actor its <c>not supported</c> (U1).
     /// </summary>
     private void CheckDeclarationClauses(IReadOnlyList<Statement> statements)
     {
@@ -1138,6 +1143,7 @@ public sealed partial class Checker
                 {
                     frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = f.Line };
                     CheckBound(bound);
+                    Positive(bound, "the bound of the declaration's `within`", "U41, U40");
                     continue;
                 }
 

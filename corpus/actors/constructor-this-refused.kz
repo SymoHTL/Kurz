@@ -1,0 +1,15 @@
+// expect: error unknown-name at 9
+// rules: U3, K7
+
+actor B {
+    pub int Ask(A x) => 0
+}
+
+actor A(B Other) {
+    int first = Other.Ask(this)
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+}
+
+print(spawn A(spawn B()).Peek())

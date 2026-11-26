@@ -1,0 +1,22 @@
+// expect: output
+// | circle 1
+// | none
+// rules: O10
+
+data Circle(int R)
+
+void | Circle Make(bool b) {
+    if b {
+        return Circle(1)
+    }
+}
+
+string D(bool b) {
+    return match Make(b) {
+        Circle c => "circle {c.R}"
+        void => "none"
+    }
+}
+
+print(D(true))
+print(D(false))

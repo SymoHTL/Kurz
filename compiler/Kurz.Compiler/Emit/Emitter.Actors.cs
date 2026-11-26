@@ -51,7 +51,10 @@ public sealed partial class Emitter
     /// the constructor and the defaults of the body run here, before <c>spawn</c> gives the reference, which on one thread is the new
     /// actor running its constructor while the spawner waits (U3). The record keeps the size of the actor's stack, the one its <c>stack</c>
     /// clause writes or 2 MiB, which the runtime rounds up to its page and raises to its floor (U1; section 6, "2 MiB + clause"). The
-    /// actor's heap is made first, its first page sized to the record and the state (section 3), and the arguments cross into it as a
+    /// actor's heap, its first page sized to the record and the state (section 3), is made just before the first argument that crosses
+    /// into it, or after the last argument where none crosses, so that a raise of an argument before that point finds no heap, as Rust's
+    /// <c>Box::new</c> evaluates a value's fields before it allocates (section 6, the owner, 2026-11-23, #519, comment 7095825398,
+    /// "T87 3"; <see cref="Arguments"/>), and the arguments cross into it as a
     /// message's do (U12, <see cref="Crossed"/>); the constructor and the defaults then allocate in it, as the actor's code does, and
     /// the spawner's heap is served again once the state stands. The spawner's heap, the supervisor's, holds the block of the actor's
     /// restart with a copy of each argument the constructor is given (<see cref="KeptArguments"/>; U22) where the policy restarts, the policy
@@ -61,7 +64,15 @@ public sealed partial class Emitter
     /// runs, so that the variables it takes by value are taken after the arguments ran, as the checker reads the block after them and as
     /// it is written, and the function that runs it (<see cref="Deciding"/>; U28, U31). While the constructor runs, the runtime names the actor as the one whose
     /// constructor runs, so that an actor it spawns is its child (the runtime's <c>Building</c>; U13), and its record says that its
-    /// constructor runs until <c>ActorBuilt</c>, so that an escalation that reaches it is its spawner's crash (U3, U25).
+    /// constructor runs until <c>ActorBuilt</c>, so that an escalation that reaches it is its spawner's crash (U3, U25). Where an
+    /// argument evaluated after the heap is made, the first that crosses among them, can raise (<see cref="Raises"/>) or wait
+    /// (<see cref="SemanticModel.CanWait"/>), the actor's heap is listed with the actor whose code spawns, as a message's heap of its own is
+    /// (the runtime's <c>SpawnHeapNew</c>), so that the crash a raise of an argument makes frees it with the copies made into it, as
+    /// Rust drops the parts of a value it was building, and is taken off that list once the last argument is evaluated, before
+    /// <c>ActorNew</c> takes the actor's number, its slot and its place under its supervisor, so that such a raise takes none of them
+    /// (section 6, the owner, 2026-11-21, #519, comment 7060155980, "T82 1", the heap freed whole and the arguments that can wait
+    /// assumed there, and "T87 3", the first crossing argument's own raise assumed there); a case propagated out of a later argument
+    /// frees it as a message's heap of its own (<see cref="EndHeaps"/>).
     /// </summary>
     private string EmitActorSpawn(SpawnExpression s)
     {
@@ -70,14 +81,34 @@ public sealed partial class Emitter
         var block = layout.ClassBlock(symbol);
         var stack = StackOf(symbol);
         var supervisor = fn.Value($"call ptr {StdFunction("HeapCurrent")}()");
-        var heap = fn.Value($"call ptr {RuntimeFunction("ActorHeapNew")}(i64 {IrSize(block)})");
-        var left = HeapBegun(heap, "HeapLeft");
+        string? heap = null;
+        string? left = null;
+        var listed = false;
+
+        // T87 3: the heap made where the argument at `from` is evaluated next, the first that crosses, or after the last where none does
+        string HeapAt(int from)
+        {
+            if (heap is null)
+            {
+                listed = s.Call.Arguments.Skip(from).Any(a => Model.CanWait(a.Value) || Raises(a.Value));
+                heap = fn.Value($"call ptr {RuntimeFunction(listed ? "SpawnHeapNew" : "ActorHeapNew")}(i64 {IrSize(block)})");
+                left = HeapBegun(heap, listed ? "MessageHeapFree" : "HeapLeft");
+            }
+
+            return heap;
+        }
+
         var spawner = fn.Alloca("ptr", "spawner");
         var building = fn.Alloca("ptr", "building");
         var side = "null";
         var policy = s.Policy ?? symbol.Declaration.Clauses?.FirstOrDefault(c => c.Policy is not null)?.Policy ?? new CrashPolicy(s.Line, "restart");
         var state = Construct(symbol, s.Call, info, () =>
         {
+            if (listed)
+            {
+                fn.Emit($"call void {RuntimeFunction("SpawnHeapTaken")}(ptr {heap})");
+            }
+
             var state = fn.Value($"call ptr {RuntimeFunction("ActorNew")}(ptr {heap}, i64 {IrSize(block)}, i64 {stack}, ptr {side}, ptr {ActorName(symbol)})");
             fn.Emit($"store ptr null, ptr {left}");
             fn.Emit($"store i64 1, ptr {state}");
@@ -85,7 +116,7 @@ public sealed partial class Emitter
             fn.Emit($"store ptr {fn.Value($"call ptr {RuntimeFunction("Building")}(ptr {state})")}, ptr {building}");
             fn.Emit($"store ptr {fn.Value($"call ptr {StdFunction("HeapUse")}(ptr {heap})")}, ptr {spawner}");
             return state;
-        }, into: heap, kept: (arguments, types) => side = policy.Word switch
+        }, making: HeapAt, kept: (arguments, types) => side = policy.Word switch
         {
             "restart" => KeptArguments(s.Call, info, symbol, arguments, types, supervisor, policy),
             "escalate" => Escalating(supervisor),
@@ -120,8 +151,9 @@ public sealed partial class Emitter
     /// <summary>
     /// U51 to U54 (assumed: T27 to T33 of issue 519, comment 6983903100, at their defaults): the function a message to the name of the
     /// <c>per node</c> type <paramref name="symbol"/> calls before its arguments run, made once for the type with three globals of its
-    /// own, declared here, once, where its entry is set: its cell, the lock, the slot and the number of its one actor (the runtime's
-    /// <c>PerFind</c>); its block of a restart, as <see cref="KeptArguments"/> makes a <c>spawn</c>'s with no argument kept, naming the
+    /// own, declared here, once, where its entry is set: its cell, whose words are the lock, the slot and the number of its one
+    /// actor (the runtime's <c>PerFind</c>); its block of a restart, as <see cref="KeptArguments"/> makes a <c>spawn</c>'s with no
+    /// argument kept, naming the
     /// function of its restart (<see cref="Restarted"/>), or none for <c>escalate</c>, the policy after its name or <c>restart</c> (U27),
     /// and no block for <c>stop</c>; and its knobs where <c>after</c> or <c>max N in</c> is written, marked as a <c>per node</c> type's
     /// (<see cref="KnobsValue"/>), whose place no <c>restart-limit</c> names, so that it holds none. The function finds the actor that
@@ -129,7 +161,8 @@ public sealed partial class Emitter
     /// one with that block of a restart, whose supervisor <c>ActorNew</c> takes as at a <c>spawn</c>, the code that runs (U53), stores it
     /// in the cell before its constructor runs (<c>PerStarted</c>), so that a message that reaches it meanwhile waits for it, and runs the
     /// constructor, the defaults of its body, on the stack of that code, as a <c>spawn</c> runs it (<see cref="EmitActorSpawn"/>; U3), so
-    /// that a throw there is that code's crash, which ends the actor half built, its supervisor's child; then the root becomes its
+    /// that a throw there is that code's crash, at the throw's line where T29's words name the call's (U52; assumed: T37 of issue
+    /// 519, comment 6991862214, put to the owner), which ends the actor half built, its supervisor's child; then the root becomes its
     /// supervisor (<c>PerBuilt</c>). A message to it from the code its constructor runs waits for a constructor that waits for it, the
     /// top-level code's <c>deadlock</c> on one thread (U18).
     /// </summary>
@@ -254,7 +287,9 @@ public sealed partial class Emitter
     /// (<see cref="PerStart"/>): a copy of each kept argument in the actor's heap, the one the allocation
     /// entry serves, the state's counts at one, and the constructor run on them as at the <c>spawn</c>, a constructor of the body
     /// borrowing them, since <c>move</c> before a parameter of a constructor is <c>not supported</c> (<c>Semantics/Checker.Constructors.cs</c>),
-    /// so that the copies are released after it, the primary one owning them, then the defaults of the body (K7); then the message freed. A
+    /// so that the copies are released after it, the primary one owning them, then the defaults of the body (K7); then the end of the
+    /// constructor given to the runtime (<c>Rebuilt</c>), since a call of the restart's chain that reaches the actor while the constructor
+    /// runs waits in its inbox (U22; section 6, the owner, 2026-11-20, #599, comment 7051501153, "Option 1"); then the message freed. A
     /// throw there is the actor's own crash (U3).
     /// </summary>
     private string Restarted(ClassSymbol symbol, ConstructorSymbol? constructor, List<KurzType> types, List<string?> copiesInto) =>
@@ -316,6 +351,7 @@ public sealed partial class Emitter
                 }
             }
 
+            fn.Emit($"call void {RuntimeFunction("Rebuilt")}(ptr %a0)"); // U22: the calls of its chain get in again (the runtime's `Moved`)
             fn.Emit($"call void {StdFunction("Free")}(ptr %a1, i64 56)"); // the restart's message (the runtime's `Restart`)
             fn.Return(null);
         });
@@ -533,7 +569,8 @@ public sealed partial class Emitter
     /// <summary>
     /// At a region's end, or a jump out of it, after the region let go of its copies, the heap of each <c>spawn</c> begun in it that a
     /// case propagated out of an argument after it left without its actor, and of each message built in a heap of its own that it left
-    /// unqueued, freed whole (the runtime's <c>HeapLeft</c> and <c>MessageHeapFree</c>).
+    /// unqueued, freed whole (the runtime's <c>HeapLeft</c>, and <c>MessageHeapFree</c> for those and for a <c>spawn</c>'s heap listed with
+    /// its builder, <see cref="EmitActorSpawn"/>).
     /// </summary>
     private void EndHeaps(List<(string Value, KurzType Type)> temporaries)
     {
@@ -555,6 +592,7 @@ public sealed partial class Emitter
     private void EmitWithin(WithinStatement w)
     {
         var bound = EmitExpression(w.Bound);
+        Positive(w.Bound, bound);
         regionBlocks[regions[^1]] = fn.Value($"call i64 {RuntimeFunction("BlockEnter")}(i64 {bound})");
         EmitBlock(w.Body);
     }
@@ -569,20 +607,74 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// U39, U19: whether the bound of a call's clause can raise with no call in it, an index out of range or an operator's
-    /// <c>overflow</c> or <c>divide-by-zero</c> (chapter 12), which crashes the actor whose code runs it: anything but a duration's literal,
-    /// a number with its unit (L14), its sign included, or a read of a name, either in brackets, a bound of another type being
-    /// <c>type-mismatch</c> (U39, U40); a bound that runs a call, a name that runs a property's among them, can wait
-    /// (<see cref="SemanticModel.CanWait"/>).
+    /// U40, U41: a bound of <c>within</c> that is no constant (<see cref="Checker.ConstantBound"/>), a block's or a call's clause's, read
+    /// where it is read, at the block's entry before its first statement or at the call after its arguments and before its queueing, and
+    /// of zero or less the run-time error <c>invalid-input</c> at the line where the bound starts (<see cref="Checker.BoundLine"/>), whose text the runtime's <c>InvalidBound</c> writes,
+    /// the crash of the code that runs it (section 6, the owner, 2026-11-20, #519, comment 7051492844, "T4 (2)"; assumed: T78 and T81 of
+    /// comment 7055305138, and T79 of it as corrected on 2026-11-21); a constant one, a literal or one folded from literals, the checker
+    /// refused where it is zero or less, and it takes no compare.
     /// </summary>
-    private static bool Raises(Expression bound) => bound switch
+    private void Positive(Expression bound, string value)
+    {
+        if (Checker.ConstantBound(Model, bound))
+        {
+            return;
+        }
+
+        var refused = fn.Label("bound.refused");
+        var positive = fn.Label("bound.positive");
+        fn.CondBranch(fn.Value($"icmp sgt i64 {value}, 0"), positive, refused);
+        fn.Block(refused);
+        fn.Emit($"call void {RuntimeFunction("InvalidBound")}(i64 {value}, %kz.str {StringValue(unit.File)}, i32 {Number(Checker.BoundLine(bound))})");
+        fn.Unreachable();
+        fn.Block(positive);
+    }
+
+    /// <summary>
+    /// U39, U19: whether the bound of a call's clause can raise with no call in it, an index out of range or an operator's
+    /// <c>overflow</c> or <c>divide-by-zero</c> (chapter 12), and <c>invalid-input</c> for a bound of zero or less (<see cref="Positive"/>),
+    /// which crashes the actor whose code runs it: anything but a constant as T25 reads one, a literal or one folded from literals
+    /// (<see cref="Checker.ConstantBound"/>), a read of a name among such bounds, a bound of another type being <c>type-mismatch</c> (U39,
+    /// U40); a bound that runs a call, a name that runs a property's among them, can wait (<see cref="SemanticModel.CanWait"/>).
+    /// <see cref="EmitMessage"/> reads it of the bound of a call's clause; of an argument of a message it reads <see cref="Raises"/>.
+    /// </summary>
+    private bool BoundRaises(Expression bound) => !Checker.ConstantBound(Model, bound);
+
+    /// <summary>
+    /// U39, U19: whether an expression can raise with no call in it, an index out of range or an operator's <c>overflow</c> or
+    /// <c>divide-by-zero</c> (chapter 12), which crashes the actor whose code runs it: anything but a literal, a number, a string with no
+    /// hole, a <c>char</c>, a <c>bool</c>, <c>null</c> or a duration's, a number with its unit (L14), a number's sign and a duration's included, which the checker folds into a constant, or a read of a
+    /// name, either in brackets; an expression that runs a call, a name that runs a property's among them, can wait
+    /// (<see cref="SemanticModel.CanWait"/>). <see cref="EmitMessage"/> reads it of each argument of a message
+    /// after one that crosses (<see cref="RaisesAfterCrossing"/>; section 6, the owner, 2026-11-20, #519, comment 7051492844, "T24 (1)",
+    /// and 2026-11-21, comment 7060155980, "T83 1", the arguments read as a bound is, assumed there), and of each argument of a
+    /// <c>spawn</c> from its first crossing one on (<see cref="EmitActorSpawn"/>; "T82 1" and "T87 3"), and the bound of a call's clause,
+    /// which raises <c>invalid-input</c> too where it is zero or less (U40, U41), by <see cref="BoundRaises"/>.
+    /// </summary>
+    private static bool Raises(Expression e) => e switch
     {
         ParenthesizedExpression p => Raises(p.Inner),
-        UnitLiteral => false,
-        UnaryExpression { Operand: UnitLiteral } => false,
+        IntegerLiteral or RealLiteral or UnitLiteral or CharLiteral or BoolLiteral or NullLiteral => false,
+        StringLiteral s => !s.IsPlain,
+        UnaryExpression { Operand: UnitLiteral or IntegerLiteral or RealLiteral } => false,
         NameExpression => false,
         _ => true,
     };
+
+    /// <summary>
+    /// Section 6: whether an argument of the message <paramref name="c"/> of the method <paramref name="f"/> after one that crosses
+    /// into the callee's heap, a value that holds a block (U12), can raise with no call in it (<see cref="Raises"/>), whose raise would
+    /// crash the builder with the copies made before it unqueued, were they made where they are evaluated: the crossing arguments of such
+    /// a message are then copied after its last argument, so that a raise leaves no copy (<see cref="Arguments"/>; the owner, 2026-11-20,
+    /// #519, comment 7051492844, "T24 (1)", and 2026-11-21, comment 7060155980, "T83 1", which copies them so in place of the heap of
+    /// the message's own of T24 (1)). An argument that raises before every crossing one leaves no copy, and one that runs a call can
+    /// wait and builds the message in a heap of its own (<see cref="SemanticModel.CanWait"/>).
+    /// </summary>
+    private bool RaisesAfterCrossing(CallExpression c, CallInfo info, FunctionSymbol f)
+    {
+        var first = Enumerable.Range(0, c.Arguments.Count).FirstOrDefault(i => info.Binding[i] >= 0 && Counted(Sub(f.Parameters[info.Binding[i]].Type)), -1);
+        return first >= 0 && c.Arguments.Skip(first + 1).Any(a => Raises(a.Value));
+    }
 
     /// <summary>
     /// U4, U6, U11: a call of an actor's method as a message: the actor's reference, read first, or, inside it, made from <c>this</c>
@@ -603,11 +695,13 @@ public sealed partial class Emitter
     /// that the arguments and the message would go into (U21), or end (U13): the message is then built in a heap of its own, made for it (the runtime's
     /// <c>MessageHeapNew</c>), and at its queueing copied into the heap the actor has then by the function of its call site that copies it
     /// after a crash, its own heap then freed, as Erlang builds a message in the sender's heap and copies it into the receiver's at its
-    /// send. So is a message whose clause's bound can raise with no call in it (<see cref="Raises"/>), which runs after the message is
+    /// send. So is a message whose clause's bound can raise with no call in it (<see cref="BoundRaises"/>), which runs after the message is
     /// built: its raise crashes the actor whose code builds the message before its queueing, and that crash frees the heap of its own with
     /// the message and the copies of its arguments (the runtime's <c>Fall</c>), which the actor's heap would keep unqueued to the actor's
     /// end. Where no argument can wait, the message is built in the actor's heap, and nothing runs between the read of that heap and the
-    /// queueing that could end the actor. Where the actor ended, the message is built or copied in the heap the caller allocates in (the
+    /// queueing that could end the actor; where an argument can raise after one that crosses (<see cref="RaisesAfterCrossing"/>), the
+    /// crossing arguments are copied into that heap after the last, so that a raise leaves no copy there (<see cref="Arguments"/>;
+    /// section 6, the owner, 2026-11-21, #519, comment 7060155980, "T83 1"). Where the actor ended, the message is built or copied in the heap the caller allocates in (the
     /// runtime's <c>ActorHeap</c>), and its queueing raises <c>actor-gone</c> at the call's line, a <c>send</c>'s too (the runtime's
     /// <c>Enqueue</c>; U6, U20; section 6, the owner, 2026-11-16, #519, comments 6919351399 and 6923513534).
     /// </summary>
@@ -622,10 +716,10 @@ public sealed partial class Emitter
             NameExpression n => Reference(This(n, n.Line)),
             _ => throw new InvalidOperationException($"a message through `{c.Callee.GetType().Name}` at line {c.Line}"),
         };
-        var own = c.Arguments.Select(a => a.Value).Concat(c.Clause()).Any(Model.CanWait) || c.Clause().Any(Raises) ? fn.Value($"call ptr {RuntimeFunction("MessageHeapNew")}()") : null;
+        var own = c.Arguments.Select(a => a.Value).Concat(c.Clause()).Any(Model.CanWait) || c.Clause().Any(BoundRaises) ? fn.Value($"call ptr {RuntimeFunction("MessageHeapNew")}()") : null;
         var left = own is null ? null : HeapBegun(own, "MessageHeapFree");
         var heap = own ?? fn.Value($"call ptr {RuntimeFunction("ActorHeap")}({ReferenceWords(actor)})");
-        var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => Default(f.Declaration!.Parameters[j].Default, owners[f]), cConvention: false, owned: true, into: heap);
+        var arguments = Arguments(c, info, j => f.Parameters[j].Type, _ => false, j => Default(f.Declaration!.Parameters[j].Default, owners[f]), cConvention: false, owned: true, into: heap, after: own is null && RaisesAfterCrossing(c, info, f));
         var message = MessageType(f);
         var block = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr {heap}, i64 {IrSize(message)})");
         var run = MessageRun(f);
@@ -662,10 +756,21 @@ public sealed partial class Emitter
 
         // U39: the call's bound, that of its clause, run after the arguments, at every call it stands on, under a `within` block whose
         // deadline wins over it too (assumed: a reading of the build), else the literal of the method's declaration, the call's clause
-        // winning over the declaration's, which the runtime's `Enqueue` takes where no `within` block runs (assumed in section 6); the
-        // callee's reference and its heap, read before the arguments, stay the callee's while the bound runs, since a bound that
-        // changes the variable the callee was read from, `s.Get() within Swap(mut s)`, is `changed-while-held` (M7), as an argument is
+        // winning over the declaration's, which the runtime's `Enqueue` takes where no `within` block runs (assumed in section 6). The
+        // callee's reference, its two words read before the arguments as a receiver is (F12, U2), is the call's own while the bound
+        // runs; the callee's heap is read before the arguments too only where the message is built in it, its bound none or a
+        // constant (T25), which runs no code and raises nothing, and a message built in a heap of its own reads it at its queueing alone.
+        // A bound that changes the variable the callee was read from, `s.Get() within Swap(mut s)`, or the list it was read from as an item,
+        // `ss[0].Get() within Clear(mut ss)`, is `changed-while-held` (M7), as an argument is; one that gives the field it was read from
+        // another actor, through its instance passed as `mut`, `b.s.Get() within Swap(mut b)`, or in a method of the actor the bound
+        // calls, `helper.Get() within Reset()`, leaves the call with the actor read before the bound, which stands while its slot holds
+        // its number (U2)
         var bound = c.Within is { } clause ? EmitExpression(clause) : f.Declaration!.Within is { } declared ? EmitExpression(declared) : null;
+        if (c.Within is { } read)
+        {
+            Positive(read, bound!); // U41: after the arguments, before the queueing that looks the actor up (assumed: T81 of comment 7055305138)
+        }
+
         var result = f.ReturnType;
         var reply = fn.Alloca(Reply(result), "reply");
         fn.Emit($"store i32 0, ptr {reply}");
@@ -813,14 +918,16 @@ public sealed partial class Emitter
     /// word set once the result stands, an <c>i32</c> that the runtime stores with release and loads with acquire, the activation that
     /// waits on it, which the runtime's <c>ReplyWaiter</c> sets, the call's deadline and the replies before and after it among the
     /// thread's timers, which the runtime's <c>Enqueue</c> and <c>Wait</c> set (U36), the clock at which a crash or an end set the word,
-    /// which the runtime's <c>Signal</c> stores and <c>Wait</c> holds to the deadline (U43), the actor the call reaches, the call's file and
-    /// its line, which the runtime's <c>Enqueue</c> stores and the wait line reads (U60, U63), then, for a method with a result, the heap of
-    /// the caller, which the result is copied into (U12), the field <see cref="ReplyHeap"/>, and the result after it.
+    /// which the runtime's <c>Signal</c> stores and <c>Wait</c> holds to the deadline (U43), the call's place, its file's bytes, their count
+    /// and its line, which the runtime's <c>Enqueue</c> stores and the top-level code's <c>deadlock</c> names where an actor's start keeps the
+    /// call out (the runtime's <c>Kept</c>; U22, U52; section 6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1) and the wait line
+    /// reads (U63), the actor the call reaches, which <c>Enqueue</c> stores and the wait line reads (U60), then, for a method with a result,
+    /// the heap of the caller, which the result is copied into (U12), the field <see cref="ReplyHeap"/>, and the result after it.
     /// </summary>
-    private string Reply(KurzType result) => Types.IsVoid(result) ? "{ i32, ptr, i64, ptr, ptr, i64, ptr, %kz.str, i32 }" : $"{{ i32, ptr, i64, ptr, ptr, i64, ptr, %kz.str, i32, ptr, {Ir(result)} }}";
+    private string Reply(KurzType result) => Types.IsVoid(result) ? "{ i32, ptr, i64, ptr, ptr, i64, ptr, i64, i64, ptr }" : $"{{ i32, ptr, i64, ptr, ptr, i64, ptr, i64, i64, ptr, ptr, {Ir(result)} }}";
 
     /// <summary>The field of the caller's heap in a reply (<see cref="Reply"/>), the result's the one after it.</summary>
-    private const int ReplyHeap = 9;
+    private const int ReplyHeap = 10;
 
     /// <summary>
     /// U37: the function that drops a message of the method <paramref name="f"/> unrun, the third of its call site's table, which the
@@ -953,8 +1060,8 @@ public sealed partial class Emitter
     /// <c>Fell</c> stores it, then the block's value, where it gives one.
     /// </summary>
     private string AttemptReply(KurzType success) => success is Semantics.VoidType
-        ? "{ i32, ptr, i64, ptr, ptr, i64, ptr, %kz.str, i32, ptr, ptr }"
-        : $"{{ i32, ptr, i64, ptr, ptr, i64, ptr, %kz.str, i32, ptr, ptr, {Ir(success)} }}";
+        ? "{ i32, ptr, i64, ptr, ptr, i64, ptr, i64, i64, ptr, ptr, ptr }"
+        : $"{{ i32, ptr, i64, ptr, ptr, i64, ptr, i64, i64, ptr, ptr, ptr, {Ir(success)} }}";
 
     /// <summary>
     /// U46, U47: the function of the message of an <c>attempt</c> whose block has the function type <paramref name="block"/>, which the

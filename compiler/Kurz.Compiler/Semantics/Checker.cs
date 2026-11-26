@@ -53,6 +53,9 @@ public sealed partial class Checker
     private Frame frame = null!;
     private List<TypeParameterSymbol>? typeContext;
     private bool inElseArm;
+    private VariableSymbol? elseArmName; // O7, U12: the name the arm of `else` being checked binds, which its bare `throw` reads
+    private bool elseArmVoid; // O7: the arm of `else` being checked takes a `void` case, which its bare `throw` cannot throw (issue 641)
+    private bool elseArmTakesVoid; // O7: the arm being checked is `else`, and it takes a `void` case no arm before it handled (issue 650)
     private CallExpression? loopSource; // S16: the collection of the `for` loop being checked, the one place `f.Lines()` stands
     private bool realKeepsOwnType;
     private int blockDepth;
@@ -353,8 +356,17 @@ public sealed partial class Checker
     /// <paramref name="text"/> with the rules it cites, <paramref name="rule"/> where the place has one, then the rule of that id
     /// (<see cref="Types.MismatchRule"/>).
     /// </summary>
-    private void ReportMismatch(KurzType from, KurzType to, int line, string text, string? rule = null) =>
+    private void ReportMismatch(KurzType from, KurzType to, int line, string text, string? rule = null)
+    {
+        if (from is TypeParameterType limited && to is InterfaceType face && limited.Symbol.Limits.Contains(face.Symbol))
+        {
+            // T19 with A10: a limit that a type meets by its text alone holds values of types without the interface (Types.Assignable)
+            NotSupported(line, $"a value of `{limited.Symbol.Name}` where its limit `{face.Symbol.Name}` is required, which a type meets by its text alone (A10, T19)");
+            return;
+        }
+
         Report(Types.MismatchId(from, to), line, $"{text} ({(rule is null ? "" : rule + ", ")}{Types.MismatchRule(from, to)})");
+    }
 
     private void NotSupported(int line, string construct) => Add(Diagnostic.NotSupported(line, construct));
 
@@ -428,6 +440,18 @@ public sealed partial class Checker
         RefuseUnreadBases();
         FindBaseCycles();
         pendingPointees = [];
+        foreach (var symbol in dataDeclared.Concat(refusedTypes))
+        {
+            // T19: every data type's limits before any type is resolved, since a use of a generic data type checks its arguments
+            typeContext = symbol.TypeParameters;
+            foreach (var (p, parameter) in symbol.Declaration.TypeParameters.Zip(symbol.TypeParameters))
+            {
+                ResolveLimits(p, parameter);
+            }
+
+            typeContext = null;
+        }
+
         foreach (var symbol in dataDeclared.Concat(refusedTypes))
         {
             ResolveData(symbol);
@@ -754,7 +778,7 @@ public sealed partial class Checker
         foreach (var p in d.TypeParameters)
         {
             RefusePreludeTypeParameter(p);
-            symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
+            symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line));
         }
 
         if (clash)
@@ -1169,14 +1193,6 @@ public sealed partial class Checker
         symbol.Resolved = true;
         var d = symbol.Declaration;
         typeContext = symbol.TypeParameters;
-        foreach (var p in d.TypeParameters)
-        {
-            if (p.Limit is not null)
-            {
-                NotSupported(p.Line, "the limit of a type parameter (T19)"); // not resolved: the one diagnostic of the construct (E1)
-            }
-        }
-
         // D6 gives a data type one base, the data type among the bases wherever it stands; a second one is text no rule gives a
         // meaning (E4); what the checker does not read among them left the type unread before (RefuseUnreadBases), unless the
         // type is a redeclared one, whose bases report it here
@@ -1478,7 +1494,20 @@ public sealed partial class Checker
                 return Types.Error;
             }
 
-            return arguments.Any(Types.IsError) ? Types.Error : new DataType(data, arguments);
+            if (arguments.Any(Types.IsError))
+            {
+                return Types.Error;
+            }
+
+            // T19: the limits at every use that names the type with its arguments, never implied by a signature (Q7 and Q16 of issue
+            // 605, comment 7051071380)
+            if (Unmet(data.TypeParameters.Zip(arguments)) is { } unmet)
+            {
+                Report(ErrorIds.TypeMismatch, n.Line, UnmetText(unmet, data.Name));
+                return Types.Error;
+            }
+
+            return new DataType(data, arguments);
         }
 
         if (classes.TryGetValue(n.Name, out var classSymbol))
@@ -1598,7 +1627,7 @@ public sealed partial class Checker
         foreach (var p in d.TypeParameters)
         {
             RefusePreludeTypeParameter(p);
-            symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null, HasDefault = p.Default is not null });
+            symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasDefault = p.Default is not null });
         }
 
         if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || interfaces.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || flagsTypes.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
@@ -1624,11 +1653,7 @@ public sealed partial class Checker
         typeContext = symbol.TypeParameters;
         foreach (var (p, parameter) in d.TypeParameters.Zip(symbol.TypeParameters))
         {
-            if (p.Limit is not null)
-            {
-                NotSupported(p.Line, "the limit of a type parameter (T19)"); // not resolved: the one diagnostic of the construct (E1)
-            }
-
+            ResolveLimits(p, parameter);
             if (p.Constant is not null)
             {
                 parameter.Constant = ResolveConstantParameter(symbol, p);
@@ -1654,6 +1679,69 @@ public sealed partial class Checker
         if (symbol.TakesC && !modifiedFunctions.Contains(symbol))
         {
             CheckCSignature(symbol, d); // R12, R16
+        }
+    }
+
+    /// <summary>
+    /// T19: the interfaces and the class the limits of a type parameter name, read with the type parameters of its declaration in scope
+    /// (the owner's answers of 2026-11-20 on issue 605, comment 7051071380). A limit names an interface or a class that can have derived
+    /// classes, which every class but an actor can (K6, U1; Q5); any other type, a data type, an enum, a number type, a type parameter,
+    /// a union and a function type among them, is <c>limit-not-interface</c> (Q6), the union and the function type that the parser reads
+    /// there as a reading of Q6; a limit named twice in one list is <c>syntax</c> (Q19). A second class, and a class after an interface,
+    /// are <c>not supported</c>, as a reading of the build, as a class's second base and its base after an interface are (K6, K7). A
+    /// generic interface as a limit, which Q15 lets stand, is <c>not supported</c>. Each limit that is not read leaves the parameter with
+    /// a limit unread, whose members and arguments report nothing more (E1).
+    /// </summary>
+    private void ResolveLimits(TypeParameter p, TypeParameterSymbol parameter)
+    {
+        foreach (var limit in p.Limits)
+        {
+            if (limit is NamedType { } n && genericInterfaces.Contains(n.Name))
+            {
+                NotSupported(limit.Line, "a generic interface as a limit (Q15 of issue 605, T19)");
+                parameter.LimitUnread = true;
+                continue;
+            }
+
+            var type = Resolve(limit);
+            if (Types.IsError(type))
+            {
+                parameter.LimitUnread = true; // its diagnostic is reported (E1)
+            }
+            else if (type is InterfaceType face)
+            {
+                if (parameter.Limits.Contains(face.Symbol))
+                {
+                    Report(ErrorIds.Syntax, limit.Line, $"`{face.Symbol.Name}` is named twice among the limits of `{p.Name}` (T19)");
+                }
+                else
+                {
+                    parameter.Limits.Add(face.Symbol);
+                }
+            }
+            else if (type is ClassType { Symbol: var named })
+            {
+                if (ReferenceEquals(parameter.ClassLimit, named))
+                {
+                    Report(ErrorIds.Syntax, limit.Line, $"`{named.Name}` is named twice among the limits of `{p.Name}` (T19)");
+                }
+                else if (parameter.ClassLimit is not null || parameter.Limits.Count > 0)
+                {
+                    NotSupported(limit.Line, parameter.ClassLimit is not null
+                        ? $"a second class, `{named.Name}`, among the limits of `{p.Name}` (T19)"
+                        : $"the class `{named.Name}` after an interface among the limits of `{p.Name}` (T19)");
+                    parameter.LimitUnread = true;
+                }
+                else
+                {
+                    parameter.ClassLimit = named;
+                }
+            }
+            else
+            {
+                Report(ErrorIds.LimitNotInterface, limit.Line, $"`{type.Text}` is neither an interface nor a class that can have derived classes, which a limit names (T19)");
+                parameter.LimitUnread = true;
+            }
         }
     }
 
@@ -1755,6 +1843,9 @@ public sealed partial class Checker
 
     /// <summary>O10: a function whose success case is <c>void</c> needs no <c>return</c> with a value.</summary>
     private static bool SuccessIsVoid(KurzType type) => type is VoidType || type is UnionType { Cases: [VoidType, ..] };
+
+    /// <summary>F3: a result a bare <c>return</c> gives, <c>void</c> or a union with a <c>void</c> case, the success or another (issue 641).</summary>
+    private static bool HoldsVoid(KurzType type) => type is VoidType || (type is UnionType u && u.Cases.Any(c => c is VoidType));
 
     /// <summary>F12 names the parameters only: the type parameters are matched by their position, and their count makes no difference.</summary>
     private static bool SameParameters(FunctionSymbol a, FunctionSymbol b)
@@ -1878,6 +1969,7 @@ public sealed partial class Checker
             DeclareParameter(p.Name, p.Type, p.Mut, p.Line, node, p.Move);
         }
 
+        ViewParameters(f);
         var returnType = f.ReturnType;
         if (d.ExpressionBody is not null)
         {
@@ -2357,6 +2449,25 @@ public sealed partial class Checker
                 {
                     Report(ErrorIds.ThrowNeedsValue, t.Line, "a bare `throw` stands only in an arm of `else` (O7)");
                 }
+                else if (elseArmVoid)
+                {
+                    // O7: a bare `throw` throws the case its arm took, and a `void` case holds no value (issue 641, the product pass's Q2
+                    // (a), comment 7165561768, assumed)
+                    Report(ErrorIds.ThrowNeedsValue, t.Line, "a bare `throw` throws the case its arm took, and a `void` case holds none (O7)");
+                }
+                else if (elseArmTakesVoid)
+                {
+                    // O7: the arm `else` takes the `void` case no arm before it handled, as the arm of a `void` case does, and a bare `throw`
+                    // there has no value either (issue 650, the product pass's Q1 (a) and Q3 (b), comment 7176868566, assumed)
+                    Report(ErrorIds.ThrowNeedsValue, t.Line, "a bare `throw` throws the case its arm took, and `else` here takes the `void` case, which holds none (O7)");
+                }
+                else if (elseArmName is { } name)
+                {
+                    // O7, U12: a bare `throw` throws the case its arm took, which is a use of the arm's name, so that one a `move` may have
+                    // ended is `used-after-move` at the `throw`, as rustc refuses a use after a move (E0382) (the owner, 2026-11-20, issue
+                    // 596, comment 7051500690); it reads no expression, so that no `move` is its own
+                    UseOfMoved(null, name, t.Line);
+                }
 
                 return Flow.Ends;
             case RawBlock r:
@@ -2508,7 +2619,11 @@ public sealed partial class Checker
         }
     }
 
-    private void CheckWithin(WithinStatement w) => CheckBound(w.Bound);
+    private void CheckWithin(WithinStatement w)
+    {
+        CheckBound(w.Bound);
+        Positive(w.Bound, "the bound of `within`", "U40");
+    }
 
     /// <summary>
     /// U40: the bound of <c>within</c>, a block's or a clause's (U39), is a <c>duration</c>, read as a condition is (C3): a value of another
@@ -2528,6 +2643,51 @@ public sealed partial class Checker
             Report(ErrorIds.TypeMismatch, bound.Line, $"{of} is a `duration`, not {Types.A(t.Type)} ({rule})");
         }
     }
+
+    /// <summary>
+    /// U40, U41: a constant bound of <c>within</c> (<see cref="ConstantBound"/>) of 0 ns or less, a block's, a call's clause's or a
+    /// declaration's, is <c>bound-not-positive</c> at the line where it starts (<see cref="BoundLine"/>), its text naming the form, <paramref name="of"/>, and the bound as written
+    /// (section 6, the owner, 2026-11-20, #519, comment 7051492844, "T4 (2)"; assumed: T77 and T80 of comment 7055305138, and T79 of it as
+    /// corrected on 2026-11-21); a bound that is no <c>duration</c>, or a constant with an error of its own, <c>constant-overflow</c> among
+    /// them, has that one error (E1; assumed: a reading of the build). Every other bound is read at run time, and the emitter refuses one
+    /// of zero or less there (<c>Emitter.Positive</c>).
+    /// </summary>
+    private void Positive(Expression bound, string of, string rules)
+    {
+        if (ConstantBound(model, bound) && ((IntegerConstant)model.TypeOf(bound).Constant!).Value <= 0)
+        {
+            Report(ErrorIds.BoundNotPositive, BoundLine(bound), $"{of} is {DefaultText(bound)}; a bound is positive ({rules})");
+        }
+    }
+
+    /// <summary>
+    /// U40, U41: the line a bound of <c>within</c> of zero or less reports, <c>bound-not-positive</c> here and <c>invalid-input</c> at
+    /// run time (<c>Emitter.Positive</c>), for every form of the bound: the line where the bound starts, the line of its first token,
+    /// as an error of the whole is read (E1), and not the line of its node, which for a sum continued after an operator at a line's
+    /// end (L4) is its last operator's (section 6, the owner, 2026-11-24, issue 39, comment 7144769568, "Start line"). The first token
+    /// of a binary operator, a range, a member, an index, a call, an <c>else</c> and a <c>with</c> is that of the part on its left;
+    /// every other node starts on its own line.
+    /// </summary>
+    internal static int BoundLine(Expression bound) => bound switch
+    {
+        BinaryExpression b => BoundLine(b.Left),
+        RangeExpression r => BoundLine(r.Start),
+        MemberAccess m => BoundLine(m.Target),
+        IndexExpression i => BoundLine(i.Target),
+        CallExpression c => BoundLine(c.Callee),
+        ElseExpression e => BoundLine(e.Call),
+        WithExpression w => BoundLine(w.Target),
+        _ => bound.Line,
+    };
+
+    /// <summary>
+    /// U40, U41: whether a bound of <c>within</c> is a constant as T25 reads one, a <c>duration</c> the checker knows while it compiles, a
+    /// literal or one folded from literals (T6), <c>0s</c>, <c>-1s</c>, <c>(0s)</c> and <c>1s - 1s</c> among them, and no
+    /// variable's name, whatever it was given; the checker refuses one of 0 ns or less (<see cref="Positive"/>) and the emitter reads one
+    /// with no check (assumed: T79 of comment 7055305138, as corrected on 2026-11-21).
+    /// </summary>
+    internal static bool ConstantBound(SemanticModel model, Expression bound) =>
+        model.HasType(bound) && model.TypeOf(bound) is { Type: PrimitiveType { Kind: Primitive.Duration }, Constant: IntegerConstant };
 
     /// <summary>C3: a condition is a <c>bool</c>.</summary>
     private void CheckCondition(Expression condition)
@@ -2601,6 +2761,7 @@ public sealed partial class Checker
         }
 
         Declare(v.Name, type, v.Mut, VariableKind.Local, v.Line, v);
+        ViewLocal(v.Name, v.Type, v.Value);
         Assigned(new NullPath(model.DeclarationOf(v), string.Empty), type, t); // N7: a value that is not null, as C# reads a declaration
         BindRegion(model.DeclarationOf(v), v.Value, v); // U12
     }
@@ -2705,6 +2866,7 @@ public sealed partial class Checker
         }
 
         Declare(a.Name, type, false, VariableKind.Local, a.Line, a);
+        ViewLocal(a.Name, null, a.Value);
         BindRegion(model.DeclarationOf(a), a.Value, a); // U12
     }
 
@@ -3024,6 +3186,8 @@ public sealed partial class Checker
             model.RecordSecondName(f); // U12: a `move` of either name reads the loop (SemanticModel.LoopOf)
         }
 
+        ViewLoop(f); // T19, T33
+
         var fields = WalksFieldsOfTypeParameter(f); // T34: a loop over `T.Fields` read on a function's text, outside a copy
         if (fields)
         {
@@ -3133,9 +3297,11 @@ public sealed partial class Checker
 
         if (r.Value is null)
         {
-            if (!Types.IsError(expected) && !SuccessIsVoid(expected))
+            // F3: a bare `return` gives the result's `void` case, the success or another, as Rust's `return;` gives `()`; a result with
+            // none is `missing-return` (issue 641, the product pass's Q1 (a) and Q1c (b), comment 7165561768, assumed)
+            if (!Types.IsError(expected) && !HoldsVoid(expected))
             {
-                Report(ErrorIds.MissingReturn, r.Line, "a bare `return` in a function with a result (F3)");
+                Report(ErrorIds.MissingReturn, r.Line, "a bare `return` in a function whose result holds no `void` case (F3)");
             }
 
             return;

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using Kurz.Compiler.Build;
+using Kurz.Compiler.Emit;
 using Kurz.Compiler.Text;
 using Xunit;
 
@@ -3409,6 +3410,67 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         """;
 
+    // O5, O7: an arm of a postfix `else` that reads the case it holds and throws it with a bare `throw`, a list case and a plain data
+    // case with a list: the throw reads the case before any end of the arm lets go of it; a throw ends the program, so a program of
+    // it throws once
+    private const string ArmRethrows = """
+        data Missing
+
+        data Inner(List<int> Xs)
+
+        int | List<int> | Missing Listed(int id) {
+            if id == 1 {
+                return [id, 7, 9]
+            }
+
+            if id == 2 {
+                return Missing
+            }
+
+            return id
+        }
+
+        int | Inner | Missing Plain(int id) {
+            if id == 1 {
+                return Inner([id, 7, 9])
+            }
+
+            if id == 2 {
+                return Missing
+            }
+
+            return id
+        }
+
+        int ListRethrown(int id) {
+            v = Listed(id) else {
+                List<int> n => {
+                    print("seen {n.Count}")
+                    throw
+                }
+                Missing => 0
+            }
+
+            return v
+        }
+
+        int PlainRethrown(int id) {
+            v = Plain(id) else {
+                Inner n => {
+                    print("seen {n.Xs.Count}")
+                    throw
+                }
+                Missing => 0
+            }
+
+            return v
+        }
+
+        """;
+
+    // what each program of `ArmRethrows` prints before its throw: the success, the case no arm throws, and the arm's read of its case
+    private static readonly string[] RethrownPrint = ["3", "0", "seen 3"];
+
     // the environments of fields of a function type, made, replaced and let go of with their instances each round
     private const string FunctionFieldRounds = """
         class Button(string Name, mut () => int OnClick)
@@ -5684,11 +5746,20 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(ArmCases + armCasesMain, fenced, "arm-cases-fenced"), 0, ["9 9", "4 4", "8 8", "11 11", "4 4", "9 9", "5 5", "5 5", "11 11", "17 17", "2 2", "5 5", "4 4", "9 9", "4 4"], "");
         const string unionFieldsMain = """
             for row in 0..<5 {
-                print("{Run(row, 0)} {Run(row, 1)} {Run(row, 2)} {Run(row, 0)}")
+                print("{Run(row, 0)} {Run(row, 0)} {Run(row, 1)} {Run(row, 1)} {Run(row, 2)} {Run(row, 2)}")
             }
 
             """;
-        Ran(BuildAndRun(UnionFields + unionFieldsMain, fenced, "union-fields-fenced"), 0, ["9 5 2 9", "18 10 4 18", "18 10 4 18", "9 5 2 9", "9 5 2 9"], "");
+        Ran(BuildAndRun(UnionFields + unionFieldsMain, fenced, "union-fields-fenced"), 0, ["9 9 5 5 2 2", "18 18 10 10 4 4", "18 18 10 10 4 4", "9 9 5 5 2 2", "9 9 5 5 2 2"], "");
+        // O5, O7: the case an arm holds, read and thrown with a bare `throw` (`ArmRethrows`)
+        var listThrown = BuildAndRun(ArmRethrows + "print(ListRethrown(3))\nprint(ListRethrown(2))\nprint(ListRethrown(1))\n", fenced, "arm-rethrows-list-fenced");
+        Assert.Equal(1, listThrown.Code);
+        Assert.Equal(RethrownPrint, listThrown.Output);
+        Assert.StartsWith("error: thrown at program.kz:33:\n[1, 7, 9]\n", listThrown.Error, StringComparison.Ordinal);
+        var plainThrown = BuildAndRun(ArmRethrows + "print(PlainRethrown(3))\nprint(PlainRethrown(2))\nprint(PlainRethrown(1))\n", fenced, "arm-rethrows-plain-fenced");
+        Assert.Equal(1, plainThrown.Code);
+        Assert.Equal(RethrownPrint, plainThrown.Output);
+        Assert.StartsWith("error: thrown at program.kz:45:\nInner { Xs = [1, 7, 9] }\n", plainThrown.Error, StringComparison.Ordinal);
         Ran(BuildAndRun(Interfaces, fenced, "class-interfaces-fenced"), 0, InterfacesPrint, "");
         Ran(BuildAndRun(ClassArms, fenced, "class-arms-fenced"), 0, ClassArmsPrint, "");
         // the first release a program lays out is of a class that holds another, whose release it lays out inside its own: the flag of
@@ -5755,6 +5826,68 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(WithFieldPath, fenced, "with-field-path-fenced"), 0, ["[7]", "[9]"], "");
         Ran(BuildAndRun(WithFieldName, fenced, "with-field-name-fenced"), 0, ["[7]", "[9]"], "");
         Ran(BuildAndRun(WithFieldLambda, fenced, "with-field-lambda-fenced"), 0, ["[7]", "[9]"], "");
+        // N5: a call after `?.` on a field of an instance whose argument sets the field to `null` and makes a string of the same size:
+        // the value the call is made on holds a count of its own to the end of the statement (InstanceField, K2), as before a dot
+        const string ChainReceiver = """
+            class Box(mut string? Name, mut string? Other)
+
+            string Drop(Box b) {
+                b.Name = null
+                b.Other = "zzzzzzzzzzzzzzzz{3 + 3}"
+                return "abcdefghijklmnop"
+            }
+
+            Box x = Box("abcdefghijklmnop{1 + 1}", null)
+            bool? r = x.Name?.StartsWith(Drop(x))
+            print("{r}")
+            print("{x.Name == null}")
+            """;
+        Ran(BuildAndRun(ChainReceiver, fenced, "chain-receiver-fenced"), 0, ["true", "true"], "");
+        // issue 630: a `mut` call after `?.` on a path through a nullable variable borrows the field's list for the chain's test of
+        // `null` alone and takes the place where the call takes it, after its argument, which gives the field another list and frees
+        // the one the test read: the call writes the field's new list, and nothing reads the freed one
+        const string ChainPath = """
+            class Box {
+                pub mut List<int> Items = [1, 2, 3]
+            }
+
+            int Swap(Box b) {
+                b.Items = [7]
+                return 5
+            }
+
+            box = Box()
+            Box? c = box
+            c?.Items.Add(Swap(box))
+            print(box.Items)
+            """;
+        Ran(BuildAndRun(ChainPath, fenced, "chain-path-fenced"), 0, ["[7, 5]"], "");
+        // issue 646: two paths of one variable passed as `mut` give the callee two places in the variable's block; the place of the
+        // second, taken after the first, copies no block the variable holds alone and copies a shared one once, so the place of the
+        // first is in the block the variable holds when the callee writes through it, whether another variable held the block or not;
+        // `Pair` is a block because a type derives from it (D7), where a data type with no base and none derived from it is laid out in
+        // the variable's own place and no block is copied
+        const string MutPath = """
+            data Pair(List<int> A, List<int> B)
+            data Tagged(int Tag) : Pair
+
+            void Two(mut List<int> a, mut List<int> b) {
+                a.Add(5)
+                b.Add(6)
+            }
+
+            mut p = Pair([1], [2])
+            held = p
+            Two(mut p.A, mut p.B)
+            print(p.A)
+            print(p.B)
+            print(held.A)
+            mut q = Pair([3], [4])
+            Two(mut q.A, mut q.B)
+            print(q.A)
+            print(q.B)
+            """;
+        Ran(BuildAndRun(MutPath, fenced, "mut-path-fenced"), 0, ["[1, 5]", "[2, 6]", "[1]", "[3, 5]", "[4, 6]"], "");
 
         // the positive control: a write into a freed block under the same allocator ends the process, and so does one into a freed
         // block of more than 262144 bytes, which the thread keeps outside the fence
@@ -6013,6 +6146,247 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // and a parameter it borrows, and C#'s implied `base()` gives the base the default of its parameter
         const string constructors = "class A {\n    pub A() {\n        print(\"A body\")\n    }\n}\n\nclass B : A {\n    pub B() {\n        print(\"B body\")\n    }\n}\n\nclass C : A\n\nclass D(int N) : A() {\n    pub D() : this(7) {\n        print(\"D further {N}\")\n    }\n}\n\nclass Animal(string Name) {\n    pub Animal(int legs) : this(\"legs {legs}\") {\n        print(\"Animal {legs}\")\n    }\n}\n\nclass Dog : Animal {\n    pub Dog(int legs) : base(legs) {\n        print(\"Dog {Name}\")\n    }\n\n    pub Dog(string name) : base(name) { }\n\n    pub Dog(string name, int n) : base(\"{name}{n}\") { }\n}\n\nclass Pet(string Name = \"pet\")\n\nclass Cat : Pet\n\nclass Named {\n    string name\n    mut string tag\n    mut List<int> items\n    int count = 3\n\n    pub Named(string n) {\n        name = \"{n}!\"\n        tag = \"t{n}\"\n        tag = \"{tag}+\"\n        items = [1, 2]\n        items = [count]\n        items.Add(4)\n        show = () => \"{name}?\"\n        print(show())\n    }\n\n    pub Named() : this(\"anon\") {\n        items.Add(5)\n        tag = \"{tag}-\"\n    }\n\n    pub string Text() => \"{name} {items} {tag}\"\n}\n\nclass Counter(int Start) {\n    pub Counter() : this(0) { }\n\n    Counter(string s) : this(9) {\n        if s == \"\" {\n            return\n        }\n\n        print(s)\n    }\n\n    pub static Counter Of(string s) => Counter(s)\n\n    pub int Value() => Start\n}\n\nB()\nC()\nd = D()\nprint(d.N)\nprint(D(2).N)\nprint(Named(\"x\"))\nprint(Named())\nprint(Counter().Value())\nprint(Counter(5).Value())\nprint(Counter.Of(\"abc\").Value())\nprint(Counter.Of(\"\").Value())\nbase = Dog(4)\nprint(base.Name)\nwho = \"rex\"\nprint(Dog(who).Name)\nprint(who)\nprint(Dog(\"kim\", 2).Name)\nprint(Cat().Name)\n";
         Ran(BuildAndRun(constructors, Fenced, "class-constructors-fenced"), 0, ["A body", "B body", "A body", "A body", "D further 7", "7", "A body", "2", "x!?", "x! [3, 4] tx+", "anon!?", "anon! [3, 4, 5] tanon+-", "0", "5", "abc", "9", "9", "Animal 4", "Dog legs 4", "legs 4", "rex", "rex", "kim2", "pet"], "");
+    }
+
+    /// <summary>
+    /// std/ whose <c>HttpServer</c> holds a probe, true where it holds, of each place that sets the heap the allocation entry serves and
+    /// that heap's table of size classes (<c>serving</c>, <c>servingHeads</c>): the entry serves the heap <c>HeapUse</c> names, the thread's
+    /// own after null and from its first use on, and gives the free block of a class the table of that heap holds, the table a heap
+    /// makes, resets or is made without where it serves and no other. A heap freed or reset gives its pages to the thread's pools, where
+    /// the fence does not see a read of them (knowledge/a-freed-heap-page-stays-readable-under-the-fence.md), so each probe that frees or
+    /// resets the heap that served writes the address 16 into the words of its record and its table the entry would read, before it
+    /// allocates again: a read of them ends the run with the system's signal.
+    /// </summary>
+    private static readonly Lazy<CheckedRuntime> Serving = new(() => Edited(("std/std.kz", "pub class HttpServer {\n", """
+        pub class HttpServer {
+            pub static bool UsedHeap() {
+                mut bool served = false
+                raw {
+                    byte* mine = Allocate(16)
+                    Free(mine, 16)
+                    byte* heap = HeapNew(0)
+                    byte* before = HeapUse(heap)
+                    served = Owner(Allocate(16), 16) == heap
+                    HeapUse(before)
+                    HeapFree(heap)
+                }
+
+                return served
+            }
+
+            pub static bool UsedHeapsTable() {
+                mut bool taken = false
+                raw {
+                    byte* heap = HeapNew(0)
+                    byte* before = HeapUse(heap)
+                    byte* p = Allocate(16)
+                    Free(p, 16)
+                    HeapUse(before)
+                    HeapUse(heap)
+                    taken = Allocate(16) == p
+                    HeapUse(before)
+                    HeapFree(heap)
+                }
+
+                return taken
+            }
+
+            pub static bool FreedWhileAnotherServes() {
+                mut bool held = false
+                raw {
+                    byte* mine = Allocate(16)
+                    Free(mine, 16)
+                    byte* heap = HeapNew(0)
+                    byte* before = HeapUse(heap)
+                    byte* p = Allocate(16)
+                    Free(p, 16)
+                    byte* q = Allocate(16)
+                    HeapUse(before)
+                    Free(q, 16)
+                    held = Allocate(16) == mine
+                    HeapUse(heap)
+                    held = held && Allocate(16) == q
+                    HeapUse(before)
+                    HeapFree(heap)
+                }
+
+                return held
+            }
+
+            pub static bool UsedNull() {
+                mut bool served = false
+                raw {
+                    byte* mine = HeapCurrent()
+                    byte* heap = HeapNew(0)
+                    byte* before = HeapUse(heap)
+                    byte* p = Allocate(16)
+                    Free(p, 16)
+                    long* table = *Ptr<long*>(heap + 32)
+                    HeapUse(null)
+                    HeapFree(heap)
+                    mut long i = 0
+                    while i < 16 {
+                        table[i] = 16
+                        i = i + 1
+                    }
+
+                    *Ptr<long>(heap) = 16
+                    *Ptr<long>(heap + 8) = 16
+                    *Ptr<long>(heap + 16) = 16
+                    *Ptr<long>(heap + 32) = 16
+                    served = Owner(Allocate(16), 16) == mine
+                    HeapUse(before)
+                }
+
+                return served
+            }
+
+            pub static bool FirstOwn() {
+                mut bool served = false
+                raw {
+                    byte* ownBefore = own
+                    byte* currentBefore = current
+                    byte* servingBefore = serving
+                    long* headsBefore = servingHeads
+                    own = null
+                    current = null
+                    serving = null
+                    servingHeads = null
+                    byte* p = Allocate(16)
+                    byte* q = Allocate(16)
+                    byte* made = own
+                    served = made != null && Owner(p, 16) == made && Owner(q, 16) == made
+                    own = ownBefore
+                    current = currentBefore
+                    serving = servingBefore
+                    servingHeads = headsBefore
+                    HeapFree(made)
+                }
+
+                return served
+            }
+
+            pub static bool MadeTable() {
+                mut bool held = false
+                raw {
+                    byte* heap = HeapNew(0)
+                    byte* before = HeapUse(heap)
+                    byte* p = Allocate(16)
+                    Free(p, 16)
+                    held = Allocate(16) == p
+                    byte* other = HeapNew(0)
+                    HeapUse(other)
+                    byte* q = Allocate(16)
+                    HeapUse(before)
+                    Free(q, 16)
+                    held = held && Owner(Allocate(16), 16) == HeapCurrent()
+                    HeapFree(heap)
+                    HeapFree(other)
+                }
+
+                return held
+            }
+
+            pub static bool ResetTable() {
+                mut bool held = false
+                raw {
+                    byte* heap = HeapNew(0)
+                    byte* before = HeapUse(heap)
+                    byte* p = Allocate(16)
+                    Free(p, 16)
+                    long* table = *Ptr<long*>(heap + 32)
+                    HeapReset(heap)
+                    mut long i = 0
+                    while i < 16 {
+                        table[i] = 16
+                        i = i + 1
+                    }
+
+                    held = Owner(Allocate(16), 16) == heap
+                    HeapUse(before)
+                    byte* mine = Allocate(16)
+                    Free(mine, 16)
+                    HeapReset(heap)
+                    held = held && Allocate(16) == mine
+                    HeapFree(heap)
+                }
+
+                return held
+            }
+
+            pub static bool NewTable() {
+                mut bool held = false
+                raw {
+                    byte* heap = HeapNew(0)
+                    byte* before = HeapUse(heap)
+                    byte* p = Allocate(16)
+                    Free(p, 16)
+                    long* table = *Ptr<long*>(heap + 32)
+                    HeapFree(heap)
+                    byte* again = HeapNew(0)
+                    mut long i = 0
+                    while i < 16 {
+                        table[i] = 16
+                        i = i + 1
+                    }
+
+                    held = again == heap && Owner(Allocate(16), 16) == again
+                    HeapUse(before)
+                    HeapFree(again)
+                    byte* mine = Allocate(16)
+                    Free(mine, 16)
+                    byte* other = HeapNew(0)
+                    held = held && Allocate(16) == mine
+                    HeapFree(other)
+                }
+
+                return held
+            }
+
+        """)));
+
+    [Theory]
+    [InlineData("UsedHeap")] // `HeapUse` with a heap: the entry serves it, not the thread's own heap, whose table holds a free block of the class
+    [InlineData("UsedHeapsTable")] // `HeapUse` with a heap: the entry gives the block that heap's table holds, read where it comes to serve again
+    [InlineData("FreedWhileAnotherServes")] // a block of a heap freed while the thread's own heap serves goes to the table of its heap, not to the one the entry serves
+    [InlineData("UsedNull")] // `HeapUse` with null: the entry serves the thread's own heap again and reads nothing of the heap that served, freed
+    [InlineData("FirstOwn")] // the thread's own heap made at its first use, as on a thread that never allocated: the entry serves it from then on
+    [InlineData("MadeTable")] // the table a heap makes where it serves is the entry's; one made while another serves is not
+    [InlineData("ResetTable")] // a heap reset where it serves leaves the entry no table, so nothing it held is given; one reset while another serves leaves that one's
+    [InlineData("NewTable")] // a heap made where the heap that served stood, freed while it served, leaves the entry no table; one made while another serves leaves that one's
+    public void The_heap_the_allocation_entry_serves_and_its_table_are_set_where_either_changes(string probe)
+    {
+        // the allocation entry finds the heap that serves and its table by one load of the thread, as mimalloc's `_mi_heap_default`
+        // (std/std.kz, `serving`): each probe is true where it is set where the heap that serves or its table changes
+        Ran(BuildAndRun($"print(HttpServer.{probe}())\n", Serving.Value, "heap-serving-" + probe), 0, ["true"], "");
+    }
+
+    [Fact]
+    public void The_allocation_entry_stays_a_call_where_its_size_is_a_constant()
+    {
+        // `Emitter.OutOfLine` marks `std.Allocate` `noinline`, as Rust's `__rust_alloc` is a call into the global allocator: a program
+        // that makes an instance of a class of one size in a loop calls the entry there once its IR is optimised as a release build
+        // optimises it, where LLVM put the entry into such a caller without the mark (LLVM writes a name without its quotes where it
+        // needs none)
+        const string text = """
+            class Point(int X, int Y)
+
+            mut total = 0
+            for i in 0..<1000 {
+                p = Point(i, i + 1)
+                total = total + p.X + p.Y
+            }
+
+            print(total)
+
+            """;
+        var program = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: false).Program!;
+        var main = OptimisedMain(program, "allocate-out-of-line");
+        // the instance's 24 bytes, a constant at the call; the slow path of an entry put into its caller would call `HeapCurrent`
+        Assert.Contains(main, l => l.Contains(" call ", StringComparison.Ordinal) && l.Contains("std.Allocate.", StringComparison.Ordinal) && l.Contains("(i64 24)", StringComparison.Ordinal));
+        Assert.DoesNotContain(main, l => l.Contains("std.HeapCurrent.", StringComparison.Ordinal));
+        var define = program.Ir.Split('\n').Single(l => l.StartsWith("define internal ptr @\"std.Allocate.", StringComparison.Ordinal));
+        Assert.Contains(") noinline ", define, StringComparison.Ordinal);
     }
 
     // lists of 70000 items made and dropped for 200 rounds, which grow through blocks of 262160 and 524304 bytes, and the same lists
@@ -7755,6 +8129,65 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.True(Calls(optimised, "SameBytes") >= 2, string.Join('\n', optimised.Where(l => l.Contains("rt.common.Same", StringComparison.Ordinal))));
     }
 
+    [Fact]
+    public void A_piece_of_a_string_whose_count_is_a_constant_is_made_in_its_caller()
+    {
+        // X2, X4: the emitter passes the helper that makes a part of a string the part's count, not its end, so that LLVM puts the
+        // helper into a caller that passes the count as a constant (`Piece`; the owner, 2026-11-20, issue 157, comment 7051500158,
+        // S1). The top-level code of a program takes parts of 8 and of 4 bytes of a string it built, in a loop: its IR calls the
+        // helper in both places, two calls, so that LLVM's bonus for the sole call of a function puts nothing in
+        // (knowledge/a-helper-of-several-callers-stays-a-call.md), and once optimised as a release build is optimised that code calls
+        // the helper nowhere (LLVM writes a name without its quotes where it needs none)
+        const string text = """
+            mut string text = ""
+            for i in 0..<64 {
+                text = "{text}{i % 10}"
+            }
+
+            mut long total = 0
+            for i in 0..<40 {
+                total = total + text.Substring(i, 8).Bytes[0] + text.Substring(i + 2, 4).Bytes[3]
+            }
+
+            print(total)
+
+            """;
+        var program = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: false).Program!;
+        Assert.Equal(2, program.Ir.Split('\n').Count(l => l.Contains(" call ", StringComparison.Ordinal) && l.Contains("@\"piece.string\"(", StringComparison.Ordinal)));
+        var main = OptimisedMain(program, "piece-count-inlined");
+        Assert.DoesNotContain(main, l => l.Contains("piece.string", StringComparison.Ordinal));
+        // the parts are made in it: the blocks of 8 and of 4 bytes behind their 16 bytes of counts, each size a constant at its call
+        foreach (var size in new[] { 24, 20 })
+        {
+            Assert.Contains(main, l => l.Contains(" call ", StringComparison.Ordinal) && l.Contains("std.Allocate.", StringComparison.Ordinal) && l.Contains($"(i64 {size})", StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// The lines of the top-level code, <c>kz.main</c>, in the IR of <paramref name="program"/> as clang optimises it at <c>-O2</c>, the level of a
+    /// release build (<c>Clang.Arguments</c>), written under the toolchain's directory as <paramref name="name"/>.
+    /// </summary>
+    private string[] OptimisedMain(EmittedProgram program, string name)
+    {
+        var directory = Path.Combine(toolchain.Directory, name);
+        Directory.CreateDirectory(directory);
+        var input = Path.Combine(directory, "program.ll");
+        var output = Path.Combine(directory, "optimised.ll");
+        File.WriteAllText(input, program.Ir);
+        List<string> arguments = ["-O2", "-S", "-emit-llvm", input, "-o", output];
+        if (program.CpuFlag is { } cpu)
+        {
+            arguments.Add(cpu);
+        }
+
+        var (code, _, error) = Processes.Capture(toolchain.Clang.Path, arguments, null, TimeSpan.FromMinutes(2));
+        Assert.True(code == 0, error);
+        var optimised = File.ReadAllLines(output);
+        var start = Array.FindIndex(optimised, l => l.StartsWith("define ", StringComparison.Ordinal) && l.Contains(" @kz.main(", StringComparison.Ordinal));
+        Assert.True(start >= 0, "the optimised IR holds the program's top-level code");
+        return optimised[start..Array.IndexOf(optimised, "}", start)];
+    }
+
     /// <summary>The sign of the order of the UTF-8 bytes of two strings (T32), as the program's <c>Sign</c> writes it.</summary>
     private static string Sign(string x, string y)
     {
@@ -7809,7 +8242,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     [Theory]
     [InlineData("s = \"ab\"\nprint(s.Chars[0])\n", 2, "`s.Chars` as a list (T15)", null)]
-    [InlineData("data Box(List<int> Items)\n\nvoid Fill(mut List<int> xs) {\n    xs.Add(1)\n}\n\nmut b = Box(List<int>())\nFill(mut b.Items)\n", 8, "a `mut` parameter given anything but a variable (M7)", null)]
+    [InlineData("data Config(List<int> Items)\n\nvoid Grow(mut List<int> xs) {\n    xs.Add(4)\n}\n\nclass H(mut Config Cfg) {\n    pub void Run() {\n        Grow(mut Cfg.Items)\n    }\n}\n\nh = H(Config([1]))\nh.Run()\n", 9, "a path through a class instance passed as `mut` (M7)", null)]
+    [InlineData("class Box(List<int> Items)\ndata Link(weak Box? To)\n\nvoid Set(mut Box? x) {\n    x = Box([9])\n}\n\nb = Box([1])\nmut l = Link(b)\nSet(mut l.To)\n", 10, "a path to a `weak` field passed as `mut` (M7, R3)", null)]
     public void What_the_emitter_does_not_lay_out_of_a_list_is_not_supported_at_its_line(string text, int line, string message, string? grant)
     {
         var compilation = Compile(text, toolchain.Runtime, grant is null ? [] : [grant]);

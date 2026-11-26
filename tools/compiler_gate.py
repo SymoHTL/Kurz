@@ -47,7 +47,7 @@ CWD = "compiler"  # the working directory of the command: the dotnet host reads 
 SOLUTION = "Kurz.sln"  # relative to CWD
 CONFIG = "compiler/NuGet.config"
 FLOOR = 1000  # below the tests the suites hold, above what is left without either corpus theory (over 300 cases each): a run that lost a project or a corpus theory cannot pass
-TIMEOUT = 1200  # seconds for restore, build and tests together: the Windows job's run took up to 864 s and met 900 twice on 2026-11-17 (runs 43985873704 and 43999911148, both green when run again)
+TIMEOUT = 1800  # seconds for restore, build and tests together: the Windows job's step took up to 1178 s and met 1200 three times on 2026-11-24 (runs 45473510913; 45465952795, 45471979520 and 45472163974), after up to 864 s and 900 met twice on 2026-11-17 (runs 43985873704 and 43999911148)
 # the workflows whose job runs this gate, each with the seconds that job spends outside it: compiler-windows and compiler-arm run it
 # alone, after the checkout, the cache of LLVM's archive and the SDK (about 100 s on 2026-11-17); gates runs it among every other
 # gate, in its container, and the slowest run seen spent 681 s outside it, 641 s of them in the replay of the red proofs (run
@@ -58,13 +58,13 @@ COMMAND = ["dotnet", "test", SOLUTION, "--nologo", "-c", "Release", "-p:RestoreL
 # section 2; the owner, 2026-11-15, #519, comment 6892835500, Q8, "GitHub Arm runner job"): the actors, the check of the runtime
 # for every target and architecture, the naked function and the switch of every pair, and the actors' corpus cases; the floor is
 # the count of those tests, taken on x86-64 on 2026-11-19, which no test of them skips on Arm: the compiler-arm run 44440771989
-# of the head 8222f973 of pull request 592 printed "compiler tests: 347 passed, 0 failed, 0 skipped, 347 total, 0 errors", and the twelve cases
+# of pull request 592, on its commit 8222f973, printed "compiler tests: 347 passed, 0 failed, 0 skipped, 347 total, 0 errors", and the twelve cases
 # of layer 2 that expect a run (U56 to U58) add 24 rows of RunTests, counted in the suite's log on x86-64 on 2026-11-20, and the nine
 # cases of layer 3 (U60 to U65) add 18 rows of RunTests and the test of its log line one of ActorTests, and its case of a call
 # that got in and runs 2 rows and its test one, counted so on 2026-11-21, which no run on Arm has read
 ARM_FILTER = ("FullyQualifiedName~ActorTests|FullyQualifiedName~RuntimeTests|FullyQualifiedName~EmitterTests.On_an_arm"
               "|FullyQualifiedName~EmitterTests.The_switch|(FullyQualifiedName~RunTests&DisplayName~actors/)")
-ARM_FLOOR = 472  # 152 of ActorTests, 32 of RuntimeTests, 2 of EmitterTests and 286 rows of the actors' cases of RunTests, each case run twice
+ARM_FLOOR = 537  # 169 of ActorTests, 32 of RuntimeTests, 2 of EmitterTests and 334 rows of the actors' cases of RunTests, each case run twice
 ARM_COMMAND = COMMAND + ["--filter", ARM_FILTER]
 # the command the test run built, run without a build of its own; the dotnet host reads global.json from CWD as for the tests
 VERSION_COMMAND = ["dotnet", "run", "--project", "Kurz", "-c", "Release", "--no-build", "--", "--version"]
@@ -348,7 +348,7 @@ def self_test():
     cases.append(("the Arm run is the gate's command with the actors' filter alone",
                   ARM_COMMAND == COMMAND + ["--filter", ARM_FILTER] and "ActorTests" in ARM_FILTER and "RunTests&DisplayName~actors/" in ARM_FILTER,
                   ARM_COMMAND))
-    cases.append(("the Arm floor is at least 472 tests", ARM_FLOOR >= 472, ARM_FLOOR))
+    cases.append(("the Arm floor is at least 537 tests", ARM_FLOOR >= 537, ARM_FLOOR))
     with kit.scratch("compiler-gate-arm-") as root:
         os.makedirs(os.path.join(root, "compiler"))
         with open(os.path.join(root, CONFIG), "w", encoding="utf-8") as f:

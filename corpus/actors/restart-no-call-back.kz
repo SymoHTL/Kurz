@@ -1,0 +1,44 @@
+// expect: output
+// | 0
+// | 0
+// threads: 1
+// rules: U22
+
+// the program of `actors/restart-reentrant.kz` with `B` given no `A`: at the restart `B.Ask` calls nothing back, and the constructor
+// ends
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return vouch x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+    List<int> items = [1, 2, 3]
+
+    pub int Peek() => items.Count
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+print(a.Get())
+send a.Fail()
+print(a.Get())

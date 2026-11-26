@@ -93,6 +93,10 @@ public sealed partial class Emitter
                 return EmitMonotonicNow(m.Line);
             case MemberAccess m:
                 return HeldCopy(m, EmitMember(m, type), type);
+            case ChainValue v:
+                return chainPayloads[v]; // N5: the value the chain's call is called on, where the chain did not stop
+            case CallExpression c when Model.IsChainCall(c, out _):
+                return Temp(EmitCall(c) ?? throw new InvalidOperationException($"a `void` call stands as a value at line {c.Line}: the checker reports it"), type);
             case CallExpression c when !Model.IsMade(c, out _) && Model.CallOf(c).Result is WeakRefType weak: // `T.Make` is its construction, no call (T33)
                 return Upgrade(Temp(EmitCall(c)!, weak), weak); // R3: a `weak T?` result, read as a strong `T?`
             case CallExpression c:
@@ -402,7 +406,8 @@ public sealed partial class Emitter
 
     /// <summary>
     /// A field of a data value (D1), a string's <c>Pointer</c> and the count of its <c>Bytes</c> (R15, T15), read from the string itself,
-    /// a string's <c>Bytes</c> as a list (T15), a list's <c>Count</c> (M9) and <c>Pointer</c> (R15), and a listener's <c>Port</c> (S9);
+    /// a string's <c>Bytes</c> as a list (T15), a list's <c>Count</c> (M9) and <c>Pointer</c> (R15), a duration's counts (T39), and a
+    /// listener's <c>Port</c> (S9);
     /// every other member is not emitted.
     /// </summary>
     private string EmitMember(MemberAccess m, KurzType type) => MemberOf(m, () => EmitExpression(m.Target), TypeOf(m.Target), type);
@@ -452,6 +457,10 @@ public sealed partial class Emitter
                 return EnumNumber(target(), e); // D18
             case FlagsType when m.Member == "Number":
                 return target(); // D19: the sum of the bits it holds, which is the set itself
+            case PrimitiveType { Kind: Primitive.Duration or Primitive.LongDuration } when Checker.TotalScale(m.Member) is { } scale:
+                return DurationTotal(target(), targetType, scale); // T39
+            case PrimitiveType { Kind: Primitive.Duration } when m.Member == "WholeNanoseconds":
+                return target(); // T39: the count of nanoseconds a duration is
             case PrimitiveType { Kind: Primitive.Instant } when m.Member == "Elapsed":
                 return Elapsed(target(), m.Line); // S25
             case HandleType when m.Member == "Port":
@@ -1061,7 +1070,9 @@ public sealed partial class Emitter
             case ClassType c:
                 return InstanceText(value, c); // A5
             case InterfaceType face:
-                return CallThrough(face.Symbol.TextMethod ?? throw new InvalidOperationException($"`{face}` declares no `Text()`: `no-text`, which the checker reports (A10)"), value, face.Symbol, []); // A10
+                return face.Symbol.TextMethod is { } faceText ? CallThrough(faceText, value, face.Symbol, []) // A10
+                    : namesClasses ? FaceText(value, face.Symbol) // O7: in the text of a thrown value, that of the instance's class
+                    : throw new InvalidOperationException($"`{face}` declares no `Text()`: `no-text`, which the checker reports (A10)");
             case WeakRefType w:
                 {
                     // A4 with R3: the text of what its read gives, the target's `Text()` or `null`

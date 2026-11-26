@@ -117,7 +117,7 @@ public sealed partial class Checker
 
                         if (tp.Binding is not null)
                         {
-                            DeclareChecked(tp.Binding, type, false, VariableKind.Binding, arm.Line, tp);
+                            DeclareArmName(tp, type, arm.Line);
                             BindRegion(model.DeclarationOf(tp), subject, tp); // U12: a binding joins its subject's region (comment 6897444564)
                         }
 
@@ -505,6 +505,7 @@ public sealed partial class Checker
         var handled = new List<KurzType>();
         var hasElse = false;
         var armWrong = false;
+        var elseTakesVoid = false; // O7: the arm `else` takes a `void` case no arm before it handled, whose bare `throw` has no value (issue 650)
         var start = frame.Known; // N3: the success goes on with what held after the call, an arm with that too, and after both holds what each keeps
         var reaching = new List<ImmutableHashSet<NullPath>> { start };
         var startMoves = frame.Moves; // U12: each arm is a branch
@@ -524,6 +525,7 @@ public sealed partial class Checker
                     }
 
                     hasElse = true;
+                    elseTakesVoid = rest.Any(c => Types.IsVoid(c) && !handled.Any(h => IsCaseOf(c, h)));
                     break;
                 case TypePattern tp:
                     {
@@ -556,7 +558,7 @@ public sealed partial class Checker
 
                         if (tp.Binding is not null)
                         {
-                            DeclareChecked(tp.Binding, type, false, VariableKind.Binding, arm.Line, tp);
+                            DeclareArmName(tp, type, arm.Line);
                             if (subject is not null)
                             {
                                 BindRegion(model.DeclarationOf(tp), subject, tp); // U12 (assumed): a binding joins the region of the call it takes a case of, as comment 6897444564 has a `match` binding join its subject's
@@ -576,7 +578,7 @@ public sealed partial class Checker
                     throw new InvalidOperationException(arm.Pattern.GetType().Name);
             }
 
-            if (CheckElseArmBody(arm.Body, success) == Flow.Completes)
+            if (CheckElseArm(arm, success, arm.Pattern is ElsePattern && elseTakesVoid) == Flow.Completes)
             {
                 reaching.Add(frame.Known); // an arm that returns or throws reaches nothing after the call (N3)
             }
@@ -598,6 +600,20 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>C4 and O5: the name an arm binds, of its case's type. A name of the <c>void</c> case is F4's <c>syntax</c> at the arm, as C# refuses a
+    /// variable of type <c>void</c> (CS1547), and the arm is written <c>void =&gt;</c> (the owner, 2026-11-25, issue 632, comment 7158347230); the name is
+    /// declared as an error, so that a read of it carries no second one (E1).</summary>
+    private void DeclareArmName(TypePattern tp, KurzType type, int line)
+    {
+        if (Types.IsVoid(type))
+        {
+            Report(ErrorIds.Syntax, line, "`void` is no type of a name an arm binds: write `void =>` (F4)");
+            type = Types.Error;
+        }
+
+        DeclareChecked(tp.Binding!, type, false, VariableKind.Binding, line, tp);
+    }
+
     /// <summary>The arms of an <c>else</c> after a call that did not type: what does not depend on the call's cases is still checked, with the success unknown (E1); after an <c>attempt</c>, <paramref name="afterAttempt"/>, an arm's <c>Crashed</c> with no type arguments names the case unknown too (U46).</summary>
     private void CheckArmsLoosely(IReadOnlyList<MatchArm> arms, bool afterAttempt = false)
     {
@@ -611,7 +627,7 @@ public sealed partial class Checker
                         var type = afterAttempt && tp.Type is NamedType { Name: "Crashed", TypeArguments.Count: 0 } ? Types.Error : Resolve(tp.Type);
                         if (tp.Binding is not null)
                         {
-                            DeclareChecked(tp.Binding, type, false, VariableKind.Binding, arm.Line, tp);
+                            DeclareArmName(tp, type, arm.Line);
                         }
 
                         break;
@@ -625,9 +641,22 @@ public sealed partial class Checker
                     break;
             }
 
-            CheckElseArmBody(arm.Body, Types.Error);
+            CheckElseArm(arm, Types.Error);
             PopScope();
         }
+    }
+
+    /// <summary>O5: what the arm does (<see cref="CheckElseArmBody"/>), with the name its pattern binds as the one its bare <c>throw</c> reads (O7, U12);
+    /// <paramref name="takesVoid"/> is an arm <c>else</c> that takes a <c>void</c> case, whose bare <c>throw</c> has no value either (O7, issue 650).</summary>
+    private Flow CheckElseArm(MatchArm arm, KurzType success, bool takesVoid = false)
+    {
+        var (outer, outerVoid, outerElse) = (elseArmName, elseArmVoid, elseArmTakesVoid);
+        elseArmName = arm.Pattern is TypePattern { Binding: not null } named ? model.DeclarationOf(named) : null;
+        elseArmVoid = arm.Pattern is TypePattern { Type: Syntax.VoidType }; // the arm of a `void` case, whose bare `throw` has no value (O7)
+        elseArmTakesVoid = takesVoid;
+        var flow = CheckElseArmBody(arm.Body, success);
+        (elseArmName, elseArmVoid, elseArmTakesVoid) = (outer, outerVoid, outerElse);
+        return flow;
     }
 
     /// <summary>

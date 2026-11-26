@@ -4,9 +4,9 @@ namespace Kurz.Compiler.Semantics;
 
 /// <summary>
 /// The tests of a program (record, section 11; chapter 20 of the reference): <c>test "name" { ... }</c> at the top level of a file, each
-/// checked as a function of its own (Y1, Y5); <c>check condition</c> in any code (Y6); and the forms the checker says <c>not supported</c>
-/// to, the cluster test of section 13 (Y8), <c>mock X with Y</c> (Y9) and <c>advance d</c> (Y10). Every command checks every test, so that an
-/// error in one refuses a build (Y7).
+/// checked as a function of its own (Y1, Y5); <c>check condition</c> in any code (Y6); <c>advance d</c> among a test's own statements (Y10);
+/// and the forms the checker says <c>not supported</c> to, the cluster test of section 13 (Y8) and <c>mock X with Y</c> (Y9). Every command
+/// checks every test, so that an error in one refuses a build (Y7).
 /// </summary>
 public sealed partial class Checker
 {
@@ -82,17 +82,22 @@ public sealed partial class Checker
     /// </summary>
     private static bool Shows(KurzType type) => HasText(type) && !HoldsRaw(type, []) && PrivateTextClass(type, []) is null;
 
-    /// <summary>Y9: <c>mock X with Y</c>, whose types the checker does not resolve, is <c>not supported</c> while what it accepts is open.</summary>
+    /// <summary>Y9: <c>mock X with Y</c>, whose types the checker does not resolve, is <c>not supported</c>: what it accepts, decided by Q7, is not built.</summary>
     private void CheckMock(MockStatement m) => NotSupported(m.Line, "`mock X with Y` (Y9)");
 
     /// <summary>
-    /// Y10: <c>advance d</c> is <c>not supported</c> while where it stands is open; its duration is checked as any expression is, and as the
-    /// bound of <c>within</c> is (U40): a value of another type than <c>duration</c> is <c>type-mismatch</c> at its line, a nullable one
-    /// <c>nullable-unchecked</c>, a call with a <c>void</c> success <c>syntax</c> (O10).
+    /// Y10: <c>advance d</c> stands among a test's own statements alone, in its body and the blocks nested in it, and not in a lambda, a
+    /// block of <c>on crash</c> or the block of an <c>attempt</c> inside it, each read in a frame of its own (F11 of comment 6993110710):
+    /// elsewhere it is <c>advance-outside</c> at its line. Its duration is checked as any expression is, and as the bound of <c>within</c>
+    /// is (U40): a value of another type than <c>duration</c> is <c>type-mismatch</c> at its line, a nullable one <c>nullable-unchecked</c>,
+    /// a call with a <c>void</c> success <c>syntax</c> (O10).
     /// </summary>
     private void CheckAdvance(AdvanceStatement a)
     {
         CheckBound(a.Duration, "the duration of `advance`", "Y10");
-        NotSupported(a.Line, "`advance` (Y10)");
+        if (frame.IsLambda || checking is null || !tests.Any(t => ReferenceEquals(t.Symbol, checking)))
+        {
+            Report(ErrorIds.AdvanceOutside, a.Line, "`advance` stands among a `test` block's own statements alone (Y10)");
+        }
     }
 }

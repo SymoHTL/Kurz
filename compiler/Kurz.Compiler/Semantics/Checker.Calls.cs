@@ -78,7 +78,19 @@ public sealed partial class Checker
         /// <summary>The first argument whose own type does not fit its parameter, with the parameter's type after substitution.</summary>
         public (int Argument, KurzType Parameter)? Misfit { get; set; }
 
-        public bool Fits => BindingError is null && !CannotInfer && Misfit is null;
+        /// <summary>T19: the first limit that a type argument, inferred or written, does not meet, with the parameter and the argument; null where each meets all.</summary>
+        public UnmetLimit? Unmet { get; set; }
+
+        /// <summary>The name of the data type a construction builds, which an unmet limit's message names where no function stands (T19).</summary>
+        public string? Of { get; init; }
+
+        /// <summary>T19, T33 (Q22): in a copy, the type arguments that the arguments read through a view give, as the function's text writes them; null for none.</summary>
+        public Dictionary<TypeParameterSymbol, KurzType>? Written { get; set; }
+
+        /// <summary>T19, T33 (Q8, Q22): in a copy, the type arguments the call writes that name the function's type parameters, as written; null for none.</summary>
+        public Dictionary<TypeParameterSymbol, KurzType>? WrittenTypeArguments { get; set; }
+
+        public bool Fits => BindingError is null && !CannotInfer && Misfit is null && Unmet is null;
 
         public bool Exact { get; set; }
 
@@ -90,8 +102,14 @@ public sealed partial class Checker
 
     private Typed CheckCall(CallExpression c, KurzType? expected, bool keepCases)
     {
+        if (c.Callee is MemberAccess m && (m.Conditional || InChain(m.Target)))
+        {
+            // N5: the call where the chain did not stop, read as every call is, its other cases among it
+            return CheckChainCall(m, c, call => CheckExpression(call, null, keepCases));
+        }
+
         var result = CallResult(c, expected);
-        CallRan(); // N9: a call can assign a `mut` field through another reference (K2) and free the target of a `weak` one (R3)
+        CallRan(c); // N9: a call can assign a `mut` field through another reference (K2) and free the target of a `weak` one (R3)
         if (result.IsError || result.Type is not UnionType u || Types.NonNull(u) is not null || keepCases && (expected is null || Types.KeepsCases(expected, u)))
         {
             return result; // N8: a `T?` is no outcome list, and a call that returns one yields it whole
@@ -110,6 +128,11 @@ public sealed partial class Checker
     private Typed CallResult(CallExpression c, KurzType? expected)
     {
         var result = CalleeResult(c, expected);
+        if (c.Callee is MemberAccess m && (m.Conditional || InChain(m.Target)))
+        {
+            return result; // N5: its words and its clause are the call's it is read as (CheckChainCall)
+        }
+
         if (!result.IsError && PlainCallWords(c))
         {
             result = Typed.Error;
@@ -636,7 +659,8 @@ public sealed partial class Checker
             return new Typed(Types.Long); // R14: the address a pointer holds
         }
 
-        Report(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is not converted to {Types.A(target)} (T10, {(Types.IsInstant(source.Type) || Types.IsInstant(target) ? "T36" : "T13")})");
+        Add(Diagnostic.Error(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is not converted to {Types.A(target)} (T10, {(Types.IsInstant(source.Type) || Types.IsInstant(target) ? "T36" : "T13")})")
+            with { OwnHelp = Types.IsDuration(source.Type) && Types.IsNumber(target) ? DurationHelp(source.Type) : null });
         return Typed.Error;
     }
 
@@ -848,6 +872,22 @@ public sealed partial class Checker
         [("timestamp", "FromUnixSeconds")] = 1_000_000_000,
         [("timestamp", "FromUnixMilliseconds")] = 1_000_000,
     };
+
+    /// <summary>
+    /// T39: the nanoseconds of the unit a duration's <c>TotalX</c> member counts in, the unit of <c>duration.FromX</c> in <see cref="TimeFrom"/>,
+    /// or null where <paramref name="member"/> names no such member.
+    /// </summary>
+    internal static long? TotalScale(string member) =>
+        member.StartsWith("Total", StringComparison.Ordinal) && TimeFrom.TryGetValue(("duration", "From" + member["Total".Length..]), out var scale) ? scale : null;
+
+    /// <summary>
+    /// T39: the help line of a refusal that asked for the count of a duration, divided by a duration or converted to a number, naming the
+    /// members that give it (section 4, the owner, 2026-11-25, #629, comment 7159373153, "Add a help line (Recommended)"), the operands
+    /// <paramref name="types"/>; <c>WholeNanoseconds</c> where none is a <c>longduration</c>, which has no such member.
+    /// </summary>
+    private static string DurationHelp(params KurzType[] types) => types.All(t => t is PrimitiveType { Kind: Primitive.Duration })
+        ? "read its count with a member: `.TotalMilliseconds` or another unit's, a `double`, or `.WholeNanoseconds`, the exact `long`"
+        : "read its count with a member: `.TotalMilliseconds` or another unit's, a `double`";
 
     /// <summary>
     /// T38: <c>duration.FromSeconds(n)</c> and the other constructors of <see cref="TimeFrom"/>, the time of a count, a <c>long</c> or a
@@ -1450,7 +1490,7 @@ public sealed partial class Checker
         }
 
         var slots = data.ConstructorFields.Select(f => new Slot(f.Name, f.Type, false, f.HasDefault, data.TypeParameters.Any(p => Types.Mentions(f.Type, p)))).ToList();
-        var candidate = new Candidate { Slots = slots, TypeParameters = data.TypeParameters, Result = Types.Void }; // the result is built below from the type arguments
+        var candidate = new Candidate { Slots = slots, TypeParameters = data.TypeParameters, Result = Types.Void, Of = data.Name }; // the result is built below from the type arguments
         if (c.TypeArguments.Count > 0)
         {
             if (c.TypeArguments.Count != data.TypeParameters.Count)
@@ -1468,6 +1508,7 @@ public sealed partial class Checker
             }
 
             candidate.Map = data.TypeParameters.Zip(written).ToDictionary(p => p.First, p => p.Second);
+            candidate.WrittenTypeArguments = WrittenTypeArguments(c, data.TypeParameters, written); // T19, T33 (Q8, Q22)
         }
 
         if (typeArguments is not null)
@@ -1489,6 +1530,7 @@ public sealed partial class Checker
 
         var made = new DataType(data, arguments);
         model.RecordCall(c, new CallInfo(CallKind.DataNew, null, data, null, candidate.Map, candidate.Binding, candidate.Slots.Count, made));
+        RecordWritten(c, candidate, new DataType(data, [.. data.TypeParameters.Select(p => new TypeParameterType(p))])); // T19, T33 (Q22)
         return new Typed(made);
     }
 
@@ -1497,11 +1539,13 @@ public sealed partial class Checker
     {
         if (m.Conditional || InChain(m.Target))
         {
-            // N5: C# reads a call after `?.` inside the chain, which section 4 does not say
-            NotSupported(m.Line, "a call after `?.` or `?[` (N5)");
-            CheckExpression(m.Target, null);
-            CheckArgumentsLoosely(c);
-            return Typed.Error;
+            // N5: after `send` (U6) or before `else` (O5), the call's whole result, where the chain did not stop
+            return CheckChainCall(m, c, call =>
+            {
+                var whole = CallResult(call, null);
+                model.RecordType(call, whole);
+                return whole;
+            });
         }
 
         if (CheckIntrinsicCall(m, c) is { } intrinsic)
@@ -1516,7 +1560,7 @@ public sealed partial class Checker
 
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
         {
-            if (IsUnreadName(n.Name) || ProcessNameAsValue(n.Name, n.Line) || UnreadTypeMember(n.Name, m.Member, m.Line))
+            if (IsUnreadName(n.Name) || ProcessNameAsValue(n.Name, n.Line) || UnreadTypeMember(n.Name, m.Member, m.Line) || TypeParameterMember(n.Name, m.Member, m.Line))
             {
                 CheckArgumentsLoosely(c);
                 return Typed.Error;
@@ -1653,6 +1697,16 @@ public sealed partial class Checker
         {
             CheckArgumentsLoosely(c);
             return Typed.Error;
+        }
+
+        if (target.Type is TypeParameterType { Symbol: { } limited })
+        {
+            return CallThroughLimits(limited, m, c); // T19
+        }
+
+        if (ViewedLimit(m.Target, target.Type) is { } viewed)
+        {
+            return CallThroughLimits(viewed, m, c); // T19, T33: in a copy, through a parameter or a local of a type parameter with limits
         }
 
         if (target.Type is VectorType vector)
@@ -2161,13 +2215,50 @@ public sealed partial class Checker
 
     /// <summary>
     /// M5: the receiver of a <c>mut</c> method is a <c>mut</c> variable or a path of data fields from one; in a lambda, such a variable
-    /// is not changed (F11). A path through an index is not read (M9). The call changes what it takes as <c>mut</c> (M7).
+    /// is not changed (F11). A path through an index is not read (M9). The call changes what it takes as <c>mut</c> (M7). After
+    /// <c>?.</c> it is the place the chain names (<see cref="ChainReceiver"/>, N5); a path a call can change, known not null where it was
+    /// read and left nullable by a call in the arguments, is N2's (<see cref="NarrowingEnded"/>, N9), the path itself or a nullable
+    /// variable or field on the way to it, the first one from its root (issue 630).
     /// </summary>
     private void MutReceiver(CallExpression call, Expression receiver, int line, string what)
     {
+        if (Unwrap(receiver) is ChainValue chain)
+        {
+            ChainReceiver(call, chain, line, what); // N5
+            return;
+        }
+
+        MutPlace(call, receiver, line, what);
+        var steps = new List<MemberAccess>();
+        for (var e = Unwrap(receiver); e is MemberAccess m; e = Unwrap(m.Target))
+        {
+            steps.Insert(0, m);
+        }
+
+        foreach (var m in steps)
+        {
+            if (NarrowingEnded(m.Target, declared => $"`{m.Member}` is read from {Types.A(declared)}", line, throughNullable: true))
+            {
+                return; // N9: a nullable step on the way, read known not null, which a call in the arguments left nullable
+            }
+        }
+
+        NarrowingEnded(receiver, declared => $"`{((MemberAccess)call.Callee).Member}` is read from {Types.A(declared)}", line); // N9
+    }
+
+    /// <summary>
+    /// M5: the receiver of a <c>mut</c> method as <see cref="MutReceiver"/> reads it, a place its path reaches. A path through a nullable
+    /// variable or field, read where the checker knew it not null (N3) or after <c>?.</c> (N5, <see cref="ChainReceiver"/>), reaches the
+    /// place in the case other than <c>null</c>, as Rust's <c>if let Some(c) = &amp;mut cfg { c.items.push(2) }</c> and
+    /// <c>cfg.as_mut().map(|c| c.items.push(3))</c> reach it (section 4: the build of both forms the owner's answer, 2026-11-24, #624, comment
+    /// 7135538740, and the place the product pass's reading, issue 630, comment 7161590400, assumed); a step the checker did not know not
+    /// null was reported where the path was read (N2).
+    /// </summary>
+    private void MutPlace(CallExpression call, Expression receiver, int line, string what)
+    {
         var members = new List<MemberAccess>();
         var root = Unwrap(receiver);
-        while (root is MemberAccess { Conditional: false } m)
+        while (root is MemberAccess m)
         {
             members.Insert(0, m);
             root = Unwrap(m.Target);
@@ -2179,7 +2270,7 @@ public sealed partial class Checker
             return;
         }
 
-        if (MutReceiverThroughInstance(receiver, members, line, what))
+        if (MutReceiverThroughInstance(receiver, members, line, what, narrowed: true))
         {
             return; // K2, M5: a `mut` field of an instance
         }
@@ -2202,12 +2293,7 @@ public sealed partial class Checker
             return; // reported where the receiver was read
         }
 
-        if (ThroughNullable(variable, members, "a `mut` method on a path through a nullable variable or field (N3, M5)"))
-        {
-            return;
-        }
-
-        if (!IsFieldPath(variable.Type, members, out var notField))
+        if (!IsFieldPath(variable.Type, members, out var notField, narrowed: true))
         {
             Report(ErrorIds.MutRequired, line, $"{what}, and `{notField}` is no field of a data value: only a path of data fields from a `mut` variable reaches a value that changes (M5, M4)");
             return;
@@ -2265,13 +2351,53 @@ public sealed partial class Checker
         return false;
     }
 
-    /// <summary>M4: whether every member of the path from a value of <paramref name="type"/> is a field of a data type; a type the checker could not tell passes.</summary>
-    private static bool IsFieldPath(KurzType type, List<MemberAccess> members, out string notField)
+    /// <summary>
+    /// M7 (the owner, 2026-11-25, issue 646, "Data fields only"): the text of a path after <c>mut</c> that leaves its <c>data</c> fields
+    /// through a form the build leaves out, a <c>weak</c> reference (R3) or a field of a class instance, each naming its form; null where
+    /// the step it leaves at is neither, a property of a class (K7) among them, which stays <c>mut-at-call</c>.
+    /// </summary>
+    private static string? LeftOutStep(KurzType type, List<MemberAccess> members)
+    {
+        var current = type;
+        foreach (var m in members)
+        {
+            if (current is WeakRefType weak)
+            {
+                return HasField(weak.Target, m.Member) ? "a path through a `weak` reference passed as `mut` (M7, R3)" : null;
+            }
+
+            var plain = Types.NonNull(current) ?? current;
+            if (plain is ClassType instance)
+            {
+                return HasField(instance, m.Member) ? "a path through a class instance passed as `mut` (M7)" : null;
+            }
+
+            if (plain is not DataType d || d.Symbol.Field(m.Member) is not { } field)
+            {
+                return null;
+            }
+
+            current = SubstituteData(d, field.Type);
+        }
+
+        return null;
+    }
+
+    /// <summary>K1: whether the member is a field of the class or of a base, which a property (K7) is not.</summary>
+    private static bool HasField(ClassType type, string member) => type.Symbol.Chain.Any(c => c.Field(member) is not null);
+
+    /// <summary>
+    /// M4: whether every member of the path from a value of <paramref name="type"/> is a field of a data type; a type the checker could not
+    /// tell passes. <paramref name="narrowed"/> reads each nullable step as the case other than <c>null</c>, for a path the checker read known
+    /// not null or after <c>?.</c> (<see cref="MutPlace"/>, N3, N5).
+    /// </summary>
+    private static bool IsFieldPath(KurzType type, List<MemberAccess> members, out string notField, bool narrowed = false)
     {
         notField = "";
         var current = type;
         foreach (var m in members)
         {
+            current = narrowed ? Types.NonNull(current) ?? current : current;
             if (Types.IsError(current))
             {
                 return true;
@@ -2328,6 +2454,7 @@ public sealed partial class Checker
                     // T35: a type parameter the call leaves out takes its default, one that was not read the error type, since its
                     // diagnostic stands at the default (E1)
                     candidate.Map = f.TypeParameters.Zip(typeArguments.Concat(left.Select(p => (KurzType?)p.Default ?? Types.Error))).ToDictionary(p => p.First, p => p.Second);
+                    candidate.WrittenTypeArguments = WrittenTypeArguments(c, f.TypeParameters, typeArguments); // T19, T33 (Q8, Q22)
                 }
             }
 
@@ -2467,7 +2594,7 @@ public sealed partial class Checker
 
             if (a.Mut && IsElementPath(a.Value))
             {
-                NotSupported(a.Line, "an element of a list passed as `mut` (M7, M9)"); // before the pick, so that no misfit of its type is reported beside it (E1)
+                NotSupported(a.Line, "an item of a list or an entry of a map, or a path through one, passed as `mut` (M7, M9)"); // before the pick, so that no misfit of its type is reported beside it (E1)
                 Push();
                 CheckExpression(a.Value, null);
                 Pop(commit: false);
@@ -2595,6 +2722,7 @@ public sealed partial class Checker
             var map = picked.Map.Count == 0 ? NoMap : picked.Map;
             var recorded = kind == CallKind.Method && picked.Function is { IsStatic: true } ? CallKind.Function : kind; // K7: a `static` method has no instance
             model.RecordCall(c, new CallInfo(recorded, picked.Function, null, null, map, binding ?? picked.Binding, picked.Slots.Count, Types.Substitute(picked.Result, picked.Map)));
+            RecordWritten(c, picked, picked.Result); // T19, T33: the call's result as the function's text writes it (Q22)
             if (kind == CallKind.Function)
             {
                 KeepGenericCall(c, picked.Function); // T33: a call that may make a copy
@@ -2699,6 +2827,15 @@ public sealed partial class Checker
         if (candidate.Fits)
         {
             Fit(candidate, pres, only);
+        }
+
+        if (candidate.Fits)
+        {
+            // T19: the types inferred or written are checked against the limits after the inference (T27), and a function whose limit
+            // they do not meet does not fit the call (F13) (Q10 of issue 605, comment 7051071380); in a copy, a type argument that an
+            // argument read through the copy's type parameter gives is that type parameter, as the function's text writes it (Q22)
+            var written = candidate.Written = WrittenArguments(candidate, pres);
+            candidate.Unmet = Unmet(candidate.TypeParameters.Where(candidate.Map.ContainsKey).Select(p => (p, written?.GetValueOrDefault(p) ?? candidate.Map[p])));
         }
     }
 
@@ -3210,6 +3347,12 @@ public sealed partial class Checker
             return;
         }
 
+        if (bound.Unmet is { } unmet)
+        {
+            Report(ErrorIds.TypeMismatch, c.Line, UnmetText(unmet, bound.Function?.Name ?? bound.Of!)); // T19: at the line of the call
+            return;
+        }
+
         var (index, parameter) = bound.Misfit!.Value;
         var pre = pres[index];
         var own = ArgumentType(bound, pres, index);
@@ -3305,6 +3448,11 @@ public sealed partial class Checker
         if (candidate.CannotInfer)
         {
             return $"its type arguments are neither written nor inferable from the arguments{GivesNothing(candidate, pres)} (T27)";
+        }
+
+        if (candidate.Unmet is { } unmet)
+        {
+            return UnmetText(unmet, candidate.Function?.Name ?? candidate.Of!); // T19
         }
 
         var (index, parameter) = candidate.Misfit!.Value;
@@ -3404,7 +3552,9 @@ public sealed partial class Checker
             var a = pre.Argument;
             if (pre.Lambda is not null)
             {
+                lambdaText = WrittenType(candidate, slot.Type); // T19, T33 (Q22)
                 var typed = CheckExpression(pre.Lambda, type);
+                lambdaText = null;
                 if (!typed.IsError && !Types.IsError(type) && !Types.Assignable(typed.Type, type))
                 {
                     Report(ErrorIds.TypeMismatch, a.Line, $"{Types.A(typed.Type)} where {Types.A(type)} is required (F11, T1)");
@@ -3472,7 +3622,7 @@ public sealed partial class Checker
         return fits;
     }
 
-    /// <summary>M7, M9: whether the path after <c>mut</c> starts at an element of a list, which the checker does not read.</summary>
+    /// <summary>M7, M9: whether the path after <c>mut</c> starts at an item of a list or an entry of a map, which the checker does not read.</summary>
     private static bool IsElementPath(Expression value)
     {
         var root = Unwrap(value);
@@ -3543,6 +3693,12 @@ public sealed partial class Checker
 
         if (!IsFieldPath(variable.Type, members, out var notField))
         {
+            if (LeftOutStep(variable.Type, members) is { } leftOut)
+            {
+                NotSupported(a.Line, leftOut);
+                return;
+            }
+
             Report(ErrorIds.MutAtCall, a.Line, $"`{notField}` is no field of a data value: after `mut` stands a `mut` variable or a path of data fields from one (M7)");
             return;
         }

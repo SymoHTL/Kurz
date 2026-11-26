@@ -523,10 +523,13 @@ public sealed partial class Emitter
     /// one caller is <c>Same</c>: LLVM inlines a function into its one caller, and <c>Same</c> with it grew too big to be inlined, a
     /// call at every <c>==</c> of strings. Rust's <c>==</c> of <c>str</c> has the shape this keeps, the test in every caller and a
     /// call for the bytes, because that call is <c>bcmp</c>, in the C library, which LLVM cannot inline; the runtime of Kurz is
-    /// written in Kurz (design record, section 2), so the emitter keeps the call. No program sees the mark: it names no function of a
-    /// program.
+    /// written in Kurz (design record, section 2), so the emitter keeps the call. <c>std.Allocate</c>, the allocation entry, stays a
+    /// call at every caller, as Rust's <c>__rust_alloc</c> is a call into the global allocator: once its fast path read the heap that
+    /// serves by one load, it was small enough that LLVM put it into callers that ask for a constant size, the loops of issue 157's
+    /// programs among them, which moved rows that allocate nothing in their loop. No program sees the mark: it names no function of
+    /// a program.
     /// </summary>
-    private static readonly HashSet<string> OutOfLine = new(StringComparer.Ordinal) { "rt.common.SameBytes" };
+    private static readonly HashSet<string> OutOfLine = new(StringComparer.Ordinal) { "rt.common.SameBytes", "std.Allocate" };
 
     private void EmitFunctionCore(FunctionSymbol f, FunctionDeclaration d, IReadOnlyDictionary<TypeParameterSymbol, KurzType> instanceMap, string name)
     {
@@ -635,8 +638,9 @@ public sealed partial class Emitter
             return;
         }
 
-        if (value is null && returnType is UnionType { Cases: [VoidType, ..] } union)
+        if (value is null && returnType is UnionType union && union.Cases.Any(c => c is VoidType))
         {
+            // F3: a bare `return` gives the result's `void` case, the success or another (issue 641)
             Leaving(0, 0);
             ReturnRaw(MakeUnion(union, Types.Void, null));
             return;
@@ -825,6 +829,9 @@ public sealed partial class Emitter
             case AssertionStatement a:
                 EmitAssertion(a);
                 break;
+            case AdvanceStatement a:
+                EmitAdvance(a);
+                break;
             case AsmStatement asm:
                 EmitAsm(asm);
                 break;
@@ -911,7 +918,9 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// A <c>throw</c> (O6): the text of the value and the place of the throw to the runtime's <c>Throw</c>, which ends the process; a bare
+    /// A <c>throw</c> (O6): the text of the value, in which an instance held as a class with no <c>Text()</c> has the text of its own class,
+    /// or its class's name where that class has none (O7), and the
+    /// place of the throw to the runtime's <c>Throw</c>, which ends the process; a bare
     /// <c>throw</c> in an arm of <c>else</c> throws the case value that reached the arm (O7). Where a block of <c>on crash</c> of the program
     /// reads a <c>Reason</c> with the value's type, or with the type of its case, the value, its type's number and its copy go to the
     /// runtime first (the runtime's <c>Thrown</c>; U30).
@@ -921,7 +930,17 @@ public sealed partial class Emitter
         var (value, type) = t.Value is null
             ? elseCase ?? throw new InvalidOperationException($"a bare `throw` outside an arm of `else` at line {t.Line}: the checker reports it")
             : (EmitExpression(t.Value), TypeOf(t.Value));
-        var text = TextOf(value, type, t.Line);
+        namesClasses = true; // O7: an instance held as a class with no `Text()` has its own class's text, or its class's name, here
+        string text;
+        try
+        {
+            text = TextOf(value, type, t.Line);
+        }
+        finally
+        {
+            namesClasses = false;
+        }
+
         if (program.Model.CrashReasons.Count > 0)
         {
             EmitThrown(value, type);

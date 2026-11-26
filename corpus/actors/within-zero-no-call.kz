@@ -1,0 +1,9 @@
+// expect: throws invalid-input at 7
+// rules: U40
+
+// the bound is read at the block's entry, before its first statement, so that a block with no call in it is refused too
+
+zero = 1s - 1s
+within zero {
+    print("inside")
+}

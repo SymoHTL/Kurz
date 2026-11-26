@@ -1,0 +1,15 @@
+// expect: throws call-timeout at 15
+// | 1
+// rules: S28
+
+// a call's bound counts the time its callee sleeps
+actor Napper {
+    pub int Nap(duration d) {
+        Environment.Sleep(d)
+        return 1
+    }
+}
+
+a = spawn Napper()
+print(a.Nap(5ms) within 1s)
+print(a.Nap(200ms) within 20ms)

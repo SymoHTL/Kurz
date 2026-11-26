@@ -1,0 +1,79 @@
+// expect: throws deadlock at 21
+// | 0
+// | 0
+// threads: 1
+// rules: U22
+
+// at their restarts `A`'s and `C`'s constructors each wait on a call whose call back waits in the inbox for that constructor, so
+// that the top-level code's wait on `Get` finds nothing left to run, and the error names both calls kept out, `A`'s on its line and
+// `C`'s on a line of its own under it
+
+actor B {
+    mut A? a = null
+
+    pub void Set(A x) {
+        a = x
+    }
+
+    pub int Ask() {
+        x = a
+        if x != null {
+            return vouch x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor D {
+    mut C? c = null
+
+    pub void Set(C x) {
+        c = x
+    }
+
+    pub int Ask() {
+        x = c
+        if x != null {
+            return vouch x.Peek()
+        }
+
+        return 0
+    }
+}
+
+actor A(B Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "a fails"
+    }
+
+    pub int Get() => first
+}
+
+actor C(D Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "c fails"
+    }
+
+    pub int Get() => first
+}
+
+b = spawn B()
+a = spawn A(b)
+d = spawn D()
+c = spawn C(d)
+print(a.Get())
+print(c.Get())
+b.Set(a)
+d.Set(c)
+send a.Fail()
+send c.Fail()
+print(a.Get())

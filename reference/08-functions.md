@@ -21,9 +21,14 @@ Case: [functions/expression-body.kz](../corpus/functions/expression-body.kz)
 ### F3 (assumed, §8) Block body and `return`
 
 A body between braces holds statements. `return expression` ends the function with that result,
-as in C#. As there, a function with a result whose end can be reached without a `return`, and a
-bare `return` in such a function, are the compile error `missing-return`; `return` with a value in
+as in C#. As there, a function with a result whose end can be reached without a `return` is the
+compile error `missing-return`; `return` with a value in
 a `void` function (F4), and a value of another type than the result, are `type-mismatch`.
+A bare `return` gives the result's `void` case, the success or another (O10), in a lambda's body
+the `void` case of the lambda's result (F11), so it is `missing-return` only where the result holds no
+`void` case, "a bare `return` in a function whose
+result holds no `void` case (F3)"; the end of a function whose result holds a `void` case beside
+another success stays `missing-return` *(assumed: §5, issue 641, comment 7165561768)*.
 Whether the end can be reached is read as N3 reads a block that always leaves, its `while true`
 form included.
 *(proposed: C#'s rules with Kurz's ids; the reading of the end is N3's, which the record marks as
@@ -50,6 +55,68 @@ int Sign(int n) {
 }
 
 print(Sign(3))
+```
+
+Case: [functions/void-case-return.kz](../corpus/functions/void-case-return.kz)
+```kurz
+data Circle(int R)
+
+// a bare `return` gives the result's `void` case, which is not its success here
+Circle | void Find(bool b) {
+    if b {
+        return Circle(1)
+    }
+    return
+}
+
+string Show(bool b) {
+    return match Find(b) {
+        Circle c => "circle {c.R}"
+        void => "none"
+    }
+}
+
+print(Show(true))
+print(Show(false))
+```
+
+Case: [functions/void-case-return-lambda.kz](../corpus/functions/void-case-return-lambda.kz)
+```kurz
+data Circle(int R)
+
+string Show((bool) => Circle | void f, bool b) {
+    return match f(b) {
+        Circle c => "circle {c.R}"
+        void => "none"
+    }
+}
+
+// a lambda's bare `return` gives the `void` case of the lambda's result, as a function's does
+(bool) => Circle | void find = (b) => {
+    if b {
+        return Circle(2)
+    }
+
+    return
+}
+
+print(Show(find, true))
+print(Show(find, false))
+```
+
+Case: [functions/bare-return-no-void-case.kz](../corpus/functions/bare-return-no-void-case.kz)
+```kurz
+data Circle(int R)
+
+// a result with no `void` case has nothing a bare `return` gives
+Circle | string Find(bool b) {
+    if b {
+        return Circle(1)
+    }
+    return
+}
+
+print("unreached")
 ```
 
 Case: [functions/while-true-end.kz](../corpus/functions/while-true-end.kz)
@@ -213,8 +280,13 @@ print(Either())
 
 A function that has no result is declared with `void`, as in C# and in the record's samples. `void`
 is no type of a value: a parameter a function or a method declares, `static` or not, a field or a
-variable of type `void` is `syntax`, as C# refuses each (CS1536, CS0670, CS1547), while the success case of a union may be
-`void` (§5) and so may the result of a function type (F11) (§8, the owner, 2026-11-04). A parameter
+variable of type `void` is `syntax`, as C# refuses each (CS1536, CS0670, CS1547), while a case of a union may be
+`void`, the success case or another, a case with no payload (§5, the owner, 2026-11-24, issue 625, comment 7141775138, Q1), and so may the result of a function type (F11) (§8, the owner, 2026-11-04). A name an arm of a `match` binds
+(C4) is no exception: an arm of a `void` case binds none and is written `void =>`, and `void v =>`
+is `syntax` at the arm (§8, the owner, 2026-11-25, issue 632, comment 7158347230), "`void` is no type
+of a name an arm binds: write `void =>` (F4)" *(assumed: the text, a reading of the build)*, and so is a
+name an arm of `else` after a call binds (O5) *(assumed: the reading of "an arm" in the owner's answer, §8,
+said back on issue 632, comment 7161338758)*. A parameter
 of a function type, `(void) => int`, is read as it is (§8, the owner, 2026-11-04): the type has one
 parameter, a lambda with no type on its parameter, `(v) => 1`, is a value of it, and no call of it
 can be written, since `f()` gives that parameter no argument (D11) and a call of a `void` function is
@@ -251,6 +323,72 @@ Case: [functions/void-variable.kz](../corpus/functions/void-variable.kz)
 ```kurz
 // `void` is no type of a variable: the case pins that refusal, and the value `1` is not checked against `void`
 void done = 1
+```
+
+Case: [functions/void-arm-name.kz](../corpus/functions/void-arm-name.kz)
+```kurz
+// an arm of the `void` case binds no name: `void v =>` is refused as a variable of type `void` is, and the arm is written `void =>`
+data Circle(int R)
+
+string Describe(Circle | void s) {
+    return match s {
+        Circle c => "circle {c.R}"
+        void v => "none"
+    }
+}
+
+print(Describe(Circle(2)))
+```
+
+Case: [functions/void-else-arm-name.kz](../corpus/functions/void-else-arm-name.kz)
+```kurz
+// an arm of `else` of the `void` case binds no name either: `void v =>` is refused at the arm
+data Circle(int R)
+
+Circle | void Find(bool b) {
+    return Circle(1)
+}
+
+int R(bool b) {
+    Circle c = Find(b) else {
+        void v => return 0
+    }
+    return c.R
+}
+
+print(R(true))
+```
+
+Case: [outcomes/void-arm-value.kz](../corpus/outcomes/void-arm-value.kz)
+```kurz
+data Circle(int R)
+data NotFound
+
+string Describe(Circle | void s) {
+    return match s {
+        Circle c => "circle {c.R}"
+        void => "none"
+    }
+}
+
+void | NotFound Remove(int id) {
+    if id < 0 {
+        return NotFound
+    }
+}
+
+void Show(void | NotFound v) {
+    match v {
+        void => print("removed")
+        NotFound => print("not found")
+    }
+}
+
+print(Describe(Circle(2)))
+void | NotFound kept = Remove(1)
+Show(kept)
+void | NotFound lost = Remove(-1)
+Show(lost)
 ```
 
 ### F5 (decided, §8) Top-level statements
@@ -1142,6 +1280,32 @@ match Run() {
     int n => print(n)
     NotFound => print("none")
 }
+```
+
+Case: [types/generic-limit-overload.kz](../corpus/types/generic-limit-overload.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+string F<T: Shape>(T x) => "generic"
+
+string F(long n) => "long"
+
+print(F(5))
+```
+
+Case: [types/generic-limit-overload-none.kz](../corpus/types/generic-limit-overload-none.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+string F<T: Shape>(T x) => "generic"
+
+string F(bool b) => "bool"
+
+print(F(5))
 ```
 
 ### F14 (decided, §8) A literal as an argument of an overloaded function

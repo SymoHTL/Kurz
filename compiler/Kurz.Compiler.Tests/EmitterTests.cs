@@ -1102,24 +1102,173 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Theory]
-    [InlineData("d", 0)]
+    [InlineData("d", 1)]
     [InlineData("2s", 0)]
-    [InlineData("-2s", 0)]
-    [InlineData("(d)", 0)]
+    [InlineData("(2s)", 0)]
+    [InlineData("(1s + 1s)", 0)]
+    [InlineData("(d)", 1)]
     [InlineData("ds[0]", 1)]
     [InlineData("(ds[0])", 1)]
     public void A_message_whose_clauses_bound_can_raise_with_no_call_in_it_is_built_in_a_heap_of_its_own(string bound, int heaps)
     {
         // U39, U12: the bound of a call's clause runs after the message is built, so a bound that can raise with no call in it, an index,
-        // builds the message in a heap of its own (the runtime's `MessageHeapNew`), which the crash of its builder frees (ActorTests,
-        // `A_message_whose_clauses_bound_crashes_its_builder_leaves_no_block_in_its_callees_heap`); a duration's literal, its sign
-        // included, and a read of a name, either in brackets, raise nothing, and the message is built in the callee's heap; the IR is
-        // read, since a call whose bound raises nothing answers alike from either heap
+        // or a read of a name, whose value of zero or less is `invalid-input` (U41; assumed: T78 and T81 of comment 7055305138), either in
+        // brackets, builds the message in a heap of its own (the runtime's `MessageHeapNew`), which the crash of its builder frees
+        // (ActorTests, `A_message_whose_clauses_bound_crashes_its_builder_leaves_no_block_in_its_callees_heap` and
+        // `A_message_whose_clauses_bound_is_refused_at_run_time_leaves_no_block_in_its_callees_heap`); a constant, a duration's literal
+        // or one folded from literals (T25), in brackets or not, raises nothing, the checker refusing one of zero or less (assumed: T79 of
+        // that comment, as corrected on 2026-11-21), and the message is built in the callee's heap; the IR is read, since a call whose
+        // bound raises nothing answers alike from either heap
         var compilation = Compile("actor Store {\n    pub int Get(List<int> xs) => xs[0]\n}\n\ns = spawn Store()\nds = [1s]\nd = 1s\nitems = [1]\n"
             + $"print([d, ds[0]].Count)\nprint(s.Get(items) within {bound})\n", Builder.CheckRuntime(Builder.HostTarget!.Value));
         var program = compilation.Program;
         Assert.True(program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         Assert.Equal(heaps, Regex.Count(program.Ir, @"call ptr @""[^""]+\.MessageHeapNew\.[0-9]+[^""]*""\(\)"));
+    }
+
+    [Theory]
+    [InlineData("print(s.Take(items, n))", 0, "")]
+    [InlineData("print(s.Take(items, (n)))", 0, "")]
+    [InlineData("print(s.Take(items, 2))", 0, "")]
+    [InlineData("print(s.Text(items, \"a\"))", 0, "")]
+    [InlineData("print(s.Letter(items, 'a'))", 0, "")]
+    [InlineData("print(s.Flag(items, true))", 0, "")]
+    [InlineData("print(s.Maybe(items, null))", 0, "")]
+    [InlineData("print(s.Wait(items, -2s))", 0, "")]
+    [InlineData("print(s.Take(items, -2))", 0, "")]
+    [InlineData("print(s.Take(items, ns[0]))", 0, "after")]
+    [InlineData("print(s.Take(items, (ns[0])))", 0, "after")]
+    [InlineData("print(s.Take(items, n + 1))", 0, "after")]
+    [InlineData("print(s.Text(items, \"{n}\"))", 0, "")]
+    [InlineData("send s.Add(items, ns[0])", 0, "after")]
+    [InlineData("print(s.Take(items, ns[0]) within 2s)", 0, "after")]
+    [InlineData("print(s.Take(items, n))\nprint(Cache.Take(items, n))", 0, "")]
+    [InlineData("print(s.Take(items, n))\nprint(Cache.Take(items, ns[0]))", 0, "after")]
+    [InlineData("print(s.Three(items, ns[0], items))", 0, "after")]
+    [InlineData("print(s.First(ns[0], items))", 0, "")]
+    [InlineData("print(s.Two(n, ns[0]))", 0, "")]
+    [InlineData("print(s.Take(items, ns[s.Two(n, n)]))", 1, "before")]
+    [InlineData("print(s.Take(move items, ns[0]))", 0, "after")]
+    public void A_message_whose_argument_after_a_crossing_one_can_raise_with_no_call_in_it_copies_its_crossing_arguments_after_its_last(string statement, int heaps, string copies)
+    {
+        // section 6 (the owner, 2026-11-21, #519, comment 7060155980, "T83 1"): where an argument after one that crosses, `items`, can
+        // raise with no call in it, an index, an operator or a string's hole, the crossing arguments are copied into the callee's heap
+        // after the last argument, `items` held as it was read from its name, or as it was moved, so that the raise comes before the last copy and leaves
+        // no copy (ActorTests, `A_message_whose_argument_after_a_crossing_one_crashes_its_builder_leaves_no_block_in_its_callees_heap`),
+        // and no heap of its own is made (the runtime's `MessageHeapNew`, which T24 (1), comment 7051492844, made there), a `send`'s, a
+        // call's with a clause and a `per node` actor's alike; a message with an argument that runs a call, which can wait, is built in
+        // a heap of its own, `items` copied into it where it is evaluated, before the raise that follows; a literal, a number's or a
+        // duration's with its sign, and a read of a name, either in brackets, raise nothing, and neither does a message whose argument
+        // that can raise comes before every crossing one, or none of whose arguments crosses, as the reading of the product pass has it
+        // (comment 7056985643), each copied where it is evaluated, which no program tells from a copy after the last; the IR is read,
+        // since the copy of a message whose builder does not crash answers alike wherever it is made
+        var text = "actor Store {\n    pub int Take(List<int> xs, int k) => k\n\n    pub int First(int k, List<int> xs) => k\n\n"
+            + "    pub int Two(int a, int k) => k\n\n    pub int Three(List<int> xs, int k, List<int> zs) => k\n\n    pub int Text(List<int> xs, string t) => xs.Count\n\n"
+            + "    pub int Letter(List<int> xs, char c) => xs.Count\n\n    pub int Flag(List<int> xs, bool b) => xs.Count\n\n"
+            + "    pub int Maybe(List<int> xs, string? t) => xs.Count\n\n    pub int Wait(List<int> xs, duration d) => xs.Count\n\n"
+            + "    pub void Add(List<int> xs, int k) {\n    }\n}\n\nactor Cache per node {\n    pub int Take(List<int> xs, int k) => k\n}\n\n"
+            + $"s = spawn Store()\nns = [1]\nn = 1\nitems = [1]\nprint(ns.Count + n + items.Count)\n{statement}\n";
+        var compilation = Compile(text, Builder.CheckRuntime(Builder.HostTarget!.Value));
+        var program = compilation.Program;
+        Assert.True(program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        Assert.Equal(heaps, Regex.Count(program.Ir, @"call ptr @""[^""]+\.MessageHeapNew\.[0-9]+[^""]*""\(\)"));
+        if (copies.Length > 0)
+        {
+            // the raise at the statement's last line, and the last copy of the function that holds it and builds the message, after or
+            // before it
+            var line = text.Split('\n').Length - 1;
+            var raise = new Regex($@"call void @""[^""]+\.Raise\.[0-9]+[^""]*""\([^\n]*, i32 {line}\)");
+            var function = Assert.Single(program.Ir.Split("\ndefine "), f => raise.IsMatch(f) && f.Contains("@\"message.table.", StringComparison.Ordinal));
+            var copy = function.LastIndexOf("call void @\"copy.run\"(", StringComparison.Ordinal);
+            Assert.True(copy >= 0, $"no copy in the function that raises at line {line}");
+            Assert.Equal(copies, copy > raise.Match(function).Index ? "after" : "before");
+        }
+    }
+
+    /// <summary>
+    /// The program of the tests of a <c>spawn</c>'s heap: the actors <c>Holder</c>, <c>First</c> and <c>Two</c>, whose slots of a list
+    /// cross into the new actor's heap, an actor whose method a call waits for, a function, and <paramref name="statement"/>, which
+    /// spawns <c>h</c>.
+    /// </summary>
+    private static string SpawnProgram(string statement) =>
+        "actor Holder(List<int> Items, int K) {\n    pub int Get() => K\n}\n\nactor First(int K, List<int> Items) {\n    pub int Get() => K\n}\n\n"
+        + "actor Two(int A, int K) {\n    pub int Get() => K\n}\n\nactor Store {\n    pub int Get() => 1\n}\n\nint Twice(int k) => k * 2\n\n"
+        + $"s = spawn Store()\nns = [1]\nn = 1\nitems = [1]\nrows = [[1]]\nprint(ns.Count + n + items.Count + rows.Count + s.Get() + Twice(n))\n{statement}\nprint(h.Get())\n";
+
+    [Theory]
+    [InlineData("h = spawn Holder(items, n)", 0)]
+    [InlineData("h = spawn Holder(items, 2)", 0)]
+    [InlineData("h = spawn Holder(items, ns[0])", 1)]
+    [InlineData("h = spawn Holder(items, n + 1)", 1)]
+    [InlineData("h = spawn Holder(items, Twice(n))", 1)]
+    [InlineData("h = spawn Holder(items, s.Get())", 1)]
+    [InlineData("h = spawn Holder(rows[0], n)", 1)]
+    [InlineData("h = spawn Holder([ns[0]], n)", 1)]
+    [InlineData("h = spawn First(ns[0], items)", 0)]
+    [InlineData("h = spawn Two(n, ns[0])", 0)]
+    [InlineData("h = spawn Two(n, s.Get())", 0)]
+    [InlineData("h = spawn First(s.Get(), items)", 0)]
+    public void A_spawn_whose_first_crossing_argument_or_one_after_it_can_raise_or_wait_lists_its_heap_with_its_builder(string statement, int listed)
+    {
+        // section 6 (the owner, 2026-11-21, #519, comment 7060155980, "T82 1", and 2026-11-23, comment 7095825398, "T87 3"): the heap a
+        // `spawn` makes just before its first argument that crosses into it, `items`, `rows[0]` or the list `[ns[0]]`, is listed with the
+        // actor whose code spawns (the runtime's `SpawnHeapNew`) where that argument or one after it can raise, an index, an operator or
+        // a call, or wait, a call of another actor's method, so that its crash frees it (ActorTests,
+        // `A_spawn_whose_argument_after_a_crossing_one_crashes_its_spawner_leaves_no_heap_of_the_actor_it_was_making`), and taken off
+        // that list before the actor takes it (`SpawnHeapTaken`); a literal and a read of a name raise nothing, and an argument before
+        // the first crossing one, or of a `spawn` none of whose arguments crosses, whose heap is made after its last, runs before the
+        // heap is made and lists nothing (`ActorHeapNew`); the IR is read, since a `spawn` whose spawner does not crash answers alike with
+        // its heap listed or not
+        var compilation = Compile(SpawnProgram(statement), Builder.CheckRuntime(Builder.HostTarget!.Value));
+        var program = compilation.Program;
+        Assert.True(program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        Assert.Equal(listed, Regex.Count(program.Ir, @"call ptr @""[^""]+\.SpawnHeapNew\.[0-9]+[^""]*""\(i64 "));
+        Assert.Equal(listed, Regex.Count(program.Ir, @"call void @""[^""]+\.SpawnHeapTaken\.[0-9]+[^""]*""\(ptr "));
+    }
+
+    [Theory]
+    [InlineData("h = spawn Two(n, ns[0]) on crash stop", "raise heap")]
+    [InlineData("h = spawn First(ns[0], items) on crash stop", "raise heap copy")]
+    [InlineData("h = spawn Holder(items, ns[0]) on crash stop", "heap copy raise")]
+    public void A_spawn_makes_its_heap_just_before_its_first_crossing_argument_or_after_its_last_where_none_crosses(string statement, string order)
+    {
+        // section 6 (the owner, 2026-11-23, #519, comment 7095825398, "T87 3"): the new actor's heap (the runtime's `ActorHeapNew` or
+        // `SpawnHeapNew`) is made after the index `ns[0]` where no argument crosses, after it and before the copy of `items` into the
+        // heap where the index comes before the first crossing argument, and before both where `items` comes first, so that a raise
+        // before that point finds no heap (ActorTests, `A_spawn_whose_argument_raises_before_its_heap_is_made_leaves_no_heap`); the
+        // statement's raise, the last heap made and the last copy of the function that holds them are read in the IR, `on crash stop`
+        // keeping no copy of the arguments for a restart, so that the one copy is the crossing one
+        var text = SpawnProgram(statement);
+        var compilation = Compile(text, Builder.CheckRuntime(Builder.HostTarget!.Value));
+        var program = compilation.Program;
+        Assert.True(program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var line = Array.IndexOf(text.Split('\n'), statement) + 1;
+        var raise = new Regex($@"call void @""[^""]+\.Raise\.[0-9]+[^""]*""\([^\n]*, i32 {line}\)");
+        var function = Assert.Single(program.Ir.Split("\ndefine "), f => raise.IsMatch(f));
+        var marks = new (string Name, int At)[]
+        {
+            ("raise", raise.Match(function).Index),
+            ("heap", Regex.Matches(function, @"call ptr @""[^""]+\.(ActorHeapNew|SpawnHeapNew)\.[0-9]+[^""]*""\(i64 ").LastOrDefault()?.Index ?? -1),
+            ("copy", function.LastIndexOf("call void @\"copy.run\"(", StringComparison.Ordinal)),
+        };
+        Assert.Equal(order, string.Join(" ", marks.Where(m => m.At >= 0).OrderBy(m => m.At).Select(m => m.Name)));
+    }
+
+    [Fact]
+    public void A_message_whose_argument_is_the_name_of_a_property_is_built_in_a_heap_of_its_own()
+    {
+        // U39, U12, K7: a name that reads a property inside its class, `Items`, is the call of its getter, which can raise, an index
+        // there, and the checker reads it as a call that can wait (`Checker.Calls`, `SemanticModel.CanWait`), so that a message with it
+        // among its arguments is built in a heap of its own, as one whose argument runs a call is; the name of a field, `items`, raises
+        // nothing, and its message is built in the callee's heap: one call of `MessageHeapNew` in the IR, the property's; the bounds are
+        // literals, which raise nothing, since a name there can raise `invalid-input` (U41)
+        var compilation = Compile("actor Store {\n    pub int Get(List<int> xs) => xs[0]\n}\n\nclass Box {\n    List<List<int>> ls = [[1]]\n"
+            + "    List<int> items = [1]\n\n    List<int> Items => ls[0]\n\n    pub void Ask(Store store) {\n"
+            + "        print(store.Get(Items) within 1s)\n        print(store.Get(items) within 1s)\n    }\n}\n\ns = spawn Store()\nBox().Ask(s)\n",
+            Builder.CheckRuntime(Builder.HostTarget!.Value));
+        var program = compilation.Program;
+        Assert.True(program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        Assert.Equal(1, Regex.Count(program.Ir, @"call ptr @""[^""]+\.MessageHeapNew\.[0-9]+[^""]*""\(\)"));
     }
 
     [Fact]
@@ -1458,6 +1607,31 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_call_through_a_limit_is_direct_in_a_copy_that_binds_a_class_and_through_the_table_in_one_that_binds_the_interface()
+    {
+        // T19 (Q14 of issue 605, comment 7051071380): in `AreaOf<Square>` the call is `Square`'s `Area`, as a call on a `Square` runs it, with no
+        // table read; in `AreaOf<Shape>` it loads the slot of `Area` from the instance's table for `Shape` (K6)
+        var program = Compile(
+            "interface Shape {\n    int Area()\n}\n\nclass Square(int Side) : Shape {\n    pub int Area() => Side * Side\n}\n\nint AreaOf<T: Shape>(T item) => item.Area()\n\nShape s = Square(2)\nprint(AreaOf(Square(3)) + AreaOf(s))\n",
+            Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
+        Assert.True(program is not null, "no program");
+        string Body(string copy)
+        {
+            var lines = program.Ir.ReplaceLineEndings("\n").Split('\n'); // the module's lines end as the system's do
+            var start = Array.FindIndex(lines, l => l.StartsWith("define ", StringComparison.Ordinal) && l.Contains($".AreaOf<{copy}>.", StringComparison.Ordinal));
+            Assert.True(start >= 0, $"no copy `AreaOf<{copy}>` in the IR");
+            return string.Join("\n", lines.Skip(start).TakeWhile(l => l != "}"));
+        }
+
+        var direct = Body("Square");
+        Assert.Contains(".Square.Area.", direct, StringComparison.Ordinal);
+        Assert.DoesNotContain("extractvalue %kz.obj", direct, StringComparison.Ordinal);
+        var through = Body("Shape");
+        Assert.DoesNotContain(".Square.Area.", through, StringComparison.Ordinal);
+        Assert.Contains("extractvalue %kz.obj", through, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_value_of_an_interface_is_the_address_and_the_table_its_class_has_for_the_interface()
     {
         // K6, as Rust lays out `Rc<dyn Trait>`: a value of an interface is the address of the instance's block and its class's table for
@@ -1585,7 +1759,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // takes the reply off the message after the method returned by one swap (`ReplyTaken`), as the crash's unhook does, so that one
         // of them owns it, as tokio's `oneshot` decides by one word (not checked at source); the owner reads the waiter, then stores the
         // reply's word with release, then wakes (`Replied`, `Signal`), the waiter loads it with acquire (`ReplyState`), which the
-        // waits, the readiness, the take and the crash call (`Answer`, its loop in the top-level code in `RootWait`, its loop in an activation and its
+        // waits, the readiness, the take and the crash call (`Answer`, its loop in the top-level code in `RootLoop`, its loop in an activation and its
         // kind, `Ready`, `RunOne`, `Fall`), as the crash and the end take a reply by the swap (`Fall`, `EndActor`); a wake sets QUEUED by
         // one `or` (`Wake`), a take, a hold's end, a constructor's end and a restart's hold change the state word by one compare-exchange
         // (`Exchanged`) after a load with acquire, the restart's hold loading it with acquire again while a take holds the actor
@@ -1615,7 +1789,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         InOrder(Body(@"kz\.main"), @"store i32 0, ptr %v\.reply\.\d+", @"call void @""rt\.common\.ReplyWaiter\.\d+""\(ptr %v\.reply\.\d+\)",
             @"store ptr %v\.reply\.\d+, ptr %t\d+", @"call void @""rt\.common\.Enqueue\.\d+""", @"call void @""rt\.common\.Wait\.\d+""");
-        Assert.Contains("getelementptr { i32, ptr, i64, ptr, ptr, i64, ptr, %kz.str, i32, ptr, i64 }, ptr %v.reply.", ir, StringComparison.Ordinal); // U36, U43: the deadline, the timers' links and the time of a crash or an end, and U60, U63: the callee, the call's file and its line, before the heap
+        Assert.Contains("getelementptr { i32, ptr, i64, ptr, ptr, i64, ptr, i64, i64, ptr, ptr, i64 }, ptr %v.reply.", ir, StringComparison.Ordinal); // U36, U43, U22: the deadline, the timers' links, the time of a crash or an end and the call's place, and U60: the callee, before the heap
         InOrder(Body(@"""message\.Counter\.Get\.\d+"""), @"call i64 @""f\.Counter\.Get\.\d+""", @"call ptr @""rt\.common\.ReplyTaken\.\d+""\(ptr %a1\)",
             @"call void @""rt\.common\.Replied\.\d+""");
         InOrder(Runtime("ReplyTaken"), @"atomicrmw xchg ptr %t\d+, ptr null acq_rel, align 8");
@@ -1632,7 +1806,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         InOrder(Runtime("HeldAlone"), @"call i32 @""rt\.common\.Exchanged\.\d+""", @"load atomic i32, ptr %t\d+ acquire, align 4");
         const string state = @"call i32 @""rt\.common\.ReplyState\.\d+""", taken = @"call ptr @""rt\.common\.ReplyTaken\.\d+""";
         InOrder(Runtime("Answer"), state, state);
-        InOrder(Runtime("RootWait"), state);
+        InOrder(Runtime("RootLoop"), state);
         InOrder(Runtime("Ready"), state);
         InOrder(Runtime("RunOne"), state);
         InOrder(Runtime("Fall"), state, taken, state, taken);
@@ -1705,5 +1879,51 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         const string text = "long Read<const MemoryOrder O>(AtomicLong a) {\n    mut long v = 0\n    raw {\n        v = a.Load(O)\n    }\n\n    return v\n}\n\n"
             + "mut long w = 70001\nview = AtomicLong.FromPtr(&w)\nprint(Read<MemoryOrder.Acquire>(view))\nprint(Read<MemoryOrder.Release>(view))\n";
         Ran(BuildAndRun(text, "atomic-order-copy", "raw"), 1, ["70001"], "error: invalid-ordering-at-run-time at program.kz:4\n");
+    }
+
+    [Fact]
+    public void The_void_arm_of_else_loads_no_case_and_a_guarded_block_in_it_takes_none()
+    {
+        // O5 (issue 638): the `void` case has no payload, so its arm of `else` loads nothing from a slot, which `Test` makes for no `void`
+        // case, as the `void` arm of a `match` holds nothing (issue 625, the owner, comment 7141775138), and a guarded block in the arm,
+        // a function of its own, takes no case as a parameter; the program builds, and the arm beside it runs
+        const string text = "data Circle(int R)\ndata NotFound\n\nCircle | void | NotFound Find(int id) {\n    if id == 1 {\n        return Circle(1)\n    }\n"
+            + "    return NotFound\n}\n\nint R(int id) {\n    Circle c = Find(id) else {\n        void => {\n            if X86.Sse41.IsSupported {\n"
+            + "                print(0)\n            }\n            return 0\n        }\n        NotFound => Circle(5)\n    }\n    return c.R\n}\n\n"
+            + "print(R(1))\nprint(R(2))\n";
+        var program = Emit(text);
+        Assert.Contains(".guarded.", program.Ir, StringComparison.Ordinal);
+        Assert.DoesNotContain("load void", program.Ir, StringComparison.Ordinal);
+        Assert.DoesNotContain("void %case", program.Ir, StringComparison.Ordinal);
+        Ran(Toolchain.Run(toolchain.Build(program, "else-void-arm-guarded")), 0, ["1", "5"], string.Empty);
+    }
+
+    [Fact]
+    public void The_offset_of_the_clock_is_read_in_every_build_of_kurz_test_and_in_no_other()
+    {
+        // Y10 with D8 of issue 586, comment 6992687784: every build `kurz test` makes, the release build of `--release` among them, adds
+        // the runtime's offset (`Ahead`) to each of the program's reads of the clock, here one of `instant.Now`, one of `Elapsed` and two
+        // of `timestamp.Now`, and `advance` writes it; a build of `run`, `build` or `exec` reads the system's clock alone and stores to the
+        // offset nowhere, so that the read of it in the runtime's `PauseClock` reads a global no code changes, which the optimiser folds to
+        // 0; Linux alone, where the clock's reads are built (S25)
+        if (Builder.HostTarget != Target.Linux)
+        {
+            return;
+        }
+
+        const string text = "instant start = instant.Now\nprint(start.Elapsed >= 0s)\n\ntest \"reads\" {\n    instant first = instant.Now\n    timestamp wall = timestamp.Now\n    advance 1s\n    check first.Elapsed >= 1s\n    check timestamp.Now - wall >= 1s\n}\n";
+        var stores = new Regex(@"store i64 [^\n]*, ptr @""s\.rt\.common\.ahead""");
+        foreach (var release in new[] { false, true })
+        {
+            var run = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: !release).Program?.Ir;
+            var test = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: !release, tests: true).Program?.Ir;
+            Assert.NotNull(run);
+            Assert.NotNull(test);
+            Assert.DoesNotContain("@\"rt.common.Ahead.", run, StringComparison.Ordinal);
+            Assert.DoesNotMatch(stores, run);
+            Assert.Contains("@\"s.rt.common.ahead\" = internal global i64 0", run, StringComparison.Ordinal); // the global the optimiser folds
+            Assert.Equal(4, Regex.Count(test, @"call i64 @""rt\.common\.Ahead\.[^""]*""\(\)"));
+            Assert.Matches(stores, test);
+        }
     }
 }

@@ -1,0 +1,23 @@
+// expect: error call-loop at 15
+// threads: 1
+// rules: U52, U56
+
+// `User`'s `Use` starts `Cache`, whose default calls `Cache.Size` in the chain of `Use`, a call that would wait in `Cache`'s inbox
+// for the start that waits on it: a loop through `Cache`'s type, which layer 2 refuses at that call
+
+actor Cache per node {
+    int size = Measured()
+
+    pub int Size() => size
+}
+
+int Measured() {
+    return Cache.Size() + 1
+}
+
+actor User {
+    pub int Use() => Cache.Size()
+}
+
+u = spawn User()
+print(u.Use())

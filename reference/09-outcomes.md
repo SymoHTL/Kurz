@@ -928,7 +928,10 @@ An arm is read as an arm of `match` (C4): one that names an interface the call's
 or a class or a `data` type they derive from, covers those cases, as C#'s `catch (IOException e)`
 catches the exceptions derived from its type (§5, the owner, 2026-11-09, #408, comment 6748445211,
 "Cover, as match does", against `type-mismatch` as built); one that names a type the call cannot
-return beside its success is `type-mismatch` (T1), as such an arm of `match` is.
+return beside its success is `type-mismatch` (T1), as such an arm of `match` is. An arm `void =>`
+over a call whose success is another case takes the call's `void` case, which has no payload and
+gives the arm nothing to hold, as the `void` arm of `match` does (O10) *(assumed: §5's `void` case
+read with C4)*.
 
 Case: [outcomes/else-recover.kz](../corpus/outcomes/else-recover.kz)
 ```kurz
@@ -1131,6 +1134,33 @@ value = Find(2) else {
 print(value)
 ```
 
+Case: [outcomes/else-void-arm.kz](../corpus/outcomes/else-void-arm.kz)
+```kurz
+data Circle(int R)
+data NotFound
+
+Circle | void | NotFound Find(int id) {
+    if id == 1 {
+        return Circle(1)
+    }
+    return NotFound
+}
+
+int R(int id) {
+    Circle c = Find(id) else {
+        void => return 0
+        NotFound => {
+            print("not found")
+            Circle(5)
+        }
+    }
+    return c.R
+}
+
+print(R(1))
+print(R(2))
+```
+
 ### O6 (decided, §5, §6) Exceptions
 
 An exception is for a situation the function cannot recover from. There is no `catch`. An
@@ -1149,7 +1179,12 @@ Case: [outcomes/else-throw.kz](../corpus/outcomes/else-throw.kz)
 form. It is a statement and can stand wherever one can. As an arm of `else` it can also stand
 alone (O5): a bare `throw` there throws the case value that reached the arm, so the arm
 `NotFound => throw` throws the `NotFound`. A bare `throw` anywhere else is the compile error
-`throw-needs-value`: there is no value it could mean. *(proposed)* A bare `throw` in a lambda is one of these, a lambda
+`throw-needs-value`: there is no value it could mean. So is one in the arm of a `void` case, which
+holds no value to throw, "a bare `throw` throws the case its arm took, and a `void` case holds none
+(O7)" *(assumed: §5, issue 641, comment 7165561768)*. So is one in an arm `else` that takes a
+`void` case no arm before it handled, "a bare `throw` throws the case its arm took, and `else`
+here takes the `void` case, which holds none (O7)", while an arm `void =>` before it leaves `else`
+the other cases *(assumed: §5, issue 650, comment 7176868566)*. *(proposed)* A bare `throw` in a lambda is one of these, a lambda
 inside an arm of `else` too, since the lambda's body is not the arm *(assumed: as §5 marks it)*. When a supervisor reads what
 was thrown as the `Reason` of a crashed child, its type is the union of everything the
 child's code can throw, found over the whole program (the owner, 2026-10-03, against a fixed type
@@ -1177,6 +1212,240 @@ the order of the union's cases (U30) *(assumed: as §5 marks it)*. The bare `thr
 raised (E3): it throws the case value that reached the arm, and nothing is raised a second time,
 because nothing catches.
 
+A bare `throw` is a use of the arm's name, the case it throws being that name's value: after a `move`
+that may have ended the name on a path that reaches the `throw`, it is `used-after-move` at the
+`throw`, naming the line of the `move`, as U12 has it for every use and as rustc refuses a use of a
+value after its move (E0382) (§5, the owner, 2026-11-20, issue 596, comment 7051500690). It holds for
+every type of the name, on every path on which the name may have moved, with U12's message, and an
+arm's name is declared without `mut` (V7), so that no assignment makes it live again *(assumed, §5:
+the readings of the product pass on issue 596, comment 7055001448)*. A thrown instance of a class
+that neither declares nor inherits a `Text()` (A9) is allowed, and the error line of `thrown` prints
+its class's name where a thrown value's text stands (chapter 12), for a `throw` of the instance and
+for a bare `throw` of such a case alike (§5, the owner, 2026-11-20, issue 598, comment 7051500939).
+The name is the bare name of the instance's own class, a derived instance thrown as its base giving
+its own, and a `print` of a `Reason` whose union holds such a class stays `no-text`, as A7 has it
+(§5, the owner, 2026-11-21, issue 598, comment 7060156252, Q2 and Q3 of comment 7055011193). A thrown
+value that holds such an instance, a `data` value or a list, is allowed and has the text A3 and A4
+derive from what it holds, the instance's part of it being its class's name (§5, the owner,
+2026-11-21, comment 7060156252, Q8 of comment 7055578588). An instance thrown as a base that has no
+`Text()`, whose own class or a base between the two declares one (A9), shows what that `Text()` gives,
+found when the program runs from the instance's class, as C#'s virtual `ToString()` is, while a
+`print` of a value of that base stays `no-text` (A4) (§5, the owner, 2026-11-21, comment 7060156252,
+Q9 of comment 7055578588). An instance that a thrown `data` value or list holds as such a base takes
+its text by the same rule (§5, the owner, 2026-11-21, comment 7063693020, F1), and a `Text()` declared
+without `pub` is called there as one with it (§5, the owner, 2026-11-21, comment 7063693020, F2). A
+value thrown as an interface that declares no `Text()` (A10) takes the text of a thrown class instance,
+what the `Text()` of the instance's own class gives, found when the program runs, else that class's
+name, while a `print` of it stays `no-text` (A10) (§5, the owner, 2026-11-21, issue 621, comment
+7067091007). One that a thrown `data` value or list holds takes its text by the same rule, and a
+`Text()` declared without `pub` is called there *(assumed, §5: F1 and F2 read for such a value)*.
+
+Case: [outcomes/else-throw-after-move.kz](../corpus/outcomes/else-throw-after-move.kz)
+```kurz
+data Missing
+
+int | List<int> | Missing Plain(int id) {
+    if id == 1 {
+        return [id, 7, 9]
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Use(move List<int> l) => l.Count
+
+int Rethrown(int id) {
+    v = Plain(id) else {
+        List<int> n => {
+            c = Use(move n)
+            print("used {c}")
+            throw
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3))
+print(Rethrown(1))
+```
+
+Case: [outcomes/else-throw-after-move-other-path.kz](../corpus/outcomes/else-throw-after-move-other-path.kz)
+```kurz
+data Missing
+
+int | List<int> | Missing Plain(int id) {
+    if id == 1 {
+        return [id, 7, 9]
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Use(move List<int> l) => l.Count
+
+int Rethrown(int id, bool give) {
+    v = Plain(id) else {
+        List<int> n => {
+            if give {
+                return Use(move n)
+            } else {
+                throw
+            }
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3, true))
+print(Rethrown(1, true))
+print(Rethrown(1, false))
+```
+
+Case: [outcomes/else-throw-after-read.kz](../corpus/outcomes/else-throw-after-read.kz)
+```kurz
+data Missing
+
+int | List<int> | Missing Plain(int id) {
+    if id == 1 {
+        return [id, 7, 9]
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Rethrown(int id) {
+    v = Plain(id) else {
+        List<int> n => {
+            print("seen {n.Count}")
+            throw
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3))
+print(Rethrown(1))
+```
+
+Case: [outcomes/throw-instance-without-text.kz](../corpus/outcomes/throw-instance-without-text.kz)
+```kurz
+data Missing
+
+class Note(string Body, List<int> Marks)
+
+int | Note | Missing Find(int id) {
+    if id == 1 {
+        return Note("note {id}", [id, id])
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Rethrown(int id) {
+    v = Find(id) else {
+        Note n => {
+            print("seen {n.Body}")
+            throw n
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3))
+print(Rethrown(2))
+print(Rethrown(1))
+```
+
+Case: [outcomes/else-throw-instance-without-text.kz](../corpus/outcomes/else-throw-instance-without-text.kz)
+```kurz
+data Missing
+
+class Note(string Body, List<int> Marks)
+
+int | Note | Missing Find(int id) {
+    if id == 1 {
+        return Note("note {id}", [id, id])
+    }
+
+    if id == 2 {
+        return Missing
+    }
+
+    return id
+}
+
+int Rethrown(int id) {
+    v = Find(id) else {
+        Note n => {
+            print("seen {n.Body}")
+            throw
+        }
+        Missing => 0
+    }
+
+    return v
+}
+
+print(Rethrown(3))
+print(Rethrown(2))
+print(Rethrown(1))
+```
+
+Case: [outcomes/throw-derived-instance-without-text.kz](../corpus/outcomes/throw-derived-instance-without-text.kz)
+```kurz
+class Animal(string Name)
+
+class Dog(int Legs) : Animal
+
+void Fail(Animal a) {
+    throw a
+}
+
+print("before")
+Fail(Dog("rex", 4))
+```
+
+Case: [outcomes/throw-interface-without-text.kz](../corpus/outcomes/throw-interface-without-text.kz)
+```kurz
+interface Sized {
+    int Size()
+}
+
+class Dot : Sized {
+    pub int Size() => 1
+}
+
+void Fail(Sized s) {
+    throw s
+}
+
+Fail(Dot())
+```
+
 Case: [outcomes/bare-throw.kz](../corpus/outcomes/bare-throw.kz)
 ```kurz
 void Fail() {
@@ -1184,6 +1453,69 @@ void Fail() {
 }
 
 Fail()
+```
+
+Case: [outcomes/else-throw-void-case.kz](../corpus/outcomes/else-throw-void-case.kz)
+```kurz
+data Circle(int R)
+
+Circle | void Find(bool b) {
+    return Circle(1)
+}
+
+// the arm of a `void` case holds no value a bare `throw` could throw
+Circle | void Take(bool b) {
+    Circle c = Find(b) else {
+        void => throw
+    }
+    return c
+}
+
+print("unreached")
+```
+
+Case: [outcomes/else-throw-catchall-void.kz](../corpus/outcomes/else-throw-catchall-void.kz)
+```kurz
+data Circle(int R)
+data NotFound
+
+Circle | void | NotFound Find(bool b) {
+    return Circle(1)
+}
+
+// the arm `else` takes the `void` case and `NotFound`, and the `void` case holds no value a bare `throw` could throw
+Circle Get(bool b) {
+    return Find(b) else {
+        else => throw
+    }
+}
+
+print("unreached")
+```
+
+Case: [outcomes/else-throw-after-void-arm.kz](../corpus/outcomes/else-throw-after-void-arm.kz)
+```kurz
+data Circle(int R)
+data NotFound
+
+Circle | void | NotFound Find(int id) {
+    if id == 1 {
+        return Circle(1)
+    }
+    return NotFound
+}
+
+// the arm `void =>` takes the `void` case, so the arm `else` takes `NotFound` alone, which its bare `throw` throws
+Circle Get(int id) {
+    return Find(id) else {
+        void => return Circle(0)
+        else => throw
+    }
+}
+
+print(Get(1).R)
+print("before")
+print(Get(2).R)
 ```
 
 Case: [outcomes/throw-text.kz](../corpus/outcomes/throw-text.kz)
@@ -1228,6 +1560,62 @@ void Show(Plain p) {
 print("before")
 Show(Sub<Loud>(1, Loud(2)))
 print("after")
+```
+
+Case: [outcomes/else-throw-void.kz](../corpus/outcomes/else-throw-void.kz)
+```kurz
+data NotFound
+
+void | NotFound Find(int id) {
+    if id == 1 {
+        return NotFound
+    }
+}
+
+void Run(int id) {
+    Find(id) else {
+        else => throw
+    }
+}
+
+Run(2)
+print("ok")
+Run(1)
+```
+
+Case: [outcomes/else-throw-void-attempt.kz](../corpus/outcomes/else-throw-void-attempt.kz)
+```kurz
+data Big(int N)
+
+void Work(int n) {
+    if n > 1 {
+        throw Big(n)
+    }
+
+    print("worked {n}")
+}
+
+// a bare `throw` in the arm `else` over a block whose value is `void` throws the case `Crashed` that reached the arm
+void Run(int n) {
+    attempt { Work(n) } else {
+        else => throw
+    }
+}
+
+// the throw is a crash of the outer child, whose `Reason` holds that case
+void Read(int n) {
+    attempt { Run(n) } else {
+        Crashed c => {
+            match c.Reason {
+                Crashed<Big | RuntimeError> d => print("inner {d.Reason} at {d.Place.Line}, outer at {c.Place.Line}")
+                else => print("other {c.Reason}")
+            }
+        }
+    }
+}
+
+Read(1)
+Read(2)
 ```
 
 ### O8 (decided, §5) `match` covers every case
@@ -1316,7 +1704,16 @@ print(value)
 ### O10 (decided, §5) A success case without a value
 
 `void` can be the success case: `void | NotFound Remove(int id)`. The call is then a statement,
-and its other cases propagate or are handled as those of any call (O2, O5).
+and its other cases propagate or are handled as those of any call (O2, O5). It is a statement where
+nothing reads its cases: a `match` reads them, and a variable, a parameter or a field of its union
+holds them (§5, the owner, 2026-11-24, issue 625, comment 7141775138, Q1 and Q2); every other use of
+the call as a value is `syntax`, "a call with a `void` success used as a value (O10)" *(assumed: the
+text, a reading of the build)*.
+
+A `void` case is a case with no payload: a value of a union with a `void` case holds it, and a
+`match` reads it with a `void` arm, `void =>`, which binds no name (F4), over such a value or over a call whose success is `void`, as
+a `match` over any call reads the call's cases (O4, O8), and as Rust's `Ok(())` matches the `()` of
+a `Result<(), E>` (§5). A function gives its `void` case with a bare `return` (F3).
 
 Case: [outcomes/void-success.kz](../corpus/outcomes/void-success.kz)
 ```kurz
@@ -1335,6 +1732,59 @@ Remove(1) else {
 Remove(2) else {
     NotFound => print("none")
 }
+```
+
+Case: [outcomes/void-arm-call.kz](../corpus/outcomes/void-arm-call.kz)
+```kurz
+data Circle(int R)
+
+void | Circle Make(bool b) {
+    if b {
+        return Circle(1)
+    }
+}
+
+string D(bool b) {
+    return match Make(b) {
+        Circle c => "circle {c.R}"
+        void => "none"
+    }
+}
+
+print(D(true))
+print(D(false))
+```
+
+Case: [outcomes/void-arm-value.kz](../corpus/outcomes/void-arm-value.kz)
+```kurz
+data Circle(int R)
+data NotFound
+
+string Describe(Circle | void s) {
+    return match s {
+        Circle c => "circle {c.R}"
+        void => "none"
+    }
+}
+
+void | NotFound Remove(int id) {
+    if id < 0 {
+        return NotFound
+    }
+}
+
+void Show(void | NotFound v) {
+    match v {
+        void => print("removed")
+        NotFound => print("not found")
+    }
+}
+
+print(Describe(Circle(2)))
+void | NotFound kept = Remove(1)
+Show(kept)
+void | NotFound lost = Remove(-1)
+Show(lost)
 ```
 
 ### O11 (decided, §2, §6) A child's stack and the process's heap

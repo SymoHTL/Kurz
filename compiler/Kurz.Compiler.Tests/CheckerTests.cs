@@ -41,6 +41,46 @@ public sealed class CheckerTests
         Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
     }
 
+    [Theory]
+    [InlineData("within 0s {\n}", "bound-not-positive")]
+    [InlineData("within -1s {\n}", "bound-not-positive")]
+    [InlineData("within 0ms {\n}", "bound-not-positive")]
+    [InlineData("within (0s) {\n}", "bound-not-positive")]
+    [InlineData("within 0 {\n}", "type-mismatch")]
+    [InlineData("within 0.5ns {\n}", "inexact-literal")]
+    [InlineData("within 0s + 0s {\n}", "bound-not-positive")]
+    [InlineData("within 1s - 1s {\n}", "bound-not-positive")]
+    [InlineData("within 2s * 0 {\n}", "type-mismatch")]
+    [InlineData("within 5000000000s + 5000000000s {\n}", "constant-overflow")]
+    [InlineData("within 1ns {\n}", null)]
+    [InlineData("within 1s + 1s {\n}", null)]
+    [InlineData("duration d = 0s\nwithin d {\n}", null)]
+    public void A_bound_of_zero_or_less_that_the_checker_folds_is_bound_not_positive(string program, string? id)
+    {
+        // U40: a constant bound of 0 ns or less, as T25 reads a constant, a literal or one folded from literals (T6), its unary minus,
+        // brackets, a sum and a difference among them, is `bound-not-positive` at its line (the owner, 2026-11-20, #519, comment
+        // 7051492844, "T4 (2)"; assumed: T77 of comment 7055305138, and T79 of it as corrected on 2026-11-21), where 1 ns and a sum of 2 s
+        // are bounds (the product pass's default, comment 7055304984); a literal of another type, and a product of a time and a number,
+        // which `*` does not take (T18, T13), has its `type-mismatch`, and a literal or a fold with an error of its own that error, alone
+        // (E1); a variable's name, whatever it was given, is read at run time (ActorTests)
+        var line = program.Split('\n').Length - 1;
+        Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
+    }
+
+    [Fact]
+    public void The_text_of_bound_not_positive_names_the_form_and_the_bound()
+    {
+        // U40, U41: the text names the form, a block's, a call's clause's or a declaration's, and the bound as written (assumed: T77 of
+        // comment 7055305138)
+        string Message(string program) => Assert.Single(Check(program).Diagnostics.Items).Message;
+        Assert.Equal("the bound of `within` is 0s; a bound is positive (U40)", Message("within 0s {\n}"));
+        Assert.Equal("the bound of `within` is (-1s); a bound is positive (U40)", Message("within (-1s) {\n}"));
+        Assert.Equal("the bound of `within` is 1s - 1s; a bound is positive (U40)", Message("within 1s - 1s {\n}"));
+        Assert.Equal("the bound of the call's `within` is 0ms; a bound is positive (U41, U40)", Message(Store + "print(s.Get() within 0ms)"));
+        Assert.Equal("the bound of the declaration's `within` is -1s; a bound is positive (U41, U40)",
+            Message("actor Store {\n    pub int Get() within -1s => 1\n}\n\ns = spawn Store()\nprint(s.Get())"));
+    }
+
     /// <summary>An actor of two methods, <c>Get</c>, whose call waits, and <c>Run</c>, which a <c>send</c> takes, made in <c>s</c>: seven lines.</summary>
     private const string Store = "actor Store {\n    pub int Get() => 1\n    pub void Run() {\n    }\n}\n\ns = spawn Store()\n";
 
@@ -54,14 +94,18 @@ public sealed class CheckerTests
     [InlineData(Store + "duration d = 2s\nprint(s.Get() within d)", null)]
     [InlineData(Store + "print(s.Get() within (2s + 1ms))", null)]
     [InlineData(Store + "print(s.Get() within 2s + 1ms)", "type-mismatch")]
-    [InlineData(Store + "print(s.Get() within 0s)", null)]
-    [InlineData(Store + "print(s.Get() within -1s)", null)]
+    [InlineData(Store + "print(s.Get() within 0s)", "bound-not-positive")]
+    [InlineData(Store + "print(s.Get() within -1s)", "bound-not-positive")]
+    [InlineData(Store + "print(s.Get() within (1s - 1s))", "bound-not-positive")]
+    [InlineData(Store + "print(s.Get() within 1ns)", null)]
     public void The_bound_of_a_calls_clause_is_a_duration(string program, string? id)
     {
         // U39, U40: the clause's bound is read as a block's is: a value of another type is `type-mismatch` at its line, a nullable one
         // `nullable-unchecked` and a call with a `void` success `syntax` (O10); a call that reports its own error has its bound read with
-        // no diagnostic of its own (E1); a bound of zero or less is a deadline that has passed, no error (U40); the bound is a unary
-        // expression, so that `+ 1ms` adds to the call's `int` (assumed: T12 of comment 6967625156)
+        // no diagnostic of its own (E1); a constant of zero or less, a literal or one folded from literals in brackets, is
+        // `bound-not-positive` (U41; the owner, 2026-11-20, "T4 (2)"; assumed: T77 and T80 of comment 7055305138, and T79 of it as corrected
+        // on 2026-11-21), where 1 ns is a bound; the bound is a unary expression, so that `+ 1ms` adds to the call's `int` (assumed: T12 of
+        // comment 6967625156)
         var line = program.Split('\n').Length;
         Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
     }
@@ -99,13 +143,14 @@ public sealed class CheckerTests
     [Theory]
     [InlineData("print(s.Get() within Swap(mut s))", "changed-while-held")]
     [InlineData("mut t = spawn Store()\nprint(s.Get() within Swap(mut t))\nprint(t.Get())", null)]
+    [InlineData("mut ss = [s]\nprint(ss[0].Get() within Clear(mut ss))", "changed-while-held")]
     public void The_bound_of_a_calls_clause_changes_nothing_its_callee_was_read_from(string tail, string? id)
     {
         // U39, M7: the callee's reference is read before the arguments and the bound, so a bound that changes the variable it was read
-        // from is `changed-while-held` at its line, as an argument that does is; `Swap`'s parameter is named apart from `s`, so that
-        // the row has that one error (F16)
+        // from, or the list it was read from as an item, is `changed-while-held` at its line, as an argument that does is; `Swap`'s and
+        // `Clear`'s parameters are named apart from the program's variables, so that the row has that one error (F16)
         var program = "actor Store {\n    pub int Get() => 1\n}\n\nduration Swap(mut Store other) {\n    other = spawn Store()\n    return 1s\n}\n\n" +
-            "mut s = spawn Store()\n" + tail;
+            "duration Clear(mut List<Store> held) {\n    held.Clear()\n    return 1s\n}\n\nmut s = spawn Store()\n" + tail;
         Assert.Equal(id is null ? [] : [(id, program.Split('\n').Length)], Errors(program));
     }
 
@@ -145,13 +190,14 @@ public sealed class CheckerTests
     [InlineData("pub int Get() within 2.5 => 1", "type-mismatch")]
     [InlineData("pub int Get() within 2mb => 1", "type-mismatch")]
     [InlineData("pub int Get() within 2s => 1", null)]
-    [InlineData("pub int Get() within 0s => 1", null)]
-    [InlineData("pub int Get() within -1s => 1", null)]
+    [InlineData("pub int Get() within 0s => 1", "bound-not-positive")]
+    [InlineData("pub int Get() within -1s => 1", "bound-not-positive")]
+    [InlineData("pub int Get() within 0 => 1", "type-mismatch")]
     public void The_literal_of_a_declarations_clause_is_a_duration(string method, string? id)
     {
-        // U39, U40, U41: the literal is read as a block's bound is, of another type `type-mismatch` at its line, zero or less a deadline
-        // that has passed at each call, its sign included (U41; assumed: a reading of the build), the literal standing alone (U41;
-        // assumed: T13 of comment 6967625156)
+        // U39, U40, U41: the literal is read as a block's bound is, of another type `type-mismatch` at its line, zero or less
+        // `bound-not-positive`, its sign included (U41; the owner, 2026-11-20, "T4 (2)"; assumed: T77 and T80 of comment 7055305138), the
+        // literal standing alone (U41; assumed: T13 of comment 6967625156)
         Assert.Equal(id is null ? [] : [(id, 2)], Errors($"actor Store {{\n    {method}\n}}\n\ns = spawn Store()\nprint(s.Get())"));
     }
 
@@ -697,6 +743,38 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void The_count_of_a_duration_is_a_double_in_each_unit_and_its_whole_nanoseconds_a_long_of_the_narrow_type_alone()
+    {
+        // T39 (section 4, the owner, 2026-11-25, issue 629, comments 7158347507 and 7159373153): a `TotalX` member for each unit of
+        // `duration.FromX`, a `double`, on both widths; `WholeNanoseconds`, a `long`, on a `duration` alone
+        Clean("d = 1s\ndouble a = d.TotalNanoseconds + d.TotalMicroseconds + d.TotalMilliseconds + d.TotalSeconds\nprint(a + d.TotalMinutes + d.TotalHours + d.TotalDays)");
+        Clean("d = 1s\nlong n = d.WholeNanoseconds\nprint(n)");
+        Clean("longduration w = 1s\ndouble x = w.TotalNanoseconds + w.TotalDays\nprint(x)");
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("d = 1s\nlong n = d.TotalSeconds\nprint(n)"));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("longduration w = 1s\nprint(w.WholeNanoseconds)"));
+
+        // a unit is one of `duration.FromX`: no bare `Total`, no timestamp's unit, and no member on a timestamp
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("d = 1s\nprint(d.Total)"));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("d = 1s\nprint(d.TotalUnixSeconds)"));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("t = timestamp.FromUnixSeconds(5)\nprint(t.TotalSeconds)"));
+
+        // the help line of a refusal that asked for a count names the members (comment 7159373153, "Add a help line (Recommended)"):
+        // `/` of two durations, `WholeNanoseconds` where neither is a `longduration`, and a duration converted to a number; a duration
+        // divided by a number, a remainder of two durations, a timestamp converted to a number and a `/` of other types keep none
+        const string Narrow = "read its count with a member: `.TotalMilliseconds` or another unit's, a `double`, or `.WholeNanoseconds`, the exact `long`";
+        const string Wide = "read its count with a member: `.TotalMilliseconds` or another unit's, a `double`";
+        Assert.Equal(Narrow, Assert.Single(Check("d = 1s\nprint(d / 1ms)").Diagnostics.Items).Help);
+        Assert.Equal(Wide, Assert.Single(Check("longduration w = 1s\nprint(w / 1ms)").Diagnostics.Items).Help);
+        Assert.Equal(Wide, Assert.Single(Check("longduration w = 1s\nprint(1ms / w)").Diagnostics.Items).Help);
+        Assert.Equal(Narrow, Assert.Single(Check("d = 1s\nprint(long(d))").Diagnostics.Items).Help);
+        Assert.Equal(Wide, Assert.Single(Check("longduration w = 1s\nprint(double(w))").Diagnostics.Items).Help);
+        Assert.Null(Assert.Single(Check("d = 1s\nprint(d / 2)").Diagnostics.Items).Help);
+        Assert.Null(Assert.Single(Check("d = 1s\nprint(d % 1ms)").Diagnostics.Items).Help);
+        Assert.Null(Assert.Single(Check("t = timestamp.FromUnixSeconds(5)\nprint(long(t))").Diagnostics.Items).Help);
+        Assert.Null(Assert.Single(Check("print(1 / \"a\")").Diagnostics.Items).Help);
+    }
+
+    [Fact]
     public void A_part_of_a_list_is_a_list_and_its_ends_are_a_range_s()
     {
         // M9 (section 4, the owner, 2026-10-29, "A List<T>, a value"), with C8's ends: integers of one sign, in order where both are literals
@@ -933,7 +1011,7 @@ public sealed class CheckerTests
     public void A_generic_data_type_names_its_type_arguments_or_infers_them()
     {
         // T17, T19, T27, D1: T19 says a use names the type arguments or leaves them to be inferred (T27), the part of T19 the checker reads
-        // beside the limit of a type parameter, which it does not; a written type that leaves them has no argument to infer them from, so
+        // beside the limit of a type parameter; a written type that leaves them has no argument to infer them from, so
         // `Pair p` is T27's `cannot-infer`, as `List()` is, where `Pair<int> p`, a count that is neither, is `syntax` (the test above)
         Clean("data Pair<A, B>(A First, B Second)\n\np = Pair<int, string>(1, \"one\")\nprint(p.First)\nprint(p.Second)");
         Assert.Equal("Pair<int, string>", TypeOf("data Pair<A, B>(A First, B Second)\n\np = Pair(1, \"one\")\nprint(p.First)", "p"));
@@ -956,6 +1034,313 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.CannotInfer, 6)], Errors("data User(string Name)\ndata Admin(int Level) : User\n\nT Put<T>(List<T> items, T item) => item\n\nprint(Put(List<Admin>(), User(\"b\")).Name)")); // a list of the derived type fixes it, and the base is no `Admin`
     }
 
+    // ---- limits of type parameters (T19) -----------------------------------------------------------
+
+    /// <summary>An interface and a class that implements it, on lines 1 to 8, so that a program after it starts at line 9.</summary>
+    private const string Limited = "interface Shape {\n    int Area()\n}\n\nclass Square(int Side) : Shape {\n    pub int Area() => Side * Side\n}\n\n";
+
+    /// <summary>An interface whose only member is <c>string Text()</c> (A10), on lines 1 to 4, so that a program after it starts at line 5.</summary>
+    private const string Texty = "interface Texty {\n    string Text()\n}\n\n";
+
+    /// <summary>A class with a <c>virtual</c> method and a class derived from it that overrides it, on lines 1 to 8, so that a program after it starts at line 9.</summary>
+    private const string Animals = "class Animal {\n    pub virtual string Sound() => \"quiet\"\n}\n\nclass Dog : Animal {\n    pub override string Sound() => \"woof\"\n}\n\n";
+
+    [Fact]
+    public void A_limit_names_an_interface_or_a_class_and_any_other_type_is_limit_not_interface()
+    {
+        // T19 (Q5 and Q6 of issue 605, comment 7051071380): an interface and a class, which can have derived classes (K6), stand as a
+        // limit; a number type, a type parameter, a data type, an enum and an actor are `limit-not-interface` at the limit, and so are a
+        // union and a function type the parser reads there (a reading of Q6); the limit is then not read, so its members and its calls
+        // report nothing more (E1)
+        Clean(Animals + "string Speak<T: Animal>(T a) => a.Sound()\n\nprint(Speak(Dog()))");
+        Assert.Equal([(ErrorIds.LimitNotInterface, 9)], Errors(Limited + "int F<T: int>(T item) => item.Area()\n\nprint(F(1))"));
+        Assert.Equal("`int` is neither an interface nor a class that can have derived classes, which a limit names (T19)", ErrorText(Limited + "int F<T: int>(T item) => 1\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.LimitNotInterface, 9)], Errors(Limited + "U F<T: Shape, U: T>(U item) => item\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.LimitNotInterface, 3)], Errors("data Shape\n\nint AreaOf<T: Shape>(T item) => 1\n\nprint(AreaOf(5))"));
+        Assert.Equal([(ErrorIds.LimitNotInterface, 2)], Errors("data Shape\ndata Box<T: Shape>(T Item)\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.LimitNotInterface, 3)], Errors("enum Color { Red, Green }\n\nint F<T: Color>(T item) => 1\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.LimitNotInterface, 4)], Errors("actor Counter {\n}\n\nint F<T: Counter>(T item) => 1\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.LimitNotInterface, 9)], Errors(Limited + "int F<T: Shape | Square>(T item) => 1\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.LimitNotInterface, 9)], Errors(Limited + "int F<T: Shape?>(T item) => 1\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.LimitNotInterface, 9)], Errors(Limited + "int F<T: (int) => int>(T item) => 1\n\nprint(1)"));
+    }
+
+    [Fact]
+    public void Several_limits_are_joined_by_plus_and_one_named_twice_is_syntax()
+    {
+        // T19 (Q4 and Q19 of issue 605, comment 7051071380): `T: Shape + Named` joins two limits (`&` there is the parser's `syntax`,
+        // ParserTests); `T: Shape + Shape` and `T: Animal + Animal` are `syntax` at the second name, and `T` keeps the limit
+        Clean(Limited + "interface Named {\n    string Name()\n}\n\nstring F<T: Shape + Named>(T item) => \"{item.Name()} {item.Area()}\"\n\nprint(1)");
+        Assert.Equal([(ErrorIds.Syntax, 9)], Errors(Limited + "int AreaOf<T: Shape + Shape>(T item) => item.Area()\n\nprint(AreaOf(Square(2)))"));
+        Assert.Equal("`Shape` is named twice among the limits of `T` (T19)", ErrorText(Limited + "int AreaOf<T: Shape + Shape>(T item) => item.Area()\n\nprint(AreaOf(Square(2)))"));
+        Assert.Equal("`Animal` is named twice among the limits of `T` (T19)", ErrorText(Animals + "string Speak<T: Animal + Animal>(T a) => a.Sound()\n\nprint(Speak(Dog()))"));
+    }
+
+    [Fact]
+    public void A_second_class_or_a_class_after_an_interface_among_the_limits_is_not_supported()
+    {
+        // T19, a reading of the build, as a class's second base and its base after an interface are (K6, K7): `not supported` at the
+        // limit, which is then not read (E1)
+        Assert.Equal(["12: a second class, `Plant`, among the limits of `T` (T19)"], NotSupported(Animals + "class Plant {\n}\n\nstring N<T: Animal + Plant>(T a) => a.Sound()\n\nprint(1)"));
+        Assert.Equal(["13: the class `Animal` after an interface among the limits of `T` (T19)"], NotSupported(Animals + "interface Named {\n    string Name()\n}\n\nstring N<T: Named + Animal>(T a) => a.Sound()\n\nprint(1)"));
+    }
+
+    [Fact]
+    public void A_generic_interface_as_a_limit_is_not_supported_at_the_limit()
+    {
+        // T19 (Q15 of issue 605, comment 7051071380): a generic interface stands as a limit, which the build does not read: `not
+        // supported` at the limit, beside the interface's own, with a text that names Q15, and the function's calls report nothing more (E1)
+        Assert.Equal(
+            ["1: a generic interface (T19, K6)", "5: a generic interface as a limit (Q15 of issue 605, T19)"],
+            NotSupported("interface Comparable<T> {\n    int CompareTo(T other)\n}\n\nT Max<T: Comparable<T>>(T a, T b) => a.CompareTo(b)\n\nprint(Max(1, 2))"));
+    }
+
+    [Fact]
+    public void A_limit_that_names_nothing_is_unknown_name_and_nothing_more()
+    {
+        // V10: the limit's name resolves as a type's does; the parameter's members, its text, the arguments for it and its value passed
+        // to another limit report nothing more (E1), as an argument with no type reports nothing beside its own error
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("int F<T: Shap>(T item) => item.Area()\n\nprint(F(1))"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("int F<T: Shap>(T item) => item.Side\n\nprint(F(1))"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("int F<T: Shap>() => T.Create()\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("void Show<T: Shap>(T item) {\n    print(item)\n}\n\nShow(1)"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("data Box<T: Shap>(T Item)\n\nb = Box(5)\nprint(b.Item)"));
+        Assert.Equal([(ErrorIds.UnknownName, 11)], Errors(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nint Wrap<U: Shap>(U item) => AreaOf(item)\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.UnknownName, 11)], Errors(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nprint(AreaOf(nope))")); // an argument with no type
+    }
+
+    [Fact]
+    public void A_body_reaches_the_methods_of_its_limits_at_its_definition()
+    {
+        // T19 (Q1 and Q2 of issue 605, comment 7051071380): the body is checked once, on its text, whether a call reaches it or not: a
+        // method of a limit, of either of two limits, is called; a method or a field of a class that implements it and an operator (T18,
+        // Q3) are not; a method named without a call is `not supported`, as a class's is (K7, F11); a member of a `T?` needs its check
+        // (N2); a member named through `T` itself that no limit declares as `static` names `T` and the member, on a `T` without a limit too
+        Clean(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nprint(AreaOf(Square(3)))");
+        Clean(Limited + "interface Named {\n    string Name()\n}\n\nstring F<T: Shape + Named>(T item) => item.Name()\n\nprint(1)");
+        Assert.Equal([(ErrorIds.UnknownName, 9)], Errors(Limited + "int Perim<T: Shape>(T item) => item.Perimeter()\n\nprint(1)"));
+        Assert.Equal("a `T` has no member `Perimeter` (V10)", ErrorText(Limited + "int Perim<T: Shape>(T item) => item.Perimeter()\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.UnknownName, 9)], Errors(Limited + "int F<T: Shape>(T item) => item.Side\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.UnknownName, 9)], Errors(Limited + "int F<T: Shape>() => T.Create()\n\nprint(1)"));
+        Assert.Equal("`T.Create` names no `static` member of a limit of `T` (V10, T19)", ErrorText(Limited + "int F<T: Shape>() => T.Create()\n\nprint(1)"));
+        Assert.Equal("`T.Size` names no `static` member of a limit of `T` (V10, T19)", ErrorText(Limited + "int F<T: Shape>() => T.Size\n\nprint(1)"));
+        Assert.Equal("`U.Create` names no `static` member of a limit of `U` (V10, T19)", ErrorText("int F<U>() => U.Create()\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 9)], Errors(Limited + "bool Before<T: Shape>(T a, T b) => a < b\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Limited + "int F<T: Shape>(T? item) => item.Area()\n\nprint(1)"));
+        Assert.Equal(["10: a method as a value, named without a call (K7, F11)"], NotSupported(Limited + "int F<T: Shape>(T item) {\n    g = item.Area\n    return 1\n}\n\nprint(1)"));
+    }
+
+    [Fact]
+    public void A_class_limit_gives_its_methods_and_its_fields_properties_and_static_members_are_not_supported()
+    {
+        // T19 (Q5 and Q2 of issue 605, comment 7051071380): a value of `T: Animal` reaches the methods of `Animal` as a value of the class
+        // does, a private one among them `not-visible` (F9); a property and a `static` member of the class, which Q2 gives a body, are
+        // `not supported` with a text that names them and Q2; a field, which Q2 does not name, is `not supported` as a reading of the
+        // build; a method of the class and one of an interface limit with the same parameters are `ambiguous-call`, as two interfaces'
+        // are (a default of issue 605)
+        Clean(Animals + "string Speak<T: Animal>(T a) => a.Sound()\n\nprint(Speak(Dog()))");
+        Assert.Equal([(ErrorIds.UnknownName, 9)], Errors(Animals + "string Fly<T: Animal>(T a) => a.Fly()\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.NotVisible, 5)], Errors("class Animal {\n    string Secret() => \"s\"\n}\n\nstring S<T: Animal>(T a) => a.Secret()\n\nprint(1)"));
+        Assert.Equal(["5: the field `Legs` of the limit `Animal` of `T`, read through a value of it (T19)"], NotSupported("class Animal(int Legs) {\n    pub string Sound() => \"quiet\"\n}\n\nint Legs<T: Animal>(T a) => a.Legs\n\nprint(1)"));
+        Assert.Equal(["5: the property `Count` of the limit `Bag` of `T`, read through a value of it (Q2 of issue 605, T19)"], NotSupported("class Bag {\n    pub int Count => 1\n}\n\nint Size<T: Bag>(T b) => b.Count\n\nprint(1)"));
+        Assert.Equal(["5: the `static` member `Create` of the limit `Maker`, reached through `T` (Q2 of issue 605, T19)"], NotSupported("class Maker {\n    pub static int Create() => 1\n}\n\nint Fresh<T: Maker>() => T.Create()\n\nprint(1)"));
+        Assert.Equal(["5: the `static` member `Most` of the limit `Maker`, reached through `T` (Q2 of issue 605, T19)"], NotSupported("class Maker {\n    pub static int Most = 2\n}\n\nint Size<T: Maker>() => T.Most\n\nprint(1)"));
+        Assert.Equal(["10: a method as a value, named without a call (K7, F11)"], NotSupported(Animals + "string S<T: Animal>(T a) {\n    f = a.Sound\n    return \"x\"\n}\n\nprint(1)"));
+        var twin = "interface Named {\n    string Name()\n}\n\nclass Animal : Named {\n    pub string Name() => \"a\"\n}\n\nstring N<T: Animal + Named>(T a) => a.Name()\n\nprint(1)";
+        Assert.Equal([(ErrorIds.AmbiguousCall, 9)], Errors(twin));
+        Assert.Equal("`Name` is declared with the same parameters by the limits `Animal` and `Named` of `T`, so the call fits both (F13, T19)", ErrorText(twin));
+    }
+
+    [Fact]
+    public void A_method_that_two_limits_declare_is_ambiguous_call()
+    {
+        // T19 with F13, as C#'s CS0121 (a default of issue 605, comment 7051071380), with a text that names the method and both limits;
+        // two methods of the name with other parameters are picked by the arguments
+        Assert.Equal([(ErrorIds.AmbiguousCall, 9)], Errors("interface A {\n    int M()\n}\n\ninterface B {\n    int M()\n}\n\nint Both<T: A + B>(T x) => x.M()\n\nprint(1)"));
+        Assert.Equal(
+            "`M` is declared with the same parameters by the limits `A` and `B` of `T`, so the call fits both (F13, T19)",
+            ErrorText("interface A {\n    int M()\n}\n\ninterface B {\n    int M()\n}\n\nint Both<T: A + B>(T x) => x.M()\n\nprint(1)"));
+        Clean("interface A {\n    int M(int n)\n}\n\ninterface B {\n    int M(string s)\n}\n\nint Both<T: A + B>(T x) => x.M(1) + x.M(\"s\")\n\nprint(1)");
+    }
+
+    [Fact]
+    public void A_limit_of_a_text_alone_gives_the_text_and_its_call_and_no_conversion_through_it()
+    {
+        // A10 with T19 (Q21 of issue 605, comment 7051071380): a limit that declares `string Text()` gives `print`, and one whose only
+        // member it is is met by every type with a text; a call of its method is a `string`, the text of the type each copy binds; a
+        // conversion of the value to it stays `not supported`, since a type without the interface meets it
+        Clean(Texty + "void Show<T: Texty>(T item) {\n    print(item)\n}\n\nShow(1)\nShow(\"a\")\nShow([1, 2])");
+        Assert.Equal([(ErrorIds.NoText, 6)], Errors("interface Shape {\n    int Area()\n}\n\nvoid Show<T: Shape>(T item) {\n    print(item)\n}\n\nprint(1)"));
+        Assert.Equal("string", TypeOf(Texty + "string Show<T: Texty>(T item) => item.Text()\n\nr = Show(1)\nprint(r)", "r"));
+        Clean(Texty + "string Show<T: Texty>(T item) {\n    print(T.Kind)\n    return item.Text()\n}\n\nprint(Show(1))");
+        Assert.Equal(["6: a value of `T` where its limit `Texty` is required, which a type meets by its text alone (A10, T19)"], NotSupported(Texty + "void Show<T: Texty>(T item) {\n    Texty t = item\n    print(t)\n}\n\nShow(1)"));
+    }
+
+    [Fact]
+    public void A_type_argument_meets_a_limit_by_naming_the_interface()
+    {
+        // T19 (Q11 and Q17 of issue 605, comment 7051071380): a class that names the interface, itself or through a base (K6), and the
+        // interface itself meet the limit; a class with the method that does not name it, a data type and a number type do not, at the
+        // call's line
+        Clean(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nShape s = Square(2)\nprint(AreaOf(s))");
+        Clean(Limited + "class Base : Shape {\n    pub int Area() => 1\n}\n\nclass Big : Base {\n}\n\nint AreaOf<T: Shape>(T item) => item.Area()\n\nprint(AreaOf(Big()))");
+        Assert.Equal([(ErrorIds.TypeMismatch, 15)], Errors(Limited + "class Dot {\n    pub int Area() => 0\n}\n\nint AreaOf<T: Shape>(T item) => item.Area()\n\nprint(AreaOf(Dot()))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 13)], Errors(Limited + "data Point(int X)\n\nint AreaOf<T: Shape>(T item) => item.Area()\n\nprint(AreaOf(Point(1)))"));
+        Assert.Equal("`int` does not implement `Shape`, the limit of `T` of `AreaOf` (T19)", ErrorText(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nprint(AreaOf(5))"));
+    }
+
+    [Fact]
+    public void A_type_argument_meets_a_class_limit_by_deriving_from_it()
+    {
+        // T19 (Q5 and Q8 of issue 605, comment 7051071380): the class and a class derived from it meet `T: Animal`, a value of either
+        // static type; a class that does not derive from it, an interface type and a number type do not, with a text that says so (this
+        // change's wording); a caller's `U: Dog` meets it, a caller's `U: Animal` does not meet `T: Dog`, and a caller's class limit
+        // that names an interface meets that interface's limit; a data type's class limit holds at its uses
+        Clean(Animals + "string Speak<T: Animal>(T a) => a.Sound()\n\nAnimal pet = Dog()\nprint(Speak(Dog()))\nprint(Speak(Animal()))\nprint(Speak(pet))");
+        var rock = Animals + "class Rock {\n}\n\nstring Speak<T: Animal>(T a) => a.Sound()\n\nprint(Speak(Rock()))";
+        Assert.Equal([(ErrorIds.TypeMismatch, 14)], Errors(rock));
+        Assert.Equal("`Rock` does not derive from `Animal`, the limit of `T` of `Speak` (T19)", ErrorText(rock));
+        Assert.Equal([(ErrorIds.TypeMismatch, 16)], Errors(Limited + "class Animal {\n    pub string Sound() => \"q\"\n}\n\nstring S<T: Animal>(T a) => a.Sound()\n\nShape s = Square(1)\nprint(S(s))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors(Animals + "string Speak<T: Animal>(T a) => a.Sound()\n\nprint(Speak(5))"));
+        Clean(Animals + "string Speak<T: Animal>(T a) => a.Sound()\n\nstring Outer<U: Dog>(U d) => Speak(d)\n\nprint(Outer(Dog()))");
+        var up = Animals + "string Fetch<T: Dog>(T d) => d.Sound()\n\nstring Outer<U: Animal>(U a) => Fetch(a)\n\nprint(1)";
+        Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors(up));
+        Assert.Equal("`U` has no limit `Dog`, which `T` of `Fetch` requires (T19)", ErrorText(up));
+        Clean(Limited + "class Base : Shape {\n    pub int Area() => 1\n}\n\nint AreaOf<T: Shape>(T item) => item.Area()\n\nint Wrap<U: Base>(U b) => AreaOf(b)\n\nprint(Wrap(Base()))");
+        Assert.Equal("`int` does not derive from `Animal`, the limit of `T` of `Box` (T19)", ErrorText(Animals + "data Box<T: Animal>(T Item)\n\nb = Box(5)\nprint(1)"));
+    }
+
+    [Fact]
+    public void A_type_parameter_of_the_caller_meets_a_limit_through_its_own_limits()
+    {
+        // T19 (Q8 of issue 605, comment 7051071380): `Wrap<U: Shape>` passes its `U` on, `Wrap<U>` does not, at its definition
+        Clean(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nint Wrap<U: Shape>(U item) => AreaOf(item)\n\nprint(Wrap(Square(3)))");
+        Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nint Wrap<U>(U item) => AreaOf(item)\n\nprint(1)"));
+        Assert.Equal("`U` has no limit `Shape`, which `T` of `AreaOf` requires (T19)", ErrorText(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nint Wrap<U>(U item) => AreaOf(item)\n\nprint(1)"));
+        Clean(Texty + "interface Named {\n    string Text()\n}\n\nvoid Show<T: Texty>(T item) {\n    print(item)\n}\n\nvoid Pass<U: Named>(U item) {\n    Show(item)\n}\n\nPass(7)"); // A10: through a text
+    }
+
+    [Fact]
+    public void A_union_or_a_nullable_type_meets_no_limit_but_a_text_alone()
+    {
+        // T19 (Q12 of issue 605, comment 7051071380): a union of two classes that implement the limit and a nullable one do not meet it;
+        // the interface of a text alone is met by each, as by every type with a text (A10)
+        Assert.Equal([(ErrorIds.TypeMismatch, 15)], Errors(Limited + "class Dot : Shape {\n    pub int Area() => 0\n}\n\nint AreaOf<T: Shape>(T item) => item.Area()\n\nint Use(Square | Dot u) => AreaOf(u)\n\nprint(Use(Dot()))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nint Use(Square? s) => AreaOf(s)\n\nprint(Use(Square(3)))"));
+        Clean(Texty + "void Show<T: Texty>(T item) {\n    print(item)\n}\n\nvoid Use(int | string u) {\n    Show(u)\n}\n\nint? n = null\nShow(n)\nUse(1)");
+    }
+
+    [Fact]
+    public void An_unmet_limit_takes_its_function_out_of_the_pick()
+    {
+        // T19 with F13 (Q10 of issue 605, comment 7051071380): `F<int>`, the exact fit, does not meet its limit, so `F(long)` takes the
+        // call; where no function fits, the call is `argument-mismatch` with the unmet limit as one function's reason
+        Assert.Equal("string", TypeOf(Limited + "int F<T: Shape>(T x) => 1\n\nstring F(long n) => \"long\"\n\nr = F(5)\nprint(r)", "r"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 13)], Errors(Limited + "int F<T: Shape>(T x) => 1\n\nstring F(bool b) => \"bool\"\n\nprint(F(5))"));
+        Assert.Contains("`int F<T>(T x)` at line 9: `int` does not implement `Shape`, the limit of `T` of `F` (T19)", ErrorText(Limited + "int F<T: Shape>(T x) => 1\n\nstring F(bool b) => \"bool\"\n\nprint(F(5))"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void An_unmet_limit_is_reported_at_the_line_of_the_call_after_the_inference()
+    {
+        // T19 (Q9 and Q20 of issue 605, comment 7051071380): at the call's first line, for an inferred type argument and a written one;
+        // T27's `cannot-infer` comes first, the limit taking no part in the inference (a default of issue 605)
+        Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nprint(AreaOf(\n    5))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nprint(AreaOf<int>(5))"));
+        Assert.Equal([(ErrorIds.CannotInfer, 11)], Errors(Limited + "int Count<T: Shape>() => 1\n\nprint(Count())"));
+    }
+
+    [Fact]
+    public void The_limit_of_a_data_type_holds_at_every_use_and_is_never_implied()
+    {
+        // T19 (Q7, Q16 and Q20 of issue 605, comment 7051071380): a construction, a written type of a parameter or a field, and a
+        // signature over `Box<U>` without the limit are `type-mismatch` at their line, the type declared after its use among them
+        var box = Limited + "data Box<T: Shape>(T Item)\n\n";
+        Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors(box + "b = Box(5)\nprint(b.Item)"));
+        Assert.Equal("`int` does not implement `Shape`, the limit of `T` of `Box` (T19)", ErrorText(box + "b = Box(5)\nprint(b.Item)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors(box + "b = Box<int>(5)\nprint(b.Item)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors(box + "int Count(Box<int> b) => 1\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors(box + "int Count<U>(Box<U> b) => 1\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors(box + "class Holder(Box<int> B)\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 9)], Errors(Limited + "data Bag(Box<int> B)\ndata Box<T: Shape>(T Item)\n\nprint(1)"));
+        Clean(box + "int Count<U: Shape>(Box<U> b) => b.Item.Area()\n\nprint(Count(Box(Square(2))))");
+    }
+
+    [Fact]
+    public void A_value_of_a_type_parameter_converts_to_its_limits()
+    {
+        // T19, as C# converts it (a default of issue 605, comment 7051071380): to an interface among its limits and to no other; with a
+        // class limit, to the class and its bases and to an interface the class implements, and to no class derived from it (a reading
+        // of the build, as C# converts it)
+        Clean(Limited + "int Describe(Shape s) => s.Area()\n\nint Pass<T: Shape>(T item) => Describe(item)\n\nprint(Pass(Square(3)))");
+        Assert.Equal([(ErrorIds.TypeMismatch, 15)], Errors(Limited + "interface Named {\n    string Name()\n}\n\nint Describe(Named n) => 1\n\nint Pass<T: Shape>(T item) => Describe(item)\n\nprint(1)"));
+        Clean(Animals + "string Hear(Animal a) => a.Sound()\n\nstring Pass<T: Dog>(T d) => Hear(d)\n\nprint(Pass(Dog()))");
+        Clean(Limited + "class Base : Shape {\n    pub int Area() => 1\n}\n\nint Describe(Shape s) => s.Area()\n\nint Pass<T: Base>(T b) => Describe(b)\n\nprint(Pass(Base()))");
+        Assert.Equal([(ErrorIds.TypeMismatch, 11)], Errors(Animals + "string Hear(Dog d) => d.Sound()\n\nstring Pass<T: Animal>(T a) => Hear(a)\n\nprint(1)"));
+    }
+
+    [Fact]
+    public void A_copy_of_a_function_that_reads_its_type_reaches_the_limits_alone()
+    {
+        // T19 with T33 (Q13 of issue 605, comment 7051071380): through a parameter of `T`, a local written `T` and a local that takes one
+        // of them, a copy for `Square` reaches `Area` and neither `Perimeter` nor `Side`, at the line of the copy's text; with a class
+        // limit, a copy for `Dog` reaches the methods of `Animal` and not `Bark`, which `Dog` alone declares (Q5)
+        var square = "interface Shape {\n    int Area()\n}\n\nclass Square(int Side) : Shape {\n    pub int Area() => Side * Side\n    pub int Perimeter() => 4 * Side\n}\n\nint Measure<T: Shape>(T item) {\n    print(T.Kind)\n";
+        Clean(square + "    return item.Area()\n}\n\nprint(Measure(Square(3)))");
+        Assert.Equal([(ErrorIds.UnknownName, 12)], Errors(square + "    return item.Perimeter()\n}\n\nprint(Measure(Square(3)))"));
+        Assert.Equal([(ErrorIds.UnknownName, 12)], Errors(square + "    return item.Side\n}\n\nprint(Measure(Square(3)))"));
+        Assert.Equal([(ErrorIds.UnknownName, 13)], Errors(square + "    T x = item\n    return x.Perimeter()\n}\n\nprint(Measure(Square(3)))"));
+        Assert.Equal([(ErrorIds.UnknownName, 13)], Errors(square + "    x = item\n    return x.Perimeter()\n}\n\nprint(Measure(Square(3)))"));
+        Assert.Equal("`T.Create` names no `static` member of a limit of `T` (V10, T19)", ErrorText(square + "    return T.Create()\n}\n\nprint(Measure(Square(3)))"));
+        var dog = "class Animal {\n    pub virtual string Sound() => \"quiet\"\n}\n\nclass Dog : Animal {\n    pub string Bark() => \"woof\"\n}\n\nstring M<T: Animal>(T a) {\n    print(T.Kind)\n";
+        Clean(dog + "    return a.Sound()\n}\n\nprint(M(Dog()))");
+        Assert.Equal([(ErrorIds.UnknownName, 11)], Errors(dog + "    return a.Bark()\n}\n\nprint(M(Dog()))"));
+    }
+
+    [Fact]
+    public void A_carrier_the_build_does_not_read_is_not_supported_with_its_limit_by_a_text_that_names_it()
+    {
+        // T19 (Q18 of issue 605, comment 7051071380): a generic class, interface and actor and a method with type parameters of its own
+        // with a limit are `not supported` at their declaration, by the text that names the carrier, their limits unread (E1)
+        Assert.Equal(["9: not supported: a generic class (T19, chapter 7)"], Check(Limited + "class Box<T: Shape>(T Item)\n\nprint(1)").Diagnostics.Sorted.Select(d => d.ToString()));
+        Assert.Equal(["9: not supported: a generic interface (T19, K6)"], Check(Limited + "interface Store<T: Shape> {\n    int Count()\n}\n\nprint(1)").Diagnostics.Sorted.Select(d => d.ToString()));
+        Assert.Equal(["9: not supported: a generic actor (U1, T19)"], Check(Limited + "actor Worker<T: Shape> {\n}\n\nprint(1)").Diagnostics.Sorted.Select(d => d.ToString()));
+        Assert.Equal(["10: not supported: a method with type parameters of its own (section 4, T19)"], Check(Limited + "class Tool {\n    pub int Same<T: Shape>(T item) => 1\n}\n\nprint(1)").Diagnostics.Sorted.Select(d => d.ToString()));
+    }
+
+    [Fact]
+    public void A_copy_passes_its_type_parameter_on_by_its_own_limits()
+    {
+        // T19 with T33 (Q22 and Q8 of issue 605, comment 7051071380): a function that reads its type passes its `T` on to a limited
+        // function by the limits it writes for `T`, whatever its copy binds: without the limit, every copy is Q9's `type-mismatch` for a
+        // caller's type parameter at the inner call's line, through a parameter of `T`, a local written `T`, a parameter of `List<T>` and an item of one;
+        // with it, the copy compiles
+        var reader = Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nint M<T>(T item) {\n    print(T.Kind)\n";
+        Assert.Equal([(ErrorIds.TypeMismatch, 13)], Errors(reader + "    return AreaOf(item)\n}\n\nprint(M(Square(3)))"));
+        Assert.Equal("`T` has no limit `Shape`, which `T` of `AreaOf` requires (T19)", ErrorText(reader + "    return AreaOf(item)\n}\n\nprint(M(Square(3)))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 13)], Errors(reader + "    return AreaOf(item)\n}\n\nprint(M(5))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 14)], Errors(reader + "    T x = item\n    return AreaOf(x)\n}\n\nprint(M(Square(3)))"));
+        Clean(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nint M<T: Shape>(T item) {\n    print(T.Kind)\n    return AreaOf(item)\n}\n\nprint(M(Square(3)))");
+        Assert.Equal([(ErrorIds.TypeMismatch, 13)], Errors(Limited + "int Sum<U: Shape>(List<U> xs) => xs[0].Area()\n\nint M<T>(List<T> items) {\n    print(T.Kind)\n    return Sum(items)\n}\n\nmut squares = List<Square>()\nsquares.Add(Square(2))\nprint(M(squares))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 13)], Errors(Limited + "int AreaOf<T: Shape>(T item) => item.Area()\n\nint M<T>(List<T> items) {\n    print(T.Kind)\n    return AreaOf(items[0])\n}\n\nmut squares = List<Square>()\nsquares.Add(Square(2))\nprint(M(squares))"));
+    }
+
+    [Fact]
+    public void The_kind_of_an_interface_type_in_a_copy_is_not_supported_at_the_member()
+    {
+        // T33 with T19 (Q11 of issue 605): a value whose type is an interface gives a copy the interface type, whose kind T33 does not name,
+        // so `T.Kind`, a `match` on it, a loop over `T.Fields` and `T.Make` are `not supported` there, with a limit and without one; the
+        // copy for a class reads its kind
+        const string Shape = "Shape s = Square(4)\n";
+        Clean(Limited + "int Measure<T: Shape>(T item) {\n    print(T.Kind)\n    return item.Area()\n}\n\nprint(Measure(Square(4)))");
+        const string Kind = "`T.Kind` where `T` is the interface type `Shape`, whose kind T33 does not name (T33)";
+        Assert.Equal(["10: " + Kind], NotSupported(Limited + "int Measure<T: Shape>(T item) {\n    print(T.Kind)\n    return item.Area()\n}\n\nShape s = Square(4)\nprint(Measure(s))"));
+        Assert.Equal(["10: " + Kind], NotSupported(Limited + "int Measure<T>(T item) {\n    print(T.Kind)\n    return 1\n}\n\nShape s = Square(4)\nprint(Measure(s))"));
+        Assert.Equal(["9: " + Kind], NotSupported(Limited + "string Name<T: Shape>(T item) => match T.Kind {\n    TypeKind.Class => \"class\"\n    else => \"other\"\n}\n\n" + Shape + "print(Name(s))"));
+        Assert.Equal(["10: `T.Fields` where `T` is the interface type `Shape`, whose kind T33 does not name (T33)"], NotSupported(Limited + "void Walk<T: Shape>(T item) {\n    for f in T.Fields {\n        print(f.Name)\n    }\n}\n\n" + Shape + "Walk(s)"));
+        Assert.Equal(["9: `T.Make` where `T` is the interface type `Shape`, whose kind T33 does not name (T33)"], NotSupported(Limited + "T Fresh<T: Shape>(T item) => T.Make(f => 0)\n\n" + Shape + "print(Fresh(s).Area())"));
+    }
+
     // ---- functions (chapter 8) ----------------------------------------------------------------------
 
     [Fact]
@@ -973,6 +1358,66 @@ public sealed class CheckerTests
         Clean("int Max(int a, int b) {\n    if a > b {\n        return a\n    }\n    return b\n}\n\nprint(Max(2, 3))");
         Clean("int Sign(int n) {\n    if n > 0 {\n        return 1\n    } else if n < 0 {\n        return -1\n    } else {\n        return 0\n    }\n}\n\nprint(Sign(5))");
         Clean("string Name(int n) {\n    match n {\n        0 => return \"zero\"\n        else => return \"many\"\n    }\n}\n\nprint(Name(0))");
+    }
+
+    [Fact]
+    public void A_bare_return_gives_the_void_case_of_the_result_and_a_bare_throw_in_the_arm_of_that_case_is_throw_needs_value()
+    {
+        // F3 (issue 641, assumed): a bare `return` gives the result's `void` case, the success or another, and is `missing-return` only
+        // where the result holds none; the end of a function whose `void` case stands beside another success stays `missing-return`
+        const string find = "data Circle(int R)\n\nCircle | void Find(bool b) {\n    if b {\n        return Circle(1)\n    }\n\n    return\n}\n\n";
+        Clean(find + "print(1)");
+        Assert.Equal([(ErrorIds.MissingReturn, 8)], Errors(find.Replace("Circle | void Find", "Circle | string Find") + "print(1)"));
+        Assert.Equal("a bare `return` in a function whose result holds no `void` case (F3)", ErrorText(find.Replace("Circle | void Find", "Circle | string Find") + "print(1)"));
+        Assert.Equal([(ErrorIds.MissingReturn, 3)], Errors(find.Replace("\n\n    return\n}", "\n}") + "print(1)"));
+
+        // a lambda's bare `return` reads the lambda's result, as a function's does; the control's result holds no `void` case
+        const string show = "data Circle(int R)\n\nstring Show((bool) => Circle | void f, bool b) {\n    return match f(b) {\n        Circle c => \"circle {c.R}\"\n"
+            + "        void => \"none\"\n    }\n}\n\nprint(Show((b) => {\n    if b {\n        return Circle(2)\n    }\n\n    return\n}, true))";
+        Clean(show);
+        Assert.Equal([(ErrorIds.MissingReturn, 15)], Errors(show.Replace("Circle | void f", "Circle | string f").Replace("void => \"none\"", "string s => s")));
+
+        // O7 (issue 641, assumed): the arm of a `void` case holds no value a bare `throw` could throw; the control's arm gives the `void`
+        // case of its own function with a bare `return`
+        const string take = "Circle | void Take(bool b) {\n    Circle c = Find(b) else {\n        void => throw\n    }\n\n    return c\n}\n\nprint(1)";
+        Assert.Equal([(ErrorIds.ThrowNeedsValue, 13)], Errors(find + take));
+        Assert.Equal("a bare `throw` throws the case its arm took, and a `void` case holds none (O7)", ErrorText(find + take));
+        Clean(find + take.Replace("void => throw", "void => return"));
+    }
+
+    [Fact]
+    public void A_bare_throw_in_an_else_arm_that_takes_the_void_case_is_throw_needs_value()
+    {
+        // O7 (issue 650, assumed): the arm `else` takes the cases no arm before it handled; where they hold the `void` case, a bare `throw`
+        // there has no value to throw, as in the arm of a `void` case; the controls: an arm `void =>` before it leaves `else` the case
+        // `NotFound` alone, and a result with no `void` case leaves `else` cases that each hold a value
+        const string find = "data Circle(int R)\ndata NotFound\n\nCircle | void | NotFound Find(bool b) {\n    return Circle(1)\n}\n\n";
+        const string get = "Circle Get(bool b) {\n    return Find(b) else {\n        else => throw\n    }\n}\n\nprint(Get(true).R)";
+        Assert.Equal([(ErrorIds.ThrowNeedsValue, 10)], Errors(find + get));
+        Assert.Equal("a bare `throw` throws the case its arm took, and `else` here takes the `void` case, which holds none (O7)", ErrorText(find + get));
+        Clean(find + get.Replace("        else => throw", "        void => return Circle(0)\n        else => throw"));
+        Clean(find.Replace("Circle | void | NotFound Find", "Circle | NotFound Find") + get);
+    }
+
+    [Fact]
+    public void A_name_an_arm_of_the_void_case_binds_is_syntax_at_the_arm_and_the_arm_without_it_is_clean()
+    {
+        // F4: `void` is no type of a name an arm binds, of a `match` over a value or over a call or of `else` after a call (C4, O5), and the arm
+        // is written `void =>` (the owner, 2026-11-25, issue 632, comment 7158347230); the name is an error, so a read of it carries no second
+        // error, O10's text of a call among them (E1); each row's control is the same arm with no name
+        const string Value = "data Circle(int R)\n\nstring D(Circle | void s) {\n    return match s {\n        Circle c => \"circle {c.R}\"\n        void v => \"none\"\n    }\n}\n\nprint(D(Circle(2)))";
+        const string Call = "data Circle(int R)\n\nvoid | Circle Make(bool b) {\n    if b {\n        return Circle(1)\n    }\n}\n\nstring D(bool b) {\n    return match Make(b) {\n        Circle c => \"circle {c.R}\"\n        void v => \"none\"\n    }\n}\n\nprint(D(true))";
+        const string Else = "data Circle(int R)\n\nCircle | void Find(bool b) {\n    return Circle(1)\n}\n\nint R(bool b) {\n    Circle c = Find(b) else {\n        void v => return 0\n    }\n    return c.R\n}\n\nprint(R(true))";
+        const string Lost = "int R(bool b) {\n    int c = Lost(b) else {\n        void v => return 0\n    }\n    return c\n}\n\nprint(R(true))";
+        Assert.Equal([(ErrorIds.Syntax, 6)], Errors(Value));
+        Assert.Equal([(ErrorIds.Syntax, 6)], Errors("data Circle(int R)\n\nvoid | Circle P(Circle | void s) {\n    return match s {\n        Circle c => c\n        void v => v\n    }\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.Syntax, 12)], Errors(Call));
+        Assert.Equal([(ErrorIds.Syntax, 9)], Errors(Else));
+        Assert.Equal([(ErrorIds.UnknownName, 2), (ErrorIds.Syntax, 3)], Errors(Lost));
+        Clean(Value.Replace("void v =>", "void =>"));
+        Clean(Call.Replace("void v =>", "void =>"));
+        Clean(Else.Replace("void v =>", "void =>"));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors(Lost.Replace("void v =>", "void =>")));
     }
 
     [Fact]
@@ -3249,6 +3694,38 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_mut_method_on_a_path_through_a_nullable_value_changes_it_where_it_is_known_not_null_and_after_the_chain()
+    {
+        // issue 630 (section 4: the build of both forms the owner's answer, 2026-11-24, #624, comment 7135538740, and the place the
+        // product pass's reading, comment 7161590400, assumed): a test's branch and `?.`, through a nullable variable, a nullable field
+        // and a nullable `mut` parameter (N3, N5, M5)
+        const string Config = "data Config(List<int> Items)\ndata Box(Config? Cfg)\n\nConfig? Find() => null\n\n";
+        Clean(Config + "mut c = Find()\nif c != null {\n    c.Items.Add(1)\n}\nc?.Items.Add(2)\nc?.Items.Clear()");
+        Clean(Config + "mut b = Box(Find())\nif b.Cfg != null {\n    b.Cfg.Items.Clear()\n}\nb.Cfg?.Items.Add(2)");
+        Clean(Config + "void Grow(mut Config? c) {\n    if c != null {\n        c.Items.Add(1)\n    }\n    c?.Items.Add(2)\n}\n\nprint(1)");
+        Clean(Config + "mut Config? n = Config(List<int>())\nn.Items.Add(1)");
+
+        // the variable is `mut`, as on a path that is not nullable (M5), and a step not known not null is N2's at its read
+        Assert.Equal([(ErrorIds.MutRequired, 7)], Errors(Config + "c = Find()\nc?.Items.Add(2)"));
+        Assert.Equal([(ErrorIds.MutRequired, 8)], Errors(Config + "c = Find()\nif c != null {\n    c.Items.Add(1)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(Config + "mut c = Find()\nc.Items.Add(1)"));
+
+        // a class instance on the way: its `mut` field changes, the variable need not be `mut` (K2), and a field without `mut` is
+        // `mut-required`
+        const string Shelf = "class Box {\n    pub mut List<int> Items = [1]\n    pub List<int> Fixed = [1]\n}\n\nclass Shelf(mut Box? B)\n\nint Drop(Shelf s) {\n    s.B = null\n    return 5\n}\n\nshelf = Shelf(Box())\n";
+        Clean(Shelf + "if shelf.B != null {\n    shelf.B.Items.Add(1)\n}\nshelf.B?.Items.Add(2)");
+        Assert.Equal([(ErrorIds.MutRequired, 14)], Errors(Shelf + "shelf.B?.Fixed.Add(2)"));
+
+        // N9: a call in the arguments that can set a nullable field on the way to `null` is that field's read with the call on the
+        // line before it, in the branch and after `?.`; the call run into a variable first stays allowed
+        Assert.Equal([(ErrorIds.NullableUnchecked, 15)], Errors(Shelf + "if shelf.B != null {\n    shelf.B.Items.Add(Drop(shelf))\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 14)], Errors(Shelf + "shelf.B?.Items.Add(Drop(shelf))"));
+        Assert.Equal("`Drop(shelf)` can set `shelf.B` to `null`: run it into a variable before this line", Assert.Single(Check(Shelf + "shelf.B?.Items.Add(Drop(shelf))").Diagnostics.Items).Help);
+        Clean(Shelf + "n = Drop(shelf)\nshelf.B?.Items.Add(n)");
+        Clean(Config + "int Two() => 2\n\nmut c = Find()\nc?.Items.Add(Two())");
+    }
+
+    [Fact]
     public void Coalescing_runs_its_right_side_only_where_the_left_is_null_and_a_chain_stops_at_the_first_null()
     {
         // N4, N5 as C# reads them: a right side of neither type is the mismatch; `?.` makes the member's type nullable, keeps a nullable
@@ -3306,6 +3783,114 @@ public sealed class CheckerTests
 
         // the list is read before its index runs and held without a count, so an index that changes it is refused (M7)
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors("int Pop(mut List<string>? xs) {\n    xs = null\n    return 0\n}\n\nmut List<string>? names = List<string>()\nnames.Add(\"a\")\nprint(names?[Pop(mut names)])"));
+    }
+
+    [Fact]
+    public void A_call_after_a_conditional_access_is_the_call_where_the_chain_did_not_stop()
+    {
+        // N5 with section 4, the owner, 2026-11-24, #624, comment 7130490403, "yes support calls after ?. like c#": the call's result
+        // made nullable, a `T?` as it is, and `void` as it is; the chain goes on after the call, and a call after `?[` reads the item
+        const string Note = "class Note {\n    pub int Size() => 1\n    pub string Text() => \"a\"\n    pub string? Name() => null\n    pub void Say() {\n    }\n}\n\nNote? Find() => null\nList<Note>? All() => null\n\n";
+        Assert.Equal("int?", TypeOf(Note + "n = Find()?.Size()\nprint(n)", "n"));
+        Assert.Equal("string?", TypeOf(Note + "n = Find()?.Name()\nprint(n)", "n"));
+        Assert.Equal("int?", TypeOf(Note + "n = Find()?.Text().Bytes.Count\nprint(n)", "n"));
+        Assert.Equal("int?", TypeOf(Note + "n = All()?[0].Size()\nprint(n)", "n"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 12)], Errors(Note + "print(Find()?.Name().Bytes.Count)"));
+        Clean(Note + "Find()?.Say()");
+
+        // O2, O3: a union result is read as the same call reads it without `?.`, its other cases leaving where the context does not
+        // take them whole, against what a declared type takes; its words and its clause are that call's (U12, U41)
+        const string Parser = "data Failed(string Why)\n\nclass Parser(int Limit) {\n    pub int | Failed Read(int n) {\n        if n > Limit {\n            return Failed(\"too big\")\n        }\n        return n\n    }\n}\n\n";
+        Assert.Equal([(ErrorIds.UnlistedCase, 13)], Errors(Parser + "void Go(Parser? p) {\n    x = p?.Read(9)\n    print(x)\n}\n\nGo(Parser(5))"));
+        Clean(Parser + "void | Failed Go(Parser? p) {\n    int? x = p?.Read(3)\n    print(x)\n}\n\nGo(Parser(5)) else {\n    Failed f => print(f.Why)\n}");
+        Clean("class Bag {\n    pub void Keep(move List<int> items) {\n        print(items)\n    }\n}\n\nactor Sink {\n    pub int Get() => 1\n}\n\nBag? Find() => Bag()\nSink? s = spawn Sink()\n\nmut xs = [1]\nxs.Add(2)\nFind()?.Keep(move xs)\nprint(s?.Get() within 2s)");
+
+        // U12: a result moves as the same call's result does, from the region of the value it was called on
+        Clean("class Box(mut int V)\n\nclass Maker {\n    pub Box Make() => Box(1)\n}\n\nactor Sink {\n    pub void Take(move Box box) {\n        print(box.V)\n    }\n}\n\ns = spawn Sink()\nMaker? mk = Maker()\nb = mk?.Make()\nif b != null {\n    send s.Take(move b)\n}\nprint(mk == null)");
+
+        // U6: `send` before it sends where the chain did not stop, a method with a result being `send-result` as anywhere, and its
+        // arguments' words are the call's (U12)
+        const string Sink = "actor Sink {\n    pub int Get() => 1\n    pub void Take(move List<int> items) {\n        print(items)\n    }\n}\n\nSink? s = spawn Sink()\n";
+        Assert.Equal([(ErrorIds.SendResult, 9)], Errors(Sink + "send s?.Get()"));
+        Assert.Equal([(ErrorIds.Syntax, 12)], Errors(Note + "send Find()?.Say()"));
+        Clean(Sink + "mut xs = [1]\nxs.Add(2)\nsend s?.Take(move xs)");
+
+        // O5: the chain's value is a `T?`, which is no outcome list (N8), so `else` after it has no case to take, and its words are
+        // read once, as the call's (U12)
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors("data Failed(string Why)\n\nvoid Go(string? s) {\n    x = s?.Trim() else {\n        Failed f => \"\"\n    }\n    print(x)\n}\n\nGo(null)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 12)], Errors("data Failed(string Why)\n\nclass Bag {\n    pub int Keep(move List<int> items) => items.Count\n}\n\nBag? Find() => Bag()\n\nmut xs = [1]\nxs.Add(2)\nn = Find()?.Keep(move xs) else {\n    Failed f => 0\n}\nprint(n)"));
+    }
+
+    [Fact]
+    public void A_mut_call_after_a_conditional_access_changes_the_place_the_chain_names()
+    {
+        // N5, M5 with section 4, the owner, 2026-11-24, #624, comment 7131301981, "Write the place (Recommended)": a variable without
+        // `mut` and a value that is no place are the errors the same call gets without `?.`, and a path through the chain's value is
+        // what the same call in a test's branch is
+        Clean("mut List<int>? xs = [1]\nxs?.Add(2)\nmut m = Map<string, List<int>>()\nm[\"k\"]?.Add(1)\nmut List<List<int>?> ls = [[1]]\nls[0]?.Add(2)");
+        Assert.Equal([(ErrorIds.MutRequired, 2)], Errors("List<int>? xs = [1]\nxs?.Add(2)"));
+        Assert.Equal([(ErrorIds.MutRequired, 7)], Errors("class Box {\n    pub List<int> Copy() => [1]\n}\n\nBox? Find() => null\n\nFind()?.Copy().Add(1)"));
+        Assert.Equal(["2: a `mut` method on an element of a list (M5, M9)"], NotSupported("mut List<List<int>>? ls = [[1]]\nls?[0].Add(1)"));
+
+        // M7: the place is held while the arguments run, as the receiver of the same call without `?.`, of an entry the map, and
+        // after `?[` the list the chain started from
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 7)], Errors("int Pop(mut List<int>? ys) {\n    ys = null\n    return 1\n}\n\nmut List<int>? xs = [1]\nxs?.Add(Pop(mut xs))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors("int Clear(mut Map<string, List<int>> n) {\n    n = Map<string, List<int>>()\n    return 1\n}\n\nmut m = Map<string, List<int>>()\nm[\"k\"] = [1]\nm[\"k\"]?.Add(Clear(mut m))"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 11)], Errors("class Note(int N) {\n    pub int Plus(int k) => N + k\n}\n\nint Pop(mut List<Note>? ys) {\n    ys = null\n    return 1\n}\n\nmut List<Note>? ns = [Note(1)]\nprint(ns?[0].Plus(Pop(mut ns)))"));
+    }
+
+    [Fact]
+    public void A_write_into_a_path_a_call_can_change_after_a_call_in_its_arguments_is_nullable_unchecked()
+    {
+        // N5, N9 with section 4, the owner, 2026-11-24, #624, comment 7131654435, and #628, comment 7131654741, "Refuse it
+        // (Recommended)": a `mut` call after `?.` on a path a call can change, whose arguments run a call, and the same call, an item
+        // and an entry written in a test's branch, are the error each gets with that call on the line before it; a path no call
+        // changes, a local variable, a path of `data` fields from one, a map one holds and a `mut` parameter, and a call with no call
+        // in its arguments stay allowed, the refusal's text is the one N2 gives the same call in a test's branch, and a receiver the
+        // build does not read keeps its `not supported` and a variable passed as `mut` in them M7's error alone
+        const string Bag = "class Bag(mut List<int>? Items, mut Map<string, List<int>> M)\n\nint Drop(Bag b) {\n    b.Items = null\n    return 5\n}\n\nc = Bag([1], Map<string, List<int>>())\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Bag + "c.Items?.Add(Drop(c))"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Bag + "c.M[\"k\"]?.Add(Drop(c))"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Bag + "if c.Items != null {\n    c.Items.Add(Drop(c))\n}"));
+        Clean(Bag + "c.Items?.Add(5)\nc.M[\"k\"]?.Add(5)\nif c.Items != null {\n    c.Items.Add(5)\n}");
+        Clean("int Two() => 2\n\nmut List<int>? xs = [1]\nxs?.Add(Two())\nmut m = Map<string, List<int>>()\nm[\"k\"]?.Add(Two())");
+        Clean("data Inner(List<int>? Items)\ndata Outer(Inner In)\n\nint Two() => 2\n\nmut o = Outer(Inner([1]))\no.In.Items?.Add(Two())");
+        Assert.Equal("`Add` is read from a `List<int>?` without a check (N2)", ErrorText(Bag + "c.Items?.Add(Drop(c))"));
+
+        // N9 with pull request 631, comment 7143447670, "Refuse it in the push (Recommended)": a call in the chain's index or key runs
+        // before the place is taken and is counted as one in the arguments, where the item's position, checked against the list the
+        // field held before the call, would be written into the list the call left; the call run into a variable first, and the same
+        // index on a local list, stay allowed
+        const string Rows = "class Box(mut List<List<int>?> L, mut Map<string, List<int>> M)\n\nint Swap(Box b) {\n    b.L = [null]\n    return 3\n}\n\nstring Key(Box b) => \"k\"\n\nx = Box([[1], [2], [3], [4]], Map<string, List<int>>())\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 11)], Errors(Rows + "x.L[Swap(x)]?.Add(2)"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 11)], Errors(Rows + "x.M[Key(x)]?.Add(2)"));
+        Assert.Equal("`Swap(x)` can set `x.L[Swap(x)]` to `null`: run it into a variable before this line", Assert.Single(Check(Rows + "x.L[Swap(x)]?.Add(2)").Diagnostics.Items).Help);
+        Clean(Rows + "i = Swap(x)\nx.L[i]?.Add(2)");
+        Clean("int Three() => 3\n\nmut List<List<int>?> ys = [[1], [2], [3], [4]]\nys[Three()]?.Add(2)");
+
+        // section 4, the owner, 2026-11-24, #624, comment 7135538740, "A help line of its own (Recommended)": where a call in the
+        // arguments or the written value ended the check, the help line names that call and the path, "a call in this line" where it
+        // is no call of a function or a method (an assumption there), and every other `nullable-unchecked` keeps N2's, a call earlier
+        // in its line among them
+        const string Ended = "`Drop(c)` can set `c.Items` to `null`: run it into a variable before this line";
+        Assert.Equal(Ended, Assert.Single(Check(Bag + "c.Items?.Add(Drop(c))").Diagnostics.Items).Help);
+        Assert.Equal(Ended, Assert.Single(Check(Bag + "if c.Items != null {\n    c.Items.Add(Drop(c))\n}").Diagnostics.Items).Help);
+        Assert.Equal("check it with `!= null`, or give a value for null with `??`", Assert.Single(Check(Bag + "print(Drop(c) + c.Items.Count)").Diagnostics.Items).Help);
+        Assert.Equal("a call in this line can set `c.Items` to `null`: run it into a variable before this line", Assert.Single(Check("class Note {\n    pub string Text() => \"n\"\n}\n\nclass Bag(mut List<int>? Items)\n\nint Drop(Bag b) {\n    b.Items = null\n    return 5\n}\n\nc = Bag([1])\nn = Note()\nprint(Drop(c))\nif c.Items != null {\n    c.Items.Add(\"{n}\".Bytes.Count)\n}").Diagnostics.Items).Help);
+        // issue 630: a nullable field of an instance on the way to the receiver, narrowed, which the call can set to `null`, is the
+        // error of the field's read with the call on the line before it; with no call in the arguments the instance's field changes
+        const string Nested = "class Inner(mut List<int> Items)\nclass Outer(mut Inner? In)\nint Drop(Outer o) {\n    o.In = null\n    return 5\n}\nOuter c = Outer(Inner([1]))\nif c.In != null {\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Nested + "    c.In.Items.Add(Drop(c))\n}"));
+        Assert.Equal("`Drop(c)` can set `c.In` to `null`: run it into a variable before this line", Assert.Single(Check(Nested + "    c.In.Items.Add(Drop(c))\n}").Diagnostics.Items).Help);
+        Clean(Nested + "    c.In.Items.Add(5)\n}");
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors("int Pop(mut List<int>? ys) {\n    ys = null\n    return 1\n}\n\nmut List<int>? xs = [1]\nif xs != null {\n    xs.Add(Pop(mut xs))\n}"));
+        Clean("int Two() => 2\n\nvoid Grow(mut List<int>? xs) {\n    xs?.Add(Two())\n    if xs != null {\n        xs.Add(Two())\n    }\n}\n\nmut List<int>? ys = [1]\nGrow(mut ys)");
+
+        const string Box = "class Box(mut List<int>? L, mut Map<string, int>? M)\n\nint Clear(Box b) {\n    b.L = null\n    return 7\n}\n\nx = Box([1], Map<string, int>())\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Box + "if x.L != null {\n    x.L[0] = Clear(x)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(Box + "if x.M != null {\n    x.M[\"k\"] = Clear(x)\n}"));
+        Assert.Equal("`Clear(x)` can set `x.L` to `null`: run it into a variable before this line", Assert.Single(Check(Box + "if x.L != null {\n    x.L[0] = Clear(x)\n}").Diagnostics.Items).Help);
+        Clean(Box + "if x.L != null {\n    x.L[0] = 7\n}\nif x.M != null {\n    x.M[\"k\"] = 7\n}");
     }
 
     [Fact]
@@ -5775,7 +6360,7 @@ public sealed class CheckerTests
     [InlineData("List<int>? Find() => null\n\nprint(Find()?[0][1])", "3: an index after `?.` or `?[` (N5)")]
     [InlineData("List<int>? Find() => null\n\nprint(Find()?[0..<1])", "3: a part after `?[` (N5, M9)")]
     [InlineData("mut List<int>? xs = null\nxs?[0] = 1", "2: an assignment through `?[` (N5)")]
-    [InlineData("data User(List<int> Items)\n\nmut User? u = null\nu?.Items.Clear()", "4: a call after `?.` or `?[` (N5)")]
+    [InlineData("class Cell {\n    pub int* At() => null\n}\n\nCell? c = Cell()\nprint(c?.At() == null)", "6: `?.` to an `int*`, which no `?` makes nullable (N1, N5)")]
     [InlineData("int? | string x = 1\nprint(x)", "1: a nullable case of a union, `int?` (N1, D9)")]
     [InlineData("void? F() {\n}\n\nprint(1)", "1: a nullable `void` (N1)")]
     [InlineData("data In(int X)\ndata Out(In? I)\n\nmut o = Out(In(1))\nif o.I != null {\n    o.I.X = 2\n}", "6: an assignment of a field through a nullable variable or field (N3, M4)")]
@@ -5791,9 +6376,10 @@ public sealed class CheckerTests
     [InlineData("data P(int X)\n\nmut m = Map<string, P>()\nm[\"a\"].X = 1", "4: an assignment into a map reached through an item or a call, or into a path that goes on after the key (M4, M9)")]
     [InlineData("data Box(Map<string, int> M)\n\nmut Box? b = Box(Map<string, int>())\nb.M[\"a\"] = 1", "4: an assignment into a path through a nullable variable or field (N3, M4)")]
     [InlineData("data In(Map<string, int> M)\ndata Out(In? I)\n\nmut o = Out(In(Map<string, int>()))\nif o.I != null {\n    o.I.M[\"a\"] = 1\n}", "6: an assignment into a path through a nullable variable or field (N3, M4)")]
-    [InlineData("data Box(List<int> Items)\n\nmut Box? b = Box(List<int>())\nb.Items.Add(1)", "4: a `mut` method on a path through a nullable variable or field (N3, M5)")]
-    [InlineData("data In(List<int> Items)\ndata Out(In? I)\n\nmut o = Out(In(List<int>()))\nif o.I != null {\n    o.I.Items.Clear()\n}", "6: a `mut` method on a path through a nullable variable or field (N3, M5)")]
     [InlineData("data In(int X)\ndata Out(In? I)\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nmut o = Out(In(1))\nif o.I != null {\n    Bump(mut o.I.X)\n}", "10: a path through a nullable variable or field passed as `mut` (N3, M7)")]
+    [InlineData("data Config(List<int> Items)\n\nmut groups = Map<string, Config>()\nkey = \"a\"\ngroups[key]?.Items.Add(2)", "5: a `mut` method on a path through a nullable item, entry or call's result (N3, M5)")]
+    [InlineData("data Config(List<int> Items)\n\nmut xs = List<Config?>()\nxs[0]?.Items.Add(2)", "4: a `mut` method on a path through a nullable item, entry or call's result (N3, M5)")]
+    [InlineData("data Config(List<int> Items)\n\nConfig? Find() => null\n\nFind()?.Items.Add(2)", "5: a `mut` method on a path through a nullable item, entry or call's result (N3, M5)")]
     [InlineData("use tools\nprint(1)", "1: use (F10)")]
     [InlineData("use a/util\nprint(1)", "1: use (F10)")]
     [InlineData("print(string(1))", "1: a conversion to `string`, a type that is neither a number type nor a time type (T10, T29)")]
@@ -5802,13 +6388,16 @@ public sealed class CheckerTests
     [InlineData("data P(int X)\n\nmut ps = List<P>()\nps[0].X = 1", "4: an assignment into a list reached through an item or a call, or into a path that goes on after the item (M4, M9)")]
     [InlineData("mut grid = List<List<int>>()\ngrid[0][0] = 1", "2: an assignment into a list reached through an item or a call, or into a path that goes on after the item (M4, M9)")]
     [InlineData("mut grid = List<List<int>>()\ngrid[0].Add(1)", "2: a `mut` method on an element of a list (M5, M9)")]
-    [InlineData("data Shape\n\nint AreaOf<T: Shape>(T item) => 1\n\nprint(AreaOf(5))", "3: the limit of a type parameter (T19)")]
-    [InlineData("data Shape\ndata Box<T: Shape>(T Item)\n\nprint(1)", "2: the limit of a type parameter (T19)")]
     [InlineData("data Box<T>(T Item)\ndata IntBox(int Extra) : Box<int>\n\nprint(1)", "2: a generic data type as a base (T19)")]
     [InlineData("data Box<T>(T Item)\ndata IntBox(int Extra) : Box<int>\n\nb = IntBox(1, 2)\nprint(b.Item)", "2: a generic data type as a base (T19)")]
     [InlineData("uint u = 1\nprint(-u)", "2: `-` on a `uint`, which no rule gives a meaning")]
     [InlineData("ulong u = 1\nprint(-u)", "2: `-` on a `ulong`, which no rule gives a meaning")]
-    [InlineData("void Bump(mut int n) {\n    n = n + 1\n}\n\nmut xs = List<short>()\nBump(mut xs[0])", "6: an element of a list passed as `mut` (M7, M9)")]
+    [InlineData("void Bump(mut int n) {\n    n = n + 1\n}\n\nmut xs = List<short>()\nBump(mut xs[0])", "6: an item of a list or an entry of a map, or a path through one, passed as `mut` (M7, M9)")]
+    [InlineData("data Box(Map<string, List<int>> M)\n\nvoid Grow(mut List<int> xs) {\n    xs.Add(4)\n}\n\nmut b = Box(Map<string, List<int>>())\nGrow(mut b.M[\"k\"])", "8: an item of a list or an entry of a map, or a path through one, passed as `mut` (M7, M9)")]
+    [InlineData("data Config(List<int> Items)\ndata Box(List<Config> Cs)\n\nvoid Grow(mut List<int> xs) {\n    xs.Add(4)\n}\n\nmut b = Box(List<Config>())\nGrow(mut b.Cs[0].Items)", "9: an item of a list or an entry of a map, or a path through one, passed as `mut` (M7, M9)")]
+    [InlineData("void Fill(mut List<int> xs) {\n    xs.Add(1)\n}\n\nclass Box(mut List<int> Items)\n\nb = Box(List<int>())\nFill(mut b.Items)", "8: a path through a class instance passed as `mut` (M7)")]
+    [InlineData("void Fill(mut List<int> xs) {\n    xs.Add(1)\n}\n\nclass Box(mut List<int> Items)\ndata Link(weak Box? To)\n\nb = Box(List<int>())\nmut l = Link(b)\nif l.To != null {\n    Fill(mut l.To.Items)\n}", "11: a path through a `weak` reference passed as `mut` (M7, R3)")]
+    [InlineData("void Fill(mut List<int> xs) {\n    xs.Add(1)\n}\n\nclass Box(mut List<int> Items)\n\nb = Box(List<int>())\nmut weak Box? w = b\nif w != null {\n    Fill(mut w.Items)\n}", "10: a path through a `weak` reference passed as `mut` (M7, R3)")]
     [InlineData("static int Twice(int n) {\n    return \"x\"\n}\n\nprint(Twice(\"a\"))", "1: the modifier `static` of a method (K7, M6)")]
     [InlineData("data User(string Name)\n\nmut u = User(\"a\")\nu?.Name = \"b\"", "4: `?.` (N5)")]
     public void A_construct_of_a_chapter_the_checker_does_not_read_is_not_supported_and_carries_no_error(string program, string first)
@@ -7170,13 +7759,14 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnusedVariable, 6)], Errors(program.Replace("Check(n)", "true")));
     }
 
-    // ---- tests (Y1 to Y10; assumed: issue 586, comments 6992687784 and 6993110710) ----------------------------------------------
+    // ---- tests (Y1 to Y10; issue 586, comments 6992687784, 6993110710 and 7051499099) -------------------------------------------
 
     [Fact]
     public void A_second_test_of_one_name_is_syntax_at_its_line_naming_the_first()
     {
         // Y1 with E4: a test's name is its own in its file, compared by its value; the text of the second names the line of the first
-        // (assumed: D3 of issue 586, comment 6992687784)
+        // (assumed: D3 of issue 586, comment 6992687784; for the value the owner's answers of 2026-11-20, comment 7051499099, Q10 (a)
+        // of comment 6994632453)
         Assert.Equal([(ErrorIds.Syntax, 4)], Errors("test \"a\" {\n}\n\ntest \"a\" {\n}"));
         Assert.Contains("line 3", ErrorText("print(1)\n\ntest \"a\" {\n}\n\ntest \"a\" {\n}"), StringComparison.Ordinal);
         Assert.Equal([(ErrorIds.Syntax, 6), (ErrorIds.Syntax, 8)], Errors("test \"a\" {\n}\n\ntest \"b\" {\n}\ntest \"a\" {\n}\ntest \"b\" {\n}"));
@@ -7188,7 +7778,7 @@ public sealed class CheckerTests
     public void A_check_narrows_nothing_after_it()
     {
         // Y6: after `check n != null` the variable is still nullable (N2), as Rust's `assert!` narrows no type; an `if` is the control
-        // (the reading in compiler/README.md)
+        // (the owner's answers of 2026-11-20, issue 586, comment 7051499099, Q9 (a) of comment 6994632453)
         Assert.Equal([(ErrorIds.NullableUnchecked, 3)], Errors("int? n = null\ncheck n != null\nprint(n + 1)"));
         Assert.Empty(Errors("int? n = null\nif n != null {\n    print(n + 1)\n}"));
     }
@@ -7221,7 +7811,8 @@ public sealed class CheckerTests
     public void The_condition_of_a_check_is_a_bool_as_a_condition_is(string program, string? id)
     {
         // Y6 with C3: a condition of another type is `type-mismatch` at its line, a nullable one N2's `nullable-unchecked`, and a call
-        // with a `void` success O10's `syntax` (assumed: Q1 of issue 586, comment 6992687784, and F8 of comment 6993110710)
+        // with a `void` success O10's `syntax`, as Y6 reads a check's condition as a condition is read (the owner's answers of
+        // 2026-11-20, issue 586, comment 7051499099, Q1 of comment 6992687784)
         var line = program.Split('\n').Length;
         Assert.Equal(id is null ? [] : [(id, line)], Errors(program));
     }
@@ -7229,8 +7820,8 @@ public sealed class CheckerTests
     [Fact]
     public void A_check_stands_in_any_code()
     {
-        // Y6: in top-level code, a function, a method, a lambda and a test, in every build (assumed: Q1 of issue 586, comment
-        // 6992687784, and F9 of comment 6993110710)
+        // Y6: in top-level code, a function, a method, a lambda and a test, in every build (the owner's answers of 2026-11-20, issue
+        // 586, comment 7051499099, Q1 of comment 6992687784; assumed: F8 of comment 6993110710)
         Assert.Empty(Errors("int Twice(int n) {\n    check n >= 0\n    return n * 2\n}\n\nclass Box(int N) {\n    pub int Get() {\n        check N > 0\n        return N\n    }\n}\n\nf = (int x) => {\n    check x != 0\n    return x\n}\n\ncheck Twice(1) == 2\nprint(f(Box(1).Get()))\ntest \"a\" {\n    check Twice(2) == 4\n}"));
     }
 
@@ -7238,8 +7829,8 @@ public sealed class CheckerTests
     public void The_model_keeps_each_test_in_its_order_and_each_check_s_text_and_the_types_its_failure_shows()
     {
         // Y5, Y6 with F10: the tests of the file in their order, each its function; a check's text, and for one of the six comparisons
-        // whose two sides have a text (A4) the comparison and each side's type, which its failure line shows in parentheses (assumed:
-        // Q1 of issue 586, comment 6992687784, and F10 of comment 6993110710)
+        // whose two sides have a text (A4) the comparison and each side's type, which its failure line shows in parentheses (the owner's
+        // answers of 2026-11-20, issue 586, comment 7051499099, Q1 of comment 6992687784, and F10 as comment 6994632453 said it back)
         var diagnostics = new DiagnosticBag();
         var tree = Parser.Parse(SourceText.FromString("test.kz", "class Box(int N)\n\nb = Box(1)\nnames = [\"a\"]\ncheck (names.Count == 1)\ncheck b == b\nprint(b.N)\ntest \"second\" {\n    check 1 + 1 == 2\n}\n\ntest \"first\" {\n    check \"a\" != \"b\" && true\n    check 2.5 < 3.0\n}"), diagnostics);
         var model = Checker.Check(tree, diagnostics, []).Model;
@@ -7301,34 +7892,56 @@ public sealed class CheckerTests
     }
 
     [Fact]
-    public void A_cluster_test_mock_and_advance_are_not_supported()
+    public void A_cluster_test_and_mock_are_not_supported()
     {
-        // Y8: the cluster test of section 13, once at its line, its body unread; Y9 and Y10: `mock` and `advance`, whose questions are
-        // open, once at their line, in a test or not; the duration's variables count as read (E1) (assumed: D7 of issue 586, comment
-        // 6992687784, and F20 of comment 6993110710)
+        // Y8: the cluster test of section 13, once at its line, its body unread; Y9: `mock`, whose answers of 2026-11-20 are not built,
+        // once at its line, in a test or not (assumed: D7 of issue 586, comment 6992687784, and F20 of comment 6993110710 for `mock`)
         NotSupportedAt(1, "Y8", "test cluster 3 seed 42 {\n    a = spawn Store()\n    split 2 | 3\n    check a.Count() == 1\n}");
         Assert.Empty(Check("test cluster 3 seed 42 {\n}").Checker.Model.Tests); // no test of `kurz test`
         NotSupportedAt(2, "Y9", "test \"a\" {\n    mock Clock with FakeClock\n}");
         NotSupportedAt(1, "Y9", "mock Clock with FakeClock");
-        NotSupportedAt(3, "Y10", "test \"a\" {\n    d = 1s\n    advance d\n}");
-        NotSupportedAt(2, "Y10", "d = 1s\nadvance d + 1ms");
+    }
 
-        // T8 with Y10: the duration is checked as any expression is, as the bound of `within` is (U40), beside the `not supported`
-        foreach (var (program, id) in new[] { ("advance 1", ErrorIds.TypeMismatch), ("long n = 1\nadvance n", ErrorIds.TypeMismatch), ("duration? d = null\nadvance d", ErrorIds.NullableUnchecked), ("void Stop() {\n}\n\nadvance Stop()", ErrorIds.Syntax) })
+    [Fact]
+    public void Advance_stands_among_a_test_s_own_statements_alone()
+    {
+        // Y10 with F11 of issue 586, comment 6993110710: `advance` in a test's body and in a block nested in it, and nowhere else: a
+        // function, the top-level code, and a lambda, a block of `on crash` and the block of an `attempt` inside a test, each read in a
+        // frame of its own, are `advance-outside` at its line, with no other diagnostic, the duration's variables read (E1)
+        Assert.Empty(Errors("test \"a\" {\n    d = 1s\n    advance d\n    if d > 0s {\n        advance d + 1ms\n    }\n}"));
+        var worker = "actor Worker {\n    pub int Run() => 1\n}\n\n";
+        foreach (var (program, line) in new[]
         {
-            var line = program.Split('\n').Length;
-            var (diagnostics, _) = Check(program);
-            Assert.Equal([(id, line)], diagnostics.Items.Where(d => d.IsError).Select(d => (d.Id, d.Line)));
-            var unread = Assert.Single(diagnostics.Items, d => !d.IsError);
-            Assert.Equal((line, "`advance` (Y10)"), (unread.Line, unread.Message));
+            ("void Later() {\n    advance 1h\n}\n\ntest \"a\" {\n    Later()\n}", 2),
+            ("d = 1s\nadvance d + 1ms", 2),
+            ("test \"a\" {\n    f = () => {\n        advance 1h\n    }\n\n    f()\n}", 3),
+            (worker + "test \"a\" {\n    w = spawn Worker() on crash (c) {\n        advance 1h\n        restart\n    }\n\n    check w.Run() == 1\n}", 7),
+            (worker + "test \"a\" {\n    w = spawn Worker()\n    v = attempt {\n        advance 1h\n        return w.Run()\n    } else {\n        Crashed c => 0\n    }\n\n    check v == 1\n}", 8),
+        })
+        {
+            Assert.Equal([(ErrorIds.AdvanceOutside, line)], ErrorsSeeingStd(program)); // `std/` declares `Crashed`, which the block and the `attempt` read
         }
+
+        // the text the person reads at that line (Q6 of the product pass of issue 655, comment 7178562787)
+        Assert.Equal(
+            ["advance-outside 2: `advance` stands among a `test` block's own statements alone (Y10)"],
+            Check("void Later() {\n    advance 1h\n}\n\ntest \"a\" {\n    Later()\n}").Diagnostics.Sorted.Select(d => $"{d.Id} {d.Line}: {d.Message}"));
+
+        // T8 with Y10: the duration is checked as any expression is, as the bound of `within` is (U40)
+        foreach (var (program, id) in new[] { ("advance 1", ErrorIds.TypeMismatch), ("long n = 1\n    advance n", ErrorIds.TypeMismatch), ("duration? d = null\n    advance d", ErrorIds.NullableUnchecked) })
+        {
+            Assert.Equal([(id, program.Split('\n').Length + 1)], Errors($"test \"a\" {{\n    {program}\n}}"));
+        }
+
+        Assert.Equal([(ErrorIds.Syntax, 5)], Errors("void Stop() {\n}\n\ntest \"a\" {\n    advance Stop()\n}"));
     }
 
     [Fact]
     public void An_error_in_a_test_refuses_the_build_of_its_program()
     {
         // Y7: every command checks every test, so that an error in one refuses `kurz build` and `kurz run` of its file as an error
-        // elsewhere does; the control has no error (assumed: Q5 of issue 586, comment 6992687784)
+        // elsewhere does; the control has no error (the owner's answers of 2026-11-20, issue 586, comment 7051499099, Q5 of comment
+        // 6992687784)
         var refused = Builder.Compile(SourceText.FromString("program.kz", "test \"a\" {\n    check 1\n}\n\nprint(1)"), [], StdRuntime.Value, testBuild: true);
         Assert.Null(refused.Program);
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], refused.Diagnostics.Items.Where(d => d.IsError).Select(d => (d.Id, d.Line)));
@@ -7530,7 +8143,7 @@ public sealed class CheckerTests
     [InlineData("T Bad<T>() => T.Make((mut f) => 0)\n\nprint(Bad<Point>())", "7: syntax: `T.Make` takes one lambda of one parameter with no type, `T.Make(f => ...)` (T33)")]
     [InlineData("T Bad<T>() => T.Make(x: f => 0)\n\nprint(Bad<Point>())", "7: syntax: `T.Make` takes one lambda of one parameter with no type, `T.Make(f => ...)` (T33)")]
     [InlineData("T Bad<T>() => T.Make(mut (f => 0))\n\nprint(Bad<Point>())", "7: syntax: `T.Make` takes one lambda of one parameter with no type, `T.Make(f => ...)` (T33)")]
-    [InlineData("T Bad<T>() => T?.Make(f => 0)\n\nprint(Bad<Point>())", "7: unknown-name: no `T` is visible here (V10)|7: : a call after `?.` or `?[` (N5)")]
+    [InlineData("T Bad<T>() => T?.Make(f => 0)\n\nprint(Bad<Point>())", "7: unknown-name: no `T` is visible here (V10)")]
     [InlineData("T Bad<T>() => T.Make(f => f)\n\nprint(Bad<Point>())", "7: syntax: `f` walks the fields of `T`, and stands only in `f.Name`, `f.Type` as a type and `f.Get(value)` (T33)")]
     [InlineData("int Grow(mut List<int> t) {\n    t.Add(9)\n    return 0\n}\n\nint Sum(List<int> xs, Point p) => p.X\n\nint Fill<T>(mut List<int> numbers) => Sum(numbers, T.Make(f => Grow(mut numbers)))\n\nmut list = List<int>()\nprint(Fill<Point>(mut list))", "14: changed-while-held: `numbers` is still in use while the call that takes `mut numbers` runs, and a `List<int>` is not copied: copy it into a variable of its own on a line before (M7)")]
     [InlineData("T Bad<T>(T value) => T.Make(value => 0)\n\nprint(Bad(Point(1, 2)))", "7: redeclared: `value` is visible already (V9)")]
@@ -7914,6 +8527,51 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "cart = Cart(1)\nshop.Two(move cart, 1 +\n    cart.Items)\n"));
         Assert.Equal([(ErrorIds.UsedAfterMove, 63)], Errors(MoveShop + "cart = Cart(1)\nf = () => cart.Items\nshop.Add(move cart)\nprint(f())\n"));
         Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "cart = Cart(1)\nshop.Add(move cart)\nf = () => cart.Items\nprint(f())\n"));
+    }
+
+    private const string MovedArm = "data Missing\n\nclass Cart(mut int Items)\n\nint | List<int> | Cart | Missing Plain(int id) {\n    if id == 1 {\n        return [id]\n    }\n\n    if id == 2 {\n        return Cart(id)\n    }\n\n    return Missing\n}\n\nint Use(move List<int> l) => l.Count\n\nint Take(move Cart c) => c.Items\n\nint Run(int id) {\n    v = Plain(id) else {\n";
+    [Fact]
+    public void A_bare_throw_after_a_move_of_its_arms_name_is_used_after_move_at_the_throw()
+    {
+        // O7, U12: a bare `throw` throws the case its arm took, a use of the arm's name, so that one after a `move` that may have ended the
+        // name is `used-after-move` at the `throw`, naming the line of the `move` (the owner, 2026-11-20, issue 596, comment 7051500690): for
+        // a list and for a class, whose region a `move` of another name ends, on a path the `move` reaches and in a guarded block (R18), while a `throw` on a path with
+        // no `move`, one after a read and the bare `throw` of an arm inside it that binds no name rethrow, and the arm's own name holds again
+        // after an `else` inside it (section 5, assumed: the readings of comment 7055001448)
+        const string End = "        else => 0\n    }\n\n    return v\n}\n\nprint(Run(1))\n";
+        Assert.Equal([(ErrorIds.UsedAfterMove, 25)], Errors(MovedArm + "        List<int> n => {\n            print(Use(move n))\n            throw\n        }\n" + End));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 26)], Errors(MovedArm + "        Cart n => {\n            m = n\n            print(Take(move m))\n            throw\n        }\n" + End));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 27)], Errors(MovedArm + "        List<int> n => {\n            if id > 0 {\n                print(Use(move n))\n            }\n            throw\n        }\n" + End));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 26)], Errors(MovedArm + "        List<int> n => {\n            print(Use(move n))\n            if X86.Sse41.IsSupported {\n                throw\n            } else {\n                throw\n            }\n        }\n" + End));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 29)], Errors(MovedArm + "        List<int> n => {\n            print(Use(move n))\n            w = Plain(id) else {\n                else => 0\n            }\n            print(w)\n            throw\n        }\n" + End));
+        Clean(MovedArm + "        List<int> n => {\n            if id > 0 {\n                return Use(move n)\n            } else {\n                throw\n            }\n        }\n" + End);
+        Clean(MovedArm + "        List<int> n => {\n            print(n.Count)\n            throw\n        }\n" + End);
+        Clean(MovedArm + "        List<int> n => {\n            print(Use(move n))\n            w = Plain(id) else {\n                Missing => throw\n                else => 0\n            }\n            w\n        }\n" + End);
+    }
+
+    [Fact]
+    public void A_print_of_a_base_without_a_text_is_no_text_where_a_derived_class_declares_one()
+    {
+        // A4, A7: whether a value has a text at a `print` or in an interpolation is decided by its type, so that a value of a base with no
+        // `Text()` is `no-text` there whatever its instance, while a `throw` of it builds and shows the text of the instance's class (O7, the
+        // owner, 2026-11-21, issue 598, comment 7060156252, Q9 of comment 7055578588)
+        const string Animals = "class Animal(string Name)\n\nclass Dog(int Legs) : Animal {\n    pub string Text() => \"dog {Name}\"\n}\n\nAnimal a = Dog(\"rex\", 4)\n";
+        Assert.Equal([(ErrorIds.NoText, 8)], Errors(Animals + "print(a)\n"));
+        Assert.Equal([(ErrorIds.NoText, 8)], Errors(Animals + "print(\"got {a}\")\n"));
+        Assert.Equal([(ErrorIds.NoText, 8)], Errors(Animals + "print([a])\n"));
+        Clean(Animals + "print(Dog(\"tom\", 3))\nthrow a\n");
+    }
+
+    [Fact]
+    public void A_print_of_an_interface_value_without_a_text_is_no_text_where_a_throw_of_it_builds()
+    {
+        // A10: whether a value of an interface has a text at a `print` or in an interpolation is decided by its interface, so that one whose
+        // interface declares no `Text()` is `no-text` there whatever its instance's class declares, while a `throw` of it builds and shows
+        // the text of the instance's class (O7, the owner, 2026-11-21, issue 621, comment 7067091007)
+        const string Sized = "interface Sized {\n    int Size()\n}\n\nclass Dot : Sized {\n    pub int Size() => 1\n    pub string Text() => \"dot\"\n}\n\nSized s = Dot()\n";
+        Assert.Equal([(ErrorIds.NoText, 11)], Errors(Sized + "print(s)\n"));
+        Assert.Equal([(ErrorIds.NoText, 11)], Errors(Sized + "print(\"got {s}\")\n"));
+        Clean(Sized + "print(Dot())\nthrow s\n");
     }
 
     [Fact]

@@ -1,0 +1,18 @@
+// expect: error unknown-name at 15
+// rules: T19
+
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+    pub int Perimeter() => 4 * Side
+}
+
+int Measure<T: Shape>(T item) {
+    print(T.Kind)
+    return item.Perimeter()
+}
+
+print(Measure(Square(3)))

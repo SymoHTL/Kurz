@@ -1,0 +1,18 @@
+// expect: error syntax at 13
+// rules: F4
+
+// an arm of `else` of the `void` case binds no name either: `void v =>` is refused at the arm
+data Circle(int R)
+
+Circle | void Find(bool b) {
+    return Circle(1)
+}
+
+int R(bool b) {
+    Circle c = Find(b) else {
+        void v => return 0
+    }
+    return c.R
+}
+
+print(R(true))

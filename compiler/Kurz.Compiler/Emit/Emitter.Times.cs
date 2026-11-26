@@ -89,6 +89,42 @@ public sealed partial class Emitter
         return Arithmetic("add", units, fn.Value($"fptosi double {rounded} to i64"), Types.Duration, c.Line, checkedBuild: true);
     }
 
+    /// <summary>
+    /// T39: <c>d.TotalSeconds</c> and its siblings, the count of nanoseconds as the nearest <c>double</c>, divided by the nanoseconds of the
+    /// unit <paramref name="scale"/>, two roundings, as C#'s <c>TimeSpan.TotalSeconds</c> divides its ticks.
+    /// </summary>
+    private string DurationTotal(string value, KurzType type, long scale)
+    {
+        var count = Types.IsWideTime(type) ? WideToDouble(value) : fn.Value($"sitofp i64 {value} to double");
+        return scale == 1 ? count : fn.Value($"fdiv double {count}, {RealText(scale)}");
+    }
+
+    /// <summary>
+    /// T39: the nearest <c>double</c> of the 128 bits of a <c>longduration</c>, ties to even, as Rust's <c>i128 as f64</c> rounds, made of
+    /// 64-bit conversions, so that no target needs the runtime library's <c>__floattidf</c>. A count that fits 64 bits converts as one.
+    /// Any other has a magnitude of 2^63 or more: it is shifted right until its highest bit is bit 63, with bit 0 set where the shift
+    /// dropped a bit that is not zero, which the conversion rounds as the whole magnitude rounds, since the 11 bits below the 53 a
+    /// <c>double</c> holds keep the bit that decides a tie above bit 0; the result is scaled back by the shift, which is exact.
+    /// </summary>
+    private string WideToDouble(string value)
+    {
+        var low = fn.Value($"trunc i128 {value} to i64");
+        var fits = fn.Value($"icmp eq i128 {fn.Value($"sext i64 {low} to i128")}, {value}");
+        var negative = fn.Value($"icmp slt i128 {value}, 0");
+        var magnitude = fn.Value($"select i1 {negative}, i128 {fn.Value($"sub i128 0, {value}")}, i128 {value}");
+        module.Declare("declare i128 @llvm.ctlz.i128(i128, i1)");
+        var zeros = fn.Value($"call i128 @llvm.ctlz.i128(i128 {magnitude}, i1 false)");
+        var shift = fn.Value($"select i1 {fits}, i128 0, i128 {fn.Value($"sub i128 64, {zeros}")}");
+        var top = fn.Value($"trunc i128 {fn.Value($"lshr i128 {magnitude}, {shift}")} to i64");
+        var dropped = fn.Value($"and i128 {magnitude}, {fn.Value($"sub i128 {fn.Value($"shl i128 1, {shift}")}, 1")}");
+        var sticky = fn.Value($"zext i1 {fn.Value($"icmp ne i128 {dropped}, 0")} to i64");
+        var rounded = fn.Value($"uitofp i64 {fn.Value($"or i64 {top}, {sticky}")} to double");
+        var power = fn.Value($"bitcast i64 {fn.Value($"shl i64 {fn.Value($"add i64 {fn.Value($"trunc i128 {shift} to i64")}, 1023")}, 52")} to double");
+        var wide = fn.Value($"fmul double {rounded}, {power}");
+        var signed = fn.Value($"select i1 {negative}, double {fn.Value($"fneg double {wide}")}, double {wide}");
+        return fn.Value($"select i1 {fits}, double {fn.Value($"sitofp i64 {low} to double")}, double {signed}");
+    }
+
     /// <summary>S25: <c>t.Elapsed</c>, <c>instant.Now - t</c>, the reading taken first and the clock read after it.</summary>
     private string Elapsed(string reading, int line) =>
         TimeArithmetic(TokenKind.Minus, EmitMonotonicNow(line), Types.Instant, reading, Types.Instant, Types.Duration, line);

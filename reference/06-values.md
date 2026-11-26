@@ -106,6 +106,16 @@ more()
 print(b.Items)
 ```
 
+Case: [null/conditional-call-no-place.kz](../corpus/null/conditional-call-no-place.kz)
+```kurz
+// a `mut` call after `?.` on a value that is no place is the error the same call gets without `?.`
+List<int>? Make() {
+    return [1]
+}
+
+Make()?.Add(2)
+```
+
 ### M6 (decided, §4) Where the `mut` marker of a method is written
 
 In front of the return type: `mut void Add(T item)`. `mut` stands in front everywhere else as
@@ -140,8 +150,20 @@ is passed (`Fill(mut c.Items)`), or a `mut` field of a class instance (M4); a ca
 literal cannot stand there, and `mut` in front of an argument whose parameter is not `mut` is
 `mut-at-call` as well. Passing one variable twice as `mut` (`Swap(mut a, mut a)`), or a variable
 and a path into it, is `mut-at-call` too: each `mut` parameter is the only way its value changes
-while the function runs (M3). *(proposed: the forms after `mut`, and the two further uses of
-`mut-at-call`)*
+while the function runs (M3). The path of `data` fields after `mut` is decided (§4, the owner,
+2026-11-25, issue 646, comment 7167181142, "Decide + build") *(proposed: a `mut` field of a class
+instance after `mut`, and the two further uses of `mut-at-call`)*.
+
+A path of `data` fields passed as `mut`, `Grow(mut b.Items)`, gives the callee the place at the end of
+the path, as C#'s `ref b.Items` and Rust's `&mut b.items` do: a block on the path that another value
+holds is copied first, as an assignment into the path copies it (M4), so that a variable that held it
+keeps its value, and one the variable holds alone is written where it stands (§4, the owner, 2026-11-25,
+"Copy if shared"). An item of a list, an entry of a map, a field of a class instance and a `weak`
+reference on the path stay `not supported`, each with a text that names its form (§4, the owner,
+2026-11-25, "Data fields only"). *(assumed, §4: the place is taken after the other arguments ran, as a
+variable's is; an item and an entry share one text, which names both; a path to a `weak` field given to
+a `mut weak T?` parameter keeps the `type-mismatch` the build gives it, since a read of the field is the
+strong `T?` (R3).)*
 
 Within one expression, a read of what a call takes as `mut`, of a value that holds it or of one it
 holds (the variable itself, a path of fields, an item of a list), is the compile error
@@ -610,6 +632,57 @@ b = Box([1, 0])
 fill = b.Filler()
 fill()
 print(b.Items.Count)
+```
+
+Case: [values/mut-path-argument.kz](../corpus/values/mut-path-argument.kz)
+```kurz
+// a path of `data` fields passed as `mut` gives the callee the place at the end of the path: a block that another variable holds is
+// copied first, so that variable keeps its value, two paths of one variable are two places, and the path may run through a `mut`
+// parameter and through a field of a field; `Pair` is a block, since a type derives from it, and `Config` stands in the variable's
+// own place
+data Config(List<int> Items)
+data Pair(List<int> A, List<int> B)
+data Tagged(int Tag) : Pair
+data Inner(List<int> Items, int N)
+data Outer(Inner In, string Tag)
+
+void Grow(mut List<int> xs) {
+    xs.Add(4)
+}
+
+void Two(mut List<int> xs, mut List<int> ys) {
+    xs.Add(5)
+    ys.Add(6)
+}
+
+void Bump(mut int n) {
+    n = n + 1
+}
+
+void Through(mut Config cfg) {
+    Grow(mut cfg.Items)
+}
+
+mut b = Config([1])
+Grow(mut b.Items)
+print(b.Items)
+mut c = Config([1])
+Through(mut c)
+print(c.Items)
+mut p = Pair([2], [3])
+held = p
+Two(mut p.A, mut p.B)
+print(held.A)
+print(p.A)
+print(p.B)
+print(held.B)
+mut o = Outer(Inner([1], 0), "t")
+kept = o
+Grow(mut o.In.Items)
+Bump(mut o.In.N)
+print(o.In.Items)
+print(o.In.N)
+print(kept.In.Items)
 ```
 
 ### M8 (decided, §4) One family of collections

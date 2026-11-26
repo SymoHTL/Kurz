@@ -299,6 +299,9 @@ public enum CallKind
     /// <summary><c>Environment.Exit(code)</c> (S23).</summary>
     EnvironmentExit,
 
+    /// <summary><c>Environment.Sleep(time)</c> (S28).</summary>
+    EnvironmentSleep,
+
     /// <summary><c>Sha256.Hash(bytes)</c>, <c>Md5.Hash(bytes)</c> or <c>Crc32.Hash(bytes)</c> (H1); <see cref="CallInfo.Target"/> is the hasher's type.</summary>
     Hash,
 
@@ -381,7 +384,7 @@ public sealed record CallInfo(
 
     /// <summary>
     /// U51: a message of <see cref="CallKind.ActorCall"/> or <see cref="CallKind.ActorSend"/> addressed by the name of a <c>per node</c>
-    /// actor, <c>Cache.Get(1)</c>, whose one actor the call finds, or starts, before its arguments run (U52).
+    /// actor, <c>Cache.Get(1)</c>, whose one actor the call finds, or starts (U52), before its arguments run (U51).
     /// </summary>
     public bool ByName { get; init; }
 }
@@ -395,8 +398,9 @@ public sealed record LogSite(int Level, string? Category, IReadOnlyList<string> 
 
 /// <summary>
 /// Y6: a <c>check</c> as the checker read it: the condition's text as the parser kept it (F10), and where the condition, its parentheses
-/// passed over, is one of the six comparisons whose two sides have a text (A4), that comparison with the type of each side, the values its
-/// failure shows; null for any other condition, whose failure shows its text alone.
+/// passed over, is one of the six comparisons whose two sides show their values as <c>Checker.Shows</c> reads them, each a value with a
+/// text (A2 to A15) that holds no raw pointer and no C function value and reaches no <c>Text()</c> without <c>pub</c> (A9, A15), that
+/// comparison with the type of each side, the values its failure shows; null for any other condition, whose failure shows its text alone.
 /// </summary>
 public sealed record Assertion(string Text, BinaryExpression? Comparison, KurzType? Left, KurzType? Right);
 
@@ -410,6 +414,19 @@ public sealed record LambdaInfo(IReadOnlyList<VariableSymbol> Parameters, IReadO
 /// they are read from, null where the block names no field.
 /// </summary>
 public sealed record AttemptInfo(LambdaExpression Lambda, UnionType Type, IReadOnlyList<(VariableSymbol Variable, FieldSymbol Field)> Fields, VariableSymbol? This);
+
+/// <summary>
+/// N5: the value a call after <c>?.</c> or <c>?[</c> is called on, the value of <paramref name="Of"/>'s case other than <c>null</c>,
+/// which the chain reads only where it did not stop: no text writes it, and only the call a chain's call is read as names it.
+/// </summary>
+internal sealed record ChainValue(int Line, Expression Of) : Expression(Line);
+
+/// <summary>
+/// N5: a call after <c>?.</c> or <c>?[</c>, read as <paramref name="Call"/>, the same call on <paramref name="Receiver"/>, which runs
+/// only where the chain did not stop; <paramref name="Result"/> is that call's own type, which the chain makes nullable, and
+/// <paramref name="Place"/> whether the call changes the value it is called on, in the place the chain names (M5).
+/// </summary>
+internal sealed record ChainCall(CallExpression Call, ChainValue Receiver, KurzType Result, bool Place);
 
 /// <summary>
 /// What the checker found out about a program, by node, for a code generator: the type and constant
@@ -454,6 +471,7 @@ public sealed class SemanticModel
     private readonly Dictionary<ExternFunction, FunctionSymbol> cFunctions = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypeDeclaration, DataSymbol> dataTypes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<CallExpression, ChainCall> chainCalls = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TestDeclaration, FunctionSymbol> tests = new(ReferenceEqualityComparer.Instance);
     private readonly List<TestDeclaration> testOrder = [];
     private readonly Dictionary<AssertionStatement, Assertion> assertions = new(ReferenceEqualityComparer.Instance);
@@ -587,10 +605,11 @@ public sealed class SemanticModel
     public bool IsCopied(Expression expression) => copied.Contains(expression);
 
     /// <summary>
-    /// U4, U17: whether the expression is an argument of a message that runs a call as it is evaluated, a call that can wait and so let
-    /// other messages run, a crash of the message's callee among them, as the checker reads every call (<c>Checker.Calls</c>, the reading
-    /// behind M7's count of a read of a <c>mut</c> parameter); the emitter builds a message in a heap of its own where any argument is
-    /// such (<c>Emitter.EmitMessage</c>).
+    /// U4, U17: whether the expression is an argument of a message or of a <c>spawn</c> that runs a call as it is evaluated, a call that can
+    /// wait and so let other messages run, a crash of the message's callee among them, as the checker reads every call (<c>Checker.Calls</c>,
+    /// the reading behind M7's count of a read of a <c>mut</c> parameter); the emitter builds a message in a heap of its own where any
+    /// argument is such (<c>Emitter.EmitMessage</c>), and lists the heap of a <c>spawn</c> with its builder where such an argument is
+    /// evaluated after that heap is made (<c>Emitter.EmitActorSpawn</c>).
     /// </summary>
     public bool CanWait(Expression argument) => waitingArguments.Contains(argument);
 
@@ -656,6 +675,9 @@ public sealed class SemanticModel
     /// the type of its target makes nullable, and <paramref name="member"/> is its own type, which <see cref="TypeOf"/> gives nullable.
     /// </summary>
     public bool IsChainMember(MemberAccess access, out KurzType member) => chainMembers.TryGetValue(access, out member!);
+
+    /// <summary>Whether the call stands after <c>?.</c> or <c>?[</c> (N5), and the call it is read as.</summary>
+    internal bool IsChainCall(CallExpression call, out ChainCall chain) => chainCalls.TryGetValue(call, out chain!);
 
     /// <summary>
     /// K7: the call a read of a property is, <c>h.Count</c> or <c>Count</c> inside its class, whose callee is the read itself and which
@@ -823,6 +845,8 @@ public sealed class SemanticModel
     internal void RecordDataType(TypeDeclaration declaration, DataSymbol symbol) => dataTypes[declaration] = symbol;
 
     internal void RecordChainMember(MemberAccess access, KurzType member) => chainMembers[access] = member;
+
+    internal void RecordChainCall(CallExpression call, ChainCall chain) => chainCalls[call] = chain;
 
     internal void RecordPropertyRead(Expression read, CallExpression call) => propertyReads[read] = call;
 
