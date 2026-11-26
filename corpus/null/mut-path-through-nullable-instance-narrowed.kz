@@ -5,7 +5,8 @@
 
 // a `mut` call on a `mut` field of an instance held by a nullable variable or field changes the instance's field where a test's
 // branch knows it not null, in a method through a field named alone and through `this`; the variable that holds the reference
-// need not be `mut`, as for an instance that is not nullable
+// need not be `mut`, as for an instance that is not nullable; each output is read in a branch of its own that knows the value
+// not null
 class Box {
     pub mut List<int> Items = [1]
 }
@@ -34,7 +35,9 @@ c = Find(1)
 if c != null {
     c.Items.Add(2)
 }
-print(c?.Items ?? [])
+if c != null {
+    print(c.Items)
+}
 
 s = Shelf()
 s.B = Find(1)
@@ -42,4 +45,6 @@ s.Fill()
 if s.B != null {
     s.B.Items.Add(4)
 }
-print(s.B?.Items ?? [])
+if s.B != null {
+    print(s.B.Items)
+}
