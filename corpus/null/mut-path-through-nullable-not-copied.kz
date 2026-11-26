@@ -1,15 +1,14 @@
 // expect: output
 // | true
 // | true
-// | true
-// | [1, 2, 9, 10]
+// | []
 // allow: raw
-// rules: N3, N5
+// rules: N5
 
-// a `mut` call on a path of fields through a nullable value changes a list no other value holds where it is, after `?.` and in
-// a test's branch: the test before the call holds no count of the list, so `Add` does not copy it
-// `true` rests on the build's layout, which `allow: raw` reads: `RemoveAt` keeps the block's room, as Rust's `Vec::remove` keeps
-// its capacity, so that `Add` finds room where the block is; no rule of M9 fixes that room
+// a `mut` call after `?.` on a path of fields through a nullable value writes a list no other value holds where it stands, the
+// reading N5 marks as assumed, through a variable and through a field: the chain's test holds no count of the list, so
+// `Clear` empties the block the list stands in, and keeps its room (M9), where a list that shared its block would let go of it;
+// `true` reads the block's address before and after the call, which `allow: raw` lets the case read
 data Config(List<int> Items)
 data Box(Config? Cfg)
 
@@ -21,21 +20,13 @@ Config? Find(int id) {
 }
 
 mut cfg = Find(1)
-cfg?.Items.RemoveAt(3)
-cfg?.Items.RemoveAt(2)
 mut b = Box(Find(1))
-b.Cfg?.Items.RemoveAt(3)
 raw {
     before = (cfg?.Items ?? []).Pointer
-    cfg?.Items.Add(9)
+    cfg?.Items.Clear()
     print((cfg?.Items ?? []).Pointer == before)
-    if cfg != null {
-        own = cfg.Items.Pointer
-        cfg.Items.Add(10)
-        print(cfg.Items.Pointer == own)
-    }
     held = (b.Cfg?.Items ?? []).Pointer
-    b.Cfg?.Items.Add(9)
+    b.Cfg?.Items.Clear()
     print((b.Cfg?.Items ?? []).Pointer == held)
 }
 print(cfg?.Items ?? [])

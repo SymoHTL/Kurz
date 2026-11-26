@@ -7,8 +7,9 @@
 // rules: N3
 
 // a `mut` call on a path of fields through a nullable value changes the field's place where a test's branch knows the value not
-// null, through a nullable variable, a nullable field and a nullable `mut` parameter, and a value another variable holds keeps
-// what it held
+// null, through a nullable variable, a nullable field and a nullable `mut` parameter; each output is read in a branch of its own
+// that knows the value not null; `before`, a copy of `kept` taken before the call, is the control of a place the call does not
+// write, and keeps what it held, as every copy does (M3)
 data Config(List<int> Items)
 data Box(Config? Cfg)
 
@@ -29,22 +30,32 @@ mut cfg = Find(1)
 if cfg != null {
     cfg.Items.Add(2)
 }
-print(cfg?.Items ?? [])
+if cfg != null {
+    print(cfg.Items)
+}
 
 mut kept = Find(1)
 before = kept
 if kept != null {
     kept.Items.Add(2)
 }
-print(before?.Items ?? [])
-print(kept?.Items ?? [])
+if before != null {
+    print(before.Items)
+}
+if kept != null {
+    print(kept.Items)
+}
 
 mut b = Box(Find(1))
 if b.Cfg != null {
     b.Cfg.Items.Add(2)
 }
-print(b.Cfg?.Items ?? [])
+if b.Cfg != null {
+    print(b.Cfg.Items)
+}
 
 mut p = Find(1)
 Grow(mut p)
-print(p?.Items ?? [])
+if p != null {
+    print(p.Items)
+}

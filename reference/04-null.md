@@ -556,8 +556,9 @@ if false {
 Case: [null/mut-path-through-nullable-narrowed.kz](../corpus/null/mut-path-through-nullable-narrowed.kz)
 ```kurz
 // a `mut` call on a path of fields through a nullable value changes the field's place where a test's branch knows the value not
-// null, through a nullable variable, a nullable field and a nullable `mut` parameter, and a value another variable holds keeps
-// what it held
+// null, through a nullable variable, a nullable field and a nullable `mut` parameter; each output is read in a branch of its own
+// that knows the value not null; `before`, a copy of `kept` taken before the call, is the control of a place the call does not
+// write, and keeps what it held, as every copy does (M3)
 data Config(List<int> Items)
 data Box(Config? Cfg)
 
@@ -578,32 +579,43 @@ mut cfg = Find(1)
 if cfg != null {
     cfg.Items.Add(2)
 }
-print(cfg?.Items ?? [])
+if cfg != null {
+    print(cfg.Items)
+}
 
 mut kept = Find(1)
 before = kept
 if kept != null {
     kept.Items.Add(2)
 }
-print(before?.Items ?? [])
-print(kept?.Items ?? [])
+if before != null {
+    print(before.Items)
+}
+if kept != null {
+    print(kept.Items)
+}
 
 mut b = Box(Find(1))
 if b.Cfg != null {
     b.Cfg.Items.Add(2)
 }
-print(b.Cfg?.Items ?? [])
+if b.Cfg != null {
+    print(b.Cfg.Items)
+}
 
 mut p = Find(1)
 Grow(mut p)
-print(p?.Items ?? [])
+if p != null {
+    print(p.Items)
+}
 ```
 
 Case: [null/mut-path-through-nullable-instance-narrowed.kz](../corpus/null/mut-path-through-nullable-instance-narrowed.kz)
 ```kurz
 // a `mut` call on a `mut` field of an instance held by a nullable variable or field changes the instance's field where a test's
 // branch knows it not null, in a method through a field named alone and through `this`; the variable that holds the reference
-// need not be `mut`, as for an instance that is not nullable
+// need not be `mut`, as for an instance that is not nullable; each output is read in a branch of its own that knows the value
+// not null
 class Box {
     pub mut List<int> Items = [1]
 }
@@ -632,7 +644,9 @@ c = Find(1)
 if c != null {
     c.Items.Add(2)
 }
-print(c?.Items ?? [])
+if c != null {
+    print(c.Items)
+}
 
 s = Shelf()
 s.B = Find(1)
@@ -640,15 +654,17 @@ s.Fill()
 if s.B != null {
     s.B.Items.Add(4)
 }
-print(s.B?.Items ?? [])
+if s.B != null {
+    print(s.B.Items)
+}
 ```
 
-Case: [null/mut-path-through-nullable-not-copied.kz](../corpus/null/mut-path-through-nullable-not-copied.kz)
+Case: [null/mut-path-through-nullable-narrowed-not-copied.kz](../corpus/null/mut-path-through-nullable-narrowed-not-copied.kz)
 ```kurz
-// a `mut` call on a path of fields through a nullable value changes a list no other value holds where it is, after `?.` and in
-// a test's branch: the test before the call holds no count of the list, so `Add` does not copy it
-// `true` rests on the build's layout, which `allow: raw` reads: `RemoveAt` keeps the block's room, as Rust's `Vec::remove` keeps
-// its capacity, so that `Add` finds room where the block is; no rule of M9 fixes that room
+// a `mut` call on a path of fields through a nullable value, in a branch where a test knows the value not null, writes a list no
+// other value holds where it stands, the reading N3 marks as assumed, through a variable and through a field: the test holds no
+// count of the list, so `Clear` empties the block the list stands in, and keeps its room (M9), where a list that shared its
+// block would let go of it; `true` reads the block's address before and after the call, which `allow: raw` lets the case read
 data Config(List<int> Items)
 data Box(Config? Cfg)
 
@@ -660,24 +676,24 @@ Config? Find(int id) {
 }
 
 mut cfg = Find(1)
-cfg?.Items.RemoveAt(3)
-cfg?.Items.RemoveAt(2)
-mut b = Box(Find(1))
-b.Cfg?.Items.RemoveAt(3)
-raw {
-    before = (cfg?.Items ?? []).Pointer
-    cfg?.Items.Add(9)
-    print((cfg?.Items ?? []).Pointer == before)
-    if cfg != null {
+if cfg != null {
+    raw {
         own = cfg.Items.Pointer
-        cfg.Items.Add(10)
+        cfg.Items.Clear()
         print(cfg.Items.Pointer == own)
     }
-    held = (b.Cfg?.Items ?? []).Pointer
-    b.Cfg?.Items.Add(9)
-    print((b.Cfg?.Items ?? []).Pointer == held)
 }
-print(cfg?.Items ?? [])
+mut b = Box(Find(1))
+if b.Cfg != null {
+    raw {
+        held = b.Cfg.Items.Pointer
+        b.Cfg.Items.Clear()
+        print(b.Cfg.Items.Pointer == held)
+    }
+}
+if cfg != null {
+    print(cfg.Items)
+}
 ```
 
 ### N4 (decided, §4) `??`
@@ -730,10 +746,12 @@ class instance the instance's field (§4: the build of both forms the owner's an
 624, comment 7135538740, and the place the product pass's reading, issue 630, comment 7161590400)
 *(the record marks the readings as assumed)*; a path through a nullable item, entry or call's
 result, `groups[key]?.Items.Add(1)`, stays `not supported`, "a `mut` method on a path through a nullable
-item, entry or call's result (N3, M5)", and so do an assignment into a path through a nullable
+item, entry or call's result (N5, M5)", and so do an assignment into a path through a nullable
 variable or field, `c.Items[0] = 3`, "an assignment into a path through a nullable variable or field
 (N3, M4)", and such a path passed as `mut`, `Grow(mut c.Items)`, "a path through a nullable variable or
-field passed as `mut` (N3, M7)". Such a call on a path a call can change (N9),
+field passed as `mut` (N3, M7)"; these two are the texts where the value is known not null
+(N3, N7), and on a value nothing knows not null each is `nullable-unchecked` (N2) first, as N2
+reads every member of a `T?` (§4). Such a call on a path a call can change (N9),
 whose arguments, index or key run a call, is `nullable-unchecked`, the error the same call gets with that call on
 the line before it, with the help line N9 gives it (§4, the owner, 2026-11-24); a local variable, a
 path of `data` fields from one and a map one holds stay allowed.
@@ -938,28 +956,25 @@ print(c?.Count ?? 0)
 
 Case: [null/conditional-call-place-not-copied.kz](../corpus/null/conditional-call-place-not-copied.kz)
 ```kurz
-// a `mut` call after `?.` changes a list no other value holds where it is, an entry's, a field's of an instance and a
-// variable's, as Rust's `get_mut` reaches it: the test before the call holds no count of the list, so `Add` does not copy it
-// `true` rests on the build's layout, which `allow: raw` reads: `RemoveAt` keeps the block's room, as Rust's `Vec::remove` keeps
-// its capacity, so that `Add` finds room where the block is; no rule of M9 fixes that room
+// a `mut` call after `?.` writes a list no other value holds where it stands, an entry's, a field's of an instance and a
+// variable's, as Rust's `get_mut` reaches it (N5): the chain's test holds no count of the list, so `Clear` empties the block
+// the list stands in, and keeps its room (M9), where a list that shared its block would let go of it; `true` reads the block's
+// address before and after the call, which `allow: raw` lets the case read
 class Bag(mut List<int>? Items)
 
 mut m = Map<string, List<int>>()
 m["a"] = [1, 2, 3, 4]
-m["a"]?.RemoveAt(3)
 b = Bag([1, 2, 3, 4])
-b.Items?.RemoveAt(3)
 mut List<int>? xs = [1, 2, 3, 4]
-xs?.RemoveAt(3)
 raw {
     before = (m["a"] ?? []).Pointer
-    m["a"]?.Add(9)
+    m["a"]?.Clear()
     print((m["a"] ?? []).Pointer == before)
     held = (b.Items ?? []).Pointer
-    b.Items?.Add(9)
+    b.Items?.Clear()
     print((b.Items ?? []).Pointer == held)
     own = (xs ?? []).Pointer
-    xs?.Add(9)
+    xs?.Clear()
     print((xs ?? []).Pointer == own)
 }
 print(m["a"] ?? [])
@@ -1069,6 +1084,33 @@ print(s.B?.Items ?? [])
 ```
 
 Case: [null/mut-path-through-nullable-not-copied.kz](../corpus/null/mut-path-through-nullable-not-copied.kz)
+```kurz
+// a `mut` call after `?.` on a path of fields through a nullable value writes a list no other value holds where it stands, the
+// reading N5 marks as assumed, through a variable and through a field: the chain's test holds no count of the list, so
+// `Clear` empties the block the list stands in, and keeps its room (M9), where a list that shared its block would let go of it;
+// `true` reads the block's address before and after the call, which `allow: raw` lets the case read
+data Config(List<int> Items)
+data Box(Config? Cfg)
+
+Config? Find(int id) {
+    if id == 1 {
+        return Config([1, 2, 3, 4])
+    }
+    return null
+}
+
+mut cfg = Find(1)
+mut b = Box(Find(1))
+raw {
+    before = (cfg?.Items ?? []).Pointer
+    cfg?.Items.Clear()
+    print((cfg?.Items ?? []).Pointer == before)
+    held = (b.Cfg?.Items ?? []).Pointer
+    b.Cfg?.Items.Clear()
+    print((b.Cfg?.Items ?? []).Pointer == held)
+}
+print(cfg?.Items ?? [])
+```
 
 Case: [null/mut-path-through-nullable-changeable.kz](../corpus/null/mut-path-through-nullable-changeable.kz)
 ```kurz

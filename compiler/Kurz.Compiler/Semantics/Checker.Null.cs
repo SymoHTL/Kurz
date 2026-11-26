@@ -618,7 +618,7 @@ public sealed partial class Checker
             }
             else if (of is MemberAccess)
             {
-                NotSupported(line, "a `mut` method on a path through a nullable item, entry or call's result (N3, M5)");
+                NotSupported(line, "a `mut` method on a path through a nullable item, entry or call's result (N5, M5)");
             }
             else
             {
