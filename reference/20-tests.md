@@ -682,9 +682,9 @@ test "sixty days pass at once" {
 
 Case: [tests/advance-call-timeout.kz](../corpus/tests/advance-call-timeout.kz)
 ```kurz
-// the bound of the watcher's call passes at the `advance`, and the call ends as `call-timeout` while its callee still sleeps; the
-// call of `Nap(0s)` waits behind the watcher's start, so that its call stands among the timers before the `advance`, and `advance 0s`
-// gives the scheduler one more turn, in which the watcher, which the end of its `attempt` woke, ends `Watch`
+// the bound of the watcher's call passes at the `advance`, while its callee still sleeps, and the watcher's `call-timeout`
+// escalates into the test; the call of `Nap(0s)` waits behind the watcher's start, so that its call stands among the timers
+// before the `advance`
 actor Napper {
     pub int Nap(duration d) {
         Environment.Sleep(d)
@@ -693,28 +693,18 @@ actor Napper {
 }
 
 actor Watcher(Napper Target) {
-    mut int seen = 0
-
     pub void Watch() {
-        n = Target
-        seen = attempt {
-            return n.Nap(2h) within 1h
-        } else {
-            Crashed c => -1
-        }
+        print(Target.Nap(2h) within 1h)
     }
-
-    pub int Seen() => seen
 }
 
 test "a bound of an hour passes at once" {
     n = spawn Napper()
-    w = spawn Watcher(n)
+    w = spawn Watcher(n) on crash escalate
     send w.Watch()
     check n.Nap(0s) == 1
     advance 1h
-    advance 0s
-    check w.Seen() == -1
+    print("after")
 }
 ```
 
