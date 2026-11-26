@@ -801,6 +801,9 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     Need(Try(() => model.AssertionOf(a)), a.Line, "`check`"); // Y6: its text, and the sides its failure shows
                     Expression(a.Condition);
                     break;
+                case AdvanceStatement a:
+                    Expression(a.Duration); // Y10: the duration, which the clock's offset takes
+                    break;
                 case AsmStatement a:
                     foreach (var o in a.Operands)
                     {

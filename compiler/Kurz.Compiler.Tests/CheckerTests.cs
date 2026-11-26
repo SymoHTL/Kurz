@@ -7878,28 +7878,43 @@ public sealed class CheckerTests
     }
 
     [Fact]
-    public void A_cluster_test_mock_and_advance_are_not_supported()
+    public void A_cluster_test_and_mock_are_not_supported()
     {
-        // Y8: the cluster test of section 13, once at its line, its body unread; Y9 and Y10: `mock` and `advance`, whose answers of
-        // 2026-11-20 are not built, once at their line, in a test or not; the duration's variables count as read (E1) (assumed: D7 of
-        // issue 586, comment 6992687784, and F20 of comment 6993110710 for `mock`; for `advance` the readings of comment 6994632453,
-        // which the owner's answers of 2026-11-20, comment 7051499099, let stand)
+        // Y8: the cluster test of section 13, once at its line, its body unread; Y9: `mock`, whose answers of 2026-11-20 are not built,
+        // once at its line, in a test or not (assumed: D7 of issue 586, comment 6992687784, and F20 of comment 6993110710 for `mock`)
         NotSupportedAt(1, "Y8", "test cluster 3 seed 42 {\n    a = spawn Store()\n    split 2 | 3\n    check a.Count() == 1\n}");
         Assert.Empty(Check("test cluster 3 seed 42 {\n}").Checker.Model.Tests); // no test of `kurz test`
         NotSupportedAt(2, "Y9", "test \"a\" {\n    mock Clock with FakeClock\n}");
         NotSupportedAt(1, "Y9", "mock Clock with FakeClock");
-        NotSupportedAt(3, "Y10", "test \"a\" {\n    d = 1s\n    advance d\n}");
-        NotSupportedAt(2, "Y10", "d = 1s\nadvance d + 1ms");
+    }
 
-        // T8 with Y10: the duration is checked as any expression is, as the bound of `within` is (U40), beside the `not supported`
-        foreach (var (program, id) in new[] { ("advance 1", ErrorIds.TypeMismatch), ("long n = 1\nadvance n", ErrorIds.TypeMismatch), ("duration? d = null\nadvance d", ErrorIds.NullableUnchecked), ("void Stop() {\n}\n\nadvance Stop()", ErrorIds.Syntax) })
+    [Fact]
+    public void Advance_stands_among_a_test_s_own_statements_alone()
+    {
+        // Y10 with F11 of issue 586, comment 6993110710: `advance` in a test's body and in a block nested in it, and nowhere else: a
+        // function, the top-level code, and a lambda, a block of `on crash` and the block of an `attempt` inside a test, each read in a
+        // frame of its own, are `advance-outside` at its line, with no other diagnostic, the duration's variables read (E1)
+        Assert.Empty(Errors("test \"a\" {\n    d = 1s\n    advance d\n    if d > 0s {\n        advance d + 1ms\n    }\n}"));
+        var worker = "actor Worker {\n    pub int Run() => 1\n}\n\n";
+        foreach (var (program, line) in new[]
         {
-            var line = program.Split('\n').Length;
-            var (diagnostics, _) = Check(program);
-            Assert.Equal([(id, line)], diagnostics.Items.Where(d => d.IsError).Select(d => (d.Id, d.Line)));
-            var unread = Assert.Single(diagnostics.Items, d => !d.IsError);
-            Assert.Equal((line, "`advance` (Y10)"), (unread.Line, unread.Message));
+            ("void Later() {\n    advance 1h\n}\n\ntest \"a\" {\n    Later()\n}", 2),
+            ("d = 1s\nadvance d + 1ms", 2),
+            ("test \"a\" {\n    f = () => {\n        advance 1h\n    }\n\n    f()\n}", 3),
+            (worker + "test \"a\" {\n    w = spawn Worker() on crash (c) {\n        advance 1h\n        restart\n    }\n\n    check w.Run() == 1\n}", 7),
+            (worker + "test \"a\" {\n    w = spawn Worker()\n    v = attempt {\n        advance 1h\n        return w.Run()\n    } else {\n        Crashed c => 0\n    }\n\n    check v == 1\n}", 8),
+        })
+        {
+            Assert.Equal([(ErrorIds.AdvanceOutside, line)], ErrorsSeeingStd(program)); // `std/` declares `Crashed`, which the block and the `attempt` read
         }
+
+        // T8 with Y10: the duration is checked as any expression is, as the bound of `within` is (U40)
+        foreach (var (program, id) in new[] { ("advance 1", ErrorIds.TypeMismatch), ("long n = 1\n    advance n", ErrorIds.TypeMismatch), ("duration? d = null\n    advance d", ErrorIds.NullableUnchecked) })
+        {
+            Assert.Equal([(id, program.Split('\n').Length + 1)], Errors($"test \"a\" {{\n    {program}\n}}"));
+        }
+
+        Assert.Equal([(ErrorIds.Syntax, 5)], Errors("void Stop() {\n}\n\ntest \"a\" {\n    advance Stop()\n}"));
     }
 
     [Fact]

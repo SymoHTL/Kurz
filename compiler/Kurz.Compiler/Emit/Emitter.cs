@@ -829,6 +829,9 @@ public sealed partial class Emitter
             case AssertionStatement a:
                 EmitAssertion(a);
                 break;
+            case AdvanceStatement a:
+                EmitAdvance(a);
+                break;
             case AsmStatement asm:
                 EmitAsm(asm);
                 break;

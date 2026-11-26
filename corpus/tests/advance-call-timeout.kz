@@ -1,0 +1,31 @@
+// expect: throws call-timeout at 20
+// | test "a bound of an hour passes at once" ... FAILED
+// |     call-timeout at tests/advance-call-timeout.kz:20
+// | 1 test: 0 passed, 1 failed
+// command: test
+// rules: Y10
+
+// the bound of the watcher's call passes at the `advance`, while its callee still sleeps, and the watcher's `call-timeout`
+// escalates into the test; the call of `Nap(0s)` waits behind the watcher's start, so that its call stands among the timers
+// before the `advance`
+actor Napper {
+    pub int Nap(duration d) {
+        Environment.Sleep(d)
+        return 1
+    }
+}
+
+actor Watcher(Napper Target) {
+    pub void Watch() {
+        print(Target.Nap(2h) within 1h)
+    }
+}
+
+test "a bound of an hour passes at once" {
+    n = spawn Napper()
+    w = spawn Watcher(n) on crash escalate
+    send w.Watch()
+    check n.Nap(0s) == 1
+    advance 1h
+    print("after")
+}

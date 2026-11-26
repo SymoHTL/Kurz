@@ -1675,6 +1675,18 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   on a call to the deadline (`RootLoop`), which, with nothing left to run, sleeps to the first timer or the deadline, and
   so does that wait where an actor sleeps among the timers (`Sleeping`), where it raised `deadlock` before; a build for
   Windows says `not supported`, as for `instant.Now`;
+- `advance d` in a test (Y10), in a build for Linux: the emitted code reads the duration, raises `advance-negative` at the
+  statement for one of less than zero, and calls the runtime's `Advance`, which adds it to the clock's offset `ahead`,
+  refuses a sum that would move the wall clock or the monotonic clock past the range of a `long`, which the emitted code
+  raises as `overflow` at the statement, and parks the test's activation among the timers to the moved clock (`Park`, which
+  `Slept` parks through too), after every timer whose deadline is not later, so that the timers and the restarts' pauses
+  the moved clock passed fire at the turn of `RootLoop` after it, the timers in the order of their deadlines, and the
+  actors they woke run before the test goes on. `PauseClock` and the time of a crash's log line add `ahead`; the program's
+  `instant.Now` and `timestamp.Now`, and so the time of a log call, add it through the runtime's `Ahead` in a build of
+  `kurz test` alone, `--release` among them, while every other build reads the system's clock directly and stores nothing
+  to `ahead`, a global the optimiser folds to 0 there (`EmitterTests`); `TestEnded` sets it back to 0. A socket's bound and
+  a child process's wait are a blocking `poll` with a timeout of its own, which `advance` does not reach; a build for
+  Windows says `not supported`, as for `instant.Now`;
 - logging (P1 to P7 and P9), in a build for Linux: a program with a log call in one of its files reads
   `KURZ_LOG` alone, since the compiler builds no settings type whose `Logging` part P4 has win, through
   `Variable` before its first statement, after `args`, and hands it to `LogFilter`,
@@ -3191,10 +3203,8 @@ path the copy follows, a lambda's capture and a field of any class among them, o
 copy of its function for a type argument that is one of them would share that block (U12); `copy` at a call that is no message before a value that
 reaches a function value or an interface's value, which no word makes cross (U12); a log call
 inside an actor (P8); the cluster test of section 13, `test cluster N seed S { ... }`, whose words and
-block the parser passes over (Y8); and `mock X with Y` and `advance d`, whose answers of 2026-11-20 it
-does not build (Y9, Y10),
-the duration of an `advance` checked as the bound of `within` is (U40) and its error reported beside the
-line. The refusal of
+block the parser passes over (Y8); and `mock X with Y`, whose answers of 2026-11-20 it
+does not build (Y9). The refusal of
 the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered
 on 2026-11-14, comment 6880404917); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory

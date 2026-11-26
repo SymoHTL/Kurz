@@ -232,6 +232,7 @@ public sealed partial class Checker
         RawBlock r => Muts(r.Body),
         WithinStatement w => Muts(w.Bound).Concat(Muts(w.Body)),
         AssertionStatement a => Muts(a.Condition),
+        AdvanceStatement a => Muts(a.Duration),
         _ => [],
     };
 
