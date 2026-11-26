@@ -1695,7 +1695,9 @@ Case: [system/park-accept-first.kz](../corpus/system/park-accept-first.kz)
 ```kurz
 // the top-level code's `Accept` waits for a connection that only an actor makes: it parks the root actor under `epoll`, so that
 // the actor's `Run` runs, connects and parks on its own read, and the byte the top-level code writes after the `Accept` reaches
-// that read (S10); a thread that blocked in the `Accept` would run no actor and wait without end, since `Accept` has no bound
+// that read (S10); a thread that blocked in the `Accept` would run no actor and wait without end, since `Accept` has no bound.
+// The top-level code's `send` and its call of `Got` each start a chain of their own (U17), so that `Got` is not let in over the
+// parked read: it waits in `Client`'s inbox behind `Run` and reads what the read took
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
@@ -1824,8 +1826,11 @@ Main() else {
 Case: [system/park-two-readers.kz](../corpus/system/park-two-readers.kz)
 ```kurz
 // two actors read a byte each from a connection of their own, and the byte of `b`'s comes first: `b` reads it while `a` still
-// waits, since each read that would block parks its actor under `epoll` (S10), and `a` reads its byte once it comes; a thread that
-// blocked in `a`'s read would hold `b` for the read's bound, 5 seconds by default (S9), past the 2 seconds the last line allows
+// waits, since each read that would block parks its actor under `epoll` (S10), and `a` reads its byte once it comes. The top-level
+// code writes `a`'s byte once `b`'s line stands and prints once both stand, each wait bounded by the 2 seconds the last line holds
+// the run to, so that it prints `true` where each read ended at its byte, and not at its bound of 5 seconds (S9). A thread that
+// blocked in a call on a socket would run no actor at the first `Accept` and wait there without end, since `Accept` has no
+// bound, as `park-accept-first.kz` says
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
@@ -1836,12 +1841,23 @@ string Text(Bytes bytes) {
 
 actor Journal {
     mut string lines = ""
+    mut int count = 0
 
     pub void Add(string line) {
         lines = "{lines}{line};"
+        count = count + 1
     }
 
     pub string Lines() => lines
+
+    pub int Count() => count
+}
+
+// waits until the journal holds `count` lines, or until 2 seconds passed since `start`
+void WaitFor(Journal journal, int count, instant start) {
+    while journal.Count() < count && instant.Now - start < 2s {
+        Environment.Sleep(1ms)
+    }
 }
 
 actor Client(Journal Lines, string Name) {
@@ -1872,9 +1888,9 @@ void | IoError Main() {
     second = listener.Accept()
     start = instant.Now
     second.Write("2".Bytes)
-    Environment.Sleep(50ms)
+    WaitFor(journal, 1, start)
     first.Write("1".Bytes)
-    Environment.Sleep(50ms)
+    WaitFor(journal, 2, start)
     print(journal.Lines())
     print(instant.Now - start < 2s)
 }
@@ -1956,7 +1972,7 @@ Case: [system/park-crash-deadlock.kz](../corpus/system/park-crash-deadlock.kz)
 // waits on `Get`, queued behind `Fail` in `Worker`'s inbox, and the block of `Worker`'s policy waits behind `Go`, a loop that a
 // crash closes and that layer 3 does not see (U60): the top-level code's wait on `Go` finds no actor left to run, no timer
 // pending and nothing registered with the poller, so that it is `deadlock` at its line (U18), and not a wait in the poller
-// without end
+// without end. The combination is under test: S10 and U18 its subject, U20 and U64 the rules it passes through
 actor Helper {
     pub void Poke(Napper n) {
         print(n.Boom())
@@ -2040,11 +2056,17 @@ Case: [system/park-read-close.kz](../corpus/system/park-read-close.kz)
 ```kurz
 // `Shut`, a call of the chain, is let in while `Run` waits in the poller on its read, and its `Close` shuts the socket down, whose
 // event wakes the read: the read in flight ends with the closed handle's error, `EBADF`, 9 (S5), at once and not at its bound of
-// 5 seconds (S9), since the shutdown reaches the poller as any event does (S10)
+// 5 seconds (S9), since the shutdown reaches the poller as any event does (S10). The top-level code prints both lines: its call of
+// `Result`, of a chain of its own, waits in `Helper`'s inbox behind `Poke` (U17), so that the order of the lines rests on no
+// order of the scheduler
 actor Helper {
+    mut string result = "none"
+
     pub void Poke(Holder h) {
-        print("shut {h.Shut()}")
+        result = "shut {h.Shut()}"
     }
+
+    pub string Result() => result
 }
 
 actor Holder {
@@ -2086,6 +2108,7 @@ void | IoError Main() {
     helper = spawn Helper()
     h = spawn Holder()
     print(h.Run(helper, listener.Port))
+    print(helper.Result())
 }
 
 Main() else {
@@ -2151,6 +2174,272 @@ test "a read's bound of an hour passes at the advance" {
         }
         IoError e => print(e)
     }
+}
+```
+
+Case: [system/park-read-write.kz](../corpus/system/park-read-write.kz)
+```kurz
+// a read waits in the poller on a connection that sends nothing, and a write of the same connection, made by a call of the read's
+// chain that the parked read lets in (U17), waits there too, for room in buffers nobody reads: each wait keeps its own direction's
+// interest in the descriptor's one registration (S10), so that the write goes on as the top-level code reads and the read takes the
+// byte the top-level code writes after it, at once and not at its bound of 5 seconds (S9); a registration that took the write's
+// interest in place of the read's would leave the read to end `TimedOut` at that bound
+actor Helper {
+    pub void Poke(Duplex d, int total) {
+        d.Write(total)
+    }
+}
+
+actor Duplex {
+    mut TcpStream? held = null
+    mut string wrote = "none"
+    mut string read = "none"
+
+    pub string Connect(int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return "connect {e.Kind}"
+        }
+
+        held = stream
+        return "connected"
+    }
+
+    pub void Read(Helper helper, int total) {
+        stream = held
+        if stream == null {
+            return
+        }
+
+        send helper.Poke(this, total)
+        mut buffer = Bytes()
+        read = match stream.Read(mut buffer, 1) {
+            int n => "read {n}"
+            IoError e => "{e.Kind} {e.Code}"
+        }
+    }
+
+    pub void Write(int total) {
+        stream = held
+        if stream == null {
+            return
+        }
+
+        piece = "0123456789abcdef".Bytes
+        mut chunk = Bytes()
+        while chunk.Count < 65536 {
+            chunk.AddRange(piece)
+        }
+
+        mut written = 0
+        while written < total {
+            stream.Write(chunk) else {
+                IoError e => {
+                    wrote = "{e.Kind} {e.Code}"
+                    return
+                }
+            }
+
+            written = written + chunk.Count
+        }
+
+        wrote = "wrote {written}"
+    }
+
+    pub string Result() => "{wrote}, {read}"
+}
+
+void | IoError Main() {
+    total = 33554432
+    listener = TcpListener.Bind("127.0.0.1:0")
+    d = spawn Duplex()
+    h = spawn Helper()
+    connected = d.Connect(listener.Port)
+    if connected != "connected" {
+        print(connected)
+        return
+    }
+
+    server = listener.Accept()
+    send d.Read(h, total)
+    mut got = 0
+    while got < total {
+        mut buffer = Bytes()
+        got = got + server.Read(mut buffer, 65536)
+    }
+
+    server.Write("x".Bytes)
+    print(d.Result())
+}
+
+Main() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/park-two-accepts.kz](../corpus/system/park-two-accepts.kz)
+```kurz
+// two `Accept`s of one listener wait in the poller at once, the second made by a call of the first's chain that the first lets in
+// (U17), and an actor connects twice once both wait: each wait keeps its place among the descriptor's waits (S10), so that the
+// connections' event wakes both and each takes a connection; a registration that took the second wait in place of the first
+// would leave the first waiting without end, since `Accept` has no bound
+actor Connector {
+    mut TcpStream? first = null
+    mut TcpStream? second = null
+
+    pub void Go(int port) {
+        a = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return
+        }
+
+        first = a
+        b = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return
+        }
+
+        second = b
+    }
+}
+
+actor Helper {
+    pub void Poke(Gate g) {
+        g.Second()
+    }
+}
+
+actor Gate {
+    mut TcpListener? held = null
+    mut Connector? connector = null
+    mut int accepted = 0
+
+    pub int Open(Connector c) {
+        listener = TcpListener.Bind("127.0.0.1:0") else {
+            IoError e => return -1
+        }
+
+        held = listener
+        connector = c
+        return listener.Port
+    }
+
+    pub void First(Helper helper) {
+        listener = held
+        if listener == null {
+            return
+        }
+
+        send helper.Poke(this)
+        stream = listener.Accept() else {
+            IoError e => return
+        }
+
+        accepted = accepted + 1
+        stream.Close() else {
+            IoError e => return
+        }
+    }
+
+    pub void Second() {
+        listener = held
+        if listener == null {
+            return
+        }
+
+        connecting = connector
+        if connecting == null {
+            return
+        }
+
+        send connecting.Go(listener.Port)
+        stream = listener.Accept() else {
+            IoError e => return
+        }
+
+        accepted = accepted + 1
+        stream.Close() else {
+            IoError e => return
+        }
+    }
+
+    pub string Count() => "accepted {accepted}"
+}
+
+dialer = spawn Connector()
+poker = spawn Helper()
+gate = spawn Gate()
+if gate.Open(dialer) < 0 {
+    print("no listener")
+} else {
+    send gate.First(poker)
+    print(gate.Count())
+}
+```
+
+Case: [system/park-busy-scheduler.kz](../corpus/system/park-busy-scheduler.kz)
+```kurz
+// a read that waits in the poller beside an actor that never runs out of work: at each of its turns `Spinner` sends itself the
+// next, so that the one thread's scheduler always has an actor to run and never waits in the poller, and it reads the poller with
+// no wait every so many turns (S10), so that the connect, the `Accept` and the byte the top-level code writes each reach their
+// wait; a scheduler that read the poller only once it had nothing to run would run `Spinner` without end. The end of the read
+// stops `Spinner`, and the top-level code's call of `Got` waits in `Client`'s inbox behind `Run` (U17)
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+actor Spinner {
+    mut bool stopped = false
+
+    pub void Spin() {
+        if !stopped {
+            send this.Spin()
+        }
+    }
+
+    pub void Stop() {
+        stopped = true
+    }
+}
+
+actor Client {
+    mut string got = ""
+
+    pub void Run(int port, Spinner s) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => {
+                got = "connect {e.Kind}"
+                send s.Stop()
+                return
+            }
+        }
+
+        mut buffer = Bytes()
+        match stream.Read(mut buffer, 1) {
+            int n => got = "read {n} {Text(buffer)}"
+            IoError e => got = "read {e.Kind}"
+        }
+
+        send s.Stop()
+    }
+
+    pub string Got() => got
+}
+
+void | IoError Main() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    s = spawn Spinner()
+    send s.Spin()
+    c = spawn Client()
+    send c.Run(listener.Port, s)
+    server = listener.Accept()
+    server.Write("x".Bytes)
+    print(c.Got())
+}
+
+Main() else {
+    IoError e => print(e)
 }
 ```
 

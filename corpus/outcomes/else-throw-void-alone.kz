@@ -1,0 +1,19 @@
+// expect: error throw-needs-value at 15
+// rules: O7
+
+data Circle(int R)
+data NotFound
+
+Circle | void | NotFound Find(bool b) {
+    return Circle(1)
+}
+
+// an arm of `NotFound` stands before the arm `else`, which takes the `void` case alone, and the `void` case holds no value a bare `throw` could throw
+Circle Get(bool b) {
+    return Find(b) else {
+        NotFound => Circle(0)
+        else => throw
+    }
+}
+
+print("unreached")

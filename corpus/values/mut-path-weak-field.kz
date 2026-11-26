@@ -1,0 +1,15 @@
+// expect: error type-mismatch at 14
+// rules: M7
+
+// a read of a `weak` field is the strong `T?` (R3), so a path that ends at one is no place a `mut weak T?` parameter takes
+class Box(List<int> Items)
+data Link(weak Box? To)
+
+void Drop(mut weak Box? x) {
+    x = null
+}
+
+b = Box([1])
+mut l = Link(b)
+Drop(mut l.To)
+print(b.Items)

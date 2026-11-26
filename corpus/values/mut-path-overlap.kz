@@ -1,0 +1,14 @@
+// expect: error mut-at-call at 13
+// rules: M7
+
+// a path and a longer path that it is a prefix of, both passed as `mut` to one call, would give the callee two ways to change one value
+data Inner(List<int> A)
+data Outer(Inner In)
+
+void Pair(mut Inner i, mut List<int> a) {
+    a.Add(i.A.Count)
+}
+
+mut p = Outer(Inner([1]))
+Pair(mut p.In, mut p.In.A)
+print(p.In.A)

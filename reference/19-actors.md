@@ -2524,6 +2524,267 @@ root = spawn Node()
 print(root.Size(root, 2))
 ```
 
+Case: [system/park-read-write.kz](../corpus/system/park-read-write.kz)
+```kurz
+// a read waits in the poller on a connection that sends nothing, and a write of the same connection, made by a call of the read's
+// chain that the parked read lets in (U17), waits there too, for room in buffers nobody reads: each wait keeps its own direction's
+// interest in the descriptor's one registration (S10), so that the write goes on as the top-level code reads and the read takes the
+// byte the top-level code writes after it, at once and not at its bound of 5 seconds (S9); a registration that took the write's
+// interest in place of the read's would leave the read to end `TimedOut` at that bound
+actor Helper {
+    pub void Poke(Duplex d, int total) {
+        d.Write(total)
+    }
+}
+
+actor Duplex {
+    mut TcpStream? held = null
+    mut string wrote = "none"
+    mut string read = "none"
+
+    pub string Connect(int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return "connect {e.Kind}"
+        }
+
+        held = stream
+        return "connected"
+    }
+
+    pub void Read(Helper helper, int total) {
+        stream = held
+        if stream == null {
+            return
+        }
+
+        send helper.Poke(this, total)
+        mut buffer = Bytes()
+        read = match stream.Read(mut buffer, 1) {
+            int n => "read {n}"
+            IoError e => "{e.Kind} {e.Code}"
+        }
+    }
+
+    pub void Write(int total) {
+        stream = held
+        if stream == null {
+            return
+        }
+
+        piece = "0123456789abcdef".Bytes
+        mut chunk = Bytes()
+        while chunk.Count < 65536 {
+            chunk.AddRange(piece)
+        }
+
+        mut written = 0
+        while written < total {
+            stream.Write(chunk) else {
+                IoError e => {
+                    wrote = "{e.Kind} {e.Code}"
+                    return
+                }
+            }
+
+            written = written + chunk.Count
+        }
+
+        wrote = "wrote {written}"
+    }
+
+    pub string Result() => "{wrote}, {read}"
+}
+
+void | IoError Main() {
+    total = 33554432
+    listener = TcpListener.Bind("127.0.0.1:0")
+    d = spawn Duplex()
+    h = spawn Helper()
+    connected = d.Connect(listener.Port)
+    if connected != "connected" {
+        print(connected)
+        return
+    }
+
+    server = listener.Accept()
+    send d.Read(h, total)
+    mut got = 0
+    while got < total {
+        mut buffer = Bytes()
+        got = got + server.Read(mut buffer, 65536)
+    }
+
+    server.Write("x".Bytes)
+    print(d.Result())
+}
+
+Main() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/park-two-accepts.kz](../corpus/system/park-two-accepts.kz)
+```kurz
+// two `Accept`s of one listener wait in the poller at once, the second made by a call of the first's chain that the first lets in
+// (U17), and an actor connects twice once both wait: each wait keeps its place among the descriptor's waits (S10), so that the
+// connections' event wakes both and each takes a connection; a registration that took the second wait in place of the first
+// would leave the first waiting without end, since `Accept` has no bound
+actor Connector {
+    mut TcpStream? first = null
+    mut TcpStream? second = null
+
+    pub void Go(int port) {
+        a = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return
+        }
+
+        first = a
+        b = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return
+        }
+
+        second = b
+    }
+}
+
+actor Helper {
+    pub void Poke(Gate g) {
+        g.Second()
+    }
+}
+
+actor Gate {
+    mut TcpListener? held = null
+    mut Connector? connector = null
+    mut int accepted = 0
+
+    pub int Open(Connector c) {
+        listener = TcpListener.Bind("127.0.0.1:0") else {
+            IoError e => return -1
+        }
+
+        held = listener
+        connector = c
+        return listener.Port
+    }
+
+    pub void First(Helper helper) {
+        listener = held
+        if listener == null {
+            return
+        }
+
+        send helper.Poke(this)
+        stream = listener.Accept() else {
+            IoError e => return
+        }
+
+        accepted = accepted + 1
+        stream.Close() else {
+            IoError e => return
+        }
+    }
+
+    pub void Second() {
+        listener = held
+        if listener == null {
+            return
+        }
+
+        connecting = connector
+        if connecting == null {
+            return
+        }
+
+        send connecting.Go(listener.Port)
+        stream = listener.Accept() else {
+            IoError e => return
+        }
+
+        accepted = accepted + 1
+        stream.Close() else {
+            IoError e => return
+        }
+    }
+
+    pub string Count() => "accepted {accepted}"
+}
+
+dialer = spawn Connector()
+poker = spawn Helper()
+gate = spawn Gate()
+if gate.Open(dialer) < 0 {
+    print("no listener")
+} else {
+    send gate.First(poker)
+    print(gate.Count())
+}
+```
+
+Case: [system/park-read-close.kz](../corpus/system/park-read-close.kz)
+```kurz
+// `Shut`, a call of the chain, is let in while `Run` waits in the poller on its read, and its `Close` shuts the socket down, whose
+// event wakes the read: the read in flight ends with the closed handle's error, `EBADF`, 9 (S5), at once and not at its bound of
+// 5 seconds (S9), since the shutdown reaches the poller as any event does (S10). The top-level code prints both lines: its call of
+// `Result`, of a chain of its own, waits in `Helper`'s inbox behind `Poke` (U17), so that the order of the lines rests on no
+// order of the scheduler
+actor Helper {
+    mut string result = "none"
+
+    pub void Poke(Holder h) {
+        result = "shut {h.Shut()}"
+    }
+
+    pub string Result() => result
+}
+
+actor Holder {
+    mut TcpStream? held = null
+
+    pub string Run(Helper helper, int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return "connect {e.Kind}"
+        }
+
+        held = stream
+        send helper.Poke(this)
+        start = instant.Now
+        mut buffer = Bytes()
+        got = match stream.Read(mut buffer, 1) {
+            int n => "read {n}"
+            IoError e => "{e.Kind} {e.Code}"
+        }
+
+        return "{got} {instant.Now - start < 2s}"
+    }
+
+    pub int Shut() {
+        s = held
+        if s == null {
+            return 0
+        }
+
+        s.Close() else {
+            IoError e => return -e.Code
+        }
+
+        return 1
+    }
+}
+
+void | IoError Main() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    helper = spawn Helper()
+    h = spawn Holder()
+    print(h.Run(helper, listener.Port))
+    print(helper.Result())
+}
+
+Main() else {
+    IoError e => print(e)
+}
+```
+
 ### U18 (decided, §6) A wait of the top-level code that nothing can end
 
 The top-level code's call that waits sleeps on the main thread until its reply is set, while the
@@ -2536,7 +2797,8 @@ actor left to run on any thread, no timer pending and nothing registered with th
 call each other from different chains and wait for each other do not hang silently
 (§6, "Deadlocks"; the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level
 wait"). Layer 3 raises first in an actor whose wait closes a loop (U62), so that on one thread this end is reached by a
-loop that a crash closes, whose waits then stand below the error line, which ends with a colon (U64) (§6, the owner,
+loop that a crash closes, whose waits then stand below the error line, which ends with a colon (U64), and by a loop that
+a call an actor's start keeps out closes, whose error names that call's place (U22) (§6, the owner,
 2026-11-20, #519, comment 7051071630, T70 1; the owner, 2026-11-21, #519, comment 7060155980, T85 2). A call that waits in a function the top-level code called is the top-level code's, at its
 own line. Where a call that an actor's start keeps out closes the loop, the error names that call's
 line (U22) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and where more than one
@@ -2546,8 +2808,9 @@ owner, 2026-11-21, #599, comment 7067131310, several 2; comment 7067139953, the 
 the count of its calls where more than one, at most 10 such lines and then `... and K more` (U22)
 (§6, the owner, 2026-11-21, #599, comment 7067639209, the order 1, the same place 1, the cap 1). Two chains that cross through two different methods, as `deadlock.kz`'s do, `Left.Ask` waiting on `Right.Value` and
 `Right.Ask` on `Left.Value`, are no loop of U56, whose loop comes back to a type on it (§6, the owner, 2026-11-20, #519, comment 7051071630, T40 (c)), so
-that `deadlock.kz` reaches its run with no `vouch` (the owner, 2026-11-21, #519, comment 7060155980, T76 1). A deadline of a call that waits in a message is nothing left to run (U42) *(assumed: T6 of comment 6967625156)*. A loop that layer 3 does not see (U64) and that the top-level code never waits on stays until the end of the program,
-where U13 drops it.
+that `deadlock.kz` reaches its run with no `vouch` (the owner, 2026-11-21, #519, comment 7060155980, T76 1). A deadline of a call that waits in a message is nothing left to run (U42) *(assumed: T6 of comment 6967625156)*. A loop that layer 3 does not see (U64) and that the top-level code never waits on stays until the bound of a call in it
+raises `call-timeout` at that call's line (U36, U34), or, where no bound holds or the program ends first, until the end of
+the program, where U13 drops it.
 
 Case: [actors/deadlock-pending-crash.kz](../corpus/actors/deadlock-pending-crash.kz)
 ```kurz
@@ -2634,7 +2897,7 @@ Case: [system/park-crash-deadlock.kz](../corpus/system/park-crash-deadlock.kz)
 // waits on `Get`, queued behind `Fail` in `Worker`'s inbox, and the block of `Worker`'s policy waits behind `Go`, a loop that a
 // crash closes and that layer 3 does not see (U60): the top-level code's wait on `Go` finds no actor left to run, no timer
 // pending and nothing registered with the poller, so that it is `deadlock` at its line (U18), and not a wait in the poller
-// without end
+// without end. The combination is under test: S10 and U18 its subject, U20 and U64 the rules it passes through
 actor Helper {
     pub void Poke(Napper n) {
         print(n.Boom())
@@ -7817,7 +8080,7 @@ Case: [actors/call-loop-unreached.kz](../corpus/actors/call-loop-unreached.kz)
 `vouch` before a call that waits on an actor's method through a reference (U4), `vouch c.Size()`, takes that call out of
 U56's graph, and with it every loop through it, and says that the call reaches another actor than the one of the loop that
 waits (§6, "Deadlocks", layer 2, "`vouch` on the call overrides it and means 'different instance, I vouch'"), which nothing
-checks at run time, U18's `deadlock` and `call-timeout` being the net for a false promise (the owner, 2026-11-20, #519, comment 7051071630, T57 (a)). Where it does not hold, the call runs as it would without the word: a call that reaches an actor busy in
+checks at run time, U18's `deadlock` and `call-timeout` being the net for a false promise (the owner, 2026-11-20, #519, comment 7051071630, T57 (a)), layer 3 (U62) raising first where a wait closes the loop, and U18, the call's bound (U36) and U13 staying for a loop that a crash closes (U64). Where it does not hold, the call runs as it would without the word: a call that reaches an actor busy in
 another chain waits on it, so that the two chains wait on each other and the waiter whose wait closes their loop gets
 `deadlock` (U62, U65), and a call that reaches an actor waiting in the
 call's own chain gets in as a call of that chain (U17), so that a recursion of one chain through a `vouch` that does not hold
@@ -7996,8 +8259,10 @@ whose block runs only after the supervisor's current message (U28) (§6, "Deadlo
 an actor that is idle, that runs, or whose top activation can go on, its reply set or its deadline passed, at an actor that
 waits for its restart (U23) or ended, at a call that got in that no activation runs yet, and at a child whose block runs in
 the top-level code's wait
-(U33) *(assumed: a reading of T63 2 of that comment)*. The top-level code is no point of the line, and its waits follow none
-(T64 1 of that comment); no call reaches an actor under construction (U3), whose reference reaches its spawner once `spawn`
+(U33) *(assumed: a reading of T63 2 of that comment)*, and at an actor whose top activation sleeps (S28) or waits in the
+poller (S10), which waits on no actor *(assumed: a reading of T63 of that comment)*. The top-level code is no point of the
+line, and its waits follow none (T64 1 of that comment), but for the one walk at U18's end, which follows the line from the top-level code's call once
+nothing is left to run (U64); no call reaches an actor under construction (U3), whose reference reaches its spawner once `spawn`
 returns and whose defaults read no `this` (K7), so that no edge goes to one *(assumed: as the question of comment 7012581664,
 T63, read it)*.
 
@@ -8009,6 +8274,30 @@ Case: [actors/deadlock-pending-crash.kz](../corpus/actors/deadlock-pending-crash
 
 Case: [actors/waitline-got-in.kz](../corpus/actors/waitline-got-in.kz)
 
+Case: [actors/waitline-sleeper.kz](../corpus/actors/waitline-sleeper.kz)
+```kurz
+// `Caller`'s call reaches `Sleeper`, whose top activation sleeps among the timers in another chain: the wait line ends there,
+// since a sleep waits on no actor (U60, S28), and the call waits in `Sleeper`'s inbox for the end of `Nap`
+
+actor Sleeper {
+    pub void Nap() {
+        Environment.Sleep(50ms)
+        print("woke")
+    }
+
+    pub int Value() => 1
+}
+
+actor Caller {
+    pub int Ask(Sleeper s) => s.Value()
+}
+
+sleeper = spawn Sleeper()
+caller = spawn Caller()
+send sleeper.Nap()
+print(caller.Ask(sleeper))
+```
+
 ### U61 (decided, §6) The line is followed at every wait of an actor
 
 Before the activation of a call that waits parks, the runtime follows the line from the call's edge (U60), and where the line
@@ -8016,8 +8305,9 @@ leads back to the waiting actor, the wait closes a loop (U62) (§6, "Deadlocks",
 clause's, its block's and its chain's deadline change nothing of it (U36 to U44), so that a loop under a bound of 2 s raises
 `deadlock` at once and never `call-timeout` (T66 1 of that comment). A line that runs into a loop its waiting actor is not in
 ends there, and the wait parks, raising nothing; each hop of the line is a different actor, up to its waiter or such
-a loop, which a check of Brent's kind stops, so that a walk is bounded by the actors that wait (T65 1 of that comment); and a
-call that gets in, a call back through `this` among them (U10, U17), ends the line at its first hop.
+a loop, which a check of Brent's kind stops, so that a walk is bounded by the actors that wait (T65 1 of that comment); and the
+waiter's own call that gets in and that no activation runs yet, a call back through `this` among them (U10, U17), makes no
+edge (U60).
 
 Case: [actors/deadlock.kz](../corpus/actors/deadlock.kz)
 
@@ -8057,7 +8347,8 @@ Case: [actors/waitline-got-in.kz](../corpus/actors/waitline-got-in.kz)
 The error line of a `deadlock` that U62 raises ends with a colon, and the lines under it name the loop, one for each wait in
 it, from the wait that raised, as a `throw`'s text stands under its error line (O6): `<Type>#<n> waits at <file>:<line> on
 <Type>#<m>` for a call, and `<Type>#<n> waits for the decision of <Type>#<m> on its crash` for a child whose block waits
-(U60), each actor by the name of its type and its number (U2), as its log line names it (U24), and the IDs of the chains
+(U60), each actor by the name of its type and its number (U2), as its log line names it (U24), a test's own actor, which has
+no type, by the name `test` and its number, as Y5 gives it *(assumed: F2 of comment 6993110710)*, and the IDs of the chains
 (§6, "Deadlocks", layer 3; the owner, 2026-11-20, #519, comment 7051071630, T68 3): each line ends with ` in chain ` and a chain's ID, 32 lowercase hexadecimal digits
 as a block's `Crashed.Chain` reads one (U30), for a call the chain of the activation that waits, for a child the chain of
 the message whose crash its block decides on (the owner, 2026-11-21, #519, comment 7060155980, T84 1); a child's line whose
@@ -8102,7 +8393,9 @@ test "after" {
 
 ### U64 (decided, §6) U18 behind layer 3
 
-U18's end of the process stays for what layer 3 does not see: on one thread, a loop that a crash closes, where a child
+U18's end of the process stays for what layer 3 does not see: on one thread, a loop that a call an actor's start keeps out
+closes, which the error names by that call's place first, the walk running only where no such call closes the loop (U22, Y5),
+and a loop that a crash closes, where a child
 crashes while its supervisor's call already waits in its inbox and the child's block of `on crash` waits behind that call's
 message (U34), so that no wait closes the loop and the top-level code's wait on that message finds nothing left to run, its
 deadline standing (U42) (§6, "Deadlocks", layer 3; the owner, 2026-11-20, #519, comment 7051071630, T63 2 and T70 1, which replaces the part of Q4 of comment

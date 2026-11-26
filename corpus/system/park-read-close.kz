@@ -1,15 +1,21 @@
 // expect: output
-// | shut 1
 // | Other 9 true
-// rules: S10
+// | shut 1
+// rules: S10, U17
 
 // `Shut`, a call of the chain, is let in while `Run` waits in the poller on its read, and its `Close` shuts the socket down, whose
 // event wakes the read: the read in flight ends with the closed handle's error, `EBADF`, 9 (S5), at once and not at its bound of
-// 5 seconds (S9), since the shutdown reaches the poller as any event does (S10)
+// 5 seconds (S9), since the shutdown reaches the poller as any event does (S10). The top-level code prints both lines: its call of
+// `Result`, of a chain of its own, waits in `Helper`'s inbox behind `Poke` (U17), so that the order of the lines rests on no
+// order of the scheduler
 actor Helper {
+    mut string result = "none"
+
     pub void Poke(Holder h) {
-        print("shut {h.Shut()}")
+        result = "shut {h.Shut()}"
     }
+
+    pub string Result() => result
 }
 
 actor Holder {
@@ -51,6 +57,7 @@ void | IoError Main() {
     helper = spawn Helper()
     h = spawn Holder()
     print(h.Run(helper, listener.Port))
+    print(helper.Result())
 }
 
 Main() else {

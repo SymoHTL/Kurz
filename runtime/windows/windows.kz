@@ -278,13 +278,15 @@ pub void Sleep(long nanoseconds) {
     }
 }
 
-// The poller of `runtime/common/` on Windows, where a socket keeps its blocking wait, bounded by its options (issue 658): no
-// waiter is kept, since no call here would block in the poller's place, no registration is made, and the scheduler's wait
+// The poller of `runtime/common/` on Windows, where a build makes no call on a socket (S11), so that no call waits in the
+// poller (issue 658): no waiter is kept, no registration is made, `ReadyNow` finds nothing ready, and the scheduler's wait
 // never reaches `PollWait`, since the count of registrations stays 0; the byte of an event's data is none.
 pub void Waiter(extern "C" (int, int, long) => int wait) {
 }
 
-pub long PollAdd(int fd, int events, byte* block, long dataAt) => -4099
+pub long PollAdd(int fd, int events, long dataAt) => -4099
+
+pub int ReadyNow(int fd, int events) => 0
 
 pub void PollRemove(int fd) {
 }

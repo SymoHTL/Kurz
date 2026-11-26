@@ -1,0 +1,21 @@
+// expect: output
+// | test "an advance inside within" ... ok
+// | 1 test: 1 passed, 0 failed
+// command: test
+// rules: Y10
+
+// a block of `within` is a block nested in the test, so that `advance` stands among the test's own statements there, and the clock
+// an actor reads after it is an hour on
+actor Clock {
+    pub instant Now() => instant.Now
+}
+
+test "an advance inside within" {
+    c = spawn Clock()
+    before = c.Now()
+    within 1s {
+        advance 1h
+    }
+
+    check c.Now() - before >= 1h
+}

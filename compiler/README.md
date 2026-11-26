@@ -599,7 +599,8 @@ made and one `Accept` gave get `SO_RCVTIMEO` and `SO_SNDTIMEO` of 5 seconds, two
 stream; a listener gets neither, so that `Accept` waits without a bound until `SetAcceptTimeout` sets its `SO_RCVTIMEO`,
 and the stream it gives is set explicitly, since Linux copies a listener's options to the sockets it accepts. The options
 bound no call on a socket that does not block (socket(7)): they hold the time, which each wait in the poller reads back by
-`getsockopt` as its bound (`SocketBound`), no bound where they are zeros. `SetTimeout` sets either option,
+`getsockopt` as its bound (`SocketBound`), no bound where they are zeros, rounded up to the tick of the kernel's `HZ`, in
+which Linux keeps them. `SetTimeout` sets either option,
 for a stream's two setters and a listener's alike, as Rust's `set_timeout` does: a time of zero or below is -4097, `InvalidInput`; a bound is the whole seconds and
 the microseconds cut from the rest, a positive time that comes to no microsecond raised to 1, and no bound the
 `timeval` of zeros. Rust also bounds the seconds by `time_t::MAX`, which is not written here: a `duration` of 64
@@ -1694,20 +1695,29 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - a call on a socket that would block (S10), in a build for Linux: every socket is opened with `SOCK_NONBLOCK` and stays so,
   a read, a write, an `Accept` and a connect in progress are tried first, and one that fails with `EAGAIN` on a socket, which
   `getsockopt` tells from a file or a pipe that keeps its `EAGAIN` (`Ready`), waits through the
-  waiter that `Start` puts into the page of the thread at 200 (`Waiter`), `SocketWaited`, which registers the descriptor in
-  the process's one `epoll` with `EPOLLONESHOT` (`PollAdd`), `EPOLL_CTL_MOD` first and `EPOLL_CTL_ADD` where it has none, its
-  data a block shaped as a sleep's whose word the event sets, which also holds the descriptor plus one at 40; inside a message
-  the activation parks on it among the timers, to the bound that `SocketBound` reads back from the socket's
-  `SO_RCVTIMEO` or `SO_SNDTIMEO`, which keep the time a setter wrote, so that the calls of its chain run above it and a fall
-  takes the registration out (`Fall`), and the top-level code runs `RootLoop` to the event or the bound. 1 makes the call
-  again, and a bound that passed first gives -11, `TimedOut` with the number 11, the registration taken out (`PollRemove`).
-  While a registration waits (`polled`), the scheduler that has nothing to run waits in `epoll_wait` to the first timer, in
-  whole milliseconds rounded up (`IdleWait`, `Polled`), and `RootLoop` raises no `deadlock`. The poller is made before the
-  first socket (`Poller`), so that it takes the same descriptor in every run, and a child of a `fork` drops it at the fork
-  (`Forked`, by `pthread_atfork`), since one `epoll` that two processes wait on gives either one's event to the other. The
-  offset of the event's data is the architecture's (`EpollDataAt`): 4 in x86-64's packed `struct epoll_event`, 8 in
-  AArch64's. A thread whose page holds no waiter waits in `poll` (`Blocked`); a build for Windows gives no call on a socket
-  (S11), and its runtime's functions of the poller are stubs;
+  waiter that `Start` puts into the page of the thread at 200 (`Waiter`), `SocketWaited`. Its block, shaped as a sleep's whose
+  word the event sets, holds the descriptor plus one at 40, the next wait of the same descriptor at 48 and its events at 56: the
+  waits of a descriptor stand in one list (`WaitsOf`), and its one registration in the process's one `epoll`, with
+  `EPOLLONESHOT` (`PollAdd`, `EPOLL_CTL_MOD` first and `EPOLL_CTL_ADD` where it has none), carries the descriptor as its data and
+  the events of every wait in the list (`Interest`), as Tokio's `ScheduledIo` keeps the readers and the writers of one
+  registration apart. An event ends each wait whose events it gives, or every wait at `EPOLLERR` or `EPOLLHUP`, and the
+  registration is armed again for the waits left, or taken out where none is (`Polled`, `Rearm`). Inside a message
+  the activation parks on its wait among the timers, to the bound that `SocketBound` reads back from the socket's
+  `SO_RCVTIMEO` or `SO_SNDTIMEO`, so that the calls of its chain run above it and a fall takes the wait out of its list
+  (`Fall`, `Unwait`), and the top-level code runs `RootLoop` to the event or the bound. 1 makes the call again; a bound that
+  passed first, where `poll` with no wait finds the descriptor not ready either (`ReadyNow`), as Tokio's `timeout` polls its
+  future before its timer, gives -11, `TimedOut` with the number 11, the wait taken out of its list; and a connect in progress,
+  whose bound is `ConnectWithin`'s deadline, turns it into -4100, `TimedOut` with the number 0
+  (`Connected`). A failure of `epoll_wait` but `EINTR`, which is made again, ends every wait in the poller with it, as the
+  call's `IoError` of the system's kind and number (`Fail`, S1). While a registration waits (`polled`), the scheduler that has
+  nothing to run waits in `epoll_wait` to the first timer, in whole milliseconds rounded up (`IdleWait`, `Polled`), a scheduler
+  that never runs out of work reads the poller with no wait at every 61st turn, as Tokio's `event_interval` (`RunTurn`), and
+  `RootLoop` raises no `deadlock`. The poller is made before the first socket (`Poller`), so that it takes the same descriptor
+  in every run, and a child of a `fork` drops it at the fork (`Forked`, by `pthread_atfork`), since one `epoll` that two
+  processes wait on gives either one's event to the other; with no poller `PollWait` sleeps the time it was asked for and
+  gives no event, so that a child's scheduler waits on its timers. The offset of the event's data is the architecture's
+  (`EpollDataAt`): 4 in x86-64's packed `struct epoll_event`, 8 in AArch64's. A thread whose page holds no waiter waits in
+  `poll` (`Blocked`); a build for Windows gives no call on a socket (S11), and its runtime's functions of the poller are stubs;
 - logging (P1 to P7 and P9), in a build for Linux: a program with a log call in one of its files reads
   `KURZ_LOG` alone, since the compiler builds no settings type whose `Logging` part P4 has win, through
   `Variable` before its first statement, after `args`, and hands it to `LogFilter`,
@@ -2232,7 +2242,7 @@ writes, and the corpus's `tests/` cases what a case of `kurz test` shows (E3).
 A program that uses one of these gets one `not supported` at the construct's line, in the
 checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
-`data` type or a union (R14), a `mut` parameter given anything but a variable, a path of `data` fields from one or a `mut` field named alone in its method, a path of fields from such a field and a path of `data` fields to a `weak` field among them (the owner, 2026-11-25, issue 646, "Data fields only"), and a `mut` parameter of a lambda
+`data` type or a union (R14), a `mut` parameter given anything but a variable, a path of `data` fields from one or a `mut` field named alone in its method, a `mut` parameter given a path of fields from a `mut` field named alone in its method, a `mut` parameter given a path of `data` fields that holds or ends at a `weak` field (the owner, 2026-11-25, issue 646, "Data fields only"), a `mut` parameter given a `weak` field named alone in its method, which the checker types as the strong `T?` its read gives (R3), so that a callee of `mut T?` would write a strong reference into the field's weak place *(assumed, M7)*, each of these with a text that names its form, an item of a list and an entry of a map sharing one text that names both *(assumed, M7)*, and a `mut` parameter of a lambda
 (M7), a `label` operand of an `asm` and an `asm` output into an item of a list or a map (R11), `s.Chars` as a list (T15), a call on a file or a socket, a read of the
 command line, the environment or the clock, and a log call, in a build for Windows (S11, P6), a vector held in a list, a
 map, a field or a union and a lambda that reads a variable of a vector's type, whose places are not
@@ -2282,11 +2292,12 @@ not go on (U13); of section 6's deadlocks the build makes layer 1 (U17) and the 
 of the top-level code that nothing can end (U18), and the checker layer 2, the compile error `call-loop`
 on every program that declares an actor (U56 to U58), with the warning `vouch-unneeded` (U59), which the
 walk of the throw sets (`ThrowSets.ActorsCode`) and `Semantics/CallLoops.cs` read, and the runtime layer 3 (U60 to
-U65): each wait of an actor follows the wait line from the callee its reply names (`Looped`) before it parks, and the
+U65): each wait of an actor follows the wait line from the callee its reply names (`Looped`) before it parks, the line
+ending at an actor whose top activation sleeps or waits in the poller, which names no message it waits on (`Onward`), and the
 waiter whose wait closes a loop raises `deadlock` at its call with the loop's waits below its error line (`LoopText`,
 `Deadlocked`), so that a loop that a crash closes, which layer 3 does not see, ends at U18 where the top-level code
 waits on it, its waits below the error line, which one walk from the top-level code's call finds (`Stuck`; U64), and
-else stays to the end of the program; a crash in a message is the crash of its actor (U19): the runtime stores it in the
+else stays to the bound of a call in it (U36, U34) or the end of the program; a crash in a message is the crash of its actor (U19): the runtime stores it in the
 activation's header and switches to the scheduler's stack, frees the actor's heap whole but for its
 first block, the record and the state, copies the messages of its inbox into a new heap, ends the
 open copy sessions of its activations, unhooks the reply each parked activation waits on by the swap
@@ -3491,14 +3502,15 @@ round can ask about it by the rule's id.
   there too, where it is `mut`: one without `mut` is `mut-required`, the same field twice is
   `mut-at-call`, and one inside a lambda is passed as well, through the reference to the instance the
   lambda holds (F11 with K2: the owner, 2026-11-02, #110, comment 6579495475); the emitter gives the call the
-  field's own place, so the callee's write is the field's. A path of data fields is given the place at its end,
-  taken after the other arguments ran: a block on the path with one count, which the variable holds alone, is
-  written where it stands, and one another value holds is copied into the place that held it first, the place
-  letting go of it (M4), so that `Two(mut p.A, mut p.B)` copies a shared block of `p` once and the place of
-  `p.A` stays where `p.B`'s is taken (the owner, 2026-11-25, issue 646, comment 7167181142, "Copy if shared").
+  field's own place, so the callee's write is the field's. A path of data fields is given the place at its end:
+  a block on the path with one count, which the variable holds alone, is written where it stands, and one
+  another value holds is copied into the place that held it first, the place letting go of it (M4), so that
+  `Two(mut p.A, mut p.B)` copies a shared block of `p` once and the place of `p.A` stays where `p.B`'s is taken
+  (the owner, 2026-11-25, issue 646, comment 7167181142, "Copy if shared"). The place is taken after the
+  other arguments ran, as a variable's is *(assumed, M7)*.
   The callee holds a pointer into the variable's block while it runs; nothing it reaches frees that block, since
-  a call reaches a variable of its caller only through `mut`, and the variable beside a path into it is
-  `mut-at-call` (the line `mut-path-fenced` of `ListTests` holds it).
+  a call reaches a variable of its caller only through `mut`, and the variable or a path beside a path into it is
+  `mut-at-call` (`Overlaps` in the checker; the line `mut-path-fenced` of `ListTests` holds it).
 - M7's reads, a reading of this directory of the rule the owner chose on 2026-10-24 and 2026-10-25:
   the checker reads each expression of a statement whole, in the order it runs: a call's receiver or
   the value it calls, then its arguments as written (D11), an operator's left operand, an index's

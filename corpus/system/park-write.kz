@@ -2,6 +2,7 @@
 // | ticked
 // | read 33554432
 // | wrote 33554432
+// threads: 1
 // rules: S10
 
 // a writer connects, and then writes 32 MiB to a connection that nobody reads while it writes, more than a local connection's

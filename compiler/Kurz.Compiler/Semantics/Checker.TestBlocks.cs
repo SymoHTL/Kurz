@@ -87,7 +87,8 @@ public sealed partial class Checker
 
     /// <summary>
     /// Y10: <c>advance d</c> stands among a test's own statements alone, in its body and the blocks nested in it, and not in a lambda, a
-    /// block of <c>on crash</c> or the block of an <c>attempt</c> inside it, each read in a frame of its own (F11 of comment 6993110710):
+    /// block of <c>on crash</c> or the block of an <c>attempt</c> inside it, each read in a frame of its own (F11 of comment 6993110710 for
+    /// the lambda and the block of <c>on crash</c>, item 2 of comment 7179015381 for the block of an <c>attempt</c>):
     /// elsewhere it is <c>advance-outside</c> at its line. Its duration is checked as any expression is, and as the bound of <c>within</c>
     /// is (U40): a value of another type than <c>duration</c> is <c>type-mismatch</c> at its line, a nullable one <c>nullable-unchecked</c>,
     /// a call with a <c>void</c> success <c>syntax</c> (O10).
