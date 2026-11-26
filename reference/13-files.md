@@ -1812,10 +1812,9 @@ child's wait (S19), parks the actor in the same way, the child's pipes and the d
 process waiting under `epoll`, with no thread of the pool for each child (§12, the owner, 2026-11-26,
 issue 661, comment 7189038013, Q14 (a)). A crash of the actor over such a wait closes the pipes the
 call holds to the child and the descriptor of its process, and leaves the child to run, not waited
-for, as Rust's `Child` that is dropped leaves it *(assumed, §12: what a crash over the wait leaves,
-which no answer names)*. In the child of a `fork`, which a program makes in `raw` (R7) and which has no
-thread of the pool, each call that waited on the pool ends with `Other` and the number 125,
-`ECANCELED` *(assumed, §12: the number, which no answer names)*.
+for, as Rust's `Child` that is dropped leaves it (§12, assumed there). In the child of a `fork`, which
+a program makes in `raw` (R7) and which has no thread of the pool, each call that waited on the pool
+ends with `Other` and the number 125, `ECANCELED` (§12, assumed there).
 
 Case: [system/park-accept-first.kz](../corpus/system/park-accept-first.kz)
 ```kurz
