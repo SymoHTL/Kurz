@@ -642,7 +642,11 @@ Gate: review rule "rules for sessions".
   goes on the collection ticket, the open issue labelled `review-leftovers`: one section per pull
   request, with the head the findings were made on, the links of its threads and the link of its
   lows on the `review-lows` issue; every open thread gets a reply that links the ticket and is
-  resolved, and the pull request merges as it is, on the approval the cap gives (above). The skill
+  resolved, and the pull request merges as it is, on the approval the cap gives (above). What the
+  ticket collects is fixed together, in one pull request that takes every section posted since the
+  last such pull request, and never in a pull request of its own per round; that pull request's own
+  round puts its leftovers on the ticket as any other does (the owner, 2026-11-26, "Put a round's
+  leftovers on #39 and fix them in one batch, instead of a follow-up PR per round": `judgment step`). The skill
   `change-walk` has the walk (section 3, item 8), and `py -3 tools/pr_gates.py cap --pr N --analysis <file>`
   takes it: the section as a comment on the ticket, the replies and the resolutions
   ([knowledge/the-walk-at-the-cap-is-a-command.md](knowledge/the-walk-at-the-cap-is-a-command.md)).

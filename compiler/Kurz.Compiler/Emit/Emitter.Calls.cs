@@ -527,6 +527,14 @@ public sealed partial class Emitter
 
                 if (Model.IsImplicitField(n, out _, out var field) && field is not null)
                 {
+                    if (field.Type is WeakRefType)
+                    {
+                        // M7 (the owner, 2026-11-25, issue 646, "Data fields only"; issue 649, assumed): a `weak` field named alone stays
+                        // out as a path to one does; the checker types it as the strong `T?` its read gives (R3), so a callee of `mut T?`
+                        // would write a strong reference into the field's weak place
+                        throw Unsupported(c.Line, "a `weak` field named alone passed as `mut` (M7, R3)");
+                    }
+
                     // M7, K7: a `mut` field of the instance named alone in its method, given as the field's own place
                     var symbol = ClassOfThis(n, n.Line).Symbol;
                     arguments.Add($"ptr {InstanceFieldPointer(symbol, This(n, n.Line), symbol.FieldIndex(field.Name))}");

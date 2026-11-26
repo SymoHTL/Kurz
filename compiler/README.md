@@ -2265,7 +2265,7 @@ writes, and the corpus's `tests/` cases what a case of `kurz test` shows (E3).
 A program that uses one of these gets one `not supported` at the construct's line, in the
 checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
-`data` type or a union (R14), a `mut` parameter given anything but a variable, a path of `data` fields from one or a `mut` field named alone in its method, a path of fields from such a field and a path of `data` fields to a `weak` field among them (the owner, 2026-11-25, issue 646, "Data fields only"), and a `mut` parameter of a lambda
+`data` type or a union (R14), a `mut` parameter given anything but a variable, a path of `data` fields from one or a `mut` field named alone in its method, a `mut` parameter given a path of fields from a `mut` field named alone in its method, a `mut` parameter given a path of `data` fields that holds or ends at a `weak` field (the owner, 2026-11-25, issue 646, "Data fields only"), a `mut` parameter given a `weak` field named alone in its method, which the checker types as the strong `T?` its read gives (R3), so that a callee of `mut T?` would write a strong reference into the field's weak place *(assumed, M7)*, each of these with a text that names its form, an item of a list and an entry of a map sharing one text that names both *(assumed, M7)*, and a `mut` parameter of a lambda
 (M7), a `label` operand of an `asm` and an `asm` output into an item of a list or a map (R11), `s.Chars` as a list (T15), a call on a file or a socket, a read of the
 command line, the environment or the clock, and a log call, in a build for Windows (S11, P6), a vector held in a list, a
 map, a field or a union and a lambda that reads a variable of a vector's type, whose places are not
@@ -2332,8 +2332,9 @@ of a record or at its end. `RunTests` runs the cases of a crash, its log line, i
 not hold back, an escalation and a `restart-limit` that reach the supervisor as signals, and a loop that two actors close
 at once, which raises one `deadlock`. What is not built on worker threads, each a reading of the code that no run checks
 (inferred): a timeout of a call while its callee copies the result leaks that result's heap; the reference that a `per
-node` lookup of the top-level code gives is read after its pin (`PerFind`); and a main thread whose code calls nothing
-of the runtime takes no end a worker handed it. The process ends with every actor's heap held, freeing none, and the end
+node` lookup of the top-level code gives is read after its pin (`PerFind`); the offset that a test's `advance` adds to the
+clock (`ahead`) is a plain word that `Advance` writes while another worker reads it with no order; and a main thread whose code
+calls nothing of the runtime takes no end a worker handed it. The process ends with every actor's heap held, freeing none, and the end
 of the process gives the memory back (section 6, comment 7194874125, 2: `EndActors`). A build for
 Windows starts no worker thread: its `Cores` gives 1 and its runtime reads no `KURZ_THREADS`. No run on Arm, and no
 ThreadSanitizer job, checks the orders of the atomic operations of the worker threads, and no run under a CPU quota of a
@@ -2361,11 +2362,12 @@ not go on (U13); of section 6's deadlocks the build makes layer 1 (U17) and the 
 of the top-level code that nothing can end (U18), and the checker layer 2, the compile error `call-loop`
 on every program that declares an actor (U56 to U58), with the warning `vouch-unneeded` (U59), which the
 walk of the throw sets (`ThrowSets.ActorsCode`) and `Semantics/CallLoops.cs` read, and the runtime layer 3 (U60 to
-U65): each wait of an actor follows the wait line from the callee its reply names (`Looped`) before it parks, and the
+U65): each wait of an actor follows the wait line from the callee its reply names (`Looped`) before it parks, the line
+ending at an actor whose top activation sleeps or waits in the poller, which names no message it waits on (`Onward`), and the
 waiter whose wait closes a loop raises `deadlock` at its call with the loop's waits below its error line (`LoopText`,
 `Deadlocked`), so that a loop that a crash closes, which layer 3 does not see, ends at U18 where the top-level code
 waits on it, its waits below the error line, which one walk from the top-level code's call finds (`Stuck`; U64), and
-else stays to the end of the program; a crash in a message is the crash of its actor (U19): the runtime stores it in the
+else stays to the bound of a call in it (U36, U34) or the end of the program; a crash in a message is the crash of its actor (U19): the runtime stores it in the
 activation's header and switches to the scheduler's stack, frees the actor's heap whole but for its
 first block, the record and the state, copies the messages of its inbox into a new heap, ends the
 open copy sessions of its activations, unhooks the reply each parked activation waits on by the swap
@@ -3570,14 +3572,15 @@ round can ask about it by the rule's id.
   there too, where it is `mut`: one without `mut` is `mut-required`, the same field twice is
   `mut-at-call`, and one inside a lambda is passed as well, through the reference to the instance the
   lambda holds (F11 with K2: the owner, 2026-11-02, #110, comment 6579495475); the emitter gives the call the
-  field's own place, so the callee's write is the field's. A path of data fields is given the place at its end,
-  taken after the other arguments ran: a block on the path with one count, which the variable holds alone, is
-  written where it stands, and one another value holds is copied into the place that held it first, the place
-  letting go of it (M4), so that `Two(mut p.A, mut p.B)` copies a shared block of `p` once and the place of
-  `p.A` stays where `p.B`'s is taken (the owner, 2026-11-25, issue 646, comment 7167181142, "Copy if shared").
+  field's own place, so the callee's write is the field's. A path of data fields is given the place at its end:
+  a block on the path with one count, which the variable holds alone, is written where it stands, and one
+  another value holds is copied into the place that held it first, the place letting go of it (M4), so that
+  `Two(mut p.A, mut p.B)` copies a shared block of `p` once and the place of `p.A` stays where `p.B`'s is taken
+  (the owner, 2026-11-25, issue 646, comment 7167181142, "Copy if shared"). The place is taken after the
+  other arguments ran, as a variable's is *(assumed, M7)*.
   The callee holds a pointer into the variable's block while it runs; nothing it reaches frees that block, since
-  a call reaches a variable of its caller only through `mut`, and the variable beside a path into it is
-  `mut-at-call` (the line `mut-path-fenced` of `ListTests` holds it).
+  a call reaches a variable of its caller only through `mut`, and the variable or a path beside a path into it is
+  `mut-at-call` (`Overlaps` in the checker; the line `mut-path-fenced` of `ListTests` holds it).
 - M7's reads, a reading of this directory of the rule the owner chose on 2026-10-24 and 2026-10-25:
   the checker reads each expression of a statement whole, in the order it runs: a call's receiver or
   the value it calls, then its arguments as written (D11), an operator's left operand, an index's

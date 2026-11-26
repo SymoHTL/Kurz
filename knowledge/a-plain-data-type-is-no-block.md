@@ -15,14 +15,15 @@ its corpus case passed two paths of one variable, `Two(mut p.A, mut p.B)`, with
 
 A mutation that turned the copy if shared off, `layout.IsBlock(data) && shared` changed to
 `layout.IsBlock(data) && false`, so that the second path copies the block the first path's place
-stands in and lets go of it, stayed GREEN on every test. `Pair` was no block: `Layout.IsBlock` holds a
+stands in and lets go of it, stayed green on the fenced line and on the case, the two programs that ran
+under it, each built with `kurz run` on commit `2bbec268` of pull request 648. `Pair` was no block: `Layout.IsBlock` holds a
 data type that has a base, from which a type derives, or that holds a value of its own type (the
 summary of `IsBlock` in `compiler/Kurz.Compiler/Emit/Layout.cs`, D7). Every other data type is a
 structure in its variable's own place, a path through it is an address in that place, and `held = p`
 copies the structure with a count of each list it holds. Neither branch of the block test ran.
 
-With `data Tagged(int Tag) : Pair` beside it, `Pair` is a block. The same program built with the
-mutation printed `[1]` for `p.A`, the callee's write lost in the copy the second path let go of, and
+With `data Tagged(int Tag) : Pair` beside it, `Pair` is a block. The same program, run with `kurz run`
+on the same commit with the mutation, printed `[1]` for `p.A`, the callee's write lost in the copy the second path let go of, and
 `[4, 6]` for `q.A`, a freed block taken by the next one; built without it, `[1, 5]` and `[3, 5]`. The
 fenced line and the case gained the derived type before the pull request opened.
 

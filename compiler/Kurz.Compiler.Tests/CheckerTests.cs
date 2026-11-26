@@ -1752,6 +1752,8 @@ public sealed class CheckerTests
         Clean(two + "Two(mut p.A, mut p.B)\nprint(p.A.Count)"); // two fields of one variable are two values
         Assert.Equal([(ErrorIds.MutAtCall, 8)], Errors(two + "Two(mut p.A, mut p.A)\nprint(p.A.Count)"));
         Assert.Equal([(ErrorIds.MutAtCall, 9)], Errors("data P(List<int> A)\n\nvoid Both(mut P q, mut List<int> a) {\n    a.Add(q.A.Count)\n}\n\nmut p = P(List<int>())\n\nBoth(mut p, mut p.A)")); // a path and one it is a prefix of; the parameter is not `p`, which F16 keeps for the top-level variable
+        var (longer, _) = Check("data Inner(List<int> A)\ndata Outer(Inner In)\n\nvoid Pair(mut Inner i, mut List<int> a) {\n    a.Add(i.A.Count)\n}\n\nmut p = Outer(Inner(List<int>()))\nPair(mut p.In, mut p.In.A)");
+        Assert.Equal([(ErrorIds.MutAtCall, "9: `p.In.A` is passed as `mut` twice (M7)")], longer.Sorted.Select(d => (d.Id, $"{d.Line}: {d.Message}"))); // a path beside a longer path into it (`Overlaps`)
         Assert.Equal([(ErrorIds.MutAtCall, 6)], Errors("void FillB(mut List<byte> xs) {\n    xs.Add(1)\n}\n\nmut s = \"abc\"\nFillB(mut s.Bytes)")); // M7: a path of data fields, which `Bytes` is not
         Assert.Equal([(ErrorIds.MutRequired, 2)], Errors("mut s = \"abc\"\ns.Bytes.Add(1)")); // M5 with M4: the same for a receiver
         Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("void Bump(mut int n) {\n    n = n + 1\n}\n\nmut short s = 1\nBump(mut s)\nprint(s)")); // M7: the callee writes an `int` back
@@ -6374,7 +6376,7 @@ public sealed class CheckerTests
     [InlineData("data Box(Map<string, int> M)\n\nmut bs = List<Box>()\nbs[0].M[\"a\"] = 1", "4: an assignment into a map reached through an item or a call, or into a path that goes on after the key (M4, M9)")]
     [InlineData("Map<string, int> Make() => Map<string, int>()\n\nMake()[\"a\"] = 1", "3: an assignment into a map reached through an item or a call, or into a path that goes on after the key (M4, M9)")]
     [InlineData("data P(int X)\n\nmut m = Map<string, P>()\nm[\"a\"].X = 1", "4: an assignment into a map reached through an item or a call, or into a path that goes on after the key (M4, M9)")]
-    [InlineData("data Box(Map<string, int> M)\n\nmut Box? b = Box(Map<string, int>())\nb.M[\"a\"] = 1", "4: an assignment into a path through a nullable variable or field (N3, M4)")]
+    [InlineData("data Box(Map<string, int> M)\n\nmut Box? b = Box(Map<string, int>())\nif b != null {\n    b.M[\"a\"] = 1\n}", "5: an assignment into a path through a nullable variable or field (N3, M4)")]
     [InlineData("data In(Map<string, int> M)\ndata Out(In? I)\n\nmut o = Out(In(Map<string, int>()))\nif o.I != null {\n    o.I.M[\"a\"] = 1\n}", "6: an assignment into a path through a nullable variable or field (N3, M4)")]
     [InlineData("data In(int X)\ndata Out(In? I)\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nmut o = Out(In(1))\nif o.I != null {\n    Bump(mut o.I.X)\n}", "10: a path through a nullable variable or field passed as `mut` (N3, M7)")]
     [InlineData("data Config(List<int> Items)\n\nmut groups = Map<string, Config>()\nkey = \"a\"\ngroups[key]?.Items.Add(2)", "5: a `mut` method on a path through a nullable item, entry or call's result (N5, M5)")]
@@ -7922,10 +7924,15 @@ public sealed class CheckerTests
             Assert.Equal([(ErrorIds.AdvanceOutside, line)], ErrorsSeeingStd(program)); // `std/` declares `Crashed`, which the block and the `attempt` read
         }
 
-        // the text the person reads at that line (Q6 of the product pass of issue 655, comment 7178562787)
+        // the text the person reads at that line, which the product pass's Q6 chose (issue 655, comment 7178562787): the corpus holds
+        // the id and the line (E2), and no case can hold a text, so this test holds it
         Assert.Equal(
             ["advance-outside 2: `advance` stands among a `test` block's own statements alone (Y10)"],
             Check("void Later() {\n    advance 1h\n}\n\ntest \"a\" {\n    Later()\n}").Diagnostics.Sorted.Select(d => $"{d.Id} {d.Line}: {d.Message}"));
+
+        // E1 with Y10: outside a test's own statements a duration of another type than `duration` gets its own error beside
+        // `advance-outside`, at the one line
+        Assert.Equal([(ErrorIds.TypeMismatch, 2), (ErrorIds.AdvanceOutside, 2)], Errors("void Later() {\n    advance 5\n}\n\ntest \"a\" {\n    Later()\n}"));
 
         // T8 with Y10: the duration is checked as any expression is, as the bound of `within` is (U40)
         foreach (var (program, id) in new[] { ("advance 1", ErrorIds.TypeMismatch), ("long n = 1\n    advance n", ErrorIds.TypeMismatch), ("duration? d = null\n    advance d", ErrorIds.NullableUnchecked) })

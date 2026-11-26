@@ -2,14 +2,14 @@
 // | true
 // | true
 // | true
-// | [1, 2, 3]
+// | []
 // allow: raw
 // rules: N5
 
 // a `mut` call after `?.` writes a list no other value holds where it stands, an entry's, a field's of an instance and a
-// variable's, as Rust's `get_mut` reaches it (N5): the chain's test holds no count of the list, so `RemoveAt` writes the block
-// the list stands in, and a removal needs no room; `true` reads the block's address before and after the call, which
-// `allow: raw` lets the case read
+// variable's, as Rust's `get_mut` reaches it (N5): the chain's test holds no count of the list, so `Clear` empties the block
+// the list stands in, and keeps its room (M9), where a list that shared its block would let go of it; `true` reads the block's
+// address before and after the call, which `allow: raw` lets the case read
 class Bag(mut List<int>? Items)
 
 mut m = Map<string, List<int>>()
@@ -18,13 +18,13 @@ b = Bag([1, 2, 3, 4])
 mut List<int>? xs = [1, 2, 3, 4]
 raw {
     before = (m["a"] ?? []).Pointer
-    m["a"]?.RemoveAt(3)
+    m["a"]?.Clear()
     print((m["a"] ?? []).Pointer == before)
     held = (b.Items ?? []).Pointer
-    b.Items?.RemoveAt(3)
+    b.Items?.Clear()
     print((b.Items ?? []).Pointer == held)
     own = (xs ?? []).Pointer
-    xs?.RemoveAt(3)
+    xs?.Clear()
     print((xs ?? []).Pointer == own)
 }
 print(m["a"] ?? [])

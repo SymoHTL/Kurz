@@ -1,14 +1,14 @@
 // expect: output
 // | true
 // | true
-// | [1, 2, 3]
+// | []
 // allow: raw
 // rules: N5
 
 // a `mut` call after `?.` on a path of fields through a nullable value writes a list no other value holds where it stands, the
 // reading N5 marks as assumed, through a variable and through a field: the chain's test holds no count of the list, so
-// `RemoveAt` writes the block the list stands in, and a removal needs no room; `true` reads the block's address before and after
-// the call, which `allow: raw` lets the case read
+// `Clear` empties the block the list stands in, and keeps its room (M9), where a list that shared its block would let go of it;
+// `true` reads the block's address before and after the call, which `allow: raw` lets the case read
 data Config(List<int> Items)
 data Box(Config? Cfg)
 
@@ -23,10 +23,10 @@ mut cfg = Find(1)
 mut b = Box(Find(1))
 raw {
     before = (cfg?.Items ?? []).Pointer
-    cfg?.Items.RemoveAt(3)
+    cfg?.Items.Clear()
     print((cfg?.Items ?? []).Pointer == before)
     held = (b.Cfg?.Items ?? []).Pointer
-    b.Cfg?.Items.RemoveAt(3)
+    b.Cfg?.Items.Clear()
     print((b.Cfg?.Items ?? []).Pointer == held)
 }
 print(cfg?.Items ?? [])
