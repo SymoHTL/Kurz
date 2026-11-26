@@ -2406,7 +2406,8 @@ chains that wait, the thread's side of the scheduler, and the memo, the work lis
 heap, the keys of the hash of a map are two words of the thread, and a `static` value of the build
 holds no block (R13). `ActorTests` pins the crash,
 the turns, the end and the inbox's growth, each heap giving back every block of its crossings, results
-and moves, 10,000 idle actors within 512 bytes each, on Linux alone, which reads the resident memory,
+and moves, 1,000,000 idle actors within 512 bytes each and within 5 ticks of 10 ms on the CPU over a second
+in which the top-level code sleeps, on Linux alone, which reads the resident memory and the time on the CPU,
 a buffer of the runtime made inside an actor outliving it, and a block of more than 262144 bytes of an
 actor joining the kept blocks at the end; the line `actor-heaps-fenced` of `ListTests` the heaps of
 actors freed whole and every result of their messages read after it, from the caller's heap; and `ActorTests` the deadlines, the bound of every target, the timers kept in the order of their
