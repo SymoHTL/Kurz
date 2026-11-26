@@ -1,3 +1,4 @@
+using Kurz.Compiler.Build;
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
 
@@ -954,6 +955,23 @@ public sealed partial class Emitter
 
     /// <summary>The size of a value of the IR type, in bytes.</summary>
     private string IrSize(string irType) => fn.Value($"ptrtoint ptr {fn.Value($"getelementptr {irType}, ptr null, i32 1")} to i64");
+
+    /// <summary>
+    /// U35: in a program built for Linux with a <c>spawn</c> in one of its files, <c>KURZ_THREADS</c> read before the first statement,
+    /// which the runtime's <c>ThreadsRead</c> takes as the count of worker threads or refuses, the cores the process may use where it is
+    /// not set; a program with no <c>spawn</c> reads none, as a program with neither a log call nor a <c>spawn</c> reads no
+    /// <c>KURZ_LOG</c> (P5).
+    /// </summary>
+    private void EmitThreadsStart()
+    {
+        if (target != Target.Linux || !units.Any(u => u.Model.Spawns))
+        {
+            return;
+        }
+
+        var (found, value) = EmitVariable("KURZ_THREADS", "threads");
+        fn.Emit($"call void {RuntimeFunction("ThreadsRead")}(i32 {found}, %kz.str {value})");
+    }
 
     // ---- the block `attempt { ... }` (U46 to U50) ------------------------------------------------------------------------------
 

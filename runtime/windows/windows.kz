@@ -295,6 +295,10 @@ pub long PollWait(long nanoseconds, byte* ready, long count, long dataAt) => 0
 
 pub long EpollDataAt() => 0
 
+// The cores the process may use of `runtime/common/` on Windows (U35), where a build reads no `KURZ_THREADS`, so that nothing
+// asks for them (`ThreadsRead`): 1.
+pub int Cores() => 1
+
 // The pool of threads for blocking calls of `runtime/common/` on Windows, where a build makes no call on a file (S11), so that no
 // call is handed to it (issue 661): no waiter is kept, no pool is made and no job is done.
 pub void BlockingWaiter(extern "C" (byte*) => long wait, extern "C" () => int offloads) {

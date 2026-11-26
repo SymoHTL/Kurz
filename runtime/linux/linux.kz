@@ -79,6 +79,8 @@ extern "C" {
     int pthread_cond_signal(void* condition)
     int pthread_cond_timedwait(void* condition, void* mutex, void* time)
     int eventfd(int value, int options)
+    int sched_getaffinity(int pid, long size, void* mask)
+    long sysconf(int name)
 }
 
 // The platform's unwinder, libgcc_s's, which the trace walks the stack with (design record, section 6),
@@ -2671,6 +2673,591 @@ pub int Variable(byte* key, mut string value) {
     }
 
     return 0
+}
+
+// ---- the count of worker threads (U35) ----------------------------------------------------------------
+
+// The cores the process may use (U35), as Rust 1.82.0's `available_parallelism` counts them on Linux
+// (`library/std/src/sys/pal/unix/thread.rs` of rust-lang/rust, read on 2026-11-26): the processors of its
+// affinity, a set of 1024 (`sched_getaffinity`, 128 bytes), or where that gives none those online (`sysconf` of
+// `_SC_NPROCESSORS_ONLN`, 84), and no more than the CPU quota of its control group (`CpuQuota`). Where neither
+// count can be read, where Rust's call fails, the count is 1, as tokio takes at least 1 core.
+pub int Cores() {
+    long quota = CpuQuota()
+    mut long count = 0
+    raw {
+        byte* set = Memory(4096)
+        if set != null {
+            if sched_getaffinity(0, 128, Ptr<void>(set)) == 0 {
+                mut long i = 0
+                while i < 128 {
+                    mut long bits = long(set[i]) & 255
+                    while bits != 0 {
+                        count = count + (bits & 1)
+                        bits = bits >> 1
+                    }
+
+                    i = i + 1
+                }
+            }
+
+            Release(set, 4096)
+        }
+
+        if count == 0 {
+            long online = sysconf(84)
+            if online > 0 {
+                count = online
+            }
+        }
+    }
+
+    if count == 0 {
+        return 1
+    }
+
+    if count > quota {
+        count = quota
+    }
+
+    if count > 2147483647 {
+        count = 2147483647
+    }
+
+    return int(count)
+}
+
+// The CPU quota of the process's control group in whole cores, rounded down and at least 1, as Rust 1.82.0's
+// `cgroups::quota` reads it (`Cores`): the group a line of `/proc/self/cgroup` names, of version 2 where the line's
+// controllers are empty and of version 1 where they hold `cpu`, a line of version 1 taking the place of any line
+// before it and one of version 2 only of no line; then the least quota of that group and of each group it stands in
+// (`QuotaV2`, `QuotaV1`). The greatest `long` where no quota can be read or none is set.
+long CpuQuota() {
+    mut long quota = 9223372036854775807
+    raw {
+        mut long room = 4096
+        mut byte* text = Memory(room)
+        byte* path = Memory(12288)
+        if text != null && path != null {
+            long count = FileBytes("/proc/self/cgroup\0".Pointer, mut text, mut room)
+            mut long version = 0
+            mut long group = 0
+            mut long groupCount = 0
+            mut long at = 0
+            while at < count {
+                mut long end = at
+                while end < count && text[end] != 10 {
+                    end = end + 1
+                }
+
+                mut long first = at
+                while first < end && text[first] != 58 {
+                    first = first + 1
+                }
+
+                if first < end {
+                    mut long second = first + 1
+                    while second < end && text[second] != 58 {
+                        second = second + 1
+                    }
+
+                    mut long kind = 0
+                    if second == first + 1 {
+                        kind = 2
+                    } else if Listed(text + first + 1, second - first - 1, "cpu") {
+                        kind = 1
+                    }
+
+                    if kind != 0 && (version == 0 || kind == 1) {
+                        if second < end {
+                            version = kind
+                            group = second + 1
+                            groupCount = end - group
+                            if groupCount > 0 {
+                                group = group + 1
+                                groupCount = groupCount - 1
+                            }
+                        } else {
+                            version = 0
+                        }
+                    }
+                }
+
+                at = end + 1
+            }
+
+            if version == 2 {
+                quota = QuotaV2(text + group, groupCount, path)
+            } else if version == 1 {
+                quota = QuotaV1(text + group, groupCount, path)
+            }
+        }
+
+        if text != null {
+            Release(text, room)
+        }
+
+        if path != null {
+            Release(path, 12288)
+        }
+    }
+
+    if quota < 1 {
+        return 1
+    }
+
+    return quota
+}
+
+// The quota of a group of version 2 (`CpuQuota`), `count` bytes at `group`, the leading `/` taken off, with `path` a buffer
+// of 12288 bytes: where `/sys/fs/cgroup/<group>/cgroup.controllers` is there, the least of `limit / period` read from the
+// first line of `cpu.max`, `limit period`, in that group's directory and in each above it to `/sys/fs/cgroup`, a file that
+// cannot be read or a `limit` of `max` passed over, and the walk ended at a first line that is missing or holds no space, as
+// Rust's `?` ends it.
+long QuotaV2(byte* group, long count, byte* path) {
+    mut long quota = 9223372036854775807
+    raw {
+        mut long n = Put(path, 0, "/sys/fs/cgroup".Pointer, 14)
+        if count > 0 {
+            if count > 8192 {
+                return quota
+            }
+
+            path[n] = 47
+            n = Put(path, n + 1, group, count)
+        }
+
+        Put(path, n, "/cgroup.controllers\0".Pointer, 20)
+        if !There(path) {
+            return quota
+        }
+
+        mut long room = 4096
+        mut byte* text = Memory(room)
+        if text == null {
+            return quota
+        }
+
+        mut long dir = n
+        while true {
+            Put(path, dir, "/cpu.max\0".Pointer, 9)
+            long got = FileBytes(path, mut text, mut room)
+            if got >= 0 {
+                mut long end = 0
+                while end < got && text[end] != 10 {
+                    end = end + 1
+                }
+
+                if end > 0 && text[end - 1] == 13 {
+                    end = end - 1
+                }
+
+                mut long space = 0
+                while space < end && text[space] != 32 {
+                    space = space + 1
+                }
+
+                if got == 0 || space == end {
+                    break
+                }
+
+                mut long periodEnd = space + 1
+                while periodEnd < end && text[periodEnd] != 32 {
+                    periodEnd = periodEnd + 1
+                }
+
+                long limit = WholeOf(text, space)
+                long period = WholeOf(text + space + 1, periodEnd - space - 1)
+                if limit >= 0 && period > 0 && limit / period < quota {
+                    quota = limit / period
+                }
+            }
+
+            if dir == 14 {
+                break
+            }
+
+            mut long k = dir - 1
+            while k > 14 && path[k] != 47 {
+                k = k - 1
+            }
+
+            dir = k
+        }
+
+        Release(text, room)
+    }
+
+    return quota
+}
+
+// The quota of a group of version 1 (`CpuQuota`), `count` bytes at `group`, with `path` a buffer of 12288 bytes: the
+// controller's mount tried at `/sys/fs/cgroup/cpu`, then at `/sys/fs/cgroup/cpu,cpuacct`, then where `/proc/self/mountinfo`
+// names it (`Mounted`), the first under which the group's directory is there taken, and in that directory and in each above it
+// to the mount the least of `cpu.cfs_quota_us / cpu.cfs_period_us`, each read with the white space around it taken off, a
+// quota of -1, which is none, passed over, as Rust's `quota_v1` reads them.
+long QuotaV1(byte* group, long count, byte* path) {
+    mut long quota = 9223372036854775807
+    raw {
+        if count > 4096 {
+            return quota
+        }
+
+        mut long room = 4096
+        mut byte* text = Memory(room)
+        if text == null {
+            return quota
+        }
+
+        mut int tried = 0
+        while tried < 3 {
+            mut long m = 0
+            mut byte* within = group
+            mut long withinCount = count
+            if tried == 0 {
+                m = Put(path, 0, "/sys/fs/cgroup/cpu".Pointer, 18)
+            } else if tried == 1 {
+                m = Put(path, 0, "/sys/fs/cgroup/cpu,cpuacct".Pointer, 26)
+            } else {
+                m = Mounted(group, count, path, mut within, mut withinCount)
+            }
+
+            tried = tried + 1
+            if m > 0 {
+                mut long n = m
+                if withinCount > 0 {
+                    path[n] = 47
+                    n = Put(path, n + 1, within, withinCount)
+                }
+
+                path[n] = 0
+                if There(path) {
+                    mut long dir = n
+                    while true {
+                        Put(path, dir, "/cpu.cfs_quota_us\0".Pointer, 18)
+                        long limit = TrimmedWhole(path, mut text, mut room)
+                        Put(path, dir, "/cpu.cfs_period_us\0".Pointer, 19)
+                        long period = TrimmedWhole(path, mut text, mut room)
+                        if limit >= 0 && period > 0 && limit / period < quota {
+                            quota = limit / period
+                        }
+
+                        if dir <= m {
+                            break
+                        }
+
+                        mut long k = dir - 1
+                        while k > m && path[k] != 47 {
+                            k = k - 1
+                        }
+
+                        dir = k
+                    }
+
+                    tried = 3
+                }
+            }
+        }
+
+        Release(text, room)
+    }
+
+    return quota
+}
+
+// The mount of the controller `cpu` of version 1 that holds the group, `count` bytes at `group` (`QuotaV1`), from
+// `/proc/self/mountinfo`, as Rust's `find_mountpoint` reads it: the first line whose type, the third field from its end, is
+// `cgroup` and whose options, its last field, list `cpu`, and whose root, its fourth field after its leading `/`, is the group
+// or a directory the group stands in; its mount point, its fifth field, put at the start of `path`, and the rest of the group
+// after that root put in `within`. The count of the mount point's bytes, or 0 where no line is such or a line has fewer than
+// seven fields, which ends the search as Rust's `?` ends it.
+long Mounted(byte* group, long count, byte* path, mut byte* within, mut long withinCount) {
+    mut long found = 0
+    raw {
+        mut long room = 65536
+        mut byte* text = Memory(room)
+        if text == null {
+            return 0
+        }
+
+        long got = FileBytes("/proc/self/mountinfo\0".Pointer, mut text, mut room)
+        mut long at = 0
+        while found == 0 && at < got {
+            mut long end = at
+            while end < got && text[end] != 10 {
+                end = end + 1
+            }
+
+            mut long first = at
+            while first < end && (text[first] == 32 || text[first] == 9) {
+                first = first + 1
+            }
+
+            mut long last = end
+            while last > first && (text[last - 1] == 32 || text[last - 1] == 9 || text[last - 1] == 13) {
+                last = last - 1
+            }
+
+            mut long fields = 1
+            mut long i = first
+            while i < last {
+                if text[i] == 32 {
+                    fields = fields + 1
+                }
+
+                i = i + 1
+            }
+
+            mut bool stop = fields < 8 || first == last
+            if !stop {
+                long rootAt = Field(text, first, last, 3)
+                long rootEnd = FieldEnd(text, rootAt, last)
+                long mountAt = rootEnd + 1
+                long mountEnd = FieldEnd(text, mountAt, last)
+                mut long optionsAt = last
+                while optionsAt > first && text[optionsAt - 1] != 32 {
+                    optionsAt = optionsAt - 1
+                }
+
+                mut long typeEnd = optionsAt - 1
+                while typeEnd > first && text[typeEnd - 1] != 32 {
+                    typeEnd = typeEnd - 1
+                }
+
+                typeEnd = typeEnd - 1
+                mut long typeAt = typeEnd
+                while typeAt > first && text[typeAt - 1] != 32 {
+                    typeAt = typeAt - 1
+                }
+
+                if typeEnd - typeAt == 6 && Same(text + typeAt, "cgroup".Pointer, 6) &&
+                    Listed(text + optionsAt, last - optionsAt, "cpu") {
+                    if rootEnd == rootAt || text[rootAt] != 47 {
+                        stop = true
+                    } else {
+                        byte* root = text + rootAt + 1
+                        long rootCount = rootEnd - rootAt - 1
+                        if rootCount == 0 || (rootCount <= count && Same(group, root, rootCount) &&
+                            (rootCount == count || group[rootCount] == 47)) {
+                            if mountEnd - mountAt <= 4096 {
+                                found = Put(path, 0, text + mountAt, mountEnd - mountAt)
+                                if rootCount == 0 {
+                                    within = group
+                                    withinCount = count
+                                } else if rootCount == count {
+                                    within = group + count
+                                    withinCount = 0
+                                } else {
+                                    within = group + rootCount + 1
+                                    withinCount = count - rootCount - 1
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if stop {
+                at = got
+            } else {
+                at = end + 1
+            }
+        }
+
+        Release(text, room)
+    }
+
+    return found
+}
+
+// The start of the field `index` of the line from `first` to `last` in `text`, its fields parted by single spaces.
+long Field(byte* text, long first, long last, long index) {
+    mut long at = first
+    mut long seen = 0
+    raw {
+        while seen < index && at < last {
+            if text[at] == 32 {
+                seen = seen + 1
+            }
+
+            at = at + 1
+        }
+    }
+
+    return at
+}
+
+// The end of the field that starts at `at` in `text`, the next space or `last`.
+long FieldEnd(byte* text, long at, long last) {
+    mut long end = at
+    raw {
+        while end < last && text[end] != 32 {
+            end = end + 1
+        }
+    }
+
+    return end
+}
+
+// Whether the `count` bytes at `list`, items parted by `,`, hold the item `item`.
+bool Listed(byte* list, long count, string item) {
+    long itemCount = long(item.Bytes.Count)
+    raw {
+        mut long at = 0
+        while at <= count {
+            mut long end = at
+            while end < count && list[end] != 44 {
+                end = end + 1
+            }
+
+            if end - at == itemCount && Same(list + at, item.Pointer, itemCount) {
+                return true
+            }
+
+            at = end + 1
+        }
+    }
+
+    return false
+}
+
+// Whether the `count` bytes at `a` and at `b` are the same.
+bool Same(byte* a, byte* b, long count) {
+    raw {
+        mut long i = 0
+        while i < count {
+            if a[i] != b[i] {
+                return false
+            }
+
+            i = i + 1
+        }
+    }
+
+    return true
+}
+
+// The `count` bytes at `from` put into `to` at `at`: the place after them.
+long Put(byte* to, long at, byte* from, long count) {
+    raw {
+        mut long i = 0
+        while i < count {
+            to[at + i] = from[i]
+            i = i + 1
+        }
+    }
+
+    return at + count
+}
+
+// Whether the file at `path`, a NUL-ended path, is there, as Rust's `exists` reads it: `stat` gives it.
+bool There(byte* path) {
+    mut bool there = false
+    raw {
+        byte* found = Memory(4096)
+        if found != null {
+            there = stat(path, Ptr<void>(found)) == 0
+            Release(found, 4096)
+        }
+    }
+
+    return there
+}
+
+// The whole number in the file at `path`, a NUL-ended path, the white space around it taken off (`WholeOf`), read
+// into `text` of `room` bytes, which `FileBytes` grows; -1 where it cannot be read or holds no such number.
+long TrimmedWhole(byte* path, mut byte* text, mut long room) {
+    long got = FileBytes(path, mut text, mut room)
+    if got < 0 {
+        return -1
+    }
+
+    mut long first = 0
+    mut long last = got
+    raw {
+        while first < last && (text[first] == 32 || (text[first] >= 9 && text[first] <= 13)) {
+            first = first + 1
+        }
+
+        while last > first && (text[last - 1] == 32 || (text[last - 1] >= 9 && text[last - 1] <= 13)) {
+            last = last - 1
+        }
+    }
+
+    return WholeOf(text + first, last - first)
+}
+
+// The whole number written in the `count` bytes at `text`, in decimal digits after a `+` that may stand first, as Rust
+// reads a `usize`, no greater than the greatest `long`; -1 where they hold none.
+long WholeOf(byte* text, long count) {
+    mut long value = -1
+    raw {
+        mut long i = 0
+        if count > 0 && text[0] == 43 {
+            i = 1
+        }
+
+        if i < count {
+            value = 0
+        }
+
+        while i < count && value >= 0 {
+            long digit = long(text[i]) - 48
+            if digit < 0 || digit > 9 || value > (9223372036854775807 - digit) / 10 {
+                value = -1
+            } else {
+                value = value * 10 + digit
+            }
+
+            i = i + 1
+        }
+    }
+
+    return value
+}
+
+// The bytes of the file at `path`, a NUL-ended path, read to its end into `text`, memory of `room` bytes that `Memory`
+// gave, grown by `Resize` to twice its size where the file fills it: their count, or -1 where the file cannot be opened or
+// read, or the memory cannot be grown. `O_CLOEXEC` is 524288.
+long FileBytes(byte* path, mut byte* text, mut long room) {
+    mut long count = 0
+    raw {
+        int fd = open(path, 524288)
+        if fd < 0 {
+            return -1
+        }
+
+        while count >= 0 {
+            if count == room {
+                byte* grown = Resize(text, room, room * 2)
+                if grown == null {
+                    close(fd)
+                    return -1
+                }
+
+                text = grown
+                room = room * 2
+            }
+
+            long got = read(fd, text + count, room - count)
+            if got == 0 {
+                close(fd)
+                return count
+            }
+
+            if got < 0 {
+                if *__errno_location() != 4 {
+                    count = -1
+                }
+            } else {
+                count = count + got
+            }
+        }
+
+        close(fd)
+    }
+
+    return count
 }
 
 // ---- sockets (design record, section 12) ------------------------------------------------------------

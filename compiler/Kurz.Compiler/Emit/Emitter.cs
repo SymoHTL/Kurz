@@ -206,6 +206,7 @@ public sealed partial class Emitter
             if (runsTests)
             {
                 EmitLogStart();
+                EmitThreadsStart();
                 EmitTestRun();
                 return;
             }
@@ -220,6 +221,7 @@ public sealed partial class Emitter
             }
 
             EmitLogStart(); // P4: `KURZ_LOG`, read before the first statement of a program that logs
+            EmitThreadsStart(); // U35: `KURZ_THREADS`, read before the first statement of a program that spawns
             EmitStatements(program.Tree.Statements);
         });
 

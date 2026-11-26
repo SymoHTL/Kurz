@@ -2304,9 +2304,12 @@ where a program it builds differs from the section: every actor runs on the one 
 runs, each message on a stack of its own ("The runtime"), its state word, and the choice of the one owner of
 each reply of its calls by a swap, changed by atomic operations that hold on any number of threads ("What the
 emitter emits"), while the lifetimes of the message a crash's swap reads and of the record of the waiter's actor,
-which the owner of a reply reads after its store, hold on one thread alone, with no worker thread, no line `threads`
-and no `KURZ_THREADS` read (U35), so that a program started with a `KURZ_THREADS` that U35 refuses, `0`
-among them, runs on the one thread with no error line, and the compiler reads no `project.kz`, so no line
+which the owner of a reply reads after its store, hold on one thread alone, with no worker thread and no line `threads`
+(U35): the start of a program built for Linux with a `spawn` reads `KURZ_THREADS` and ends with `threads-variable`
+where U35 refuses its value, `0` among them, and otherwise keeps the count it gives, or the cores the process may use
+where it is not set, counted as Rust 1.82.0's `available_parallelism` counts them, its affinity and the CPU quota of its
+control group (`ThreadsRead`, `Cores`), while no worker thread is started for that count, and a build for Windows reads
+no `KURZ_THREADS`, its runtime giving no variable of the environment (S14); the compiler reads no `project.kz`, so no line
 of one reaches it, and the top-level code's wait runs the scheduler in place on the
 main thread's stack, where U18 has the main thread sleep beside the worker threads, and messages run only while the top-level
 code waits for a call's result, one message of each actor in turn, so that a `send` made after the

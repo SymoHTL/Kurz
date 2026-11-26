@@ -3173,7 +3173,65 @@ byte LogLower(byte b) {
 
 // The end of a start whose filter is refused (P4): `error: log-filter (<the entry>)` on standard error and the exit code 1.
 void LogRefused(byte* entry, long count) {
-    WriteError("error: log-filter (")
+    StartRefused("error: log-filter (", entry, count)
+}
+
+// The count of worker threads of a program with a `spawn` (U35), which its start reads (`ThreadsRead`); 0 in any other program.
+static mut int workerCount = 0
+
+// The count of worker threads of a program with a `spawn` (U35), `found` as the target's `Variable` gave it for `KURZ_THREADS`:
+// its value, a whole number written in digits alone, above 0 and no greater than 2147483647, the greatest `int`, as tokio reads
+// `TOKIO_WORKER_THREADS`, or the cores the process may use where the variable is not set (`sys.Cores`). Any other value, an empty
+// one among them, ends the process before the program's first statement with `error: threads-variable (<the value>)` on standard
+// error and the exit code 1, and a value that is not UTF-8 with `error: threads-variable (not unicode)`, as a bad `KURZ_LOG` ends it
+// (P5).
+pub void ThreadsRead(int found, string text) {
+    if found == 2 {
+        raw {
+            StartRefused("error: threads-variable (", "not unicode".Pointer, 11)
+        }
+    }
+
+    if found != 0 {
+        int cores = sys.Cores()
+        raw {
+            workerCount = cores
+        }
+
+        return
+    }
+
+    long count = long(text.Bytes.Count)
+    mut long value = 0
+    raw {
+        byte* digits = text.Pointer
+        mut long i = 0
+        while i < count && value >= 0 {
+            long digit = long(digits[i]) - 48
+            if digit < 0 || digit > 9 {
+                value = -1
+            } else {
+                value = value * 10 + digit
+                if value > 2147483647 {
+                    value = -1
+                }
+            }
+
+            i = i + 1
+        }
+
+        if count == 0 || value <= 0 {
+            StartRefused("error: threads-variable (", digits, count)
+        }
+
+        workerCount = int(value)
+    }
+}
+
+// The end of a start whose variable is refused (P4, U35): `head`, the `count` bytes at `entry` and `)` on standard error, and the
+// exit code 1.
+void StartRefused(string head, byte* entry, long count) {
+    WriteError(head)
     mut long done = 0
     while done < count {
         mut long written = -1
