@@ -2306,6 +2306,75 @@ if gate.Open(dialer) < 0 {
 }
 ```
 
+Case: [system/park-busy-scheduler.kz](../corpus/system/park-busy-scheduler.kz)
+```kurz
+// a read that waits in the poller beside an actor that never runs out of work: at each of its turns `Spinner` sends itself the
+// next, so that the one thread's scheduler always has an actor to run and never waits in the poller, and it reads the poller with
+// no wait every so many turns (S10), so that the connect, the `Accept` and the byte the top-level code writes each reach their
+// wait; a scheduler that read the poller only once it had nothing to run would run `Spinner` without end. The end of the read
+// stops `Spinner`, and the top-level code's call of `Got` waits in `Client`'s inbox behind `Run` (U17)
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+actor Spinner {
+    mut bool stopped = false
+
+    pub void Spin() {
+        if !stopped {
+            send this.Spin()
+        }
+    }
+
+    pub void Stop() {
+        stopped = true
+    }
+}
+
+actor Client {
+    mut string got = ""
+
+    pub void Run(int port, Spinner s) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => {
+                got = "connect {e.Kind}"
+                send s.Stop()
+                return
+            }
+        }
+
+        mut buffer = Bytes()
+        match stream.Read(mut buffer, 1) {
+            int n => got = "read {n} {Text(buffer)}"
+            IoError e => got = "read {e.Kind}"
+        }
+
+        send s.Stop()
+    }
+
+    pub string Got() => got
+}
+
+void | IoError Main() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    s = spawn Spinner()
+    send s.Spin()
+    c = spawn Client()
+    send c.Run(listener.Port, s)
+    server = listener.Accept()
+    server.Write("x".Bytes)
+    print(c.Got())
+}
+
+Main() else {
+    IoError e => print(e)
+}
+```
+
 ### S11 (decided, §12) Not on Windows
 
 In a build for Windows, a call of this chapter is `not supported`, and the runtime of Windows gives
