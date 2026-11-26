@@ -302,6 +302,8 @@ pub void BlockingWaiter(extern "C" (byte*) => long wait, extern "C" () => int of
 
 pub long PoolEvent() => -4099
 
+pub int* PoolFlag() => null
+
 pub long Submit(byte* job) => -4099
 
 pub byte* PoolDone() => null

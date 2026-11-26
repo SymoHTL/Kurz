@@ -5365,7 +5365,7 @@ thread static mut long handed = 0
 thread static mut long poolEvent = -1
 
 // The wait of a call on a file or a pipe handed to the pool of threads for blocking calls (`sys.BlockingWaiter`; issue 661; section
-// 12, the owner, 2026-10-30, "Readiness I/O, as Tokio"; S10): the pool's `eventfd` armed in the poller for `EPOLLIN` (1), and the
+// 12, the owner, 2026-10-30, "Readiness I/O, as Tokio"; S10): the pool's `eventfd` armed in the poller (`PoolArm`), and the
 // job queued (`sys.Submit`) with a block shaped as `SocketWaited`'s, with no deadline, at 40 the mark -1, so that a fall drops the
 // job (`Fall`), and at 48 the job, whose block at 24 it is. Inside a message the activation parks until the job is done, and the
 // calls of its chain are let in above it (U17); the top-level code runs what its wait on a call runs (`RootLoop`); and the wait
@@ -5383,7 +5383,7 @@ extern "C" long BlockingWaited(byte* job) {
             return event
         }
 
-        long armed = sys.PollAdd(int(event), 1, sys.EpollDataAt())
+        long armed = PoolArm(event)
         if armed < 0 {
             sys.Left()
             return armed
@@ -5457,8 +5457,8 @@ extern "C" int BlockingOffloads() {
 
 // The jobs of the pool of threads for blocking calls done since the last look (`sys.PoolDone`), at the event of the pool's
 // `eventfd` (`Polled`): each job's wait ended with 1 (`Ended`), whose call reads the job's result (`BlockingWaited`), or the job
-// given back where its actor fell while it ran (`Fall`); the `eventfd`'s registration is armed again while a job is handed, since
-// `EPOLLONESHOT` disarms it at each event.
+// given back where its actor fell while it ran (`Fall`); the `eventfd`'s registration is armed again while a job is handed
+// (`PoolArm`), since `EPOLLONESHOT` disarms it at each event.
 void PoolDrain() {
     raw {
         mut byte* done = sys.PoolDone()
@@ -5476,9 +5476,28 @@ void PoolDrain() {
         }
 
         if handed > 0 {
-            sys.PollAdd(int(poolEvent), 1, sys.EpollDataAt())
+            PoolArm(poolEvent)
         }
     }
+}
+
+// The registration of the pool's `eventfd` `event` in the poller for `EPOLLIN` (1) armed where it is not (`sys.PoolFlag`, which
+// `sys.PoolDone` clears at its event, `EPOLLONESHOT`), so that a call handed while a job runs makes no call of `epoll_ctl`: 0, or the
+// failure of the poller.
+long PoolArm(long event) {
+    raw {
+        int* armed = sys.PoolFlag()
+        if *armed == 0 {
+            long added = sys.PollAdd(int(event), 1, sys.EpollDataAt())
+            if added < 0 {
+                return added
+            }
+
+            *armed = 1
+        }
+    }
+
+    return 0
 }
 
 // The scheduler's wait in the poller for at most `nanoseconds` (`IdleWait`), or its look with no wait (`RunTurn`): each wait of a

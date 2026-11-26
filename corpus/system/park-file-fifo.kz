@@ -47,6 +47,10 @@ actor Reader {
 }
 
 void | IoError | ExitError Main() {
+    if File.Exists("park-file-fifo") {
+        File.Delete("park-file-fifo")
+    }
+
     Command.New("mkfifo").Arg("park-file-fifo").Status()
     r = spawn Reader()
     t = spawn Ticker()

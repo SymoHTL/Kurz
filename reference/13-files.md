@@ -2350,6 +2350,10 @@ actor Reader {
 }
 
 void | IoError | ExitError Main() {
+    if File.Exists("park-file-fifo") {
+        File.Delete("park-file-fifo")
+    }
+
     Command.New("mkfifo").Arg("park-file-fifo").Status()
     r = spawn Reader()
     t = spawn Ticker()
@@ -2454,6 +2458,57 @@ void | IoError | ExitError Main() {
     print(r.Read())
     File.Delete("park-file-crash")
     File.Delete("park-file-crash.txt")
+}
+
+Main() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}
+```
+
+Case: [system/park-command-fifo.kz](../corpus/system/park-command-fifo.kz)
+```kurz
+// `Runner` waits for a child, `cat` of a FIFO, which ends only once a writer opens the FIFO and closes it, and the wait for the
+// child and its output runs on the pool of threads for blocking calls while `Runner` parks (S10), so that the one thread runs
+// `Ticker` meanwhile and the top-level code goes on to write the FIFO. A runtime that waited for the child on the thread that runs
+// every actor would wait without end, since nothing could open the FIFO to write
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+actor Ticker {
+    pub string Tick() => "tick"
+}
+
+actor Runner {
+    mut string got = ""
+
+    pub void Run() {
+        match Command.New("cat").Arg("park-command-fifo").Output() {
+            ProcessOutput o => got = "out {Text(o.Stdout)}"
+            IoError e => got = "run {e.Kind}"
+            ExitError e => got = "exit {e}"
+        }
+    }
+
+    pub string Got() => got
+}
+
+void | IoError | ExitError Main() {
+    Command.New("mkfifo").Arg("park-command-fifo").Status()
+    r = spawn Runner()
+    t = spawn Ticker()
+    send r.Run()
+    print(t.Tick())
+    w = File.Create("park-command-fifo")
+    w.Write("x".Bytes)
+    w.Close()
+    print(r.Got())
+    File.Delete("park-command-fifo")
 }
 
 Main() else {
@@ -3295,6 +3350,8 @@ Run() else {
     }
 }
 ```
+
+Case: [system/park-command-fifo.kz](../corpus/system/park-command-fifo.kz)
 
 ### S19 (decided, §12) A child beside the program, and its input
 
