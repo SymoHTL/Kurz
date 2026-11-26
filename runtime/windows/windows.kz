@@ -295,6 +295,27 @@ pub long PollWait(long nanoseconds, byte* ready, long count, long dataAt) => 0
 
 pub long EpollDataAt() => 0
 
+// The pool of threads for blocking calls of `runtime/common/` on Windows, where a build makes no call on a file (S11), so that no
+// call is handed to it (issue 661): no waiter is kept, no pool is made and no job is done.
+pub void BlockingWaiter(extern "C" (byte*) => long wait, extern "C" () => int offloads) {
+}
+
+pub void ManyWaiter(extern "C" (int*, int, long) => int wait) {
+}
+
+pub long PoolEvent() => -4099
+
+pub int* PoolFlag() => null
+
+pub long Submit(byte* job) => -4099
+
+pub byte* PoolDone() => null
+
+pub long PoolHeld() => -1
+
+pub void JobDropped(byte* job) {
+}
+
 // The bound of a call that waits where no `within` names another, 5 seconds in nanoseconds (U36), the value
 // Linux's runtime gives its sockets and its calls, which a test holds equal.
 pub long DefaultBound() => 5000000000
