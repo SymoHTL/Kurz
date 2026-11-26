@@ -1,11 +1,15 @@
 // expect: output
 // | b read 2;a read 1;
 // | true
+// threads: 1
 // rules: S10
 
 // two actors read a byte each from a connection of their own, and the byte of `b`'s comes first: `b` reads it while `a` still
-// waits, since each read that would block parks its actor under `epoll` (S10), and `a` reads its byte once it comes; a thread that
-// blocked in `a`'s read would hold `b` for the read's bound, 5 seconds by default (S9), past the 2 seconds the last line allows
+// waits, since each read that would block parks its actor under `epoll` (S10), and `a` reads its byte once it comes. The top-level
+// code writes `a`'s byte once `b`'s line stands and prints once both stand, each wait bounded by the 2 seconds the last line holds
+// the run to, so that it prints `true` where each read ended at its byte, and not at its bound of 5 seconds (S9). A thread that
+// blocked in a call on a socket would run no actor at the first `Accept` and wait there without end, since `Accept` has no
+// bound, as `park-accept-first.kz` says
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
@@ -16,12 +20,23 @@ string Text(Bytes bytes) {
 
 actor Journal {
     mut string lines = ""
+    mut int count = 0
 
     pub void Add(string line) {
         lines = "{lines}{line};"
+        count = count + 1
     }
 
     pub string Lines() => lines
+
+    pub int Count() => count
+}
+
+// waits until the journal holds `count` lines, or until 2 seconds passed since `start`
+void WaitFor(Journal journal, int count, instant start) {
+    while journal.Count() < count && instant.Now - start < 2s {
+        Environment.Sleep(1ms)
+    }
 }
 
 actor Client(Journal Lines, string Name) {
@@ -52,9 +67,9 @@ void | IoError Main() {
     second = listener.Accept()
     start = instant.Now
     second.Write("2".Bytes)
-    Environment.Sleep(50ms)
+    WaitFor(journal, 1, start)
     first.Write("1".Bytes)
-    Environment.Sleep(50ms)
+    WaitFor(journal, 2, start)
     print(journal.Lines())
     print(instant.Now - start < 2s)
 }

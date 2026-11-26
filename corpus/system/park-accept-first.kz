@@ -4,7 +4,9 @@
 
 // the top-level code's `Accept` waits for a connection that only an actor makes: it parks the root actor under `epoll`, so that
 // the actor's `Run` runs, connects and parks on its own read, and the byte the top-level code writes after the `Accept` reaches
-// that read (S10); a thread that blocked in the `Accept` would run no actor and wait without end, since `Accept` has no bound
+// that read (S10); a thread that blocked in the `Accept` would run no actor and wait without end, since `Accept` has no bound.
+// The top-level code's `send` and its call of `Got` each start a chain of their own (U17), so that `Got` is not let in over the
+// parked read: it waits in `Client`'s inbox behind `Run` and reads what the read took
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"

@@ -2721,6 +2721,70 @@ if gate.Open(dialer) < 0 {
 }
 ```
 
+Case: [system/park-read-close.kz](../corpus/system/park-read-close.kz)
+```kurz
+// `Shut`, a call of the chain, is let in while `Run` waits in the poller on its read, and its `Close` shuts the socket down, whose
+// event wakes the read: the read in flight ends with the closed handle's error, `EBADF`, 9 (S5), at once and not at its bound of
+// 5 seconds (S9), since the shutdown reaches the poller as any event does (S10). The top-level code prints both lines: its call of
+// `Result`, of a chain of its own, waits in `Helper`'s inbox behind `Poke` (U17), so that the order of the lines rests on no
+// order of the scheduler
+actor Helper {
+    mut string result = "none"
+
+    pub void Poke(Holder h) {
+        result = "shut {h.Shut()}"
+    }
+
+    pub string Result() => result
+}
+
+actor Holder {
+    mut TcpStream? held = null
+
+    pub string Run(Helper helper, int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return "connect {e.Kind}"
+        }
+
+        held = stream
+        send helper.Poke(this)
+        start = instant.Now
+        mut buffer = Bytes()
+        got = match stream.Read(mut buffer, 1) {
+            int n => "read {n}"
+            IoError e => "{e.Kind} {e.Code}"
+        }
+
+        return "{got} {instant.Now - start < 2s}"
+    }
+
+    pub int Shut() {
+        s = held
+        if s == null {
+            return 0
+        }
+
+        s.Close() else {
+            IoError e => return -e.Code
+        }
+
+        return 1
+    }
+}
+
+void | IoError Main() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    helper = spawn Helper()
+    h = spawn Holder()
+    print(h.Run(helper, listener.Port))
+    print(helper.Result())
+}
+
+Main() else {
+    IoError e => print(e)
+}
+```
+
 ### U18 (decided, §6) A wait of the top-level code that nothing can end
 
 The top-level code's call that waits sleeps on the main thread until its reply is set, while the

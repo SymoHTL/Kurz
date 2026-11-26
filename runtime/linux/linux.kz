@@ -2779,7 +2779,9 @@ long WaitReady(int fd, int events, long nanoseconds) {
 // The bound of the socket `fd` for its reads and its `accept`, with `option` `SO_RCVTIMEO` (20), or for its writes, with
 // `SO_SNDTIMEO` (21), in nanoseconds, which `SetTimeout` keeps in the option and the poller's timer measures (section 12,
 // 2026-11-13, "Same bounds, poller timer"), since the socket does not block and the kernel measures nothing: the largest `long`
-// where the option holds no bound, -1 where it cannot be read, a descriptor that is no socket among them (`Ready`).
+// where the option holds no bound, -1 where it cannot be read, a descriptor that is no socket among them (`Ready`). Linux keeps
+// the option in its ticks (`sock_set_timeout`), so that a bound reads back rounded up to the tick of the kernel's `HZ`, 4 ms at
+// an `HZ` of 250, and a bound past the kernel's greatest reads back as none.
 long SocketBound(int fd, int option) {
     mut long bound = 9223372036854775807
     raw {
@@ -3150,7 +3152,9 @@ long Bounded(int fd) {
 // the clock read again says the time ran out; an event without `POLLERR` (8) or `POLLHUP` (16) is the
 // connection made, and one with either is the error `SO_ERROR` (4) gives. 0; -4100 where the time ran out;
 // the failure of the poller, of `poll` or of the connection; or -4099, `Other` with the number 0, where
-// `SO_ERROR` holds none, where Rust gives `Uncategorized`.
+// `SO_ERROR` holds none, where Rust gives `Uncategorized`. The wait in the poller lets the calls of the activation's chain run
+// above it (U17), and they may use the page at `held`: nothing written to the page before the wait is read after it, since the
+// clock, the `pollfd` and the option are each written and read with no wait between.
 long Connected(int fd, long deadline, byte* held) {
     mut long result = -4099
     mut bool waiting = true

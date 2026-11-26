@@ -5132,7 +5132,9 @@ void Park(long deadline) {
 // The registrations of the poller whose wait has not ended (`SocketWaited`): where it is above 0, the scheduler that has nothing
 // to run waits in the poller (`IdleWait`), and the top-level code's wait that finds nothing else left waits there too and
 // raises no `deadlock` (`RootLoop`; section 6: a deadlock where no timer is pending and the poller holds no registration, as Go's
-// `checkdead` counts its netpoller).
+// `checkdead` counts its netpoller). The count and the waits are the thread's, and the poller is the process's: this build runs
+// every actor on its one thread (U35, `compiler/README.md`), where the two are the same; a second thread that waited in the
+// poller would take the events of the first one's registrations.
 thread static mut long polled = 0
 
 // The events that `sys.PollWait` gives, at most 64 of two words, a descriptor and the events it gives, taken of the thread's own
