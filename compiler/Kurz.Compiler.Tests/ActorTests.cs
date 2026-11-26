@@ -1108,7 +1108,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void A_million_idle_actors_take_at_most_512_bytes_each_and_no_cpu_time()
+    public void A_million_idle_actors_take_at_most_512_bytes_each_and_5_ticks_of_the_cpu_in_a_second()
     {
         // section 6, "An idle actor costs no CPU and a few hundred bytes. Millions run on a handful of OS threads", and section 13, "an
         // idle actor at most 512 bytes" (the owner, 2026-11-15, #519, comment 6902210646, Q6, "Small growing pages"): 1,000,000 actors
