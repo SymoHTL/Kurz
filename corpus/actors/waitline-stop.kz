@@ -1,0 +1,37 @@
+// expect: throws actor-gone at 37
+// | ActorGone
+// | 1
+// threads: 1
+// rules: U25, U28, U62
+
+// `Right` gets `deadlock` and its policy stops it: `Left`'s call queued in its inbox raises `actor-gone`, which `Left`'s block
+// reads, and `Left` restarts and answers the top-level code's call (U62, U25, U28)
+
+actor Left {
+    pub void Ask(Right other) {
+        print("left got {other.Value()}")
+    }
+
+    pub int Value() => 1
+}
+
+actor Right {
+    pub void Ask(Left other) {
+        print("right got {other.Value()}")
+    }
+
+    pub int Value() => 2
+}
+
+l = spawn Left() on crash (c) {
+    match c.Reason {
+        RuntimeError e => print(e.Kind)
+    }
+
+    restart
+}
+r = spawn Right() on crash stop
+send l.Ask(r)
+send r.Ask(l)
+print(l.Value())
+print(r.Value())

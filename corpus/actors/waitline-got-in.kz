@@ -1,0 +1,45 @@
+// expect: throws callee-crashed at 45
+// threads: 1
+// rules: U20, U60, U62
+
+// `A`'s `F` waits on `B`'s `G`, which waits on `C`'s `H`, whose call of `B`'s `K` gets in by its chain and runs above `G`; `K`
+// waits on `D`, busy in `Y`, which waits on `C`, busy in `H`: the line goes on through `K`, the activation that runs the call
+// that got in (U60), and `B`'s wait closes the loop and gets `deadlock` at `K`'s call (U62); under the default policy `C`'s `H`
+// and then `A`'s `F` get `callee-crashed`, and so does the top-level code's call (U20)
+
+actor E {
+    pub int Delay() => 1
+}
+
+actor C {
+    pub int H(B b) => b.K()
+
+    pub int Z() => 3
+}
+
+actor B(D Last, C Mid) {
+    pub int G() => Mid.H(this)
+
+    pub int K() => Last.X()
+}
+
+actor D(E Slow) {
+    pub void Y(C c) {
+        t = Slow.Delay()
+        print("y got {c.Z() + t}")
+    }
+
+    pub int X() => 4
+}
+
+actor A {
+    pub int F(B b) => b.G()
+}
+
+ae = spawn E()
+ad = spawn D(ae)
+ac = spawn C()
+ab = spawn B(ad, ac)
+aa = spawn A()
+send ad.Y(ac)
+print(aa.F(ab))

@@ -578,12 +578,15 @@ public sealed class CommandTests : IDisposable
     {
         // Y5, Q2, F5: the test waits on its child, whose block of `on crash` runs in the test's actor once the test's message ends; the
         // runner's wait finds nothing left to run, fails the test at the test's line, since a parked wait keeps no place of its own,
-        // raises nothing, and runs the test after it
+        // lists the loop's waits under it, each with its chain ID (U64), raises nothing, and runs the test after it
         var source = Path.Combine(root, "deadlock.kz");
         File.WriteAllText(source, "actor Worker {\n    pub void Fail() {\n        throw \"down\"\n    }\n\n    pub int Get() => 1\n}\n\n"
             + "test \"waits\" {\n    w = spawn Worker() on crash (c) {\n        restart\n    }\n\n    send w.Fail()\n    print(w.Get())\n}\n\n"
             + "test \"after\" {\n    print(\"after\")\n}\n");
-        Assert.Equal((1, $"test \"waits\" ... FAILED\n    deadlock at {source}:9\nafter\ntest \"after\" ... ok\n2 tests: 1 passed, 1 failed\n", ""), KurzWithPlaces("test", source));
+        var run = KurzWithPlaces("test", source);
+        Assert.Equal((1, $"test \"waits\" ... FAILED\n    deadlock at {source}:9\n    test#1 waits at {source}:15 on Worker#2 in chain <chain>\n"
+            + "    Worker#2 waits for the decision of test#1 on its crash in chain <chain>\nafter\ntest \"after\" ... ok\n2 tests: 1 passed, 1 failed\n", ""),
+            (run.Code, RunTests.Chains(run.Output), run.Error));
     }
 
     [Fact]
