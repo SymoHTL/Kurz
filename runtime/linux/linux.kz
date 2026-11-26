@@ -70,6 +70,15 @@ extern "C" {
     int epoll_ctl(int poller, int operation, int fd, void* event)
     int epoll_wait(int poller, void* events, int count, int timeout)
     int pthread_atfork(void* prepare, void* parent, extern "C" () => void child)
+    int pthread_attr_init(void* attributes)
+    int pthread_attr_setstacksize(void* attributes, long size)
+    int pthread_attr_setdetachstate(void* attributes, int state)
+    int pthread_create(long* thread, void* attributes, extern "C" (byte*) => byte* start, byte* argument)
+    int pthread_mutex_lock(void* mutex)
+    int pthread_mutex_unlock(void* mutex)
+    int pthread_cond_signal(void* condition)
+    int pthread_cond_timedwait(void* condition, void* mutex, void* time)
+    int eventfd(int value, int options)
 }
 
 // The platform's unwinder, libgcc_s's, which the trace walks the stack with (design record, section 6),
@@ -2085,6 +2094,32 @@ long Checked(long result) {
 // it: `O_RDONLY` is 0 and `O_WRONLY | O_CREAT | O_TRUNC` 577, each with `O_CLOEXEC`, 524288, since
 // Rust's standard library opens every descriptor close-on-exec.
 pub long OpenFile(byte* path, bool create) {
+    mut long length = 0
+    raw {
+        while int(path[length]) != 0 {
+            length = length + 1
+        }
+    }
+
+    byte* job = Handing(3, -1, length + 1)
+    if job != null {
+        raw {
+            mut long i = 0
+            while i <= length {
+                job[64 + i] = path[i]
+                i = i + 1
+            }
+
+            if create {
+                *Ptr<long>(job + 40) = 1
+            }
+        }
+
+        long opened = Handed(job)
+        Unhanded(job)
+        return opened
+    }
+
     mut int options = 524288
     if create {
         options = 524288 + 577
@@ -2105,8 +2140,24 @@ pub long OpenFile(byte* path, bool create) {
 // Up to `count` bytes of the file `fd` read to `bytes`: their count, 0 at the end of the file. A read of a socket, which the
 // runtime makes non-blocking, that would block (`EAGAIN`, 11) waits in the poller for `EPOLLIN` (1) within the socket's bound
 // (`Ready`) and is made again, as Tokio's `PollEvented` reads (issue 658): a socket with bytes ready costs no call of the
-// poller. A file or a pipe keeps its `EAGAIN`.
+// poller. A file or a pipe keeps its `EAGAIN`. A read the pool of threads for blocking calls makes (`Handing`) reads into the job's
+// own bytes, copied to `bytes` once it is done.
 pub long ReadFile(int fd, byte* bytes, long count) {
+    byte* job = Handing(1, fd, count)
+    if job != null {
+        long got = Handed(job)
+        raw {
+            mut long i = 0
+            while i < got {
+                bytes[i] = job[64 + i]
+                i = i + 1
+            }
+        }
+
+        Unhanded(job)
+        return got
+    }
+
     mut long result = -1
     mut bool blocked = true
     while blocked {
@@ -2149,8 +2200,24 @@ pub long Seek(int fd, long offset) {
 // The `count` bytes at `bytes` written to the file `fd`, `write` called again with the rest where it
 // took a part, as `print` writes and Rust's `write_all` does: `count`, or the bytes written before a
 // call that took none, which is `WriteZero` to the caller, or the failure of the call that failed. A write of a socket that
-// would block (`EAGAIN`, 11) waits in the poller for `EPOLLOUT` (4) within the socket's bound and is made again (`Writable`).
+// would block (`EAGAIN`, 11) waits in the poller for `EPOLLOUT` (4) within the socket's bound and is made again (`Writable`). A
+// write the pool of threads for blocking calls makes (`Handing`) writes the job's own bytes, which `bytes` are copied to first.
 pub long WriteFile(int fd, byte* bytes, long count) {
+    byte* job = Handing(2, fd, count)
+    if job != null {
+        raw {
+            mut long i = 0
+            while i < count {
+                job[64 + i] = bytes[i]
+                i = i + 1
+            }
+        }
+
+        long wrote = Handed(job)
+        Unhanded(job)
+        return wrote
+    }
+
     mut long done = 0
     while done < count {
         mut long written = -1
@@ -2191,8 +2258,9 @@ long Writable(int fd) {
 
 // The file `fd` closed: 0, or the failure of `close`, of which an interrupt is none: Linux lets go of
 // the descriptor before the signal, so that it is not closed again, as Rust's standard library does
-// not close it again.
+// not close it again. A socket's mark is taken off (`Mark`), since its number is the next descriptor's.
 pub long CloseFile(int fd) {
+    Mark(fd, false)
     mut long result = 0
     raw {
         int* error = __errno_location()
@@ -2632,7 +2700,9 @@ pub int Variable(byte* key, mut string value) {
 // connection in progress at 144, 8 bytes; the error `SO_ERROR` gives at 152 and its length at 156; the
 // `struct timespec` of the monotonic clock at 160, 16 bytes; the `struct epoll_event` of a registration in the
 // poller at 176, 16 bytes, and the 8 bytes of its data at 192 (`PollAdd`, `PollWait`); the wait of a call that would
-// block at 200, 8 bytes (`Waiter`); and the events `epoll_wait` gives at 256, at most 64 of 16 bytes.
+// block at 200, 8 bytes (`Waiter`); the wait of a call handed to the pool of threads for blocking calls at 208 and
+// whether a call is handed at 216, 8 bytes each (`BlockingWaiter`); the wait of `Drive` in the poller at 224, 8 bytes
+// (`ManyWaiter`); and the events `epoll_wait` gives at 256, at most 64 of 16 bytes.
 thread static mut byte* endpoints = null
 
 // The page above, mapped where this thread has none yet: its address, or null where the system refuses it.
@@ -2688,12 +2758,515 @@ static mut bool forkHeld = false
 
 // The poller dropped in the child of a `fork`, which shares its parent's (`pthread_atfork`): one `epoll` that two processes wait
 // on gives an event to the wait of either, with a block of the other's memory, so that the child's next registration makes a
-// poller of its own (`Poller`), as libuv's `uv_loop_fork` and libevent's `event_reinit` make the loop again in a child.
+// poller of its own (`Poller`), as libuv's `uv_loop_fork` and libevent's `event_reinit` make the loop again in a child. The pool of
+// threads for blocking calls is dropped too (`pool`), whose threads the child has none of and whose mutex a thread of the parent
+// may have held at the `fork`, so that the child's first job makes a pool of its own (`PoolMade`).
 extern "C" void Forked() {
     raw {
         if poller >= 0 {
             close(poller)
             poller = -1
+        }
+
+        if pool != null {
+            close(*Ptr<int>(pool + 160))
+            pool = null
+        }
+    }
+}
+
+// The pool of threads for blocking calls of the process (issue 661; section 12, the owner, 2026-10-30, "Readiness I/O, as Tokio";
+// S10), as Tokio's blocking pool runs `std::fs` under `spawn_blocking`: a call on a file or a pipe that an actor's message makes
+// is handed to it as a job (`Handing`), and the actor parks while a thread of the pool makes the call (`Handed`). Mapped at the
+// first job, null before it (`PoolMade`): at 0 its mutex and at 64 its condition, zeroed as the C library's initializers are,
+// with room for either architecture's; at 128 and 136 the first and the last job queued; at 144 and 176 the first and the last
+// job done; at 152 the count of idle threads, at 156 the count of threads, at 160 the `eventfd` that a job done signals, at 168
+// the count of idle threads woken for a job that have not taken one (Tokio's `num_notify`); at 184 the 8 bytes the scheduler
+// reads that `eventfd` into, at 192 whether the `eventfd`'s registration in the poller is armed (`PoolFlag`), at 248 the
+// identity of a thread started and at 256 its attributes (`Started`), which only the thread that runs every actor writes (U35).
+static mut byte* pool = null
+
+// The pool of threads for blocking calls made where it is not (`pool`): 0, or the failure of the memory, of `eventfd`, made with
+// `EFD_CLOEXEC | EFD_NONBLOCK` (526336), or of `pthread_atfork`, which drops the pool in the child of a `fork` (`Forked`).
+long PoolMade() {
+    raw {
+        if pool != null {
+            return 0
+        }
+
+        byte* made = Memory(4096)
+        if made == null {
+            return -12
+        }
+
+        int event = eventfd(0, 526336)
+        if event < 0 {
+            long failure = -long(*__errno_location())
+            Release(made, 4096)
+            return failure
+        }
+
+        if !forkHeld {
+            int held = pthread_atfork(null, null, Forked)
+            if held != 0 {
+                close(event)
+                Release(made, 4096)
+                return -long(held)
+            }
+
+            forkHeld = true
+        }
+
+        *Ptr<int>(made + 160) = event
+        pool = made
+    }
+
+    return 0
+}
+
+// The `eventfd` of the pool of threads for blocking calls, which the scheduler registers in the poller and whose event takes the
+// jobs done at (`PoolDone`), the pool made where it is not (`PoolMade`): the descriptor, or the failure.
+pub long PoolEvent() {
+    long made = PoolMade()
+    if made < 0 {
+        return made
+    }
+
+    raw {
+        return long(*Ptr<int>(pool + 160))
+    }
+}
+
+// The `eventfd` of the pool of threads for blocking calls where the pool is made, with no pool made for it, -1 where none is, as in
+// the child of a `fork` before its first job (`Forked`), where a descriptor of the child can take the number the parent's had.
+pub long PoolHeld() {
+    raw {
+        if pool == null {
+            return -1
+        }
+
+        return long(*Ptr<int>(pool + 160))
+    }
+}
+
+// The flag of the pool of threads for blocking calls at 192, 1 while the registration of its `eventfd` in the poller is armed,
+// which the scheduler sets where it arms it and `PoolDone` clears at its event: its address, after `PoolEvent` made the pool.
+pub int* PoolFlag() {
+    raw {
+        return Ptr<int>(pool + 192)
+    }
+}
+
+// The job `job` queued for the pool of threads for blocking calls (`Handing`), made where it is not (`PoolMade`), and an idle
+// thread woken for it, or a thread started where none is idle and fewer than 512 run, Tokio's default bound (issue 661, Q10,
+// *(assumed)*), as Tokio's `Spawner::spawn_task` wakes or starts one; a job queued while 512 threads are busy waits for the first
+// that is free (issue 661, Q5): 0, the failure of the pool, or -4101, which no error number is, where the system refuses a thread
+// and no thread of the pool runs (`Started`).
+pub long Submit(byte* job) {
+    long made = PoolMade()
+    if made < 0 {
+        return made
+    }
+
+    mut bool start = false
+    raw {
+        byte* at = pool
+        pthread_mutex_lock(Ptr<void>(at))
+        *Ptr<byte*>(job) = null
+        if *Ptr<byte*>(at + 128) == null {
+            *Ptr<byte*>(at + 128) = job
+        } else {
+            *Ptr<byte*>(*Ptr<byte*>(at + 136)) = job
+        }
+
+        *Ptr<byte*>(at + 136) = job
+        if *Ptr<int>(at + 152) > 0 {
+            *Ptr<int>(at + 152) = *Ptr<int>(at + 152) - 1
+            *Ptr<int>(at + 168) = *Ptr<int>(at + 168) + 1
+            pthread_cond_signal(Ptr<void>(at + 64))
+        } else if *Ptr<int>(at + 156) < 512 {
+            *Ptr<int>(at + 156) = *Ptr<int>(at + 156) + 1
+            start = true
+        }
+
+        pthread_mutex_unlock(Ptr<void>(at))
+    }
+
+    if start {
+        return Started(job)
+    }
+
+    return 0
+}
+
+// A thread of the pool started for the job `job` (`Submit`), detached (1), with 2 MiB of stack, Tokio's default (issue 661, Q9,
+// *(assumed)*), and a page of its own (`PoolThread`): 0. Where the system refuses the page or the thread, the count of threads is
+// lowered again: 0 where another thread of the pool runs, which takes the job from the queue (issue 661, Q2, (c)), else -4101 with
+// the job taken out of the queue, where the scheduler ends the process (Q2, (a)).
+long Started(byte* job) {
+    raw {
+        byte* at = pool
+        byte* own = Memory(4096)
+        if own != null {
+            *Ptr<byte*>(own) = at
+            void* attributes = Ptr<void>(at + 256)
+            pthread_attr_init(attributes)
+            pthread_attr_setstacksize(attributes, 2097152)
+            pthread_attr_setdetachstate(attributes, 1)
+            int refused = pthread_create(Ptr<long>(at + 248), attributes, PoolThread, own)
+            pthread_attr_destroy(attributes)
+            if refused == 0 {
+                return 0
+            }
+
+            Release(own, 4096)
+        }
+
+        pthread_mutex_lock(Ptr<void>(at))
+        *Ptr<int>(at + 156) = *Ptr<int>(at + 156) - 1
+        bool none = *Ptr<int>(at + 156) == 0
+        if none {
+            mut byte* previous = null
+            mut byte* each = *Ptr<byte*>(at + 128)
+            while each != null && each != job {
+                previous = each
+                each = *Ptr<byte*>(each)
+            }
+
+            if each == job {
+                if previous == null {
+                    *Ptr<byte*>(at + 128) = *Ptr<byte*>(job)
+                } else {
+                    *Ptr<byte*>(previous) = *Ptr<byte*>(job)
+                }
+
+                if *Ptr<byte*>(at + 136) == job {
+                    *Ptr<byte*>(at + 136) = previous
+                }
+            }
+        }
+
+        pthread_mutex_unlock(Ptr<void>(at))
+        if none {
+            return -4101
+        }
+    }
+
+    return 0
+}
+
+// A thread of the pool of threads for blocking calls (`Started`), its page at `own`: the pool at 0, at 16 the deadline of its idle
+// wait, at 32 the 8 bytes it adds to the pool's `eventfd`. It takes the queue's jobs first in, first out, makes each call outside
+// the pool's mutex (`JobRun`), puts the job among the jobs done and signals the `eventfd`; with none queued it waits idle for 10
+// seconds, Tokio's default keep-alive (issue 661, Q10, *(assumed)*), on the clock `pthread_cond_timedwait` reads by default,
+// `CLOCK_REALTIME` (0), and ends where no job woke it within them (`ETIMEDOUT`, 110), as Tokio's `Inner::run` ends a thread, its
+// page and the page of its calls (`Endpoints`) given back.
+extern "C" byte* PoolThread(byte* own) {
+    raw {
+        byte* at = *Ptr<byte*>(own)
+        *Ptr<long>(own + 32) = 1
+        pthread_mutex_lock(Ptr<void>(at))
+        mut bool running = true
+        while running {
+            while *Ptr<byte*>(at + 128) != null {
+                byte* job = *Ptr<byte*>(at + 128)
+                *Ptr<byte*>(at + 128) = *Ptr<byte*>(job)
+                if *Ptr<byte*>(at + 128) == null {
+                    *Ptr<byte*>(at + 136) = null
+                }
+
+                pthread_mutex_unlock(Ptr<void>(at))
+                JobRun(job)
+                pthread_mutex_lock(Ptr<void>(at))
+                *Ptr<byte*>(job) = null
+                if *Ptr<byte*>(at + 144) == null {
+                    *Ptr<byte*>(at + 144) = job
+                } else {
+                    *Ptr<byte*>(*Ptr<byte*>(at + 176)) = job
+                }
+
+                *Ptr<byte*>(at + 176) = job
+                pthread_mutex_unlock(Ptr<void>(at))
+                write(*Ptr<int>(at + 160), own + 32, 8)
+                pthread_mutex_lock(Ptr<void>(at))
+            }
+
+            *Ptr<int>(at + 152) = *Ptr<int>(at + 152) + 1
+            mut bool waiting = true
+            while waiting {
+                clock_gettime(0, Ptr<void>(own + 16))
+                *Ptr<long>(own + 16) = *Ptr<long>(own + 16) + 10
+                int waited = pthread_cond_timedwait(Ptr<void>(at + 64), Ptr<void>(at), Ptr<void>(own + 16))
+                if *Ptr<int>(at + 168) > 0 {
+                    *Ptr<int>(at + 168) = *Ptr<int>(at + 168) - 1
+                    waiting = false
+                } else if waited == 110 {
+                    *Ptr<int>(at + 152) = *Ptr<int>(at + 152) - 1
+                    *Ptr<int>(at + 156) = *Ptr<int>(at + 156) - 1
+                    waiting = false
+                    running = false
+                }
+            }
+        }
+
+        pthread_mutex_unlock(Ptr<void>(at))
+        if endpoints != null {
+            Release(endpoints, 4096)
+            endpoints = null
+        }
+
+        Release(own, 4096)
+    }
+
+    return null
+}
+
+// The call of the job `job` made on the thread of the pool that took it (`PoolThread`), by the code that makes it on any thread,
+// since that thread's page holds no waiter of blocking calls (`Handing`), its result put at 16: kind 1 a read of the descriptor at
+// 40 into the job's bytes at 64, 2 a write of them, 3 the opening of the path at 64, to write where 40 holds 1.
+void JobRun(byte* job) {
+    mut long result = -22
+    raw {
+        long kind = *Ptr<long>(job + 8)
+        int fd = int(*Ptr<long>(job + 40))
+        long count = *Ptr<long>(job + 48)
+        if kind == 1 {
+            result = ReadFile(fd, job + 64, count)
+        } else if kind == 2 {
+            result = WriteFile(fd, job + 64, count)
+        } else if kind == 3 {
+            result = OpenFile(job + 64, *Ptr<long>(job + 40) == 1)
+        }
+
+        *Ptr<long>(job + 16) = result
+    }
+}
+
+// The jobs of the pool of threads for blocking calls done since the last look, in the order they were done, linked at 0, taken out
+// of the pool, at the event of its `eventfd`, which disarmed its registration (`EPOLLONESHOT`, `PoolFlag`), the `eventfd` read
+// first, so that a job done after the look signals it again: null where none is done or the pool is not made.
+pub byte* PoolDone() {
+    mut byte* done = null
+    raw {
+        byte* at = pool
+        if at == null {
+            return null
+        }
+
+        *Ptr<int>(at + 192) = 0
+        read(*Ptr<int>(at + 160), at + 184, 8)
+        pthread_mutex_lock(Ptr<void>(at))
+        done = *Ptr<byte*>(at + 144)
+        *Ptr<byte*>(at + 144) = null
+        *Ptr<byte*>(at + 176) = null
+        pthread_mutex_unlock(Ptr<void>(at))
+    }
+
+    return done
+}
+
+// The wait of a call handed to the pool of threads for blocking calls set to `wait`, and whether a call is handed set to
+// `offloads`, which `runtime/common/` gives at the start of the process, as it gives `Waiter`: given the job, `wait` queues it
+// (`Submit`) and parks the actor that called, or the top-level code, until the job is done, and gives its result, or the failure of
+// the pool or of the poller. They stand in the page of the thread that starts the process at 208 and 216 (`Endpoints`), so that a
+// thread of the pool, whose page holds neither, makes its jobs' calls itself.
+pub void BlockingWaiter(extern "C" (byte*) => long wait, extern "C" () => int offloads) {
+    raw {
+        byte* held = Endpoints()
+        if held != null {
+            *Ptr<extern "C" (byte*) => long>(held + 208) = wait
+            *Ptr<extern "C" () => int>(held + 216) = offloads
+        }
+    }
+}
+
+// The wait of `Drive` for its child in the poller set to `wait`, which `runtime/common/` gives at the start of the process, as it
+// gives `Waiter`: given the `struct pollfd`s of `poll`, their count and the bound in nanoseconds, it parks the actor that called, or
+// the top-level code, until the first of their descriptors is ready or the bound passed, and gives what `poll` gives, each ready
+// descriptor's events set to those it waits for, or the failure of the poller, below 0. It stands in the page of the thread that
+// starts the process at 224 (`Endpoints`).
+pub void ManyWaiter(extern "C" (int*, int, long) => int wait) {
+    raw {
+        byte* held = Endpoints()
+        if held != null {
+            *Ptr<extern "C" (int*, int, long) => int>(held + 224) = wait
+        }
+    }
+}
+
+// The job of a call on `fd` (-1 for a call on a path) handed to the pool of threads for blocking calls (`BlockingWaiter`), of the
+// kind `kind` (`JobRun`), mapped with `count` bytes of its own at 64: at 0 the next job queued or done, at 8 its kind, at 16 its
+// result, at 24 the block of its wait, which the scheduler writes and drops where the caller's actor fell (`BlockingWaited`), at
+// 32 its size, one page where `count` fits in it, taken from `keptJobs` where one is kept, at 40 the descriptor and at 48 `count`. Null
+// where the call is made on the calling thread: a thread whose page holds no waiter of blocking calls, a thread of the pool among
+// them; a socket the runtime made (`Socketed`), whose call that would block waits in the poller; a call the scheduler makes there
+// (`offloads`: the top-level code's, with nothing else left to run); or memory the system refuses, where the call is made as it was.
+byte* Handing(long kind, int fd, long count) {
+    raw {
+        byte* held = Endpoints()
+        if held == null || *Ptr<long>(held + 208) == 0 || Socketed(fd) {
+            return null
+        }
+
+        extern "C" () => int offloads = *Ptr<extern "C" () => int>(held + 216)
+        if offloads() == 0 {
+            return null
+        }
+
+        mut long size = 64 + count
+        mut byte* job = null
+        if size <= 4096 {
+            size = 4096
+            if keptJobs != null {
+                job = keptJobs
+                keptJobs = *Ptr<byte*>(job)
+                keptJobCount = keptJobCount - 1
+            }
+        }
+
+        if job == null {
+            job = Memory(size)
+            if job == null {
+                return null
+            }
+        }
+
+        *Ptr<long>(job + 8) = kind
+        *Ptr<long>(job + 32) = size
+        *Ptr<long>(job + 40) = long(fd)
+        *Ptr<long>(job + 48) = count
+        return job
+    }
+}
+
+// The call of the job `job` (`Handing`) made on the pool of threads for blocking calls while the caller parks (`BlockingWaiter`):
+// the call's result, its failure among them, or the failure of the pool or of the poller.
+long Handed(byte* job) {
+    raw {
+        byte* held = Endpoints()
+        extern "C" (byte*) => long wait = *Ptr<extern "C" (byte*) => long>(held + 208)
+        return wait(job)
+    }
+}
+
+// The wait of `Drive` on its four descriptors, the four `struct pollfd`s at `polled`, for `wait` milliseconds, -1 for no bound: in
+// the poller where the thread's page holds its waiter (`ManyWaiter`) and the scheduler hands calls (`BlockingWaiter`'s `offloads`),
+// so that the actor that waits for its child parks while its output, which it reads into its own heap, comes (issue 661, Q14 (a));
+// `poll` on this thread otherwise, and for the last look of a bound, 0 milliseconds, which waits for nothing. What `poll` gives, or
+// -1 with `errno` set to its failure or to the poller's.
+int ChildPolled(int* polled, int wait) {
+    raw {
+        byte* held = Endpoints()
+        if held != null && wait != 0 && *Ptr<long>(held + 224) != 0 {
+            extern "C" () => int offloads = *Ptr<extern "C" () => int>(held + 216)
+            if offloads() != 0 {
+                mut long nanoseconds = 9223372036854775807
+                if wait > 0 {
+                    nanoseconds = long(wait) * 1000000
+                }
+
+                extern "C" (int*, int, long) => int many = *Ptr<extern "C" (int*, int, long) => int>(held + 224)
+                int got = many(polled, 4, nanoseconds)
+                if got < 0 {
+                    *__errno_location() = -got
+                    return -1
+                }
+
+                return got
+            }
+        }
+
+        return poll(Ptr<void>(polled), 4, wait)
+    }
+}
+
+// The job `job` given back (`Handing`) by its call once it read the result: a job of one page kept for the next (`keptJobs`), any
+// other given back to the system.
+void Unhanded(byte* job) {
+    raw {
+        if *Ptr<long>(job + 32) == 4096 && keptJobCount < 64 {
+            *Ptr<byte*>(job) = keptJobs
+            keptJobs = job
+            keptJobCount = keptJobCount + 1
+            return
+        }
+
+        Release(job, *Ptr<long>(job + 32))
+    }
+}
+
+// The jobs of one page given back (`Unhanded`) and kept for the next (`Handing`), linked at 0, at most 64 (`keptJobCount`), so
+// that a small call maps and gives back no memory, as Tokio's blocking pool takes its task's memory from the allocator; read and
+// written by the thread that runs every actor alone (U35), which hands every job and takes every job back.
+static mut byte* keptJobs = null
+
+// The count of `keptJobs`.
+static mut long keptJobCount = 0
+
+// The job `job` given back by the scheduler where the call's actor fell while the job ran (`PoolDrain`), the descriptor an opening
+// gave closed, since no handle holds it (issue 661, Q3, *(assumed)*), as Rust drops the `File` of a result nobody takes.
+pub void JobDropped(byte* job) {
+    raw {
+        if *Ptr<long>(job + 8) == 3 && *Ptr<long>(job + 16) >= 0 {
+            close(int(*Ptr<long>(job + 16)))
+        }
+    }
+
+    Unhanded(job)
+}
+
+// The sockets the runtime made, a byte for each descriptor, 1 for a socket (`Mark`), with `socketSlots` bytes: a call on a socket
+// that would block waits in the poller, so that it is handed to no thread of the pool (`Handing`).
+static mut byte* sockets = null
+
+// The bytes of `sockets`.
+static mut long socketSlots = 0
+
+// Whether `fd` is a socket the runtime made (`sockets`).
+bool Socketed(int fd) {
+    raw {
+        return fd >= 0 && long(fd) < socketSlots && int(sockets[long(fd)]) != 0
+    }
+}
+
+// The descriptor `fd` marked as a socket the runtime made, or as none (`sockets`), the table grown to hold it, to twice its bytes
+// or to the descriptor's number and 1024 more, whichever is more. A mark the system gives no memory for is lost, and the socket's
+// calls are then handed to the pool, where a call that would block waits in `poll` (`Blocked`).
+void Mark(int fd, bool on) {
+    raw {
+        if fd < 0 || (!on && long(fd) >= socketSlots) {
+            return
+        }
+
+        if long(fd) >= socketSlots {
+            mut long slots = socketSlots * 2
+            if slots < long(fd) + 1024 {
+                slots = long(fd) + 1024
+            }
+
+            byte* grown = Memory(slots)
+            if grown == null {
+                return
+            }
+
+            mut long i = 0
+            while i < socketSlots {
+                grown[i] = sockets[i]
+                i = i + 1
+            }
+
+            if sockets != null {
+                Release(sockets, socketSlots)
+            }
+
+            sockets = grown
+            socketSlots = slots
+        }
+
+        if on {
+            sockets[long(fd)] = byte(1)
+        } else {
+            sockets[long(fd)] = byte(0)
         }
     }
 }
@@ -3344,6 +3917,7 @@ long Attempt(byte* address, int length, bool listening, long deadline) {
             return failure
         }
 
+        Mark(fd, true)
         result = long(fd)
     }
 
@@ -3553,6 +4127,7 @@ pub long Accept(int fd) {
         return bounded
     }
 
+    Mark(int(accepted), true)
     return accepted
 }
 
@@ -4731,7 +5306,7 @@ long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long 
             *Ptr<short>(Ptr<byte>(polled) + 14) = 0
             *Ptr<short>(Ptr<byte>(polled) + 22) = 0
             *Ptr<short>(Ptr<byte>(polled) + 30) = 0
-            int ready = poll(Ptr<void>(polled), 4, wait)
+            int ready = ChildPolled(polled, wait)
 
             if ready < 0 && *__errno_location() != 4 {
                 failure = -long(*__errno_location())

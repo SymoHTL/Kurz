@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.Versioning;
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Emit;
@@ -28,7 +29,8 @@ namespace Kurz.Compiler.Tests;
 /// first form of <c>Connect</c> waits the default bound, a connection to a name ends within one bound over its addresses, and <c>EAGAIN</c>
 /// is <c>TimedOut</c> on a stream's read and write and a listener's <c>Accept</c> alone (S9);
 /// a line is whole across the reads of the buffer, a <c>\r</c> in front of a <c>\n</c> in the next read is not part of it, a close gives
-/// up the bytes the buffer holds, and a loop over the lines holds its file (S16); and a build for Windows says
+/// up the bytes the buffer holds, and a loop over the lines holds its file (S16); the child of a <c>fork</c> reads a descriptor that took
+/// the number of the pool's <c>eventfd</c> as its data comes (S10); and a build for Windows says
 /// <c>not supported</c> at a call on a file or a socket, and at a loop over a file's lines (S11). Each program runs under
 /// the runtime of this machine and under the fenced allocator of <see cref="ListTests.Fenced"/>, where no other runtime is named; on
 /// Windows each is held to the build's refusal instead.
@@ -78,6 +80,32 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         Assert.Null(compilation.Program);
         Assert.Equal(Emitter.NotOnWindows, Assert.Single(compilation.Diagnostics.Items).Message);
+    }
+
+    [Fact]
+    public void A_forked_childs_read_of_a_descriptor_that_took_the_number_of_the_pools_eventfd_ends_as_its_byte_comes()
+    {
+        // S10: the child of a `fork` drops the pool, and the connection it accepts takes the number of the pool's `eventfd`; its read of
+        // that connection, which starts before the parent's byte, since the parent writes it 0.2 seconds after the child's `w`, ends as
+        // the byte comes, and not at the read's bound of 5 seconds, where the scheduler gave the event of that number to the pool's
+        // drain. The case `park-file-fork` shows what the run prints, and the clock holds the run alone, built first, which the bound
+        // would make 5.2 seconds at least, against a window of 4. A build for Windows makes no call on a file (S11), and the case stands
+        // among those it leaves out
+        if (Builder.HostTarget == Target.Windows)
+        {
+            return;
+        }
+
+        var text = File.ReadAllText(Path.Combine(CorpusTests.Root, "corpus", "system", "park-file-fork.kz"));
+        var compilation = Compile(text, toolchain.Runtime, ["raw", "native"]);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, "park-file-fork-time");
+        var clock = Stopwatch.StartNew();
+        var run = Toolchain.Run(executable);
+        clock.Stop();
+        Assert.Equal(["file 1 f", "parent got w", "child read r", "parent done"], run.Output);
+        Assert.Equal((0, ""), (run.Code, run.Error));
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(4), $"the run took {clock.Elapsed}");
     }
 
     private const string Rounds = """
