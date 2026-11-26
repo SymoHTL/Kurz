@@ -8,7 +8,7 @@
 // waits on `Get`, queued behind `Fail` in `Worker`'s inbox, and the block of `Worker`'s policy waits behind `Go`, a loop that a
 // crash closes and that layer 3 does not see (U60): the top-level code's wait on `Go` finds no actor left to run, no timer
 // pending and nothing registered with the poller, so that it is `deadlock` at its line (U18), and not a wait in the poller
-// without end
+// without end. The combination is under test: S10 and U18 its subject, U20 and U64 the rules it passes through
 actor Helper {
     pub void Poke(Napper n) {
         print(n.Boom())

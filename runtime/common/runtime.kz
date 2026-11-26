@@ -5789,14 +5789,22 @@ bool Runs(byte* state, byte* message) {
 // The actor the wait line goes on to from the actor whose record is `callee`, which it reached (`Reached`; U60): the supervisor of
 // a child whose block of `on crash` waits, whose block runs after the supervisor's current message (U28), and the actor that the
 // reply of the top activation reaches, which `Enqueue` stored in it; null where the line ends: at a child whose block the
-// top-level code runs (U33), and at a top activation that runs, whose reply is set or whose deadline passed.
+// top-level code runs (U33), at a top activation that runs, whose reply is set or whose deadline passed, and at one that waits on
+// no call, a sleep (`Park`) or a wait in the poller (`SocketWaited`), whose block of 48 bytes at 360 is no reply, read only after
+// the word at 432, which names the message of a call's wait (`Answer`) and no message of those (U60; assumed: a sleep and a wait in
+// the poller wait on no actor, so that the line ends there).
 byte* Onward(byte* callee) {
     raw {
         if *Ptr<int>(callee - 88) == 5 {
             return *Ptr<byte*>(callee - 72)
         }
 
-        byte* next = *Ptr<byte*>(*Ptr<byte*>(callee - 8) + 360)
+        byte* top = *Ptr<byte*>(callee - 8)
+        if *Ptr<byte*>(top + 432) == null {
+            return null
+        }
+
+        byte* next = *Ptr<byte*>(top + 360)
         if next == null || ReplyState(next) != 0 || Waited(next) {
             return null
         }
@@ -5821,7 +5829,10 @@ string LoopText(byte* first, long hops) {
 
 // The lines of the loop of `hops` waits on the wait line from the actor whose record is `first` (`Onward`; U63): one for each
 // wait of the loop, from the wait of `first` (`WaitText`), which `LoopText` joins and the runner writes under a test's `FAILED`
-// line (`RunTests`; Y5).
+// line (`RunTests`; Y5). The first hop from a waiter goes through `Onward`, which ends the line where the waiter's own reply
+// passed its deadline, while `Looped` takes it with that bound aside (T66 1): the two agree, since no reply reaches the walk past
+// its deadline, `Enqueue` raising `call-timeout` at once for one whose deadline the clock reached and `Waited` reading the clock of
+// a turn of the scheduler before it.
 List<string> LoopLines(byte* first, long hops) {
     mut lines = List<string>()
     mut byte* callee = first
@@ -7878,7 +7889,8 @@ pub void RunTests(byte* table, long count, string file) {
 // where none closes the loop, looked for with the chain of the test's message read before the wait, as `Wait` reads its call's (`Kept`),
 // and where none is added, the first actor of the loop that one walk from the test's call runs into set in `first` and the count of
 // its waits in `hops`, as the top-level code's wait finds them (`LoopFirst`; U64; the owner, 2026-11-23, #622, comment 7095825069, 1),
-// `first` left null where the line ends.
+// `first` left null where the line ends. The runner builds the lines from `first` before `TestEnded` ends the test's actors, and
+// `sys.Left` frees nothing, so that every record and reply the lines read stands.
 int TestRan(byte* test, byte* name, byte* run, byte* reply, string file, int line, mut List<long> kept, mut byte* first, mut long hops) {
     byte* heap = ActorHeapNew(0)
     byte* state = ActorNew(heap, 0, 2097152, null, name)

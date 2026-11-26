@@ -240,7 +240,8 @@ each line indented by four spaces as every word under a `FAILED` line (Y3) (§11
 2026-11-21, #599, comment 7067639209, the order 1, the same place 1, the cap 1, the indent 1). Where no
 call that an actor's start keeps out closes the loop and one walk from the test's call runs into a loop
 that a crash closes (U64), the words are the test's line and, under it, the loop's waits, each with its
-chain's ID, in the form the top-level code's error writes them below its error line (U63), each line
+chain's ID, in the form the top-level code's error writes them below its error line (U63), the test's line ending with
+no colon, as it ends where no loop stands under it, each line
 indented by four spaces as the calls kept out are, as `tests/test-deadlock.kz` shows (§11, the owner,
 2026-11-23, #622, comment 7095825069, 1, "Yes, list the waits") *(assumed: the indent of the calls kept
 out, comment 7067639209, for these lines, which the answer did not name)*. An error that

@@ -1,0 +1,26 @@
+// expect: output
+// | woke
+// | 1
+// threads: 1
+// rules: U60
+
+// `Caller`'s call reaches `Sleeper`, whose top activation sleeps among the timers in another chain: the wait line ends there,
+// since a sleep waits on no actor (U60, S28), and the call waits in `Sleeper`'s inbox for the end of `Nap`
+
+actor Sleeper {
+    pub void Nap() {
+        Environment.Sleep(50ms)
+        print("woke")
+    }
+
+    pub int Value() => 1
+}
+
+actor Caller {
+    pub int Ask(Sleeper s) => s.Value()
+}
+
+sleeper = spawn Sleeper()
+caller = spawn Caller()
+send sleeper.Nap()
+print(caller.Ask(sleeper))
