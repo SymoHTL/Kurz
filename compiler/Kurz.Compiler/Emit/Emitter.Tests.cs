@@ -1,4 +1,5 @@
 using System.Globalization;
+using Kurz.Compiler.Build;
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
 
@@ -82,6 +83,29 @@ public sealed partial class Emitter
             fn.Emit($"call void {RuntimeFunction("CheckFailed")}(%kz.str {words}, %kz.str {StringValue(unit.File)}, i32 {Number(a.Line)})");
             fn.Unreachable();
         }
+    }
+
+    /// <summary>
+    /// Y10: <c>advance d</c>, which stands in a test alone, so that only the build of <c>kurz test</c> emits it: its duration, of less than
+    /// zero the run-time error <c>advance-negative</c> at the statement, the crash of the test's actor; then the runtime's <c>Advance</c>,
+    /// which moves the clock's offset by it, and where a clock it moves would pass the range of a <c>long</c>, <c>overflow</c> at the
+    /// statement (section 4). On Linux alone, where the clock's reads are built (S25).
+    /// </summary>
+    private void EmitAdvance(AdvanceStatement a)
+    {
+        if (target != Target.Linux)
+        {
+            throw Unsupported(a.Line, ProcessNotOnWindows);
+        }
+
+        var duration = EmitExpression(a.Duration);
+        var negative = fn.Label("advance.negative");
+        var counted = fn.Label("advance.counted");
+        fn.CondBranch(fn.Value($"icmp sge i64 {duration}, 0"), counted, negative);
+        fn.Block(negative);
+        Raise(ErrorIds.AdvanceNegative, a.Line);
+        fn.Block(counted);
+        RaiseUnless(fn.Value($"call i1 {RuntimeFunction("Advance")}(i64 {duration})"), a.Line);
     }
 
     /// <summary>A comparison's operator as the source writes it, for the failure of a <c>check</c> (F1).</summary>

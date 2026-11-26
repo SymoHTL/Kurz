@@ -1,0 +1,11 @@
+// expect: error advance-outside at 7
+// rules: Y10
+
+// a lambda's body is no statement of its test's own, though the lambda stands inside the test
+test "a lambda waits an hour" {
+    later = () => {
+        advance 1h
+    }
+
+    later()
+}

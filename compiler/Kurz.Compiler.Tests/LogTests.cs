@@ -360,6 +360,51 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
     }
 
     [Fact]
+    public void The_time_of_a_line_in_a_test_reads_the_clock_that_advance_moved()
+    {
+        // Y10 with F14 of issue 586, comment 6993110710: in the build of `kurz test` the time of a line reads the clock `advance` moved,
+        // a line the program writes and the line of an actor's crash (U24), and the next test's line reads the clock with no offset
+        // (F6); on Windows no program with a log call builds, nor one with `advance`
+        const string text = """
+            actor Crasher {
+                pub void Fail() {
+                    throw "down"
+                }
+            }
+
+            test "ten days on" {
+                advance 10days
+                Log.Information("later")
+                c = spawn Crasher()
+                send c.Fail()
+                advance 0s
+            }
+
+            test "back" {
+                Log.Information("now")
+            }
+
+            """;
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: true, tests: true);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(compilation.Program);
+            return;
+        }
+
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, "log-advanced");
+        var before = DateTime.UtcNow;
+        var (code, output, error) = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = "0", ["KURZ_LOG"] = null });
+        var after = DateTime.UtcNow;
+        Assert.Equal((0, "test \"ten days on\" ... ok\ntest \"back\" ... ok\n2 tests: 2 passed, 0 failed\n"), (code, output));
+        var lines = Toolchain.Lines(error);
+        Assert.Equal(3, lines.Count);
+        Assert.Equal(["Information program: later", "Error Kurz.Actor: Crasher#2 crashed: thrown \"down\" at program.kz:3"], Unstamped($"{lines[0]}\n{lines[1]}\n", before.AddDays(10), after.AddDays(10)));
+        Assert.Equal(["Information program: now"], Unstamped($"{lines[2]}\n", before, after));
+    }
+
+    [Fact]
     public void A_case_runs_with_no_KURZ_LOG_of_the_environment_the_suite_runs_in()
     {
         // the corpus's runner takes the variable away (`Toolchain.Run`), so that a case with a log call runs at P3's default level; a

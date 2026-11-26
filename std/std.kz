@@ -14660,7 +14660,7 @@ long RegexTimes(long a, long b) {
 pub enum RuntimeKind {
     Overflow, DivideByZero, IndexOutOfRange, ReversedRangeAtRunTime, InvalidOrderingAtRunTime, StackOverflow, PrintFailed, AllocationFailed, NotCharBoundary,
     RandomFailed, Deadlock, CalleeCrashed, ActorGone, RestartLimit, CallTimeout, CpuLacksSet, SettingsUnpublished, CheckFailed, InvalidInput,
-    InvalidArgument
+    AdvanceNegative, InvalidArgument
 }
 
 // The runtime's own error, the one `data` type of the runtime's errors that is a member of every `Reason` (design record, section 5):
@@ -14709,6 +14709,7 @@ pub RuntimeError RuntimeErrorOf(string id, string detail) {
         "settings-unpublished" => RuntimeKind.SettingsUnpublished
         "check-failed" => RuntimeKind.CheckFailed
         "invalid-input" => RuntimeKind.InvalidInput
+        "advance-negative" => RuntimeKind.AdvanceNegative
         "invalid-argument" => RuntimeKind.InvalidArgument
         else => throw "the runtime raised `{word}`, which no row of the run-time table names"
     }
