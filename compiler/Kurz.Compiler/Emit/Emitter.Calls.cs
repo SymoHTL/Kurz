@@ -501,9 +501,28 @@ public sealed partial class Emitter
             var type = Sub(slotType(j));
             if (slotMut(j))
             {
-                if (argument < 0 || Unwrap(c.Arguments[argument].Value) is not NameExpression n)
+                var given = argument < 0 ? null : Unwrap(c.Arguments[argument].Value);
+                if (FieldPath(given) is (var root, var members))
                 {
-                    throw Unsupported(c.Line, "a `mut` parameter given anything but a variable (M7)");
+                    if (EndsAtWeakField(members[^1]))
+                    {
+                        // M7 (the owner, 2026-11-25, issue 646, "Data fields only"): a `weak` reference on the path stays out; the
+                        // checker types the path as the strong `T?` its read gives (R3), so a callee of `mut T?` would write a strong
+                        // reference into the field's weak place
+                        throw Unsupported(c.Line, "a path to a `weak` field passed as `mut` (M7, R3)");
+                    }
+
+                    // M7 (the owner, 2026-11-25, issue 646, "Decide + build" and "Copy if shared"): a path of `data` fields from a `mut`
+                    // variable or parameter, the place at its end, taken after the other arguments ran; a block on the path that another
+                    // value holds is copied first (M4) and one the variable holds alone is written where it stands, so that the place of
+                    // the first of two paths of one variable, `Two(mut p.A, mut p.B)`, stays where the second is taken
+                    arguments.Add($"ptr {WritablePath(root, members, shared: true).Place}");
+                    continue;
+                }
+
+                if (given is not NameExpression n)
+                {
+                    throw Unsupported(c.Line, MutArgumentLeftOut(given));
                 }
 
                 if (Model.IsImplicitField(n, out _, out var field) && field is not null)
@@ -536,6 +555,54 @@ public sealed partial class Emitter
     }
 
     private static (Expression Value, Unit File)? Default(Expression? d, Unit declaredIn) => d is null ? null : (d, declaredIn);
+
+    /// <summary>
+    /// M7 (issue 646): the root and the members of a path of <c>data</c> fields from a variable or a parameter, <c>b.Home.Tags</c>, each
+    /// member read on a <c>data</c> value; null for a name alone and for any other argument, a path through an item, an entry, a call's
+    /// result, a field of the instance named alone or a class instance among them.
+    /// </summary>
+    private (NameExpression Root, List<MemberAccess> Members)? FieldPath(Expression? given)
+    {
+        var members = new List<MemberAccess>();
+        var target = given;
+        while (target is MemberAccess m)
+        {
+            if (m.Conditional || (Types.NonNull(TypeOf(m.Target)) ?? TypeOf(m.Target)) is not DataType)
+            {
+                return null;
+            }
+
+            members.Insert(0, m);
+            target = Unwrap(m.Target);
+        }
+
+        return members.Count > 0 && target is NameExpression root && !Model.IsImplicitField(root, out _, out _) ? (root, members) : null;
+    }
+
+    /// <summary>M7, R3: whether the last member of a path of <c>data</c> fields names a <c>weak</c> field.</summary>
+    private bool EndsAtWeakField(MemberAccess last)
+    {
+        var data = (DataType)(Types.NonNull(TypeOf(last.Target)) ?? TypeOf(last.Target));
+        return Layout.Fields(data)[Layout.FieldIndex(data, last.Member)] is WeakRefType;
+    }
+
+    /// <summary>
+    /// M7: the text of a <c>mut</c> argument the build does not pass, naming its form: the owner's answer of 2026-11-25 on issue 646,
+    /// "Data fields only", leaves a path from a field of the instance named alone in its method (K7) out. The checker refuses an item, an
+    /// entry, a path through a class instance reached from a variable and a path through a `weak` reference before the emitter.
+    /// </summary>
+    private string MutArgumentLeftOut(Expression? given)
+    {
+        var at = given;
+        while (at is MemberAccess m)
+        {
+            at = Unwrap(m.Target);
+        }
+
+        return given is MemberAccess && at is NameExpression root && Model.IsImplicitField(root, out _, out _)
+            ? "a path through a class instance passed as `mut` (M7)"
+            : "a `mut` parameter given anything but a variable or a path of `data` fields from one (M7)";
+    }
 
     /// <summary>A parameter's or a field's default (D11), read in the file that declares it.</summary>
     private string EmitDefault(Unit declaredIn, Expression d, KurzType type, bool owned)
