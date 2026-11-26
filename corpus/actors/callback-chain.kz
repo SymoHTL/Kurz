@@ -1,6 +1,6 @@
 // expect: output
 // | 401
-// rules: U17, U57
+// rules: U17, U57, U61
 
 actor Store(Checker Check) {
     mut int saved = 0

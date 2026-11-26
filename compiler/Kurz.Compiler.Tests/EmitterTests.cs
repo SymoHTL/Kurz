@@ -1830,7 +1830,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         InOrder(Body(@"kz\.main"), @"store i32 0, ptr %v\.reply\.\d+", @"call void @""rt\.common\.ReplyWaiter\.\d+""\(ptr %v\.reply\.\d+\)",
             @"store ptr %v\.reply\.\d+, ptr %t\d+", @"call void @""rt\.common\.Enqueue\.\d+""", @"call void @""rt\.common\.Wait\.\d+""");
-        Assert.Contains("getelementptr { i32, ptr, i64, ptr, ptr, i64, ptr, i64, i64, ptr, i64 }, ptr %v.reply.", ir, StringComparison.Ordinal); // U36, U43, U22: the deadline, the timers' links, the time of a crash or an end and the call's place before the heap
+        Assert.Contains("getelementptr { i32, ptr, i64, ptr, ptr, i64, ptr, i64, i64, ptr, ptr, i64 }, ptr %v.reply.", ir, StringComparison.Ordinal); // U36, U43, U22: the deadline, the timers' links, the time of a crash or an end and the call's place, and U60: the callee, before the heap
         InOrder(Body(@"""message\.Counter\.Get\.\d+"""), @"call i64 @""f\.Counter\.Get\.\d+""", @"call ptr @""rt\.common\.ReplyTaken\.\d+""\(ptr %a1\)",
             @"call void @""rt\.common\.Replied\.\d+""");
         InOrder(Runtime("ReplyTaken"), @"atomicrmw xchg ptr %t\d+, ptr null acq_rel, align 8");

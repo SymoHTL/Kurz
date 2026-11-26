@@ -1,9 +1,12 @@
-// expect: throws deadlock at 28
+// expect: output
+// | left got 2
+// | 1
 // threads: 1
-// rules: U18, U35, U42
+// rules: U22, U35, U60, U61, U62
 
-// `Left`'s `Ask` waits on `Right`'s `Value` while `Right`'s `Ask` stands ahead of it in `Right`'s inbox, as one thread
-// runs the ready actors first in, first out (U35)
+// `Right`'s `Ask` waits on `Left`, whose `Ask` waits on `Right` with `Right`'s `Ask` ahead of it in `Right`'s inbox, as one
+// thread runs the ready actors first in, first out (U35): `Right`'s wait closes the loop and gets `deadlock`, and its new
+// instance answers `Left`'s call from the kept inbox (U60, U61, U62, U21)
 
 actor Left {
     pub void Ask(Right other) {

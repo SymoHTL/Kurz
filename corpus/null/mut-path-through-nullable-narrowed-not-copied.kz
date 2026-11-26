@@ -1,0 +1,40 @@
+// expect: output
+// | true
+// | true
+// | [1, 2, 3]
+// allow: raw
+// rules: N3
+
+// a `mut` call on a path of fields through a nullable value, in a branch where a test knows the value not null, writes a list no
+// other value holds where it stands, the reading N3 marks as assumed, through a variable and through a field: the test holds no
+// count of the list, so `RemoveAt` writes the block the list stands in, and a removal needs no room; `true` reads the block's
+// address before and after the call, which `allow: raw` lets the case read
+data Config(List<int> Items)
+data Box(Config? Cfg)
+
+Config? Find(int id) {
+    if id == 1 {
+        return Config([1, 2, 3, 4])
+    }
+    return null
+}
+
+mut cfg = Find(1)
+if cfg != null {
+    raw {
+        own = cfg.Items.Pointer
+        cfg.Items.RemoveAt(3)
+        print(cfg.Items.Pointer == own)
+    }
+}
+mut b = Box(Find(1))
+if b.Cfg != null {
+    raw {
+        held = b.Cfg.Items.Pointer
+        b.Cfg.Items.RemoveAt(3)
+        print(b.Cfg.Items.Pointer == held)
+    }
+}
+if cfg != null {
+    print(cfg.Items)
+}

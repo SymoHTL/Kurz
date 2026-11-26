@@ -1,13 +1,16 @@
-// expect: throws deadlock at 19
+// expect: throws deadlock at 22
 // | test "waits on its own block" ... FAILED
-// |     deadlock at tests/test-deadlock.kz:19
+// |     deadlock at tests/test-deadlock.kz:22
+// |     test#1 waits at tests/test-deadlock.kz:28 on Worker#2 in chain <chain>
+// |     Worker#2 waits for the decision of test#1 on its crash in chain <chain>
 // | after
 // | test "after" ... ok
 // | 2 tests: 1 passed, 1 failed
 // command: test
-// rules: Y5
+// rules: Y5, U63, U64
 
-// the block of the child's policy runs in the test's actor once its message ends, and that message waits on the child
+// the block of the child's policy runs in the test's actor once its message ends, and that message waits on the child: a loop
+// that the crash closes, whose waits stand under the test's `FAILED` line, each with its chain's ID, written `<chain>`
 actor Worker {
     pub void Fail() {
         throw "down"

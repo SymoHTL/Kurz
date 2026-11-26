@@ -1,0 +1,39 @@
+// expect: throws callee-crashed at 38
+// | now 7
+// threads: 1
+// rules: U20, U34, U60
+
+// `Worker`'s `Fail` crashes while `Boss`'s `Go` waits on the clock, so the block of `Worker`'s policy waits behind `Go`;
+// `Go`'s call of `Get` then waits on a child whose decision waits on `Go`, and gets `deadlock` at once (U60, U34); the
+// top-level code, which waits on `Go`, gets `callee-crashed`
+
+actor Clock {
+    pub int Now() => 7
+}
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Get() => 5
+}
+
+actor Boss(Clock C) {
+    pub void Go() {
+        w = spawn Worker() on crash (x) {
+            print("decided")
+            restart
+        }
+
+        send w.Fail()
+        t = C.Now()
+        print("now {t}")
+        print("got {w.Get()}")
+    }
+}
+
+c = spawn Clock()
+b = spawn Boss(c)
+b.Go()
+print("after")

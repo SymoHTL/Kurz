@@ -1902,10 +1902,11 @@ Main() else {
 
 Case: [system/park-read-crash.kz](../corpus/system/park-read-crash.kz)
 ```kurz
-// `Boom`, a call of the chain, is let in while `Outer` waits in the poller on its read, and its crash takes the read's
-// registration out of the poller and off the timers and wakes the caller (U20): the byte written to the connection after it
-// reaches no registration whose block the crash freed, and the last wait finds nothing registered with the poller, so that it is
-// `deadlock` at its line (U18) and not a wait in the poller without end
+// `Boom`, a call `Helper` makes in the chain of `Outer`'s message (U17), is let in while `Outer` waits in the poller on its read,
+// and its crash takes the read's wait out of the poller and off the timers and gives both its callers `callee-crashed` (U20):
+// `Caller`, whose policy prints it, and `Helper`, whose policy stops it (U25). The byte written to the connection after it
+// reaches no wait whose block the crash freed, and the scheduler, which has nothing to run during the top-level code's sleep,
+// finds nothing registered with the poller
 actor Helper {
     pub void Poke(Napper n) {
         print(n.Boom())
@@ -1940,25 +1941,9 @@ actor Caller(Napper N, Helper H) {
     pub string Done() => "done"
 }
 
-actor Left {
-    pub void Ask(Right other) {
-        print("left got {other.Value()}")
-    }
-
-    pub int Value() => 1
-}
-
-actor Right {
-    pub void Ask(Left other) {
-        print("right got {other.Value()}")
-    }
-
-    pub int Value() => 2
-}
-
 void | IoError Main() {
     listener = TcpListener.Bind("127.0.0.1:0")
-    poker = spawn Helper()
+    poker = spawn Helper() on crash stop
     napper = spawn Napper()
     c = spawn Caller(napper, poker) on crash (e) {
         match e.Reason {
@@ -1972,11 +1957,94 @@ void | IoError Main() {
     server = listener.Accept()
     print(c.Done())
     server.Write("x".Bytes)
-    l = spawn Left()
-    r = spawn Right()
-    send l.Ask(r)
-    send r.Ask(l)
-    print(l.Value())
+    Environment.Sleep(20ms)
+    print("slept")
+}
+
+Main() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/park-crash-deadlock.kz](../corpus/system/park-crash-deadlock.kz)
+```kurz
+// `Boom`'s crash takes `Outer`'s wait on its read out of the poller, as in `park-read-crash.kz` (S10, U20). Then `Boss`'s `Go`
+// waits on `Get`, queued behind `Fail` in `Worker`'s inbox, and the block of `Worker`'s policy waits behind `Go`, a loop that a
+// crash closes and that layer 3 does not see (U60): the top-level code's wait on `Go` finds no actor left to run, no timer
+// pending and nothing registered with the poller, so that it is `deadlock` at its line (U18), and not a wait in the poller
+// without end
+actor Helper {
+    pub void Poke(Napper n) {
+        print(n.Boom())
+    }
+}
+
+actor Napper {
+    pub int Outer(Helper helper, int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return -1
+        }
+
+        send helper.Poke(this)
+        mut buffer = Bytes()
+        n = stream.Read(mut buffer, 1) else {
+            IoError e => return -2
+        }
+
+        return n
+    }
+
+    pub int Boom() {
+        throw "boom"
+    }
+}
+
+actor Caller(Napper N, Helper H) {
+    pub void Go(int port) {
+        print(N.Outer(H, port))
+    }
+
+    pub string Done() => "done"
+}
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Get() => 5
+}
+
+actor Boss {
+    pub void Go() {
+        w = spawn Worker() on crash (x) {
+            print("decided")
+            restart
+        }
+
+        send w.Fail()
+        print("got {w.Get()}")
+    }
+}
+
+void | IoError Main() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    poker = spawn Helper() on crash stop
+    napper = spawn Napper()
+    c = spawn Caller(napper, poker) on crash (e) {
+        match e.Reason {
+            RuntimeError r => print(r.Kind)
+        }
+
+        restart
+    }
+
+    send c.Go(listener.Port)
+    server = listener.Accept()
+    print(c.Done())
+    server.Write("x".Bytes)
+    b = spawn Boss()
+    b.Go()
 }
 
 Main() else {

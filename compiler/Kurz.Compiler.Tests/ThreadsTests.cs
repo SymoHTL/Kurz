@@ -223,44 +223,55 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>
-    /// U18, U35: where the top-level code waits and every worker thread parked with no actor to run, no activation asleep, no registration
-    /// of its poller and no restart's pause, the last worker to park wakes the main thread, whose wait raises <c>deadlock</c> at its call's
-    /// line, the timers of the calls that wait counting for nothing, as on one thread (section 6, Go's <c>checkdead</c>): <c>Left</c> sleeps,
-    /// <c>Right</c>'s call of it waits in its inbox meanwhile, and <c>Left</c>'s call of <c>Right</c> then waits in <c>Right</c>'s, well within
-    /// the five seconds of the calls' default bound.
+    /// U18, U22, U35: where the top-level code waits and every worker thread parked with no actor to run, no activation asleep, no
+    /// registration of its poller and no restart's pause, the last worker to park wakes the main thread, whose wait raises <c>deadlock</c>,
+    /// the timers of the calls that wait counting for nothing, as on one thread (section 6, Go's <c>checkdead</c>): the top-level code's call
+    /// of <c>Peek</c> waits in <c>A</c>'s inbox behind <c>Fail</c>, and at <c>A</c>'s restart its constructor waits on <c>B.Ask</c>, whose
+    /// call of <c>Peek</c> waits in that inbox for the constructor, a loop through a start that layer 3 does not see (U60), so that the error
+    /// names that call, as <c>actors/restart-reentrant.kz</c> shows on one thread, well within the five seconds of the calls' default bound.
     /// </summary>
     [Fact]
     public void A_wait_of_the_top_level_code_that_nothing_on_the_worker_threads_can_answer_raises_deadlock()
     {
         const string text = """
-            actor Left {
-                pub void Ask(Right other) {
-                    Environment.Sleep(50ms)
-                    print("left got {other.Value()}")
+            actor B {
+                mut A? a = null
+
+                pub void Set(A x) {
+                    a = x
                 }
 
-                pub int Value() => 1
-            }
+                pub int Ask() {
+                    x = a
+                    if x != null {
+                        return vouch x.Peek()
+                    }
 
-            actor Right {
-                pub void Ask(Left other) {
-                    print("right got {other.Value()}")
+                    return 0
                 }
-
-                pub int Value() => 2
             }
 
-            l = spawn Left()
-            r = spawn Right()
-            send l.Ask(r)
-            send r.Ask(l)
-            print(l.Value())
+            actor A(B Other) {
+                int first = Other.Ask()
+
+                pub int Peek() => first
+
+                pub void Fail() {
+                    throw "a fails"
+                }
+            }
+
+            b = spawn B()
+            a = spawn A(b)
+            b.Set(a)
+            send a.Fail()
+            print(a.Peek())
 
             """;
         if (Ran(text, "threads-deadlock", "export KURZ_THREADS=4; ") is { } run)
         {
             Assert.Equal(1, run.Code);
-            Assert.StartsWith("error: deadlock at program.kz:22\n", run.Error, StringComparison.Ordinal);
+            Assert.EndsWith("error: deadlock at program.kz:11\n", run.Error, StringComparison.Ordinal);
             Assert.Empty(run.Output);
         }
     }
