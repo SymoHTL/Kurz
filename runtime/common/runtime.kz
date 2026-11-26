@@ -5400,7 +5400,8 @@ void Woken(byte* record) {
 // threads it marks itself parked, and parked with nothing pending where no activation sleeps among its timers (`Sleeping`), the timers
 // of its calls that wait counting for nothing, as on one thread (`RootLoop`; U18, U42), its poller holds no registration and no
 // restart's pause pends (section 6: Go's `checkdead` counts the timers and the poller); a worker that looked for work stops
-// looking; then the fence of `Notified` and a last look at the queues it takes from, which ends the park where one holds an actor.
+// looking; then the fence of `Notified` and a last look at the queues it takes from and at the time the first pause ends, which ends
+// the park where a queue holds an actor or a pause was made since its first look (`Pause`).
 // Where it is the last worker to park with nothing pending while the top-level code waits, it wakes the main thread, which then
 // reads whether anything is left (`RootSlept`; section 6, the owner's `deadlock` of the top-level code, the mechanism assumed there,
 // Go's `checkdead` run by the thread that goes idle last). Its epoch is then the largest `long`, since a parked thread reads no
@@ -5428,7 +5429,7 @@ void WorkerPark(byte* record, long now) {
         bool last = empty && long(*Ptr<int>(scheduler + 16)) == *Ptr<long>(scheduler + 48) && *Ptr<int>(scheduler + 20) != 0
         Unlock(IdleLock())
         Fence(MemoryOrder.SeqCst)
-        if HasWork(record) {
+        if HasWork(record) || AtomicLong.FromPtr(Ptr<long>(scheduler + 72)).Load(MemoryOrder.Acquire) != pause {
             Unparked(record)
             return
         }
@@ -9237,7 +9238,9 @@ void EndChildren(byte* state) {
 // pause again; each varied at random by up to 20% either way,
 // drawn from the thread's generator, as Akka's `BackoffSupervisor` varies its pause by its random factor.
 // The block of the restart holds the pause, the time of the last restart, the time the pause ends and the
-// next actor of the queue of the pauses, in which the actor waits by that time.
+// next actor of the queue of the pauses, in which the actor waits by that time. On worker threads a pause that
+// ends first of all wakes one parked worker (`NotifyOne`), whose park reads the time again, since a decision of a
+// block that the top-level code runs makes a pause on the main thread, which parks in no worker's poller.
 void Pause(byte* state) {
     raw {
         byte* side = *Ptr<byte*>(state - 80)
@@ -9278,6 +9281,9 @@ void Pause(byte* state) {
 
         PauseNoted()
         Unlock(PauseLock())
+        if before == null && Threaded() {
+            NotifyOne()
+        }
     }
 }
 

@@ -412,7 +412,8 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         "actors/crash-escalate-root.kz", "actors/crash-stop.kz", "actors/crash-in-constructor-at-restart.kz",
         "actors/crash-waiter.kz", "actors/block-stop.kz", "actors/block-throw-root.kz",
         "actors/block-escalate-root.kz", "actors/attempt-success.kz", "actors/attempt-crash.kz", "actors/attempt-nested.kz",
-        "actors/per-node-child.kz", "actors/per-node-restart.kz", "actors/per-node-escalate.kz", "actors/restart-reentrant.kz");
+        "actors/per-node-child.kz", "actors/per-node-restart.kz", "actors/per-node-escalate.kz", "actors/restart-reentrant.kz",
+        "actors/block-reason.kz", "actors/block-type.kz", "actors/block-sample.kz", "actors/block-reason-atomic-order.kz");
 
     [Theory]
     [MemberData(nameof(CrashPathCases))]

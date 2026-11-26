@@ -2304,7 +2304,9 @@ its thread that nobody steals, which holds the actors whose activation parked on
 last, from its ring of 256 slots, as tokio's `queue::Local`, and from the shared queue, which it reads first at every 61st
 turn, and else steals half of another worker's ring, or its slot (`WorkerTurn`, `NextActor`, `StealInto`). A worker with
 nothing to take parks in a poller of its own, with timers of its own (T88), and another thread wakes it through its
-`eventfd`; the last worker to park with nothing pending, no activation asleep, no registration of its poller and no
+`eventfd`, as a restart's pause that ends first of all wakes one parked worker, whose park reads the time of the first
+pause again, since the decision of a block that the top-level code runs makes its pause on the main thread (`Pause`,
+`NotifyOne`, `WorkerPark`); the last worker to park with nothing pending, no activation asleep, no registration of its poller and no
 restart's pause, wakes the main thread, whose wait then raises `deadlock` (`WorkerPark`, `RootSlept`). A message's
 arguments are copied into the receiver's heap at its turn, and a result into the waiter's heap as its wait returns (T17 1:
 `MessageQueued`, `Adopted`, `ResultHeap`, `ResultOwn`); an ended actor's first page, and a message's heap of its own, are
