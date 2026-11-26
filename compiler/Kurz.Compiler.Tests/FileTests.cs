@@ -116,7 +116,7 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // before its byte, and `print` writes on the thread that runs every actor. A runtime that made the read on that thread would
         // answer the call of `Tick` only after the byte came, past the bound of 500 milliseconds the program reads on its clock. No
         // case can give a program an input that comes late, so a test of the suite runs it behind the shell's pipe. A build for
-        // Windows says `not supported` to `Stdin` (S11)
+        // Windows says `not supported` at the first call the runtime of Windows does not give, the program's read of the clock (S11)
         const string text = """
             string Text(Bytes bytes) {
                 text = string.FromUtf8(bytes) else {
@@ -153,7 +153,9 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             """;
         if (Builder.HostTarget == Target.Windows)
         {
-            RefusedOnWindows(Compile(text, toolchain.Runtime));
+            var refused = Compile(text, toolchain.Runtime);
+            Assert.Null(refused.Program);
+            Assert.Equal(Emitter.ProcessNotOnWindows, Assert.Single(refused.Diagnostics.Items).Message);
             return;
         }
 
