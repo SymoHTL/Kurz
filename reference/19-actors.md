@@ -2147,7 +2147,10 @@ drops its tasks when its runtime shuts down (§6, the owner, 2026-11-15, #519, c
 dropped"). The heap of every actor is freed whole at the end of the program on one thread; with worker
 threads, the end of the process gives the memory back, as a Rust or Go program's return from `main` ends its
 other threads with no join (§6, the owner, 2026-11-26, #519, comment 7194874125, "One thread only
-(Recommended)").
+(Recommended)"). A message that runs to its end when the top-level code ends is so on one thread; with
+worker threads, a message still running on another worker then is cut with the process, its lines after
+that point never running, as a Rust or Go program's other threads end when `main` returns (§6, the owner,
+2026-11-26, #519, comment 7198702144, 1, "Cut it, as Rust and Go (Recommended)").
 
 No case: for the end of the top-level code, since which message runs when it ends is the scheduler's to
 say where actors run on more than one thread, so that a case's output would hang on it; the end of a
