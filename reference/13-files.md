@@ -53,6 +53,24 @@ match File.Create("a\0b") {
 }
 ```
 
+Case: [system/park-file-missing.kz](../corpus/system/park-file-missing.kz)
+```kurz
+// an opening inside a message runs on the pool of threads for blocking calls (S10), and one that fails gives the error a call
+// on the thread that runs every actor gives (S1): its kind, its number and the path it was given, as `open-missing.kz` holds
+// for the top-level code
+actor Opener {
+    pub string Open() {
+        return match File.Open("park-file-missing.txt") {
+            File => "opened"
+            IoError e => "{e}\n{e.Kind}\n{e.Code}"
+        }
+    }
+}
+
+o = spawn Opener()
+print(o.Open())
+```
+
 ### S2 (decided, §12) Opening and creating a file
 
 `File.Open(path)` opens the file at `path` to read it, and `File.Create(path)` creates a file at
@@ -1129,6 +1147,105 @@ void | IoError Closed() {
 
 Closed() else {
     IoError e => print(e)
+}
+```
+
+Case: [system/park-file-close.kz](../corpus/system/park-file-close.kz)
+```kurz
+// `Shut`, a call of the chain, is let in while `Run`'s read of a FIFO runs on the pool of threads for blocking calls (S10), and its
+// `Close` through the copy `held` ends the handle at once while the read in flight keeps the descriptor (S5): that read gets the
+// byte the top-level code writes once `Shut` returned, and the next read through `f` gets the error of a closed handle, `Other`
+// with the number 9. The top-level code calls `Result` until `Poke` ran, so that it writes the byte after the `Close`
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+actor Helper {
+    mut string result = "none"
+
+    pub void Poke(Holder h) {
+        result = "shut {h.Shut()}"
+    }
+
+    pub string Result() => result
+}
+
+actor Holder {
+    mut File? held = null
+    mut string first = ""
+    mut string second = ""
+
+    pub void Run(Helper helper) {
+        f = File.Open("park-file-close") else {
+            IoError e => {
+                first = "open {e.Kind}"
+                return
+            }
+        }
+
+        held = f
+        send helper.Poke(this)
+        mut buffer = Bytes()
+        match f.Read(mut buffer, 1) {
+            int n => first = "read {Text(buffer)}"
+            IoError e => first = "{e.Kind} {e.Code}"
+        }
+
+        match f.Read(mut buffer, 1) {
+            int n => second = "read {n}"
+            IoError e => second = "{e.Kind} {e.Code}"
+        }
+    }
+
+    pub int Shut() {
+        s = held
+        if s == null {
+            return 0
+        }
+
+        s.Close() else {
+            IoError e => return -e.Code
+        }
+
+        return 1
+    }
+
+    pub string First() => first
+
+    pub string Second() => second
+}
+
+void | IoError | ExitError Main() {
+    if File.Exists("park-file-close") {
+        File.Delete("park-file-close")
+    }
+
+    Command.New("mkfifo").Arg("park-file-close").Status()
+    helper = spawn Helper()
+    h = spawn Holder()
+    send h.Run(helper)
+    w = File.Create("park-file-close")
+    mut result = helper.Result()
+    while result == "none" {
+        result = helper.Result()
+    }
+
+    print(result)
+    w.Write("x".Bytes)
+    w.Close()
+    print(h.First())
+    print(h.Second())
+    print("done")
+    File.Delete("park-file-close")
+}
+
+Main() else {
+    IoError e => print(e)
+    ExitError e => print(e)
 }
 ```
 
@@ -2855,6 +2972,10 @@ Main() else {
     IoError e => print(e)
 }
 ```
+
+Case: [system/park-file-close.kz](../corpus/system/park-file-close.kz)
+
+Case: [system/park-file-missing.kz](../corpus/system/park-file-missing.kz)
 
 ### S11 (decided, §12) Not on Windows
 
