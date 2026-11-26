@@ -2858,8 +2858,9 @@ pub int* PoolFlag() {
 }
 
 // The job `job` queued for the pool of threads for blocking calls (`Handing`), made where it is not (`PoolMade`), and an idle
-// thread woken for it, or a thread started where none is idle and fewer than 512 run, Tokio's default bound (issue 661, Q10,
-// *(assumed)*), as Tokio's `Spawner::spawn_task` wakes or starts one; a job queued while 512 threads are busy waits for the first
+// thread woken for it, or a thread started where none is idle and fewer than 512 run, Tokio's default bound, with no setting (issue
+// 661, the product pass, comment 7182792402, Q1, kept as built, comment 7189038013), as Tokio's `Spawner::spawn_task` wakes or
+// starts one; a job queued while 512 threads are busy waits for the first
 // that is free (issue 661, Q5): 0, the failure of the pool, or -4101, which no error number is, where the system refuses a thread
 // and no thread of the pool runs (`Started`).
 pub long Submit(byte* job) {
@@ -2899,8 +2900,9 @@ pub long Submit(byte* job) {
     return 0
 }
 
-// A thread of the pool started for the job `job` (`Submit`), detached (1), with 2 MiB of stack, Tokio's default (issue 661, Q9,
-// *(assumed)*), and a page of its own (`PoolThread`): 0. Where the system refuses the page or the thread, the count of threads is
+// A thread of the pool started for the job `job` (`Submit`), detached (1), with 2 MiB of stack, Tokio's default (issue 661, the
+// product pass, comment 7182792402, Q9, a default taken and listed there, which no question put to the owner *(assumed)*), and a page
+// of its own (`PoolThread`): 0. Where the system refuses the page or the thread, the count of threads is
 // lowered again: 0 where another thread of the pool runs, which takes the job from the queue (issue 661, Q2, (c)), else -4101 with
 // the job taken out of the queue, where the scheduler ends the process (Q2, (a)).
 long Started(byte* job) {
@@ -2958,7 +2960,8 @@ long Started(byte* job) {
 // A thread of the pool of threads for blocking calls (`Started`), its page at `own`: the pool at 0, at 16 the deadline of its idle
 // wait, at 32 the 8 bytes it adds to the pool's `eventfd`. It takes the queue's jobs first in, first out, makes each call outside
 // the pool's mutex (`JobRun`), puts the job among the jobs done and signals the `eventfd`; with none queued it waits idle for 10
-// seconds, Tokio's default keep-alive (issue 661, Q10, *(assumed)*), on the clock `pthread_cond_timedwait` reads by default,
+// seconds, Tokio's default keep-alive, with no setting (issue 661, the product pass, comment 7182792402, Q1, kept as built, comment
+// 7189038013), on the clock `pthread_cond_timedwait` reads by default,
 // `CLOCK_REALTIME` (0), and ends where no job woke it within them (`ETIMEDOUT`, 110), as Tokio's `Inner::run` ends a thread, its
 // page and the page of its calls (`Endpoints`) given back.
 extern "C" byte* PoolThread(byte* own) {
@@ -3081,15 +3084,15 @@ pub void BlockingWaiter(extern "C" (byte*) => long wait, extern "C" () => int of
 }
 
 // The wait of `Drive` for its child in the poller set to `wait`, which `runtime/common/` gives at the start of the process, as it
-// gives `Waiter`: given the `struct pollfd`s of `poll`, their count and the bound in nanoseconds, it parks the actor that called, or
-// the top-level code, until the first of their descriptors is ready or the bound passed, and gives what `poll` gives, each ready
-// descriptor's events set to those it waits for, or the failure of the poller, below 0. It stands in the page of the thread that
-// starts the process at 224 (`Endpoints`).
-pub void ManyWaiter(extern "C" (int*, int, long) => int wait) {
+// gives `Waiter`: given the `struct pollfd`s of `poll`, their count, the bound in nanoseconds and the room of the call of `Drive`
+// (`ChildDropped`), it parks the actor that called, or the top-level code, until the first of their descriptors is ready or the
+// bound passed, and gives what `poll` gives, each ready descriptor's events set to those it waits for, or the failure of the poller,
+// below 0. It stands in the page of the thread that starts the process at 224 (`Endpoints`).
+pub void ManyWaiter(extern "C" (int*, int, long, byte*) => int wait) {
     raw {
         byte* held = Endpoints()
         if held != null {
-            *Ptr<extern "C" (int*, int, long) => int>(held + 224) = wait
+            *Ptr<extern "C" (int*, int, long, byte*) => int>(held + 224) = wait
         }
     }
 }
@@ -3151,9 +3154,10 @@ long Handed(byte* job) {
 
 // The wait of `Drive` on its four descriptors, the four `struct pollfd`s at `polled`, for `wait` milliseconds, -1 for no bound: in
 // the poller where the thread's page holds its waiter (`ManyWaiter`) and the scheduler hands calls (`BlockingWaiter`'s `offloads`),
-// so that the actor that waits for its child parks while its output, which it reads into its own heap, comes (issue 661, Q14 (a));
-// `poll` on this thread otherwise, and for the last look of a bound, 0 milliseconds, which waits for nothing. What `poll` gives, or
-// -1 with `errno` set to its failure or to the poller's.
+// so that the actor that waits for its child parks while its output, which it reads into its own heap, comes (issue 661, Q14 (a)),
+// with the room of the call, 64 bytes before `polled` (`RunCommand`), which a fall over the wait gives back (`ChildDropped`); `poll`
+// on this thread otherwise, and for the last look of a bound, 0 milliseconds, which waits for nothing. What `poll` gives, or -1
+// with `errno` set to its failure or to the poller's.
 int ChildPolled(int* polled, int wait) {
     raw {
         byte* held = Endpoints()
@@ -3165,8 +3169,8 @@ int ChildPolled(int* polled, int wait) {
                     nanoseconds = long(wait) * 1000000
                 }
 
-                extern "C" (int*, int, long) => int many = *Ptr<extern "C" (int*, int, long) => int>(held + 224)
-                int got = many(polled, 4, nanoseconds)
+                extern "C" (int*, int, long, byte*) => int many = *Ptr<extern "C" (int*, int, long, byte*) => int>(held + 224)
+                int got = many(polled, 4, nanoseconds, Ptr<byte>(polled) - 64)
                 if got < 0 {
                     *__errno_location() = -got
                     return -1
@@ -3204,7 +3208,9 @@ static mut byte* keptJobs = null
 static mut long keptJobCount = 0
 
 // The job `job` given back by the scheduler where the call's actor fell while the job ran (`PoolDrain`), the descriptor an opening
-// gave closed, since no handle holds it (issue 661, Q3, *(assumed)*), as Rust drops the `File` of a result nobody takes.
+// gave closed, since no handle holds it (issue 661, the product pass, comment 7182792402, Q3, kept as built, comment 7189038013),
+// as Rust drops the `File` of a result nobody takes; a job whose end the scheduler took before the fall is given back so too
+// (`Fall`).
 pub void JobDropped(byte* job) {
     raw {
         if *Ptr<long>(job + 8) == 3 && *Ptr<long>(job + 16) >= 0 {
@@ -3213,6 +3219,37 @@ pub void JobDropped(byte* job) {
     }
 
     Unhanded(job)
+}
+
+// The call of `Drive` whose wait for its child in the poller a fall of its actor ended (`ChildPolled`), its room at `record`, 65536
+// bytes into the mapping `RunCommand` or `WaitSpawned` made: the pipes it holds to the child closed where it owns them (at 36), the
+// input's among them, as `RunCommand` closes them after `Drive`, the descriptor of the child's process (at 40) closed and the
+// mapping, of the size at 44, given back, so that a crash over the wait leaves none of them behind; the child is left to run and is
+// not waited for, as Rust's `Child` that is dropped leaves it (S10, *(assumed)*).
+pub void ChildDropped(byte* record) {
+    raw {
+        int* fds = Ptr<int>(record)
+        if *Ptr<int>(record + 36) != 0 {
+            if fds[1] >= 0 {
+                close(fds[1])
+            }
+
+            if fds[2] >= 0 {
+                close(fds[2])
+            }
+
+            if fds[4] >= 0 {
+                close(fds[4])
+            }
+        }
+
+        int process = *Ptr<int>(record + 40)
+        if process >= 0 {
+            close(process)
+        }
+
+        Release(record - 65536, long(*Ptr<int>(record + 44)))
+    }
 }
 
 // The sockets the runtime made, a byte for each descriptor, 1 for a socket (`Mark`), with `socketSlots` bytes: a call on a socket
@@ -4362,6 +4399,7 @@ long WaitSpawned(int* state, int outFd, byte* outReader, int errFd, byte* errRea
         fds[2] = outFd
         fds[4] = errFd
         if failure == 0 {
+            *Ptr<int>(memory + 65536 + 44) = 65536 + 128
             failure = Drive(memory, state[0], process, state[1] != 0, deadline >= 0, deadline, false, fds, outReader, errReader, take, held, null, "", false, mut out, mut err)
         }
 
@@ -4831,7 +4869,8 @@ long RunCommand(List<string> command, int purpose, mut Bytes out, mut Bytes err,
     mut long waitResult = 0
     raw {
         // the layout of the memory: the buffer of a read, 65536 bytes; 128 bytes for the nine descriptors (0),
-        // the child's report (48), the four entries of `poll` (64), the status of `waitpid` (96) and the time
+        // the room a fall over the wait for the child reads (36, `ChildDropped`), the child's report (48), the four
+        // entries of `poll` (64), the status of `waitpid` (96) and the time
         // `clock_gettime` reads (104); then the three tables of addresses and their strings; and with an input,
         // the buffer of a write, 65536 bytes, at the end; the limits of open files are read into the buffer before
         // the `fork`, while no read uses it
@@ -5112,6 +5151,7 @@ long RunCommand(List<string> command, int purpose, mut Bytes out, mut Bytes err,
         }
 
         if failure == 0 {
+            *Ptr<int>(memory + 65536 + 44) = int(size)
             failure = Drive(memory, pid, process, false, bounded, deadline, true, fds, null, null, NoReader, null, memory + size - 65536, feed, fed, mut out, mut err)
             if failure == -4100 {
                 at = 0
@@ -5181,6 +5221,15 @@ long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long 
         byte* buffer = memory
         int* polled = Ptr<int>(memory + 65536 + 64)
         byte* clock = memory + 65536 + 104
+        // the room a fall over the wait for the child reads (`ChildDropped`): at 36 whether the call owns the pipes and at 40 the
+        // descriptor of the child's process, beside the size of the mapping, which the caller put at 44
+        mut int owns = 0
+        if owned {
+            owns = 1
+        }
+
+        *Ptr<int>(memory + 65536 + 36) = owns
+        *Ptr<int>(memory + 65536 + 40) = process
         // `poll` on the pipes still open, each read into its list until its end, and on the child's end
         // where `process` is not -1, while a bound holds until the bound passes
         mut int pending = 0

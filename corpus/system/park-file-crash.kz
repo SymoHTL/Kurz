@@ -8,7 +8,8 @@
 // `Boom`, a call `Helper` makes in the chain of `Outer`'s message (U17), is let in while `Outer` waits on the pool of threads for
 // blocking calls for its opening of a FIFO, and its crash drops the job and gives both its callers `callee-crashed` (U20): `Caller`,
 // whose policy prints it, and `Helper`, whose policy stops it (U25). The opening ends once the top-level code opens the FIFO to
-// write, on a thread of the pool, with no wait left to wake, and `Reader`'s read of a file on the pool after it reads its byte
+// write, on a thread of the pool, with no wait left to wake, and `Reader`'s read of a file on the pool after it reads its byte.
+// S10 alone is the subject, the job of a call whose actor fell dropped; U20 it passes through
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
