@@ -2,10 +2,12 @@
 // | test "sixty days pass at once" ... ok
 // | 1 test: 1 passed, 0 failed
 // command: test
+// threads: 1
 // rules: Y10
 
 // the reminder's sleep of sixty days ends at the `advance` that passes its deadline, and the reminder runs before the test goes on;
-// the first call waits behind the reminder's start, so that its sleep stands among the timers before the first `advance`
+// the first call waits behind the reminder's start, since one thread runs the actors that are ready first in, first out (U35), so
+// that its sleep stands among the timers before the first `advance`
 actor Counter {
     mut int count = 0
 

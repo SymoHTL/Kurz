@@ -1,13 +1,14 @@
-// expect: throws call-timeout at 20
+// expect: throws call-timeout at 21
 // | test "a bound of an hour passes at once" ... FAILED
-// |     call-timeout at tests/advance-call-timeout.kz:20
+// |     call-timeout at tests/advance-call-timeout.kz:21
 // | 1 test: 0 passed, 1 failed
 // command: test
+// threads: 1
 // rules: Y10
 
 // the bound of the watcher's call passes at the `advance`, while its callee still sleeps, and the watcher's `call-timeout`
-// escalates into the test; the call of `Nap(0s)` waits behind the watcher's start, so that its call stands among the timers
-// before the `advance`
+// escalates into the test; the call of `Nap(0s)` waits behind the watcher's start, since one thread runs the actors that are ready
+// first in, first out (U35), so that the watcher's call stands among the timers before the `advance`
 actor Napper {
     pub int Nap(duration d) {
         Environment.Sleep(d)

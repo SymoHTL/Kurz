@@ -7924,10 +7924,15 @@ public sealed class CheckerTests
             Assert.Equal([(ErrorIds.AdvanceOutside, line)], ErrorsSeeingStd(program)); // `std/` declares `Crashed`, which the block and the `attempt` read
         }
 
-        // the text the person reads at that line (Q6 of the product pass of issue 655, comment 7178562787)
+        // the text the person reads at that line, which the product pass's Q6 chose (issue 655, comment 7178562787): the corpus holds
+        // the id and the line (E2), and no case can hold a text, so this test holds it
         Assert.Equal(
             ["advance-outside 2: `advance` stands among a `test` block's own statements alone (Y10)"],
             Check("void Later() {\n    advance 1h\n}\n\ntest \"a\" {\n    Later()\n}").Diagnostics.Sorted.Select(d => $"{d.Id} {d.Line}: {d.Message}"));
+
+        // E1 with Y10: outside a test's own statements a duration of another type than `duration` gets its own error beside
+        // `advance-outside`, at the one line
+        Assert.Equal([(ErrorIds.TypeMismatch, 2), (ErrorIds.AdvanceOutside, 2)], Errors("void Later() {\n    advance 5\n}\n\ntest \"a\" {\n    Later()\n}"));
 
         // T8 with Y10: the duration is checked as any expression is, as the bound of `within` is (U40)
         foreach (var (program, id) in new[] { ("advance 1", ErrorIds.TypeMismatch), ("long n = 1\n    advance n", ErrorIds.TypeMismatch), ("duration? d = null\n    advance d", ErrorIds.NullableUnchecked) })

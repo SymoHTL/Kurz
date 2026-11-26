@@ -631,26 +631,31 @@ No case: the build answers `not supported` to the form, and a case stands on wha
 `advance d` stands among a `test` block's own statements alone, the compile error `advance-outside`
 elsewhere, and a negative duration crashes the test at the statement with the run-time error
 `advance-negative` (§11, the owner, 2026-11-20, issue 586, comment 7051499099, Q8 of comment 6992687784 at
-its lean). A test's own statements are its body and the blocks nested in it, and not a lambda, a block of
-`on crash` or the block of an `attempt` inside it (§11, assumed there). `advance` takes a duration, which
-the build checks as any expression is, and as the bound of `within` is (U40), a value of another type
-than `duration` `type-mismatch` at its line (§11, the owner, 2026-11-20, comment 7051499099: the readings
-of comment 6994632453 stand).
+its lean). A test's own statements are its body and the blocks nested in it, a block of `within` among
+them, and not a lambda, a block of `on crash` or the block of an `attempt` inside it (§11, assumed there).
+`advance` takes a duration, which the build checks as any expression is, and as the bound of `within` is
+(U40), a value of another type than `duration` `type-mismatch` at its line (§11, the owner, 2026-11-20,
+comment 7051499099: the readings of comment 6994632453 stand), wherever the statement stands, so that an
+`advance` outside a test's own statements whose duration is no `duration` gets both errors at its line (E1;
+§11, assumed there).
 
 In every build `kurz test` makes, `--release` among them, `instant.Now`, `timestamp.Now`, the time of a
-log line and every deadline the runtime owns read the runtime's clock: the system's, which keeps running,
+log line and every deadline the runtime owns, but for the wait of a child process, which waits in the
+kernel, read the runtime's clock: the system's, which keeps running,
 and an offset, which each `advance` adds to and which is 0 at each test's start; `build`, `run` and
 `exec` read the system's clock directly (§11, assumed there). The timers and the pauses the moved clock
 passed fire at the scheduler's turn after the `advance`, in the order of their deadlines, and the test's
-actor waits at the statement for that turn, so that the actors they woke run before it goes on; an
-`advance` that would move the wall clock or the monotonic clock past the range of a `long` is `overflow`
-at the statement (§11, assumed there). The build of `advance` is Linux's, `not supported` elsewhere, as
+actor waits at the statement for that turn, so that the actors they woke run before it goes on, each to
+the wait that parks it again, and timers of one deadline fire in the order they were set; an `advance`
+that would move the wall clock or the monotonic clock to within a year of the end of a `long`'s range is
+`overflow` at the statement, the offset left as it was and nothing parked (§11, assumed there). The build of `advance` is Linux's, `not supported` elsewhere, as
 `instant.Now` is (§11, assumed there).
 
 Case: [tests/advance-sleep.kz](../corpus/tests/advance-sleep.kz)
 ```kurz
 // the reminder's sleep of sixty days ends at the `advance` that passes its deadline, and the reminder runs before the test goes on;
-// the first call waits behind the reminder's start, so that its sleep stands among the timers before the first `advance`
+// the first call waits behind the reminder's start, since one thread runs the actors that are ready first in, first out (U35), so
+// that its sleep stands among the timers before the first `advance`
 actor Counter {
     mut int count = 0
 
@@ -683,8 +688,8 @@ test "sixty days pass at once" {
 Case: [tests/advance-call-timeout.kz](../corpus/tests/advance-call-timeout.kz)
 ```kurz
 // the bound of the watcher's call passes at the `advance`, while its callee still sleeps, and the watcher's `call-timeout`
-// escalates into the test; the call of `Nap(0s)` waits behind the watcher's start, so that its call stands among the timers
-// before the `advance`
+// escalates into the test; the call of `Nap(0s)` waits behind the watcher's start, since one thread runs the actors that are ready
+// first in, first out (U35), so that the watcher's call stands among the timers before the `advance`
 actor Napper {
     pub int Nap(duration d) {
         Environment.Sleep(d)
@@ -774,5 +779,24 @@ test "a lambda waits an hour" {
     }
 
     later()
+}
+```
+
+Case: [tests/advance-within.kz](../corpus/tests/advance-within.kz)
+```kurz
+// a block of `within` is a block nested in the test, so that `advance` stands among the test's own statements there, and the clock
+// an actor reads after it is an hour on
+actor Clock {
+    pub instant Now() => instant.Now
+}
+
+test "an advance inside within" {
+    c = spawn Clock()
+    before = c.Now()
+    within 1s {
+        advance 1h
+    }
+
+    check c.Now() - before >= 1h
 }
 ```
