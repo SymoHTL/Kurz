@@ -2352,7 +2352,7 @@ emitter emits"), while the lifetimes of the message a crash's swap reads and of 
 which the owner of a reply reads after its store, hold on one thread alone, with no worker thread and no line `threads`
 (U35): the start of a program built for Linux with a `spawn` reads `KURZ_THREADS` and ends with `threads-variable`
 where U35 refuses its value, `0` among them, and otherwise keeps the count it gives, or the cores the process may use
-where it is not set, counted as Rust 1.82.0's `available_parallelism` counts them, its affinity and the CPU quota of its
+where it is not set, counted as Rust 1.90.0's `available_parallelism` counts them, its affinity and the CPU quota of its
 control group (`ThreadsRead`, `Cores`), and starts that many worker threads at its first `spawn` only where `KURZ_THREADS`
 sets a count of more than 1 (`workersAsked`, `WorkersStart`; the paragraph of the worker threads), every other program and every
 test of `kurz test` running every actor on the main thread, as a case marked `// threads: 1` runs, and a build for Windows reads
