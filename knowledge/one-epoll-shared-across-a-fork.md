@@ -18,9 +18,10 @@ its first socket, and on the first head the child's wait took events the parent 
 the word of a block at an address of the parent's heap that the child's copy holds as something
 else, and the run waited to the limit of the program's run (the change's description). The child
 drops the poller it shares: `pthread_atfork` runs `Forked` in the child, which closes the
-descriptor and sets the poller to none, so that the child's first registration makes a poller of
-its own (`Poller`), as libuv's `uv_loop_fork` and libevent's `event_reinit` make the loop again in
-a child.
+descriptor and sets the poller to none, so that the child's first socket makes a poller of its own,
+as the parent's first socket made the parent's: `Attempt` calls `Poller` before it makes the socket,
+in the child as in the parent, as libuv's `uv_loop_fork` and libevent's `event_reinit` make the loop
+again in a child.
 
 The child keeps the scheduler's count of registrations its parent made, and its waits name the
 parent's poller: with no poller, `PollWait` sleeps the time it was asked for and gives no event,

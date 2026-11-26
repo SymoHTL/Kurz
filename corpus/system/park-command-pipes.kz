@@ -1,0 +1,99 @@
+// expect: output
+// | out y k
+// | CalleeCrashed
+// | done
+// | 0
+// threads: 1
+// rules: S10, S18, U20
+
+// `Boom`, a call `Helper` makes in the chain of `Outer`'s message (U17), is let in while `Outer` waits in the poller for a child,
+// `cat` of a FIFO, and its output, and its crash closes the two pipes the call holds to the child (S10): the count of the process's
+// open descriptors, which the system lists in `/proc/self/fd`, is the same once the crash is over as before it. A crash that left the
+// pipes open would leave two more. `Runner`'s wait for a child of its own and its read of a file make the poller and the pool of
+// threads for blocking calls before the first count, so that neither is counted once only, and the top-level code opens the FIFO to
+// write once the crash is over, so that the child ends. S10 alone is the subject, the fall of a wait for a child; S18 and U20 it
+// passes through
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+actor Helper {
+    pub void Poke(Napper n) {
+        print(n.Boom())
+    }
+}
+
+actor Napper {
+    pub int Outer(Helper helper) {
+        send helper.Poke(this)
+        o = Command.New("cat").Arg("park-command-pipes").Output() else {
+            IoError e => return -1
+            ExitError e => return -2
+        }
+
+        return o.Stdout.Count
+    }
+
+    pub int Boom() {
+        throw "boom"
+    }
+}
+
+actor Caller(Napper N, Helper H) {
+    pub void Go() {
+        print(N.Outer(H))
+    }
+
+    pub string Done() => "done"
+}
+
+actor Runner {
+    pub string Run() {
+        o = Command.New("printf").Arg("y").Output() else {
+            IoError e => return "run {e.Kind}"
+            ExitError e => return "exit {e}"
+        }
+
+        bytes = File.ReadAll("park-command-pipes.txt") else {
+            IoError e => return "read {e.Kind}"
+        }
+
+        return "out {Text(o.Stdout)} {Text(bytes)}"
+    }
+}
+
+void | IoError | ExitError Main() {
+    k = File.Create("park-command-pipes.txt")
+    k.Write("k".Bytes)
+    k.Close()
+    Command.New("mkfifo").Arg("park-command-pipes").Status()
+    runner = spawn Runner()
+    print(runner.Run())
+    before = Directory.List("/proc/self/fd").Count
+    poker = spawn Helper() on crash stop
+    napper = spawn Napper()
+    c = spawn Caller(napper, poker) on crash (e) {
+        match e.Reason {
+            RuntimeError r => print(r.Kind)
+        }
+
+        restart
+    }
+
+    send c.Go()
+    print(c.Done())
+    w = File.Create("park-command-pipes")
+    w.Close()
+    print(Directory.List("/proc/self/fd").Count - before)
+    File.Delete("park-command-pipes")
+    File.Delete("park-command-pipes.txt")
+}
+
+Main() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}

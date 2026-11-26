@@ -9,7 +9,8 @@
 // `Shut`, a call of the chain, is let in while `Run`'s read of a FIFO runs on the pool of threads for blocking calls (S10), and its
 // `Close` through the copy `held` ends the handle at once while the read in flight keeps the descriptor (S5): that read gets the
 // byte the top-level code writes once `Shut` returned, and the next read through `f` gets the error of a closed handle, `Other`
-// with the number 9. The top-level code calls `Result` until `Poke` ran, so that it writes the byte after the `Close`
+// with the number 9. The top-level code calls `Result` until `Poke` ran, so that it writes the byte after the `Close`. S5 alone is
+// the subject, the descriptor a call in flight keeps past a `Close`; S10 and U17 it passes through
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
