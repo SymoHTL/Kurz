@@ -146,24 +146,28 @@ not `mut`, or passing an immutable variable as `mut`, is the compile error `mut-
 assigning to such a parameter is F8's `assign-immutable`, as assigning to any immutable variable
 is. Leaving `mut` out at the call is the compile error `mut-at-call`. What may stand after `mut` at
 a call is a `mut` variable or a path from one, through fields of `data` values, to the value that
-is passed (`Fill(mut c.Items)`), or a `mut` field of a class instance (M4); a call result or a
-literal cannot stand there, and `mut` in front of an argument whose parameter is not `mut` is
-`mut-at-call` as well. Passing one variable twice as `mut` (`Swap(mut a, mut a)`), or a variable
-and a path into it, is `mut-at-call` too: each `mut` parameter is the only way its value changes
-while the function runs (M3). The path of `data` fields after `mut` is decided (§4, the owner,
-2026-11-25, issue 646, comment 7167181142, "Decide + build") *(proposed: a `mut` field of a class
-instance after `mut`, and the two further uses of `mut-at-call`)*.
+is passed (`Fill(mut c.Items)`), or a `mut` field of the instance named alone in its method (M4,
+K7); a call result or a literal cannot stand there, and `mut` in front of an argument whose parameter
+is not `mut` is `mut-at-call` as well. Passing one variable or one path twice as `mut`
+(`Swap(mut a, mut a)`), or a variable or a path beside a longer path into it
+(`Pair(mut p.In, mut p.In.A)`), is `mut-at-call` too: each `mut` parameter is the only way its value
+changes while the function runs (M3). The path of `data` fields after `mut` is decided (§4, the
+owner, 2026-11-25, issue 646, comment 7167181142, "Decide + build") *(proposed: a `mut` field of the
+instance named alone in its method after `mut`, and the uses of `mut-at-call` for `mut` in front of
+an argument whose parameter is not `mut` and for one variable or path passed twice or beside a
+longer path into it)*.
 
 A path of `data` fields passed as `mut`, `Grow(mut b.Items)`, gives the callee the place at the end of
 the path, as C#'s `ref b.Items` and Rust's `&mut b.items` do: a block on the path that another value
 holds is copied first, as an assignment into the path copies it (M4), so that a variable that held it
 keeps its value, and one the variable holds alone is written where it stands (§4, the owner, 2026-11-25,
-"Copy if shared"). An item of a list, an entry of a map, a field of a class instance and a `weak`
-reference on the path stay `not supported`, each with a text that names its form (§4, the owner,
-2026-11-25, "Data fields only"). *(assumed, §4: the place is taken after the other arguments ran, as a
-variable's is; an item and an entry share one text, which names both; a path to a `weak` field given to
-a `mut weak T?` parameter keeps the `type-mismatch` the build gives it, since a read of the field is the
-strong `T?` (R3).)*
+"Copy if shared"). An item of a list, an entry of a map, a field of a class instance, a `weak`
+reference on the path, and a path that ends at a `weak` field given to a strong `mut T?` parameter
+stay `not supported` (§4, the owner, 2026-11-25, "Data fields only"). *(assumed, §4: the place is
+taken after the other arguments ran, as a variable's is; a path to a `weak` field given to a
+`mut weak T?` parameter keeps the `type-mismatch` the build gives it, since a read of the field is the
+strong `T?` (R3); a `weak` field named alone in its method, which is no path, stays `not supported` as
+a path to one does.)*
 
 Within one expression, a read of what a call takes as `mut`, of a value that holds it or of one it
 holds (the variable itself, a path of fields, an item of a list), is the compile error
@@ -683,6 +687,41 @@ Bump(mut o.In.N)
 print(o.In.Items)
 print(o.In.N)
 print(kept.In.Items)
+```
+
+A path beside a longer path into it, passed as `mut` to one call, is `mut-at-call`:
+
+Case: [values/mut-path-overlap.kz](../corpus/values/mut-path-overlap.kz)
+```kurz
+// a path and a longer path that it is a prefix of, both passed as `mut` to one call, would give the callee two ways to change one value
+data Inner(List<int> A)
+data Outer(Inner In)
+
+void Pair(mut Inner i, mut List<int> a) {
+    a.Add(i.A.Count)
+}
+
+mut p = Outer(Inner([1]))
+Pair(mut p.In, mut p.In.A)
+print(p.In.A)
+```
+
+A path that ends at a `weak` field, given to a `mut weak T?` parameter, is `type-mismatch` *(assumed, §4)*:
+
+Case: [values/mut-path-weak-field.kz](../corpus/values/mut-path-weak-field.kz)
+```kurz
+// a read of a `weak` field is the strong `T?` (R3), so a path that ends at one is no place a `mut weak T?` parameter takes
+class Box(List<int> Items)
+data Link(weak Box? To)
+
+void Drop(mut weak Box? x) {
+    x = null
+}
+
+b = Box([1])
+mut l = Link(b)
+Drop(mut l.To)
+print(b.Items)
 ```
 
 ### M8 (decided, §4) One family of collections

@@ -1752,6 +1752,8 @@ public sealed class CheckerTests
         Clean(two + "Two(mut p.A, mut p.B)\nprint(p.A.Count)"); // two fields of one variable are two values
         Assert.Equal([(ErrorIds.MutAtCall, 8)], Errors(two + "Two(mut p.A, mut p.A)\nprint(p.A.Count)"));
         Assert.Equal([(ErrorIds.MutAtCall, 9)], Errors("data P(List<int> A)\n\nvoid Both(mut P q, mut List<int> a) {\n    a.Add(q.A.Count)\n}\n\nmut p = P(List<int>())\n\nBoth(mut p, mut p.A)")); // a path and one it is a prefix of; the parameter is not `p`, which F16 keeps for the top-level variable
+        var (longer, _) = Check("data Inner(List<int> A)\ndata Outer(Inner In)\n\nvoid Pair(mut Inner i, mut List<int> a) {\n    a.Add(i.A.Count)\n}\n\nmut p = Outer(Inner(List<int>()))\nPair(mut p.In, mut p.In.A)");
+        Assert.Equal([(ErrorIds.MutAtCall, "9: `p.In.A` is passed as `mut` twice (M7)")], longer.Sorted.Select(d => (d.Id, $"{d.Line}: {d.Message}"))); // a path beside a longer path into it (`Overlaps`)
         Assert.Equal([(ErrorIds.MutAtCall, 6)], Errors("void FillB(mut List<byte> xs) {\n    xs.Add(1)\n}\n\nmut s = \"abc\"\nFillB(mut s.Bytes)")); // M7: a path of data fields, which `Bytes` is not
         Assert.Equal([(ErrorIds.MutRequired, 2)], Errors("mut s = \"abc\"\ns.Bytes.Add(1)")); // M5 with M4: the same for a receiver
         Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("void Bump(mut int n) {\n    n = n + 1\n}\n\nmut short s = 1\nBump(mut s)\nprint(s)")); // M7: the callee writes an `int` back

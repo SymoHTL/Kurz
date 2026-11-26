@@ -1493,6 +1493,29 @@ Circle Get(bool b) {
 print("unreached")
 ```
 
+Where an arm before it handles every other case, the arm `else` takes the `void` case alone, and its
+bare `throw` is the same error:
+
+Case: [outcomes/else-throw-void-alone.kz](../corpus/outcomes/else-throw-void-alone.kz)
+```kurz
+data Circle(int R)
+data NotFound
+
+Circle | void | NotFound Find(bool b) {
+    return Circle(1)
+}
+
+// an arm of `NotFound` stands before the arm `else`, which takes the `void` case alone, and the `void` case holds no value a bare `throw` could throw
+Circle Get(bool b) {
+    return Find(b) else {
+        NotFound => Circle(0)
+        else => throw
+    }
+}
+
+print("unreached")
+```
+
 Case: [outcomes/else-throw-after-void-arm.kz](../corpus/outcomes/else-throw-after-void-arm.kz)
 ```kurz
 data Circle(int R)

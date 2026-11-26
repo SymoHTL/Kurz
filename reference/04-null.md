@@ -733,7 +733,7 @@ result, `groups[key]?.Items.Add(1)`, stays `not supported`, "a `mut` method on a
 item, entry or call's result (N3, M5)", and so do an assignment into a path through a nullable
 variable or field, `c.Items[0] = 3`, "an assignment into a path through a nullable variable or field
 (N3, M4)", and such a path passed as `mut`, `Grow(mut c.Items)`, "a path through a nullable variable or
-field passed as `mut` (N3, M7)" (issue 639). Such a call on a path a call can change (N9),
+field passed as `mut` (N3, M7)". Such a call on a path a call can change (N9),
 whose arguments, index or key run a call, is `nullable-unchecked`, the error the same call gets with that call on
 the line before it, with the help line N9 gives it (§4, the owner, 2026-11-24); a local variable, a
 path of `data` fields from one and a map one holds stay allowed.
