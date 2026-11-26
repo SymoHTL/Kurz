@@ -5036,10 +5036,10 @@ bool RootLoop(byte* reply, long deadline) {
                 } else if runFirst == null {
                     IdleWait(Earliest(Earliest(due, deadline), Next()) - now)
                 } else {
-                    RunOne()
+                    RunTurn()
                 }
             } else if runFirst != null {
-                RunOne()
+                RunTurn()
             } else if reply == null || Sleeping() || polled > 0 {
                 IdleWait(Earliest(deadline, Next()) - now)
             } else {
@@ -5135,19 +5135,149 @@ void Park(long deadline) {
 // `checkdead` counts its netpoller).
 thread static mut long polled = 0
 
-// The blocks that `sys.PollWait` gives, at most 64 of 8 bytes, taken of the thread's own heap at the first wait (`Polled`).
+// The events that `sys.PollWait` gives, at most 64 of two words, a descriptor and the events it gives, taken of the thread's own
+// heap at the first wait (`Polled`).
 thread static mut byte* readied = null
+
+// The waits of each descriptor that waits in the poller (`SocketWaited`), the first wait of `fd` at `waits + fd * 8` and each
+// wait's block linking the next at 48: the one registration of a descriptor carries the union of its waits' events and the
+// descriptor as its data, and an event wakes the waits whose direction it gives, as Tokio's `ScheduledIo` keeps the readers and the
+// writers of one registration apart, so that a read and a write of one socket, or two `Accept`s of one listener, each wait for
+// their own (issue 658). Mapped at the first wait and grown to the descriptor's number (`WaitsOf`), with `waitSlots` slots.
+thread static mut byte* waits = null
+
+// The slots of `waits`.
+thread static mut long waitSlots = 0
+
+// The slot of the first wait of `fd` (`waits`), the table grown to hold it, to twice its slots or to the descriptor's number and
+// 1024 more, whichever is more, the slots it held copied; null where the system refuses the memory.
+byte* WaitsOf(int fd) {
+    raw {
+        if long(fd) >= waitSlots {
+            mut long slots = waitSlots * 2
+            if slots < long(fd) + 1024 {
+                slots = long(fd) + 1024
+            }
+
+            byte* grown = sys.Memory(slots * 8)
+            if grown == null {
+                return null
+            }
+
+            mut long i = 0
+            while i < waitSlots {
+                *Ptr<byte*>(grown + i * 8) = *Ptr<byte*>(waits + i * 8)
+                i = i + 1
+            }
+
+            if waits != null {
+                sys.Release(waits, waitSlots * 8)
+            }
+
+            waits = grown
+            waitSlots = slots
+        }
+
+        return waits + long(fd) * 8
+    }
+}
+
+// The union of the events of the waits from `first` on, linked at 48 (`waits`).
+int Interest(byte* first) {
+    mut long events = 0
+    raw {
+        mut byte* at = first
+        while at != null {
+            events = events | *Ptr<long>(at + 56)
+            at = *Ptr<byte*>(at + 48)
+        }
+    }
+
+    return int(events)
+}
+
+// The wait `block` ended with `result`, 1 where its event came, the failure of the poller below 0: its word set and the actor of the
+// activation that waits on it woken, which goes on where that activation is its top (`SocketWaited`); the top-level code's block
+// names no waiter, and its wait reads the word (`RootLoop`).
+void Ended(byte* block, long result) {
+    raw {
+        *Ptr<long>(block) = result
+        byte* header = *Ptr<byte*>(block + 8)
+        if header != null {
+            Wake(*Ptr<byte*>(header + 320))
+        }
+    }
+}
+
+// Each wait of `fd`, whose first stands in `slot`, ended with the poller's `failure` (`Ended`), the list emptied and the
+// registration taken out, so that no wait is held to its bound, or without end, by a poller that cannot give its event.
+void Fail(int fd, byte* slot, long failure) {
+    raw {
+        mut byte* at = *Ptr<byte*>(slot)
+        *Ptr<byte*>(slot) = null
+        while at != null {
+            byte* next = *Ptr<byte*>(at + 48)
+            Ended(at, failure)
+            at = next
+        }
+
+        sys.PollRemove(fd)
+    }
+}
+
+// The registration of `fd` set to the waits whose first stands in `slot`: taken out of the poller where none is left, armed again
+// for the union of their events otherwise (`EPOLLONESHOT` disarms it at each event), and where the poller refuses that, each wait
+// given the failure (`Fail`).
+void Rearm(int fd, byte* slot) {
+    raw {
+        byte* first = *Ptr<byte*>(slot)
+        if first == null {
+            sys.PollRemove(fd)
+            return
+        }
+
+        long added = sys.PollAdd(fd, Interest(first), sys.EpollDataAt())
+        if added < 0 {
+            Fail(fd, slot, added)
+        }
+    }
+}
+
+// The wait `block` of `fd` taken out of its descriptor's list (`waits`), where its bound passed or its actor fell, and the
+// registration set to the waits left (`Rearm`); a block no longer in the list, which an event or a failure took out before, takes
+// nothing out.
+void Unwait(int fd, byte* block) {
+    raw {
+        byte* slot = WaitsOf(fd)
+        if slot == null {
+            return
+        }
+
+        mut byte* at = slot
+        while *Ptr<byte*>(at) != null && *Ptr<byte*>(at) != block {
+            at = *Ptr<byte*>(at) + 48
+        }
+
+        if *Ptr<byte*>(at) == block {
+            *Ptr<byte*>(at) = *Ptr<byte*>(block + 48)
+        }
+
+        Rearm(fd, slot)
+    }
+}
 
 // The wait of a call on the socket `fd` that would block, which the runtime's code for the system calls (`sys.Waiter`; section 6,
 // "the poller"; section 12, 2026-11-13, "Same bounds, poller timer"; issue 658): the descriptor registered in the poller for
 // `events` (`sys.PollAdd`), with a block shaped as a reply that is never answered: its word, which the poller sets to 1 at the
 // descriptor's event (`Polled`), its waiter, the deadline `nanoseconds` from now on the runtime's clock, which `advance` moves
-// (Y10, section 11), its links among the timers and, at 40, the descriptor plus one, so that a fall unhooks the registration
-// (`Fall`). Inside a message the activation parks as a sleep does (`Park`), among the timers, until the event or the deadline,
+// (Y10, section 11), its links among the timers, at 40 the descriptor plus one, so that a fall unhooks the wait (`Fall`), at 48 the
+// next wait of the same descriptor and at 56 its `events` (`waits`), the registration then armed for the union of the descriptor's
+// waits. Inside a message the activation parks as a sleep does (`Park`), among the timers, until the event or the deadline,
 // and the calls of its chain are let in above it; the top-level code runs what its wait on a call runs, to the event or the
-// deadline (`RootLoop`). 1 where the descriptor is ready, 0 where the deadline passed first, the registration then taken out
-// (`sys.PollRemove`), as an event disarms it otherwise; the failure of the poller, below 0. The descriptor is made ready before
-// the deadline wins, as Tokio's `timeout` polls its future first: an event the same turn sees is the call's.
+// deadline (`RootLoop`). 1 where the descriptor is ready, 0 where the deadline passed first, the wait then taken out of its list
+// and the registration set to the waits left (`Unwait`); the failure of the poller, below 0. A descriptor ready when the deadline
+// passed is the call's (`sys.ReadyNow`), as Tokio's `timeout` polls its future before its timer, so that a scheduler that read
+// no event for it since gives no `TimedOut` for a call the descriptor would answer.
 extern "C" int SocketWaited(int fd, int events, long nanoseconds) {
     long now = PauseClock()
     mut long deadline = Never()
@@ -5158,7 +5288,13 @@ extern "C" int SocketWaited(int fd, int events, long nanoseconds) {
     mut int result = 0
     sys.Entered()
     raw {
-        byte* block = Allocate(48)
+        byte* slot = WaitsOf(fd)
+        if slot == null {
+            sys.Left()
+            return -12
+        }
+
+        byte* block = Allocate(64)
         byte* header = running
         *Ptr<long>(block) = 0
         *Ptr<byte*>(block + 8) = header
@@ -5166,9 +5302,13 @@ extern "C" int SocketWaited(int fd, int events, long nanoseconds) {
         *Ptr<byte*>(block + 24) = null
         *Ptr<byte*>(block + 32) = null
         *Ptr<long>(block + 40) = long(fd) + 1
-        long added = sys.PollAdd(fd, events, block, sys.EpollDataAt())
+        *Ptr<byte*>(block + 48) = *Ptr<byte*>(slot)
+        *Ptr<long>(block + 56) = long(events)
+        *Ptr<byte*>(slot) = block
+        long added = sys.PollAdd(fd, Interest(block), sys.EpollDataAt())
         if added < 0 {
-            std.Free(block, 48)
+            *Ptr<byte*>(slot) = *Ptr<byte*>(block + 48)
+            std.Free(block, 64)
             sys.Left()
             return int(added)
         }
@@ -5193,41 +5333,97 @@ extern "C" int SocketWaited(int fd, int events, long nanoseconds) {
         }
 
         polled = polled - 1
-        if *Ptr<long>(block) != 0 {
+        long word = *Ptr<long>(block)
+        if word == 1 {
             result = 1
+        } else if word < 0 {
+            result = int(word)
         } else {
-            sys.PollRemove(fd)
+            if sys.ReadyNow(fd, events) != 0 {
+                result = 1
+            }
+
+            Unwait(fd, block)
         }
 
-        std.Free(block, 48)
+        std.Free(block, 64)
     }
 
     sys.Left()
     return result
 }
 
-// The scheduler's wait in the poller for at most `nanoseconds` (`IdleWait`): each block an event gave set ready, its word 1,
-// and the actor of the activation that waits on it woken, which goes on where that activation is its top (`SocketWaited`); the
-// top-level code's block names no waiter, and its wait reads the word (`RootLoop`).
+// The scheduler's wait in the poller for at most `nanoseconds` (`IdleWait`), or its look with no wait (`RunTurn`): each wait of a
+// descriptor an event gave whose events it gives, or every wait of it at an error or a hang-up (`EPOLLERR` 8, `EPOLLHUP` 16),
+// taken out of its list and ended with 1 (`Ended`), and the registration armed again for the waits left (`Rearm`), as Tokio's
+// `ScheduledIo` wakes the readers at a read's readiness and the writers at a write's; where the poller fails, every wait of every
+// descriptor ended with the failure (`Fail`), as each call's `IoError` of the system's kind and number (S1).
 void Polled(long nanoseconds) {
     raw {
         if readied == null {
-            readied = AllocateOwn(512)
+            readied = AllocateOwn(1024)
         }
 
         long count = sys.PollWait(nanoseconds, readied, 64, sys.EpollDataAt())
+        if count < 0 {
+            mut long each = 0
+            while each < waitSlots {
+                byte* failing = waits + each * 8
+                if *Ptr<byte*>(failing) != null {
+                    Fail(int(each), failing, count)
+                }
+
+                each = each + 1
+            }
+
+            return
+        }
+
         mut long i = 0
         while i < count {
-            byte* block = *Ptr<byte*>(readied + i * 8)
-            *Ptr<long>(block) = 1
-            byte* header = *Ptr<byte*>(block + 8)
-            if header != null {
-                Wake(*Ptr<byte*>(header + 320))
+            long fd = *Ptr<long>(readied + i * 16)
+            long given = *Ptr<long>(readied + i * 16 + 8)
+            if fd >= 0 && fd < waitSlots {
+                byte* slot = waits + fd * 8
+                mut byte* at = slot
+                while *Ptr<byte*>(at) != null {
+                    byte* block = *Ptr<byte*>(at)
+                    if (*Ptr<long>(block + 56) & given) != 0 || (given & 24) != 0 {
+                        *Ptr<byte*>(at) = *Ptr<byte*>(block + 48)
+                        Ended(block, 1)
+                    } else {
+                        at = block + 48
+                    }
+                }
+
+                if *Ptr<byte*>(slot) != null {
+                    Rearm(int(fd), slot)
+                }
             }
 
             i = i + 1
         }
     }
+}
+
+// The turns of the run queue since the last look at the poller (`RunTurn`).
+thread static mut long turns = 0
+
+// One actor's turn of the run queue (`RunOne`), and at every 61st turn, while a registration waits, a look at the poller with no
+// wait (`Polled`), so that a scheduler that never runs out of work still reads the events of the descriptors that wait, as Tokio's
+// scheduler reads its driver every `event_interval` ticks, 61 by default.
+void RunTurn() {
+    raw {
+        turns = turns + 1
+        if turns >= 61 {
+            turns = 0
+            if polled > 0 {
+                Polled(0)
+            }
+        }
+    }
+
+    RunOne()
 }
 
 // The replies of the calls that an actor's start keeps out, each address added to `found` in the order the walk finds them, which the
@@ -6069,10 +6265,11 @@ void Fall(byte* state, byte* header, byte* kept) {
                 TimerRemove(waited)
             }
 
-            // a call on a socket that waits in the poller (`SocketWaited`): its registration taken out, so that no event
-            // writes the block, which the fall frees with the heap
+            // a call on a socket that waits in the poller (`SocketWaited`): its wait taken out of its descriptor's list and the
+            // registration set to the waits left (`Unwait`), so that no event writes the block, which the fall frees with the heap;
+            // a sleep's block (`Park`) holds 0 at 40
             if waited != null && *Ptr<byte*>(at + 432) == null && *Ptr<long>(waited + 40) > 0 {
-                sys.PollRemove(int(*Ptr<long>(waited + 40) - 1))
+                Unwait(int(*Ptr<long>(waited + 40) - 1), waited)
                 polled = polled - 1
             }
 

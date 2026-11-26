@@ -284,7 +284,9 @@ pub void Sleep(long nanoseconds) {
 pub void Waiter(extern "C" (int, int, long) => int wait) {
 }
 
-pub long PollAdd(int fd, int events, byte* block, long dataAt) => -4099
+pub long PollAdd(int fd, int events, long dataAt) => -4099
+
+pub int ReadyNow(int fd, int events) => 0
 
 pub void PollRemove(int fd) {
 }
