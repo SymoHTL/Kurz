@@ -2819,11 +2819,12 @@ long Ready(int fd, int events, int option) {
 }
 
 // The descriptor `fd` registered in the poller for the `events` of `epoll`, with `EPOLLONESHOT` (1 << 30), so that one event
-// disarms it, its data the block `block` of the actor that waits, as Tokio's `Registration` holds its waker: `EPOLL_CTL_MOD` (3)
-// for a descriptor an event disarmed, `EPOLL_CTL_ADD` (1) where the poller has none (`ENOENT`, 2). The data stands at `dataAt` of
-// the 12 bytes of x86-64's packed struct and the 16 of AArch64's, which each architecture's file gives (`EpollDataAt`), copied a
-// byte at a time. 0, or the failure, -12 (`ENOMEM`) where the thread's page cannot be mapped.
-pub long PollAdd(int fd, int events, byte* block, long dataAt) {
+// disarms it, its data the descriptor itself, whose waits the runtime keeps in a list per descriptor (`SocketWaited`), as Tokio's
+// `ScheduledIo` keeps the readers and the writers of one registration: `EPOLL_CTL_MOD` (3) for a descriptor registered before,
+// armed or disarmed, its events then the union of its waits', `EPOLL_CTL_ADD` (1) where the poller has none (`ENOENT`, 2). The
+// data stands at `dataAt` of the 12 bytes of x86-64's packed struct and the 16 of AArch64's, which each architecture's file gives
+// (`EpollDataAt`), copied a byte at a time. 0, or the failure, -12 (`ENOMEM`) where the thread's page cannot be mapped.
+pub long PollAdd(int fd, int events, long dataAt) {
     mut long result = -12
     raw {
         byte* held = Endpoints()
@@ -2840,7 +2841,7 @@ pub long PollAdd(int fd, int events, byte* block, long dataAt) {
         *Ptr<long>(held + 176) = 0
         *Ptr<long>(held + 184) = 0
         *Ptr<int>(held + 176) = events | 1073741824
-        *Ptr<byte*>(held + 192) = block
+        *Ptr<long>(held + 192) = long(fd)
         mut long i = 0
         while i < 8 {
             held[176 + dataAt + i] = held[192 + i]
@@ -2861,8 +2862,31 @@ pub long PollAdd(int fd, int events, byte* block, long dataAt) {
     return result
 }
 
-// The registration of `fd` taken out of the poller, `EPOLL_CTL_DEL` (2), for a wait whose bound passed or whose actor fell while
-// the registration was armed; a failure ignored, a descriptor closed since among them.
+// Whether `fd` is ready for `events` now, `POLLIN` (1) or `POLLOUT` (4), the numbers of `epoll`'s, by `poll` with no wait, an
+// error or a hang-up among what it gives: 1 where it is, 0 where it is not or `poll` fails. The look of a wait whose bound passed
+// before the scheduler read the poller, so that a descriptor made ready before its deadline is the call's (`SocketWaited`), as
+// Tokio's `timeout` polls its future before its timer. The page's `struct pollfd` at 144, which `Connected` fills too, with no wait
+// between its write and its read in either.
+pub int ReadyNow(int fd, int events) {
+    mut int ready = 0
+    raw {
+        byte* held = Endpoints()
+        if held == null {
+            return 0
+        }
+
+        *Ptr<int>(held + 144) = fd
+        *Ptr<int>(held + 148) = events
+        if poll(Ptr<void>(held + 144), 1, 0) > 0 {
+            ready = 1
+        }
+    }
+
+    return ready
+}
+
+// The registration of `fd` taken out of the poller, `EPOLL_CTL_DEL` (2), where the last of its waits ended by its bound or by its
+// actor's fall; a failure ignored, a descriptor closed since among them.
 pub void PollRemove(int fd) {
     raw {
         byte* held = Endpoints()
@@ -2874,13 +2898,22 @@ pub void PollRemove(int fd) {
 
 // The wait of the scheduler that has nothing to run (section 6): `epoll_wait` for at most `nanoseconds`, in whole milliseconds,
 // rounded up so that a deadline is not passed before it comes, as Tokio's driver rounds its timeout, and at most the largest
-// `int`; the data of each event, a block that `PollAdd` registered, written to `ready`, at most `count` of them: their count, 0
-// where a signal interrupted the wait or no registration was ever made. The events stand `dataAt` + 8 bytes apart.
+// `int`, with no wait where `nanoseconds` is 0, the look of a busy scheduler (`RunTurn`); each event written to `ready` as two
+// words, its data, the descriptor `PollAdd` registered, and the events it gives, at most `count` of them: their count, 0 where a
+// signal interrupted the wait (`EINTR`, 4), or any other failure of `epoll_wait` negated, as Go's `netpoll` throws on every
+// failure but `EINTR` and the scheduler here gives it to the calls that wait (`Polled`). With no poller, in the child of a `fork`
+// (`Forked`) or before the first socket, the time asked is slept and 0 given, so that a scheduler that counts registrations its
+// process does not hold waits on its timers and does not spin. The events of `epoll_wait` stand `dataAt` + 8 bytes apart.
 pub long PollWait(long nanoseconds, byte* ready, long count, long dataAt) {
     mut long given = 0
     raw {
         byte* held = Endpoints()
-        if held == null || poller < 0 {
+        if held == null {
+            return 0
+        }
+
+        if poller < 0 {
+            Sleep(nanoseconds)
             return 0
         }
 
@@ -2903,6 +2936,15 @@ pub long PollWait(long nanoseconds, byte* ready, long count, long dataAt) {
 
         long size = dataAt + 8
         int got = epoll_wait(poller, Ptr<void>(held + 256), int(most), int(wait))
+        if got < 0 {
+            int number = *__errno_location()
+            if number == 4 {
+                return 0
+            }
+
+            return -long(number)
+        }
+
         while given < long(got) {
             byte* event = held + 256 + given * size
             mut long i = 0
@@ -2911,7 +2953,8 @@ pub long PollWait(long nanoseconds, byte* ready, long count, long dataAt) {
                 i = i + 1
             }
 
-            *Ptr<byte*>(ready + given * 8) = *Ptr<byte*>(held + 192)
+            *Ptr<long>(ready + given * 16) = *Ptr<long>(held + 192)
+            *Ptr<long>(ready + given * 16 + 8) = long(*Ptr<int>(event))
             given = given + 1
         }
     }

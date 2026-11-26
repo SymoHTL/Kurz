@@ -2524,6 +2524,203 @@ root = spawn Node()
 print(root.Size(root, 2))
 ```
 
+Case: [system/park-read-write.kz](../corpus/system/park-read-write.kz)
+```kurz
+// a read waits in the poller on a connection that sends nothing, and a write of the same connection, made by a call of the read's
+// chain that the parked read lets in (U17), waits there too, for room in buffers nobody reads: each wait keeps its own direction's
+// interest in the descriptor's one registration (S10), so that the write goes on as the top-level code reads and the read takes the
+// byte the top-level code writes after it, at once and not at its bound of 5 seconds (S9); a registration that took the write's
+// interest in place of the read's would leave the read to end `TimedOut` at that bound
+actor Helper {
+    pub void Poke(Duplex d, int total) {
+        d.Write(total)
+    }
+}
+
+actor Duplex {
+    mut TcpStream? held = null
+    mut string wrote = "none"
+    mut string read = "none"
+
+    pub string Connect(int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return "connect {e.Kind}"
+        }
+
+        held = stream
+        return "connected"
+    }
+
+    pub void Read(Helper helper, int total) {
+        stream = held
+        if stream == null {
+            return
+        }
+
+        send helper.Poke(this, total)
+        mut buffer = Bytes()
+        read = match stream.Read(mut buffer, 1) {
+            int n => "read {n}"
+            IoError e => "{e.Kind} {e.Code}"
+        }
+    }
+
+    pub void Write(int total) {
+        stream = held
+        if stream == null {
+            return
+        }
+
+        piece = "0123456789abcdef".Bytes
+        mut chunk = Bytes()
+        while chunk.Count < 65536 {
+            chunk.AddRange(piece)
+        }
+
+        mut written = 0
+        while written < total {
+            stream.Write(chunk) else {
+                IoError e => {
+                    wrote = "{e.Kind} {e.Code}"
+                    return
+                }
+            }
+
+            written = written + chunk.Count
+        }
+
+        wrote = "wrote {written}"
+    }
+
+    pub string Result() => "{wrote}, {read}"
+}
+
+void | IoError Main() {
+    total = 33554432
+    listener = TcpListener.Bind("127.0.0.1:0")
+    d = spawn Duplex()
+    h = spawn Helper()
+    connected = d.Connect(listener.Port)
+    if connected != "connected" {
+        print(connected)
+        return
+    }
+
+    server = listener.Accept()
+    send d.Read(h, total)
+    mut got = 0
+    while got < total {
+        mut buffer = Bytes()
+        got = got + server.Read(mut buffer, 65536)
+    }
+
+    server.Write("x".Bytes)
+    print(d.Result())
+}
+
+Main() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/park-two-accepts.kz](../corpus/system/park-two-accepts.kz)
+```kurz
+// two `Accept`s of one listener wait in the poller at once, the second made by a call of the first's chain that the first lets in
+// (U17), and an actor connects twice once both wait: each wait keeps its place among the descriptor's waits (S10), so that the
+// connections' event wakes both and each takes a connection; a registration that took the second wait in place of the first
+// would leave the first waiting without end, since `Accept` has no bound
+actor Connector {
+    mut TcpStream? first = null
+    mut TcpStream? second = null
+
+    pub void Go(int port) {
+        a = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return
+        }
+
+        first = a
+        b = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return
+        }
+
+        second = b
+    }
+}
+
+actor Helper {
+    pub void Poke(Gate g) {
+        g.Second()
+    }
+}
+
+actor Gate {
+    mut TcpListener? held = null
+    mut Connector? connector = null
+    mut int accepted = 0
+
+    pub int Open(Connector c) {
+        listener = TcpListener.Bind("127.0.0.1:0") else {
+            IoError e => return -1
+        }
+
+        held = listener
+        connector = c
+        return listener.Port
+    }
+
+    pub void First(Helper helper) {
+        listener = held
+        if listener == null {
+            return
+        }
+
+        send helper.Poke(this)
+        stream = listener.Accept() else {
+            IoError e => return
+        }
+
+        accepted = accepted + 1
+        stream.Close() else {
+            IoError e => return
+        }
+    }
+
+    pub void Second() {
+        listener = held
+        if listener == null {
+            return
+        }
+
+        connecting = connector
+        if connecting == null {
+            return
+        }
+
+        send connecting.Go(listener.Port)
+        stream = listener.Accept() else {
+            IoError e => return
+        }
+
+        accepted = accepted + 1
+        stream.Close() else {
+            IoError e => return
+        }
+    }
+
+    pub string Count() => "accepted {accepted}"
+}
+
+dialer = spawn Connector()
+poker = spawn Helper()
+gate = spawn Gate()
+if gate.Open(dialer) < 0 {
+    print("no listener")
+} else {
+    send gate.First(poker)
+    print(gate.Count())
+}
+```
+
 ### U18 (decided, §6) A wait of the top-level code that nothing can end
 
 The top-level code's call that waits sleeps on the main thread until its reply is set, while the
