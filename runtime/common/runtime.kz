@@ -5085,6 +5085,13 @@ pub void Slept(long nanoseconds) {
         deadline = now + nanoseconds
     }
 
+    Park(deadline)
+}
+
+// The wait of `Slept` to the clock's `deadline`, and of `Advance` to the turn after it (Y10): inside a message the activation parked
+// among the timers, after every one whose deadline is not later (`TimerAdd`), which the scheduler's turn fires in that order (`Fire`);
+// the top-level code's run of what its wait runs to the deadline (`RootLoop`).
+void Park(long deadline) {
     sys.Entered()
     raw {
         if running == null {
@@ -6353,15 +6360,63 @@ pub void Rebuilt(byte* state) {
     }
 }
 
-// The clock every pause and every deadline reads (U23, U36): the system's monotonic clock, in nanoseconds, 0
-// where it cannot be read.
+// The clock every pause and every deadline reads (U23, U36): the system's monotonic clock, in nanoseconds, with the offset that
+// `advance` added in a test (`ahead`; Y10), 0 where it cannot be read.
 long PauseClock() {
     mut long now = 0
     if !sys.MonotonicNow(mut now) {
         return 0
     }
 
-    return now
+    raw {
+        return now + ahead
+    }
+}
+
+// The offset that `advance` adds to the runtime's clock in a test, in nanoseconds (Y10, section 11): `PauseClock`, the program's
+// `instant.Now` and `timestamp.Now` and the time stamp of a crash's log line read it in the build `kurz test` makes, and only that
+// build writes it, through `Advance` and at each test's end (`TestEnded`; F6 of issue 586, comment 6993110710), so that in every
+// other build nothing writes it and it stays 0, and the program's own reads of the clock read the system's alone (D8 of comment
+// 6992687784).
+static mut long ahead = 0
+
+// `advance d` (Y10, section 11): the runtime's clock moved by `nanoseconds`, zero or more, which the emitted code checked; false where
+// the monotonic or the wall clock it moves would pass the range of a `long`, which the emitted code raises as `overflow` at the
+// statement (section 4). The timers and the pauses the moved clock passed fire at the scheduler's turn after it, in the order of their
+// deadlines (F12 of comment 6993110710): the test's actor parks to the moved clock, after every timer whose deadline is not later
+// (`Park`), so that the actors they wake run before it goes on, as tokio's `time::advance` yields once after it moves the clock.
+pub bool Advance(long nanoseconds) {
+    mut long wall = 0
+    if !sys.Now(mut wall) {
+        wall = 0
+    }
+
+    mut long now = 0
+    if !sys.MonotonicNow(mut now) {
+        now = 0
+    }
+
+    if now > wall {
+        wall = now
+    }
+
+    raw {
+        if nanoseconds > 9223372036854775807 - wall - ahead {
+            return false
+        }
+
+        ahead = ahead + nanoseconds
+    }
+
+    Park(PauseClock())
+    return true
+}
+
+// The offset of `ahead`, which the build `kurz test` adds to the program's reads of the clock (Y10).
+pub long Ahead() {
+    raw {
+        return ahead
+    }
 }
 
 // The sleep of the top-level code until a restart's pause ends, or a deadline before it passes, `nanoseconds`
@@ -6395,6 +6450,10 @@ void Logged(byte* state, byte* id, long idCount, byte* file, long fileCount, lon
     mut long now = 0
     if !sys.Now(mut now) {
         now = 0
+    }
+
+    raw {
+        now = now + ahead
     }
 
     LogLine(4, "Kurz.Actor", "{name}#{number} crashed: {what}", CrashFields(file, fileCount, line, hasText, text, count), now)
@@ -7282,6 +7341,7 @@ void TestEnded() {
         }
 
         tick = 0
+        ahead = 0
         rootBlock = 0
         thrownNumber = 0
         thrownSlot = null

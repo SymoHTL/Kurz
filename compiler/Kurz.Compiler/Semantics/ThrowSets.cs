@@ -135,7 +135,7 @@ public sealed class ThrowSets
         [typeof(TestDeclaration)] = "no code where it stands: its body is the code of the test's own actor under kurz test",
         [typeof(AssertionStatement)] = "its condition, and the Text() of each side of the comparison its failure shows",
         [typeof(MockStatement)] = "no code: the checker refuses it",
-        [typeof(AdvanceStatement)] = "no code: the checker refuses it",
+        [typeof(AdvanceStatement)] = "its duration",
         [typeof(ExternBlock)] = "no code",
         [typeof(FunctionDeclaration)] = "no code where it stands: its body where it is called",
         [typeof(FieldDeclaration)] = "no code where it stands: its value where its type is made",
@@ -1185,7 +1185,10 @@ public sealed class ThrowSets
                     break;
                 case BreakStatement or ContinueStatement or UseStatement or ConstAssertStatement or ExternBlock or FunctionDeclaration or FieldDeclaration or ConstructorDeclaration or TypeDeclaration or DecisionStatement:
                     break;
-                case TestDeclaration or MockStatement or AdvanceStatement:
+                case TestDeclaration or MockStatement:
+                    break;
+                case AdvanceStatement a:
+                    Expression(a.Duration);
                     break;
                 case AssertionStatement a:
                     Expression(a.Condition);

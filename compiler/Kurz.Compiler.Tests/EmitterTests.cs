@@ -1897,4 +1897,33 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.DoesNotContain("void %case", program.Ir, StringComparison.Ordinal);
         Ran(Toolchain.Run(toolchain.Build(program, "else-void-arm-guarded")), 0, ["1", "5"], string.Empty);
     }
+
+    [Fact]
+    public void The_offset_of_the_clock_is_read_in_every_build_of_kurz_test_and_in_no_other()
+    {
+        // Y10 with D8 of issue 586, comment 6992687784: every build `kurz test` makes, the release build of `--release` among them, adds
+        // the runtime's offset (`Ahead`) to each of the program's reads of the clock, here one of `instant.Now`, one of `Elapsed` and two
+        // of `timestamp.Now`, and `advance` writes it; a build of `run`, `build` or `exec` reads the system's clock alone and stores to the
+        // offset nowhere, so that the read of it in the runtime's `PauseClock` reads a global no code changes, which the optimiser folds to
+        // 0; Linux alone, where the clock's reads are built (S25)
+        if (Builder.HostTarget != Target.Linux)
+        {
+            return;
+        }
+
+        const string text = "instant start = instant.Now\nprint(start.Elapsed >= 0s)\n\ntest \"reads\" {\n    instant first = instant.Now\n    timestamp wall = timestamp.Now\n    advance 1s\n    check first.Elapsed >= 1s\n    check timestamp.Now - wall >= 1s\n}\n";
+        var stores = new Regex(@"store i64 [^\n]*, ptr @""s\.rt\.common\.ahead""");
+        foreach (var release in new[] { false, true })
+        {
+            var run = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: !release).Program?.Ir;
+            var test = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: !release, tests: true).Program?.Ir;
+            Assert.NotNull(run);
+            Assert.NotNull(test);
+            Assert.DoesNotContain("@\"rt.common.Ahead.", run, StringComparison.Ordinal);
+            Assert.DoesNotMatch(stores, run);
+            Assert.Contains("@\"s.rt.common.ahead\" = internal global i64 0", run, StringComparison.Ordinal); // the global the optimiser folds
+            Assert.Equal(4, Regex.Count(test, @"call i64 @""rt\.common\.Ahead\.[^""]*""\(\)"));
+            Assert.Matches(stores, test);
+        }
+    }
 }

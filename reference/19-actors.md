@@ -4968,7 +4968,7 @@ and of the runtime's error type, `RuntimeError(RuntimeKind Kind, string Detail)`
 a `RuntimeError` of its kind, with the detail its error line names, the kinds being `Overflow`, `DivideByZero`,
 `IndexOutOfRange`, `ReversedRangeAtRunTime`, `InvalidOrderingAtRunTime`, `StackOverflow`, `PrintFailed`, `AllocationFailed`,
 `NotCharBoundary`, `RandomFailed`, `Deadlock`, `CalleeCrashed`, `ActorGone`, `RestartLimit`, `CallTimeout`, `CpuLacksSet`,
-`SettingsUnpublished`, `CheckFailed` and `InvalidInput`, each run-time row's id of chapter 12 as one capitalised word for each of its
+`SettingsUnpublished`, `CheckFailed`, `InvalidInput` and `AdvanceNegative`, each run-time row's id of chapter 12 as one capitalised word for each of its
 parts, in the table's order, `thrown` left out, and `InvalidArgument` after them, for `invalid-argument`
 (S13), which chapter 12 names outside its table *(assumed: its place after the table's, which the order
 of the table does not give)*; the child's code is its

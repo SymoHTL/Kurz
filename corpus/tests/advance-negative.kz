@@ -1,0 +1,11 @@
+// expect: throws advance-negative at 10
+// | test "the clock goes back" ... FAILED
+// |     advance-negative at tests/advance-negative.kz:10
+// | 1 test: 0 passed, 1 failed
+// command: test
+// rules: Y10
+
+// a negative duration crashes the test at the statement, and the clock does not move back
+test "the clock goes back" {
+    advance -1s
+}

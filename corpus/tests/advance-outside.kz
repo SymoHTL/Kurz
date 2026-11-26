@@ -1,0 +1,11 @@
+// expect: error advance-outside at 6
+// rules: Y10
+
+// a helper moves no clock, since a program's own run never moves its clock: it returns, and its test advances
+void Later() {
+    advance 1h
+}
+
+test "waits an hour" {
+    Later()
+}
