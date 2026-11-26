@@ -1739,6 +1739,88 @@ Main() else {
 }
 ```
 
+Case: [system/park-write.kz](../corpus/system/park-write.kz)
+```kurz
+// a writer connects, and then writes 32 MiB to a connection that nobody reads while it writes, more than a local connection's
+// buffers hold, so that a write would block: it parks its actor under `epoll` (S10), the top-level code's call of the ticker runs
+// while it waits, and the reads of the top-level code then take every byte, each of which lets the write go on; a thread that blocked
+// in the write would hold the ticker and the reads to the write's bound, 5 seconds by default (S9), and the write would end `TimedOut`
+actor Ticker {
+    pub string Tick() => "ticked"
+}
+
+actor Writer {
+    mut TcpStream? held = null
+    mut string result = "none"
+
+    pub string Connect(int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return "connect {e.Kind}"
+        }
+
+        held = stream
+        return "connected"
+    }
+
+    pub void Run(int total) {
+        stream = held
+        if stream == null {
+            return
+        }
+
+        piece = "0123456789abcdef".Bytes
+        mut chunk = Bytes()
+        while chunk.Count < 65536 {
+            chunk.AddRange(piece)
+        }
+
+        mut written = 0
+        while written < total {
+            stream.Write(chunk) else {
+                IoError e => {
+                    result = "{e.Kind} {e.Code}"
+                    return
+                }
+            }
+
+            written = written + chunk.Count
+        }
+
+        result = "wrote {written}"
+    }
+
+    pub string Result() => result
+}
+
+void | IoError Main() {
+    total = 33554432
+    listener = TcpListener.Bind("127.0.0.1:0")
+    w = spawn Writer()
+    t = spawn Ticker()
+    connected = w.Connect(listener.Port)
+    if connected != "connected" {
+        print(connected)
+        return
+    }
+
+    server = listener.Accept()
+    send w.Run(total)
+    print(t.Tick())
+    mut got = 0
+    while got < total {
+        mut buffer = Bytes()
+        got = got + server.Read(mut buffer, 65536)
+    }
+
+    print("read {got}")
+    print(w.Result())
+}
+
+Main() else {
+    IoError e => print(e)
+}
+```
+
 Case: [system/park-two-readers.kz](../corpus/system/park-two-readers.kz)
 ```kurz
 // two actors read a byte each from a connection of their own, and the byte of `b`'s comes first: `b` reads it while `a` still
