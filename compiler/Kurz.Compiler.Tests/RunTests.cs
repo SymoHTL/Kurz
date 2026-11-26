@@ -180,6 +180,8 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         "http/client-limits.kz", "http/client-redirects.kz", "http/client-timeout.kz", "http/client-timeout-body.kz",
         "http/http-query.kz",
         "system/command-env-dir.kz",
+        "system/park-accept-first.kz", "system/park-two-readers.kz", "system/park-read-close.kz", "system/park-read-crash.kz",
+        "tests/advance-read-bound.kz",
     ];
 
     /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11), the cases of the deadlines that hold their thread by the clock among them (U36 to U45, U49), and the cases of <c>advance</c>, which moves the clock (Y10); a case of a deadline that reads no clock, a <c>within</c> that bounds a call with no such hold, is none of them, and a build for Windows runs it.</summary>
