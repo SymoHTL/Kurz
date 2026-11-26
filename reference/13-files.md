@@ -1695,7 +1695,9 @@ Case: [system/park-accept-first.kz](../corpus/system/park-accept-first.kz)
 ```kurz
 // the top-level code's `Accept` waits for a connection that only an actor makes: it parks the root actor under `epoll`, so that
 // the actor's `Run` runs, connects and parks on its own read, and the byte the top-level code writes after the `Accept` reaches
-// that read (S10); a thread that blocked in the `Accept` would run no actor and wait without end, since `Accept` has no bound
+// that read (S10); a thread that blocked in the `Accept` would run no actor and wait without end, since `Accept` has no bound.
+// The top-level code's `send` and its call of `Got` each start a chain of their own (U17), so that `Got` is not let in over the
+// parked read: it waits in `Client`'s inbox behind `Run` and reads what the read took
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
@@ -1824,8 +1826,11 @@ Main() else {
 Case: [system/park-two-readers.kz](../corpus/system/park-two-readers.kz)
 ```kurz
 // two actors read a byte each from a connection of their own, and the byte of `b`'s comes first: `b` reads it while `a` still
-// waits, since each read that would block parks its actor under `epoll` (S10), and `a` reads its byte once it comes; a thread that
-// blocked in `a`'s read would hold `b` for the read's bound, 5 seconds by default (S9), past the 2 seconds the last line allows
+// waits, since each read that would block parks its actor under `epoll` (S10), and `a` reads its byte once it comes. The top-level
+// code writes `a`'s byte once `b`'s line stands and prints once both stand, each wait bounded by the 2 seconds the last line holds
+// the run to, so that it prints `true` where each read ended at its byte, and not at its bound of 5 seconds (S9). A thread that
+// blocked in a call on a socket would run no actor at the first `Accept` and wait there without end, since `Accept` has no
+// bound, as `park-accept-first.kz` says
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
@@ -1836,12 +1841,23 @@ string Text(Bytes bytes) {
 
 actor Journal {
     mut string lines = ""
+    mut int count = 0
 
     pub void Add(string line) {
         lines = "{lines}{line};"
+        count = count + 1
     }
 
     pub string Lines() => lines
+
+    pub int Count() => count
+}
+
+// waits until the journal holds `count` lines, or until 2 seconds passed since `start`
+void WaitFor(Journal journal, int count, instant start) {
+    while journal.Count() < count && instant.Now - start < 2s {
+        Environment.Sleep(1ms)
+    }
 }
 
 actor Client(Journal Lines, string Name) {
@@ -1872,9 +1888,9 @@ void | IoError Main() {
     second = listener.Accept()
     start = instant.Now
     second.Write("2".Bytes)
-    Environment.Sleep(50ms)
+    WaitFor(journal, 1, start)
     first.Write("1".Bytes)
-    Environment.Sleep(50ms)
+    WaitFor(journal, 2, start)
     print(journal.Lines())
     print(instant.Now - start < 2s)
 }
@@ -1972,11 +1988,17 @@ Case: [system/park-read-close.kz](../corpus/system/park-read-close.kz)
 ```kurz
 // `Shut`, a call of the chain, is let in while `Run` waits in the poller on its read, and its `Close` shuts the socket down, whose
 // event wakes the read: the read in flight ends with the closed handle's error, `EBADF`, 9 (S5), at once and not at its bound of
-// 5 seconds (S9), since the shutdown reaches the poller as any event does (S10)
+// 5 seconds (S9), since the shutdown reaches the poller as any event does (S10). The top-level code prints both lines: its call of
+// `Result`, of a chain of its own, waits in `Helper`'s inbox behind `Poke` (U17), so that the order of the lines rests on no
+// order of the scheduler
 actor Helper {
+    mut string result = "none"
+
     pub void Poke(Holder h) {
-        print("shut {h.Shut()}")
+        result = "shut {h.Shut()}"
     }
+
+    pub string Result() => result
 }
 
 actor Holder {
@@ -2018,6 +2040,7 @@ void | IoError Main() {
     helper = spawn Helper()
     h = spawn Holder()
     print(h.Run(helper, listener.Port))
+    print(helper.Result())
 }
 
 Main() else {

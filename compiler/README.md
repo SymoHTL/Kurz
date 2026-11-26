@@ -599,7 +599,8 @@ made and one `Accept` gave get `SO_RCVTIMEO` and `SO_SNDTIMEO` of 5 seconds, two
 stream; a listener gets neither, so that `Accept` waits without a bound until `SetAcceptTimeout` sets its `SO_RCVTIMEO`,
 and the stream it gives is set explicitly, since Linux copies a listener's options to the sockets it accepts. The options
 bound no call on a socket that does not block (socket(7)): they hold the time, which each wait in the poller reads back by
-`getsockopt` as its bound (`SocketBound`), no bound where they are zeros. `SetTimeout` sets either option,
+`getsockopt` as its bound (`SocketBound`), no bound where they are zeros, rounded up to the tick of the kernel's `HZ`, in
+which Linux keeps them. `SetTimeout` sets either option,
 for a stream's two setters and a listener's alike, as Rust's `set_timeout` does: a time of zero or below is -4097, `InvalidInput`; a bound is the whole seconds and
 the microseconds cut from the rest, a positive time that comes to no microsecond raised to 1, and no bound the
 `timeval` of zeros. Rust also bounds the seconds by `time_t::MAX`, which is not written here: a `duration` of 64
@@ -1694,20 +1695,29 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - a call on a socket that would block (S10), in a build for Linux: every socket is opened with `SOCK_NONBLOCK` and stays so,
   a read, a write, an `Accept` and a connect in progress are tried first, and one that fails with `EAGAIN` on a socket, which
   `getsockopt` tells from a file or a pipe that keeps its `EAGAIN` (`Ready`), waits through the
-  waiter that `Start` puts into the page of the thread at 200 (`Waiter`), `SocketWaited`, which registers the descriptor in
-  the process's one `epoll` with `EPOLLONESHOT` (`PollAdd`), `EPOLL_CTL_MOD` first and `EPOLL_CTL_ADD` where it has none, its
-  data a block shaped as a sleep's whose word the event sets, which also holds the descriptor plus one at 40; inside a message
-  the activation parks on it among the timers, to the bound that `SocketBound` reads back from the socket's
-  `SO_RCVTIMEO` or `SO_SNDTIMEO`, which keep the time a setter wrote, so that the calls of its chain run above it and a fall
-  takes the registration out (`Fall`), and the top-level code runs `RootLoop` to the event or the bound. 1 makes the call
-  again, and a bound that passed first gives -11, `TimedOut` with the number 11, the registration taken out (`PollRemove`).
-  While a registration waits (`polled`), the scheduler that has nothing to run waits in `epoll_wait` to the first timer, in
-  whole milliseconds rounded up (`IdleWait`, `Polled`), and `RootLoop` raises no `deadlock`. The poller is made before the
-  first socket (`Poller`), so that it takes the same descriptor in every run, and a child of a `fork` drops it at the fork
-  (`Forked`, by `pthread_atfork`), since one `epoll` that two processes wait on gives either one's event to the other. The
-  offset of the event's data is the architecture's (`EpollDataAt`): 4 in x86-64's packed `struct epoll_event`, 8 in
-  AArch64's. A thread whose page holds no waiter waits in `poll` (`Blocked`); a build for Windows gives no call on a socket
-  (S11), and its runtime's functions of the poller are stubs;
+  waiter that `Start` puts into the page of the thread at 200 (`Waiter`), `SocketWaited`. Its block, shaped as a sleep's whose
+  word the event sets, holds the descriptor plus one at 40, the next wait of the same descriptor at 48 and its events at 56: the
+  waits of a descriptor stand in one list (`WaitsOf`), and its one registration in the process's one `epoll`, with
+  `EPOLLONESHOT` (`PollAdd`, `EPOLL_CTL_MOD` first and `EPOLL_CTL_ADD` where it has none), carries the descriptor as its data and
+  the events of every wait in the list (`Interest`), as Tokio's `ScheduledIo` keeps the readers and the writers of one
+  registration apart. An event ends each wait whose events it gives, or every wait at `EPOLLERR` or `EPOLLHUP`, and the
+  registration is armed again for the waits left, or taken out where none is (`Polled`, `Rearm`). Inside a message
+  the activation parks on its wait among the timers, to the bound that `SocketBound` reads back from the socket's
+  `SO_RCVTIMEO` or `SO_SNDTIMEO`, so that the calls of its chain run above it and a fall takes the wait out of its list
+  (`Fall`, `Unwait`), and the top-level code runs `RootLoop` to the event or the bound. 1 makes the call again; a bound that
+  passed first, where `poll` with no wait finds the descriptor not ready either (`ReadyNow`), as Tokio's `timeout` polls its
+  future before its timer, gives -11, `TimedOut` with the number 11, the wait taken out of its list; and a connect in progress,
+  whose bound is `ConnectWithin`'s deadline, turns it into -4100, `TimedOut` with the number 0
+  (`Connected`). A failure of `epoll_wait` but `EINTR`, which is made again, ends every wait in the poller with it, as the
+  call's `IoError` of the system's kind and number (`Fail`, S1). While a registration waits (`polled`), the scheduler that has
+  nothing to run waits in `epoll_wait` to the first timer, in whole milliseconds rounded up (`IdleWait`, `Polled`), a scheduler
+  that never runs out of work reads the poller with no wait at every 61st turn, as Tokio's `event_interval` (`RunTurn`), and
+  `RootLoop` raises no `deadlock`. The poller is made before the first socket (`Poller`), so that it takes the same descriptor
+  in every run, and a child of a `fork` drops it at the fork (`Forked`, by `pthread_atfork`), since one `epoll` that two
+  processes wait on gives either one's event to the other; with no poller `PollWait` sleeps the time it was asked for and
+  gives no event, so that a child's scheduler waits on its timers. The offset of the event's data is the architecture's
+  (`EpollDataAt`): 4 in x86-64's packed `struct epoll_event`, 8 in AArch64's. A thread whose page holds no waiter waits in
+  `poll` (`Blocked`); a build for Windows gives no call on a socket (S11), and its runtime's functions of the poller are stubs;
 - logging (P1 to P7 and P9), in a build for Linux: a program with a log call in one of its files reads
   `KURZ_LOG` alone, since the compiler builds no settings type whose `Logging` part P4 has win, through
   `Variable` before its first statement, after `args`, and hands it to `LogFilter`,
