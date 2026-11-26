@@ -1,0 +1,66 @@
+// expect: output
+// | tick
+// | read x
+// | done
+// threads: 1
+// rules: S10
+
+// `Reader`'s opening of a FIFO blocks until a writer opens it, and the call runs on the pool of threads for blocking calls while
+// `Reader` parks (S10), so that the one thread runs `Ticker` meanwhile and the top-level code goes on to open the FIFO to write,
+// which lets the opening to read end; the read of the byte parks the same way. A runtime that made the call on the thread that
+// runs every actor would wait in it without end, since no writer could open the FIFO
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+actor Ticker {
+    pub string Tick() => "tick"
+}
+
+actor Reader {
+    mut string got = ""
+
+    pub void Read() {
+        f = File.Open("park-file-fifo") else {
+            IoError e => {
+                got = "open {e.Kind}"
+                return
+            }
+        }
+
+        mut buffer = Bytes()
+        match f.Read(mut buffer, 1) {
+            int n => got = "read {Text(buffer)}"
+            IoError e => got = "read {e.Kind}"
+        }
+
+        f.Close() else {
+            IoError e => got = "close {e.Kind}"
+        }
+    }
+
+    pub string Got() => got
+}
+
+void | IoError | ExitError Main() {
+    Command.New("mkfifo").Arg("park-file-fifo").Status()
+    r = spawn Reader()
+    t = spawn Ticker()
+    send r.Read()
+    print(t.Tick())
+    w = File.Create("park-file-fifo")
+    w.Write("x".Bytes)
+    w.Close()
+    print(r.Got())
+    print("done")
+    File.Delete("park-file-fifo")
+}
+
+Main() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}

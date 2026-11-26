@@ -3210,6 +3210,99 @@ Main() else {
 }
 ```
 
+Case: [system/park-file-crash.kz](../corpus/system/park-file-crash.kz)
+```kurz
+// `Boom`, a call `Helper` makes in the chain of `Outer`'s message (U17), is let in while `Outer` waits on the pool of threads for
+// blocking calls for its opening of a FIFO, and its crash drops the job and gives both its callers `callee-crashed` (U20): `Caller`,
+// whose policy prints it, and `Helper`, whose policy stops it (U25). The opening ends once the top-level code opens the FIFO to
+// write, on a thread of the pool, with no wait left to wake, and `Reader`'s read of a file on the pool after it reads its byte
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+actor Helper {
+    pub void Poke(Napper n) {
+        print(n.Boom())
+    }
+}
+
+actor Napper {
+    pub int Outer(Helper helper) {
+        send helper.Poke(this)
+        f = File.Open("park-file-crash") else {
+            IoError e => return -1
+        }
+
+        f.Close() else {
+            IoError e => return -2
+        }
+
+        return 1
+    }
+
+    pub int Boom() {
+        throw "boom"
+    }
+}
+
+actor Caller(Napper N, Helper H) {
+    pub void Go() {
+        print(N.Outer(H))
+    }
+
+    pub string Done() => "done"
+}
+
+actor Reader {
+    pub string Read() {
+        f = File.Open("park-file-crash.txt") else {
+            IoError e => return "open {e.Kind}"
+        }
+
+        mut buffer = Bytes()
+        n = f.Read(mut buffer, 1) else {
+            IoError e => return "read {e.Kind}"
+        }
+
+        return "read {n} {Text(buffer)}"
+    }
+}
+
+void | IoError | ExitError Main() {
+    k = File.Create("park-file-crash.txt")
+    k.Write("k".Bytes)
+    k.Close()
+    Command.New("mkfifo").Arg("park-file-crash").Status()
+    poker = spawn Helper() on crash stop
+    napper = spawn Napper()
+    c = spawn Caller(napper, poker) on crash (e) {
+        match e.Reason {
+            RuntimeError r => print(r.Kind)
+        }
+
+        restart
+    }
+
+    send c.Go()
+    print(c.Done())
+    w = File.Create("park-file-crash")
+    w.Close()
+    r = spawn Reader()
+    print(r.Read())
+    File.Delete("park-file-crash")
+    File.Delete("park-file-crash.txt")
+}
+
+Main() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}
+```
+
 ### U21 (decided, §6) The inbox is kept, and the crashed instance's heap goes
 
 A crashed actor's inbox is kept and its new instance serves it, in its order, the crashing message
