@@ -2333,7 +2333,10 @@ not hold back, an escalation and a `restart-limit` that reach the supervisor as 
 at once, which raises one `deadlock`. What is not built on worker threads, each a reading of the code that no run checks
 (inferred): a timeout of a call while its callee copies the result leaks that result's heap; the reference that a `per
 node` lookup of the top-level code gives is read after its pin (`PerFind`); the offset that a test's `advance` adds to the
-clock (`ahead`) is a plain word that `Advance` writes while another worker reads it with no order; and a main thread whose code
+clock (`ahead`) is a plain word that `Advance` writes while another worker reads it with no order; the walk with no lock reads
+the two words of an activation's wait, the message of a call's wait at 432 and the block at 360, one after the other, so that
+an activation that moved meanwhile from a call's wait to a sleep or a wait in the poller is read as a call whose reply is that
+block (`Onward`); and a main thread whose code
 calls nothing of the runtime takes no end a worker handed it. The process ends with every actor's heap held, freeing none, and the end
 of the process gives the memory back (section 6, comment 7194874125, 2: `EndActors`). A build for
 Windows starts no worker thread: its `Cores` gives 1 and its runtime reads no `KURZ_THREADS`. No run on Arm, and no
