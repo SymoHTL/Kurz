@@ -2865,6 +2865,90 @@ a = spawn Napper()
 print(a.Outer(poker))
 ```
 
+Case: [system/park-read-crash.kz](../corpus/system/park-read-crash.kz)
+```kurz
+// `Boom`, a call of the chain, is let in while `Outer` waits in the poller on its read, and its crash takes the read's
+// registration out of the poller and off the timers and wakes the caller (U20): the byte written to the connection after it
+// reaches no registration whose block the crash freed, and the last wait finds nothing registered with the poller, so that it is
+// `deadlock` at its line (U18) and not a wait in the poller without end
+actor Helper {
+    pub void Poke(Napper n) {
+        print(n.Boom())
+    }
+}
+
+actor Napper {
+    pub int Outer(Helper helper, int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return -1
+        }
+
+        send helper.Poke(this)
+        mut buffer = Bytes()
+        n = stream.Read(mut buffer, 1) else {
+            IoError e => return -2
+        }
+
+        return n
+    }
+
+    pub int Boom() {
+        throw "boom"
+    }
+}
+
+actor Caller(Napper N, Helper H) {
+    pub void Go(int port) {
+        print(N.Outer(H, port))
+    }
+
+    pub string Done() => "done"
+}
+
+actor Left {
+    pub void Ask(Right other) {
+        print("left got {other.Value()}")
+    }
+
+    pub int Value() => 1
+}
+
+actor Right {
+    pub void Ask(Left other) {
+        print("right got {other.Value()}")
+    }
+
+    pub int Value() => 2
+}
+
+void | IoError Main() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    poker = spawn Helper()
+    napper = spawn Napper()
+    c = spawn Caller(napper, poker) on crash (e) {
+        match e.Reason {
+            RuntimeError r => print(r.Kind)
+        }
+
+        restart
+    }
+
+    send c.Go(listener.Port)
+    server = listener.Accept()
+    print(c.Done())
+    server.Write("x".Bytes)
+    l = spawn Left()
+    r = spawn Right()
+    send l.Ask(r)
+    send r.Ask(l)
+    print(l.Value())
+}
+
+Main() else {
+    IoError e => print(e)
+}
+```
+
 ### U21 (decided, §6) The inbox is kept, and the crashed instance's heap goes
 
 A crashed actor's inbox is kept and its new instance serves it, in its order, the crashing message
@@ -4968,7 +5052,7 @@ and of the runtime's error type, `RuntimeError(RuntimeKind Kind, string Detail)`
 a `RuntimeError` of its kind, with the detail its error line names, the kinds being `Overflow`, `DivideByZero`,
 `IndexOutOfRange`, `ReversedRangeAtRunTime`, `InvalidOrderingAtRunTime`, `StackOverflow`, `PrintFailed`, `AllocationFailed`,
 `NotCharBoundary`, `RandomFailed`, `Deadlock`, `CalleeCrashed`, `ActorGone`, `RestartLimit`, `CallTimeout`, `CpuLacksSet`,
-`SettingsUnpublished`, `CheckFailed` and `InvalidInput`, each run-time row's id of chapter 12 as one capitalised word for each of its
+`SettingsUnpublished`, `CheckFailed`, `InvalidInput` and `AdvanceNegative`, each run-time row's id of chapter 12 as one capitalised word for each of its
 parts, in the table's order, `thrown` left out, and `InvalidArgument` after them, for `invalid-argument`
 (S13), which chapter 12 names outside its table *(assumed: its place after the table's, which the order
 of the table does not give)*; the child's code is its

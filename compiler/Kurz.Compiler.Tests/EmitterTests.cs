@@ -500,6 +500,43 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void The_poller_reads_the_data_of_an_event_at_the_byte_of_its_architecture_s_struct_epoll_event()
+    {
+        // S10, issue 658: the data of an `epoll_event` stands at byte 4 of x86-64's struct, which the kernel packs, and at byte 8 of
+        // AArch64's, the kernel's generic one; each Linux architecture's file gives the byte (`EpollDataAt`), and every call of the
+        // registration (`PollAdd`, from `SocketWaited`) and of the wait (`PollWait`, from `Polled`) is given, in the function that
+        // makes it, what a call of `EpollDataAt` gave there
+        const string text = "actor A {\n    pub int Get() => 1\n}\n\na = spawn A()\nprint(a.Get())\n";
+        foreach (var (arch, at) in new[] { (Arch.X64, 4), (Arch.Arm64, 8) })
+        {
+            var cpu = arch == Arch.X64 ? Cpu.Baseline : Cpu.ArmBaseline;
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], Builder.CheckRuntime(Target.Linux, arch), true, cpu: () => cpu);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var ir = compilation.Program.Ir.ReplaceLineEndings("\n");
+            var bodies = Regex.Matches(ir, @"^define [^\n]*@(""?[^\s(]+)\([^\n]*\n(.*?)\n\}", RegexOptions.Multiline | RegexOptions.Singleline);
+            var given = bodies.Where(b => Regex.IsMatch(b.Groups[1].Value, @"^""?rt\.sys\.EpollDataAt\b")).ToList();
+            Assert.True(given.Count == 1, $"{arch}: {given.Count} definitions of `EpollDataAt`");
+            Assert.True(Regex.IsMatch(given[0].Groups[2].Value, $@"\bi64 {at}\b") && !Regex.IsMatch(given[0].Groups[2].Value, $@"\bi64 {12 - at}\b"),
+                $"{arch}: `EpollDataAt` gives no {at}:\n{given[0].Groups[2].Value}");
+            foreach (var callee in new[] { "PollAdd", "PollWait" })
+            {
+                var calls = 0;
+                foreach (Match body in bodies)
+                {
+                    foreach (Match call in Regex.Matches(body.Groups[2].Value, $@"call i64 @""?rt\.sys\.{callee}\b[^\n(]*\([^\n]*, i64 (%[\w.]+)\)"))
+                    {
+                        calls++;
+                        Assert.True(Regex.IsMatch(body.Groups[2].Value, $@"{Regex.Escape(call.Groups[1].Value)} = call i64 @""?rt\.sys\.EpollDataAt\b"),
+                            $"{arch}: `{body.Groups[1].Value}` gives `{callee}` no byte of `EpollDataAt`:\n{body.Groups[2].Value}");
+                    }
+                }
+
+                Assert.True(calls == 1, $"{arch}: {calls} calls of `{callee}`");
+            }
+        }
+    }
+
+    [Fact]
     public void A_function_of_sys_that_neither_file_or_both_give_is_named_with_both_files()
     {
         // round 20, "Dir per arch": a call on a file finds the runtime's function in the target's file or in the architecture's, which the
@@ -1896,5 +1933,34 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.DoesNotContain("load void", program.Ir, StringComparison.Ordinal);
         Assert.DoesNotContain("void %case", program.Ir, StringComparison.Ordinal);
         Ran(Toolchain.Run(toolchain.Build(program, "else-void-arm-guarded")), 0, ["1", "5"], string.Empty);
+    }
+
+    [Fact]
+    public void The_offset_of_the_clock_is_read_in_every_build_of_kurz_test_and_in_no_other()
+    {
+        // Y10 with D8 of issue 586, comment 6992687784: every build `kurz test` makes, the release build of `--release` among them, adds
+        // the runtime's offset (`Ahead`) to each of the program's reads of the clock, here one of `instant.Now`, one of `Elapsed` and two
+        // of `timestamp.Now`, and `advance` writes it; a build of `run`, `build` or `exec` reads the system's clock alone and stores to the
+        // offset nowhere, so that the read of it in the runtime's `PauseClock` reads a global no code changes, which the optimiser folds to
+        // 0; Linux alone, where the clock's reads are built (S25)
+        if (Builder.HostTarget != Target.Linux)
+        {
+            return;
+        }
+
+        const string text = "instant start = instant.Now\nprint(start.Elapsed >= 0s)\n\ntest \"reads\" {\n    instant first = instant.Now\n    timestamp wall = timestamp.Now\n    advance 1s\n    check first.Elapsed >= 1s\n    check timestamp.Now - wall >= 1s\n}\n";
+        var stores = new Regex(@"store i64 [^\n]*, ptr @""s\.rt\.common\.ahead""");
+        foreach (var release in new[] { false, true })
+        {
+            var run = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: !release).Program?.Ir;
+            var test = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: !release, tests: true).Program?.Ir;
+            Assert.NotNull(run);
+            Assert.NotNull(test);
+            Assert.DoesNotContain("@\"rt.common.Ahead.", run, StringComparison.Ordinal);
+            Assert.DoesNotMatch(stores, run);
+            Assert.Contains("@\"s.rt.common.ahead\" = internal global i64 0", run, StringComparison.Ordinal); // the global the optimiser folds
+            Assert.Equal(4, Regex.Count(test, @"call i64 @""rt\.common\.Ahead\.[^""]*""\(\)"));
+            Assert.Matches(stores, test);
+        }
     }
 }

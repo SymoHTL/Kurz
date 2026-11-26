@@ -3,8 +3,8 @@
 A program's tests are `test` blocks at the top level of its files, which `kurz test file.kz` runs one at a
 time, each in an actor of its own, and `check`, a statement that stands in any code (§2, §11; issue 586,
 comments 6992687784 and 6993110710, and the owner's answers of 2026-11-20, comment 7051499099, each rule
-marked as it stands). The cluster test of §13, `mock` and `advance` are read and answered `not supported`
-(Y8 to Y10).
+marked as it stands), and `advance`, which moves the runtime's clock in a test (Y10). The cluster test of
+§13 and `mock` are read and answered `not supported` (Y8, Y9).
 
 ### Y1 (decided, §11) `test "name" { ... }`, and its words
 
@@ -631,9 +631,209 @@ No case: the build answers `not supported` to the form, and a case stands on wha
 `advance d` stands among a `test` block's own statements alone, the compile error `advance-outside`
 elsewhere, and a negative duration crashes the test at the statement with the run-time error
 `advance-negative` (§11, the owner, 2026-11-20, issue 586, comment 7051499099, Q8 of comment 6992687784 at
-its lean). The build reads `advance d`, a duration after `advance`, which it checks as any expression is,
-and as the bound of `within` is (U40), a value of another type than `duration` `type-mismatch` at its
-line, and answers the statement `not supported` at its line (§11, the owner, 2026-11-20, comment
-7051499099: the readings of comment 6994632453 stand).
+its lean). A test's own statements are its body and the blocks nested in it, and not a lambda, a block of
+`on crash` or the block of an `attempt` inside it (§11, assumed there). `advance` takes a duration, which
+the build checks as any expression is, and as the bound of `within` is (U40), a value of another type
+than `duration` `type-mismatch` at its line (§11, the owner, 2026-11-20, comment 7051499099: the readings
+of comment 6994632453 stand).
 
-No case: the build answers `not supported` to the form, and a case stands on what a build does.
+In every build `kurz test` makes, `--release` among them, `instant.Now`, `timestamp.Now`, the time of a
+log line and every deadline the runtime owns read the runtime's clock: the system's, which keeps running,
+and an offset, which each `advance` adds to and which is 0 at each test's start; `build`, `run` and
+`exec` read the system's clock directly (§11, assumed there). The timers and the pauses the moved clock
+passed fire at the scheduler's turn after the `advance`, in the order of their deadlines, and the test's
+actor waits at the statement for that turn, so that the actors they woke run before it goes on; an
+`advance` that would move the wall clock or the monotonic clock past the range of a `long` is `overflow`
+at the statement (§11, assumed there). The build of `advance` is Linux's, `not supported` elsewhere, as
+`instant.Now` is (§11, assumed there).
+
+Case: [tests/advance-sleep.kz](../corpus/tests/advance-sleep.kz)
+```kurz
+// the reminder's sleep of sixty days ends at the `advance` that passes its deadline, and the reminder runs before the test goes on;
+// the first call waits behind the reminder's start, so that its sleep stands among the timers before the first `advance`
+actor Counter {
+    mut int count = 0
+
+    pub void Add() {
+        count = count + 1
+    }
+
+    pub int Count() => count
+}
+
+actor Reminder(Counter Target) {
+    pub void Wait(duration d) {
+        Environment.Sleep(d)
+        send Target.Add()
+    }
+}
+
+test "sixty days pass at once" {
+    c = spawn Counter()
+    r = spawn Reminder(c)
+    send r.Wait(60days)
+    check c.Count() == 0
+    advance 59days
+    check c.Count() == 0
+    advance 24h
+    check c.Count() == 1
+}
+```
+
+Case: [tests/advance-call-timeout.kz](../corpus/tests/advance-call-timeout.kz)
+```kurz
+// the bound of the watcher's call passes at the `advance`, while its callee still sleeps, and the watcher's `call-timeout`
+// escalates into the test; the call of `Nap(0s)` waits behind the watcher's start, so that its call stands among the timers
+// before the `advance`
+actor Napper {
+    pub int Nap(duration d) {
+        Environment.Sleep(d)
+        return 1
+    }
+}
+
+actor Watcher(Napper Target) {
+    pub void Watch() {
+        print(Target.Nap(2h) within 1h)
+    }
+}
+
+test "a bound of an hour passes at once" {
+    n = spawn Napper()
+    w = spawn Watcher(n) on crash escalate
+    send w.Watch()
+    check n.Nap(0s) == 1
+    advance 1h
+    print("after")
+}
+```
+
+Case: [tests/advance-clock.kz](../corpus/tests/advance-clock.kz)
+```kurz
+// `instant.Now` and `timestamp.Now` read the clock that `advance` moved, in a block nested in the test too, and the real clock keeps
+// running beneath it
+test "an hour passes on the clock" {
+    instant start = instant.Now
+    timestamp wall = timestamp.Now
+    mut int i = 0
+    while i < 3 {
+        advance 20min
+        i = i + 1
+    }
+
+    check start.Elapsed >= 1h
+    check start.Elapsed < 2h
+    check timestamp.Now - wall >= 1h
+}
+```
+
+Case: [tests/advance-negative.kz](../corpus/tests/advance-negative.kz)
+```kurz
+// a negative duration crashes the test at the statement, and the clock does not move back
+test "the clock goes back" {
+    advance -1s
+}
+```
+
+Case: [tests/advance-overflow.kz](../corpus/tests/advance-overflow.kz)
+```kurz
+// the clock's offset goes back to 0 for each test, so that the second test's `advance` fits as the first's did, while two in one
+// test move the wall clock past the range of a `timestamp`, at the second
+test "a long wait" {
+    advance 50000days
+}
+
+test "a long wait again" {
+    advance 50000days
+}
+
+test "two long waits" {
+    advance 50000days
+    advance 50000days
+}
+```
+
+Case: [tests/advance-outside.kz](../corpus/tests/advance-outside.kz)
+```kurz
+// a helper moves no clock, since a program's own run never moves its clock: it returns, and its test advances
+void Later() {
+    advance 1h
+}
+
+test "waits an hour" {
+    Later()
+}
+```
+
+Case: [tests/advance-in-lambda.kz](../corpus/tests/advance-in-lambda.kz)
+```kurz
+// a lambda's body is no statement of its test's own, though the lambda stands inside the test
+test "a lambda waits an hour" {
+    later = () => {
+        advance 1h
+    }
+
+    later()
+}
+```
+
+Case: [tests/advance-read-bound.kz](../corpus/tests/advance-read-bound.kz)
+```kurz
+// the client's read of a connection that sends nothing waits in the poller with its bound of an hour among the runtime's timers,
+// so that the `advance` of an hour passes it and the read ends with `TimedOut` and the number 11 at the scheduler's turn after it,
+// in milliseconds (Y10, S10, S9); a read that blocked in the kernel would wait the hour out. The test's calls are of its chain,
+// which the client's waiting activation lets in (U17), so that the loop reads "reading" once the read waits, and the `advance`
+// comes after the read's bound stands among the timers
+actor Client {
+    mut string got = "none"
+
+    pub void Run(int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => {
+                got = "connect {e.Kind}"
+                return
+            }
+        }
+
+        stream.SetReadTimeout(1h) else {
+            IoError e => {
+                got = "bound {e.Kind}"
+                return
+            }
+        }
+
+        got = "reading"
+        mut buffer = Bytes()
+        match stream.Read(mut buffer, 1) {
+            int n => got = "read {n}"
+            IoError e => got = "{e.Kind} {e.Code}"
+        }
+    }
+
+    pub string Got() => got
+}
+
+test "a read's bound of an hour passes at the advance" {
+    match TcpListener.Bind("127.0.0.1:0") {
+        TcpListener listener => {
+            c = spawn Client()
+            send c.Run(listener.Port)
+            match listener.Accept() {
+                TcpStream server => {
+                    while c.Got() != "reading" {
+                        Environment.Sleep(1ms)
+                    }
+
+                    advance 1h
+                    check c.Got() == "TimedOut 11"
+                    server.Close() else {
+                        IoError e => print(e)
+                    }
+                }
+                IoError e => print(e)
+            }
+        }
+        IoError e => print(e)
+    }
+}
+```

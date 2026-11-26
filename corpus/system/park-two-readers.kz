@@ -1,0 +1,64 @@
+// expect: output
+// | b read 2;a read 1;
+// | true
+// rules: S10
+
+// two actors read a byte each from a connection of their own, and the byte of `b`'s comes first: `b` reads it while `a` still
+// waits, since each read that would block parks its actor under `epoll` (S10), and `a` reads its byte once it comes; a thread that
+// blocked in `a`'s read would hold `b` for the read's bound, 5 seconds by default (S9), past the 2 seconds the last line allows
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+actor Journal {
+    mut string lines = ""
+
+    pub void Add(string line) {
+        lines = "{lines}{line};"
+    }
+
+    pub string Lines() => lines
+}
+
+actor Client(Journal Lines, string Name) {
+    pub void Run(int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => {
+                Lines.Add("{Name} connect {e.Kind}")
+                return
+            }
+        }
+
+        mut buffer = Bytes()
+        match stream.Read(mut buffer, 1) {
+            int n => Lines.Add("{Name} read {Text(buffer)}")
+            IoError e => Lines.Add("{Name} {e.Kind}")
+        }
+    }
+}
+
+void | IoError Main() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    journal = spawn Journal()
+    a = spawn Client(journal, "a")
+    b = spawn Client(journal, "b")
+    send a.Run(listener.Port)
+    first = listener.Accept()
+    send b.Run(listener.Port)
+    second = listener.Accept()
+    start = instant.Now
+    second.Write("2".Bytes)
+    Environment.Sleep(50ms)
+    first.Write("1".Bytes)
+    Environment.Sleep(50ms)
+    print(journal.Lines())
+    print(instant.Now - start < 2s)
+}
+
+Main() else {
+    IoError e => print(e)
+}

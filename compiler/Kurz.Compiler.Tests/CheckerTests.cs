@@ -1386,6 +1386,20 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_bare_throw_in_an_else_arm_that_takes_the_void_case_is_throw_needs_value()
+    {
+        // O7 (issue 650, assumed): the arm `else` takes the cases no arm before it handled; where they hold the `void` case, a bare `throw`
+        // there has no value to throw, as in the arm of a `void` case; the controls: an arm `void =>` before it leaves `else` the case
+        // `NotFound` alone, and a result with no `void` case leaves `else` cases that each hold a value
+        const string find = "data Circle(int R)\ndata NotFound\n\nCircle | void | NotFound Find(bool b) {\n    return Circle(1)\n}\n\n";
+        const string get = "Circle Get(bool b) {\n    return Find(b) else {\n        else => throw\n    }\n}\n\nprint(Get(true).R)";
+        Assert.Equal([(ErrorIds.ThrowNeedsValue, 10)], Errors(find + get));
+        Assert.Equal("a bare `throw` throws the case its arm took, and `else` here takes the `void` case, which holds none (O7)", ErrorText(find + get));
+        Clean(find + get.Replace("        else => throw", "        void => return Circle(0)\n        else => throw"));
+        Clean(find.Replace("Circle | void | NotFound Find", "Circle | NotFound Find") + get);
+    }
+
+    [Fact]
     public void A_name_an_arm_of_the_void_case_binds_is_syntax_at_the_arm_and_the_arm_without_it_is_clean()
     {
         // F4: `void` is no type of a name an arm binds, of a `match` over a value or over a call or of `else` after a call (C4, O5), and the arm
@@ -7878,28 +7892,48 @@ public sealed class CheckerTests
     }
 
     [Fact]
-    public void A_cluster_test_mock_and_advance_are_not_supported()
+    public void A_cluster_test_and_mock_are_not_supported()
     {
-        // Y8: the cluster test of section 13, once at its line, its body unread; Y9 and Y10: `mock` and `advance`, whose answers of
-        // 2026-11-20 are not built, once at their line, in a test or not; the duration's variables count as read (E1) (assumed: D7 of
-        // issue 586, comment 6992687784, and F20 of comment 6993110710 for `mock`; for `advance` the readings of comment 6994632453,
-        // which the owner's answers of 2026-11-20, comment 7051499099, let stand)
+        // Y8: the cluster test of section 13, once at its line, its body unread; Y9: `mock`, whose answers of 2026-11-20 are not built,
+        // once at its line, in a test or not (assumed: D7 of issue 586, comment 6992687784, and F20 of comment 6993110710 for `mock`)
         NotSupportedAt(1, "Y8", "test cluster 3 seed 42 {\n    a = spawn Store()\n    split 2 | 3\n    check a.Count() == 1\n}");
         Assert.Empty(Check("test cluster 3 seed 42 {\n}").Checker.Model.Tests); // no test of `kurz test`
         NotSupportedAt(2, "Y9", "test \"a\" {\n    mock Clock with FakeClock\n}");
         NotSupportedAt(1, "Y9", "mock Clock with FakeClock");
-        NotSupportedAt(3, "Y10", "test \"a\" {\n    d = 1s\n    advance d\n}");
-        NotSupportedAt(2, "Y10", "d = 1s\nadvance d + 1ms");
+    }
 
-        // T8 with Y10: the duration is checked as any expression is, as the bound of `within` is (U40), beside the `not supported`
-        foreach (var (program, id) in new[] { ("advance 1", ErrorIds.TypeMismatch), ("long n = 1\nadvance n", ErrorIds.TypeMismatch), ("duration? d = null\nadvance d", ErrorIds.NullableUnchecked), ("void Stop() {\n}\n\nadvance Stop()", ErrorIds.Syntax) })
+    [Fact]
+    public void Advance_stands_among_a_test_s_own_statements_alone()
+    {
+        // Y10 with F11 of issue 586, comment 6993110710: `advance` in a test's body and in a block nested in it, and nowhere else: a
+        // function, the top-level code, and a lambda, a block of `on crash` and the block of an `attempt` inside a test, each read in a
+        // frame of its own, are `advance-outside` at its line, with no other diagnostic, the duration's variables read (E1)
+        Assert.Empty(Errors("test \"a\" {\n    d = 1s\n    advance d\n    if d > 0s {\n        advance d + 1ms\n    }\n}"));
+        var worker = "actor Worker {\n    pub int Run() => 1\n}\n\n";
+        foreach (var (program, line) in new[]
         {
-            var line = program.Split('\n').Length;
-            var (diagnostics, _) = Check(program);
-            Assert.Equal([(id, line)], diagnostics.Items.Where(d => d.IsError).Select(d => (d.Id, d.Line)));
-            var unread = Assert.Single(diagnostics.Items, d => !d.IsError);
-            Assert.Equal((line, "`advance` (Y10)"), (unread.Line, unread.Message));
+            ("void Later() {\n    advance 1h\n}\n\ntest \"a\" {\n    Later()\n}", 2),
+            ("d = 1s\nadvance d + 1ms", 2),
+            ("test \"a\" {\n    f = () => {\n        advance 1h\n    }\n\n    f()\n}", 3),
+            (worker + "test \"a\" {\n    w = spawn Worker() on crash (c) {\n        advance 1h\n        restart\n    }\n\n    check w.Run() == 1\n}", 7),
+            (worker + "test \"a\" {\n    w = spawn Worker()\n    v = attempt {\n        advance 1h\n        return w.Run()\n    } else {\n        Crashed c => 0\n    }\n\n    check v == 1\n}", 8),
+        })
+        {
+            Assert.Equal([(ErrorIds.AdvanceOutside, line)], ErrorsSeeingStd(program)); // `std/` declares `Crashed`, which the block and the `attempt` read
         }
+
+        // the text the person reads at that line (Q6 of the product pass of issue 655, comment 7178562787)
+        Assert.Equal(
+            ["advance-outside 2: `advance` stands among a `test` block's own statements alone (Y10)"],
+            Check("void Later() {\n    advance 1h\n}\n\ntest \"a\" {\n    Later()\n}").Diagnostics.Sorted.Select(d => $"{d.Id} {d.Line}: {d.Message}"));
+
+        // T8 with Y10: the duration is checked as any expression is, as the bound of `within` is (U40)
+        foreach (var (program, id) in new[] { ("advance 1", ErrorIds.TypeMismatch), ("long n = 1\n    advance n", ErrorIds.TypeMismatch), ("duration? d = null\n    advance d", ErrorIds.NullableUnchecked) })
+        {
+            Assert.Equal([(id, program.Split('\n').Length + 1)], Errors($"test \"a\" {{\n    {program}\n}}"));
+        }
+
+        Assert.Equal([(ErrorIds.Syntax, 5)], Errors("void Stop() {\n}\n\ntest \"a\" {\n    advance Stop()\n}"));
     }
 
     [Fact]

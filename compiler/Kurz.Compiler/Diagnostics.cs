@@ -198,6 +198,7 @@ public static class ErrorIds
     public const string BoundNotPositive = "bound-not-positive";
     public const string PointerCrosses = "pointer-crosses";
     public const string CallLoop = "call-loop";
+    public const string AdvanceOutside = "advance-outside";
 
     /// <summary>L1 names this id in its rule and keeps it out of the table, which lists the ids cases expect: no corpus file can be a file that is not UTF-8.</summary>
     public const string InvalidSource = "invalid-source";
@@ -213,6 +214,7 @@ public static class ErrorIds
     public const string StackOverflow = "stack-overflow";
     public const string CheckFailed = "check-failed";
     public const string InvalidInput = "invalid-input";
+    public const string AdvanceNegative = "advance-negative";
 }
 
 /// <summary>The ids of the lints, which warn and build the program (H5): no case expects one, and the error table keeps them out.</summary>

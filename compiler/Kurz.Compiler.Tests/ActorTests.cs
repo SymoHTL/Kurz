@@ -1108,14 +1108,18 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void Ten_thousand_idle_actors_take_at_most_512_bytes_each()
+    public void A_million_idle_actors_take_at_most_512_bytes_each_and_5_ticks_of_the_cpu_in_a_second()
     {
-        // section 13, "an idle actor at most 512 bytes", its first measurement (the owner, 2026-11-15, #519, comment 6902210646, Q6, "Small
-        // growing pages"): 10,000 actors spawned and never sent a message, each a heap whose first page of 256 bytes holds its record and
-        // its state, measured by the growth of the resident memory, the line `VmRSS` of `/proc/self/status`, over their spawns
+        // section 6, "An idle actor costs no CPU and a few hundred bytes. Millions run on a handful of OS threads", and section 13, "an
+        // idle actor at most 512 bytes" (the owner, 2026-11-15, #519, comment 6902210646, Q6, "Small growing pages"): 1,000,000 actors
+        // spawned and never sent a message, each a heap whose first page of 256 bytes holds its record and its state, measured by the
+        // growth of the resident memory, the line `VmRSS` of `/proc/self/status`, over their spawns; then the time on the CPU of every
+        // thread of the process, user and system, fields 14 and 15 of `/proc/self/stat` in ticks of 10 ms, over a sleep of one second
+        // of the top-level code that starts after the spawns, at most 5 ticks, where a worker thread that spins while nothing is left
+        // to run takes about 100; the last actor answers its call after the sleep
         if (!OperatingSystem.IsLinux())
         {
-            return; // no `/proc/self/status` reads the resident memory on Windows
+            return; // no `/proc/self/status` reads the resident memory on Windows, nor `/proc/self/stat` the time on the CPU
         }
 
         const string program = """
@@ -1136,6 +1140,22 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 return -1
             }
 
+            long | IoError Ticks() {
+                bytes = File.ReadAll("/proc/self/stat")
+                text = string.FromUtf8(bytes) else {
+                    InvalidUtf8 => ""
+                }
+
+                fields = text.Split(' ')
+                user = long.Parse(fields[13]) else {
+                    ParseError => -1
+                }
+                system = long.Parse(fields[14]) else {
+                    ParseError => -1
+                }
+                return user + system
+            }
+
             actor Idle(int N) {
                 pub int Get() => N
             }
@@ -1149,7 +1169,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 IoError e => -1
             }
 
-            for i in 0..<10000 {
+            for i in 0..<1000000 {
                 last = spawn Idle(i)
             }
 
@@ -1158,13 +1178,28 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             print(last)
-            print((after - before) * 1024 / 10000)
+            print((after - before) * 1024 / 1000000)
+
+            idle = Ticks() else {
+                IoError e => -1
+            }
+            Environment.Sleep(1s)
+            woke = Ticks() else {
+                IoError e => -1
+            }
+
+            print(woke - idle)
+            print(idle >= 0)
+            print(last.Get())
 
             """;
-        var run = BuildAndRun(program, toolchain.Runtime, "actor-idle-bytes");
-        Assert.Equal((0, "", "Idle#10001"), (run.Code, run.Error, run.Output[0]));
+        var run = BuildAndRun(program, toolchain.Runtime, "actor-idle-million");
+        Assert.Equal((0, "", "Idle#1000001"), (run.Code, run.Error, run.Output[0]));
         var each = long.Parse(run.Output[1], System.Globalization.CultureInfo.InvariantCulture);
         Assert.True(each is > 0 and <= 512, $"an idle actor takes {each} bytes");
+        var ticks = long.Parse(run.Output[2], System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(ticks is >= 0 and <= 5, $"a million idle actors took {ticks} ticks of 10 ms on the CPU in a second");
+        Assert.Equal(["true", "999999"], run.Output.Skip(3));
     }
 
     [Fact]
@@ -2392,7 +2427,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// </summary>
     private static CheckedRuntime StoodIn(bool print) => ListTests.Edited(
         ("runtime/common/runtime.kz", "own = Due(now, sys.DefaultBound())", "own = Never()"),
-        ("runtime/common/runtime.kz", "    mut long now = 0\n    if !sys.MonotonicNow(mut now) {\n        return 0\n    }\n\n    return now\n",
+        ("runtime/common/runtime.kz", "    mut long now = 0\n    if !sys.MonotonicNow(mut now) {\n        return 0\n    }\n\n    raw {\n        return now + ahead\n    }\n",
             "    mut long now = 0\n    raw {\n        now = standIn\n    }\n\n    return now\n"),
         ("runtime/common/runtime.kz", "void PauseSleep(long nanoseconds) {\n    sys.Sleep(nanoseconds)\n}",
             "static mut long standIn = 0\n\nvoid PauseSleep(long nanoseconds) {\n    raw {\n        standIn = standIn + nanoseconds\n    }\n\n" +

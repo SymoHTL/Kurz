@@ -589,22 +589,24 @@ it and takes `EISCONN`; `Accept` calls `accept4` close-on-exec, again where a si
 socket is opened close-on-exec (S9). A read, a write and `Connect` on a socket wait at most 5 seconds where
 the program sets no other time, `DefaultBound` being the one definition of the 5 seconds (S9). `Connect`, and
 `ConnectWithin`, its second form, connect as Rust's `connect_timeout` does: the socket opened with
-`SOCK_NONBLOCK`, made blocking again by `ioctl` with `FIONBIO`, and a connection in progress waited for by
-`poll` in whole milliseconds, cut down and at least 1, until a deadline of the monotonic clock, after which the
+`SOCK_NONBLOCK`, which it keeps (S10), and a connection in progress waited for in the poller (`WaitReady`, in the
+item of a call on a socket that would block), until a deadline of the monotonic clock, after which the
 call fails with -4100, `TimedOut` with the number 0, as Rust's gives no error of the system. The deadline is set
 once the addresses are known, after the lookup of a name, which it does not bound, as Rust's `connect` leaves
 `getaddrinfo`, and holds over every address tried, one bound over the addresses of a name, whose cost is that a
 first address that never answers spends the whole bound, and the later addresses are not tried (section 12). A stream `Connect`
 made and one `Accept` gave get `SO_RCVTIMEO` and `SO_SNDTIMEO` of 5 seconds, two calls of `setsockopt` for each
 stream; a listener gets neither, so that `Accept` waits without a bound until `SetAcceptTimeout` sets its `SO_RCVTIMEO`,
-which bounds an `accept` (socket(7)), and the stream it gives is set explicitly, since Linux copies a listener's options to the sockets it accepts. `SetTimeout` sets either option,
+and the stream it gives is set explicitly, since Linux copies a listener's options to the sockets it accepts. The options
+bound no call on a socket that does not block (socket(7)): they hold the time, which each wait in the poller reads back by
+`getsockopt` as its bound (`SocketBound`), no bound where they are zeros. `SetTimeout` sets either option,
 for a stream's two setters and a listener's alike, as Rust's `set_timeout` does: a time of zero or below is -4097, `InvalidInput`; a bound is the whole seconds and
 the microseconds cut from the rest, a positive time that comes to no microsecond raised to 1, and no bound the
 `timeval` of zeros. Rust also bounds the seconds by `time_t::MAX`, which is not written here: a `duration` of 64
 bits in nanoseconds holds at most about 292 years, far below it. A stream's read and write and a listener's `Accept` take their kind
-from `SocketErrorKind`, which gives `TimedOut` for `EAGAIN`, with which a blocking socket's call returns when its time
-runs out, the number staying the system's 11; every other `EAGAIN` keeps `WouldBlock`. The bound holds for each
-system call, as Rust's `SO_RCVTIMEO` and `SO_SNDTIMEO` do: a `Write` of many bytes waits at most the bound for
+from `SocketErrorKind`, which gives `TimedOut` for `EAGAIN`, -11, which the wait in the poller gives where the bound
+passed first, the number a blocking socket's call gives when its time runs out, 11; every other `EAGAIN` keeps
+`WouldBlock`. The bound holds for each wait of a system call, as Rust's `SO_RCVTIMEO` and `SO_SNDTIMEO` do: a `Write` of many bytes waits at most the bound for
 each piece the system takes, as Rust's `write_all` does, and can take longer in all. `ShutdownWrite` calls `shutdown` with
 `SHUT_WR` (1) and keeps the descriptor, so that the stream still reads, and gives the system's answer as it is: a second
 call passes, and one on a stream whose peer reset the connection fails with `ENOTCONN`, 107, `NotConnected`.
@@ -1675,6 +1677,37 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   on a call to the deadline (`RootLoop`), which, with nothing left to run, sleeps to the first timer or the deadline, and
   so does that wait where an actor sleeps among the timers (`Sleeping`), where it raised `deadlock` before; a build for
   Windows says `not supported`, as for `instant.Now`;
+- `advance d` in a test (Y10), in a build for Linux: the emitted code reads the duration, raises `advance-negative` at the
+  statement for one of less than zero, and calls the runtime's `Advance`, which adds it to the clock's offset `ahead`,
+  refuses a sum that would move the wall clock or the monotonic clock past the range of a `long`, which the emitted code
+  raises as `overflow` at the statement, and parks the test's activation among the timers to the moved clock (`Park`, which
+  `Slept` parks through too), after every timer whose deadline is not later, so that the timers and the restarts' pauses
+  the moved clock passed fire at the turn of `RootLoop` after it, the timers in the order of their deadlines, and the
+  actors they woke run before the test goes on. `PauseClock` and the time of a crash's log line add `ahead`; the program's
+  `instant.Now` and `timestamp.Now`, and so the time of a log call, add it through the runtime's `Ahead` in a build of
+  `kurz test` alone, `--release` among them, while every other build reads the system's clock directly and stores nothing
+  to `ahead`, a global the optimiser folds to 0 there (`EmitterTests`); `TestEnded` sets it back to 0. A socket's bound is
+  a deadline among the timers, as a sleep's is (`SocketWaited`, in the item of a call on a socket that would block), which
+  `advance` passes; a child process's wait is a wait in
+  the kernel with a timeout of its own, `poll`'s, which `advance` does not reach; a build for Windows says `not supported`,
+  as for `instant.Now`;
+- a call on a socket that would block (S10), in a build for Linux: every socket is opened with `SOCK_NONBLOCK` and stays so,
+  a read, a write, an `Accept` and a connect in progress are tried first, and one that fails with `EAGAIN` on a socket, which
+  `getsockopt` tells from a file or a pipe that keeps its `EAGAIN` (`Ready`), waits through the
+  waiter that `Start` puts into the page of the thread at 200 (`Waiter`), `SocketWaited`, which registers the descriptor in
+  the process's one `epoll` with `EPOLLONESHOT` (`PollAdd`), `EPOLL_CTL_MOD` first and `EPOLL_CTL_ADD` where it has none, its
+  data a block shaped as a sleep's whose word the event sets, which also holds the descriptor plus one at 40; inside a message
+  the activation parks on it among the timers, to the bound that `SocketBound` reads back from the socket's
+  `SO_RCVTIMEO` or `SO_SNDTIMEO`, which keep the time a setter wrote, so that the calls of its chain run above it and a fall
+  takes the registration out (`Fall`), and the top-level code runs `RootLoop` to the event or the bound. 1 makes the call
+  again, and a bound that passed first gives -11, `TimedOut` with the number 11, the registration taken out (`PollRemove`).
+  While a registration waits (`polled`), the scheduler that has nothing to run waits in `epoll_wait` to the first timer, in
+  whole milliseconds rounded up (`IdleWait`, `Polled`), and `RootLoop` raises no `deadlock`. The poller is made before the
+  first socket (`Poller`), so that it takes the same descriptor in every run, and a child of a `fork` drops it at the fork
+  (`Forked`, by `pthread_atfork`), since one `epoll` that two processes wait on gives either one's event to the other. The
+  offset of the event's data is the architecture's (`EpollDataAt`): 4 in x86-64's packed `struct epoll_event`, 8 in
+  AArch64's. A thread whose page holds no waiter waits in `poll` (`Blocked`); a build for Windows gives no call on a socket
+  (S11), and its runtime's functions of the poller are stubs;
 - logging (P1 to P7 and P9), in a build for Linux: a program with a log call in one of its files reads
   `KURZ_LOG` alone, since the compiler builds no settings type whose `Logging` part P4 has win, through
   `Variable` before its first statement, after `args`, and hands it to `LogFilter`,
@@ -2394,7 +2427,8 @@ chains that wait, the thread's side of the scheduler, and the memo, the work lis
 heap, the keys of the hash of a map are two words of the thread, and a `static` value of the build
 holds no block (R13). `ActorTests` pins the crash,
 the turns, the end and the inbox's growth, each heap giving back every block of its crossings, results
-and moves, 10,000 idle actors within 512 bytes each, on Linux alone, which reads the resident memory,
+and moves, 1,000,000 idle actors within 512 bytes each and within 5 ticks of 10 ms on the CPU over a second
+in which the top-level code sleeps, on Linux alone, which reads the resident memory and the time on the CPU,
 a buffer of the runtime made inside an actor outliving it, and a block of more than 262144 bytes of an
 actor joining the kept blocks at the end; the line `actor-heaps-fenced` of `ListTests` the heaps of
 actors freed whole and every result of their messages read after it, from the caller's heap; and `ActorTests` the deadlines, the bound of every target, the timers kept in the order of their
@@ -3018,7 +3052,9 @@ whose type fits a call of a value, the text of every derived type without type p
 program does not build adds nothing. A call through an actor's reference reaches nothing of the callee's
 code, the text of a thrown value adds nothing, a function that reads its type and that no call copies adds nothing (section 5,
 the owner, 2026-11-17, #560, comment 6945856976, Q2), and a function of a folder of the runtime throws nothing. A bare `throw` throws the case its arm of `else` took,
-and one in a lambda is the checker's `throw-needs-value`, in a lambda inside such an arm too (O7; section 5, assumed there). The
+and one in a lambda is the checker's `throw-needs-value`, in a lambda inside such an arm too (O7; section 5, assumed there), and
+so is one in an arm that takes a `void` case, the arm of that case or an arm `else` that takes it, which no arm before it handled
+(O7; section 5, issues 641 and 650, assumed there). The
 checker reads the sets for the block of `on crash` alone (U30): it reads a program with a block again with the `Reason` of each block's child that the reading before found, the first reading with the runtime's type alone
 and the sets without the blocks' bodies, the blocks' own diagnostics left out of it, until the `Reason`s found are the ones
 read, a reading whose errors stand in blocks alone read so too, its sets those of a reading that drops what the blocks report,
@@ -3191,10 +3227,8 @@ path the copy follows, a lambda's capture and a field of any class among them, o
 copy of its function for a type argument that is one of them would share that block (U12); `copy` at a call that is no message before a value that
 reaches a function value or an interface's value, which no word makes cross (U12); a log call
 inside an actor (P8); the cluster test of section 13, `test cluster N seed S { ... }`, whose words and
-block the parser passes over (Y8); and `mock X with Y` and `advance d`, whose answers of 2026-11-20 it
-does not build (Y9, Y10),
-the duration of an `advance` checked as the bound of `within` is (U40) and its error reported beside the
-line. The refusal of
+block the parser passes over (Y8); and `mock X with Y`, whose answers of 2026-11-20 it
+does not build (Y9). The refusal of
 the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered
 on 2026-11-14, comment 6880404917); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
