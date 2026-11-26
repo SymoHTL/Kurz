@@ -1,0 +1,21 @@
+// expect: output
+// | not found: park-file-missing.txt
+// | NotFound
+// | 2
+// threads: 1
+// rules: S1, S10
+
+// an opening inside a message runs on the pool of threads for blocking calls (S10), and one that fails gives the error a call
+// on the thread that runs every actor gives (S1): its kind, its number and the path it was given, as `open-missing.kz` holds
+// for the top-level code
+actor Opener {
+    pub string Open() {
+        return match File.Open("park-file-missing.txt") {
+            File => "opened"
+            IoError e => "{e}\n{e.Kind}\n{e.Code}"
+        }
+    }
+}
+
+o = spawn Opener()
+print(o.Open())

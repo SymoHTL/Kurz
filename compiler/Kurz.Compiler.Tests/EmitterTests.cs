@@ -504,7 +504,8 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // S10, issue 658: the data of an `epoll_event` stands at byte 4 of x86-64's struct, which the kernel packs, and at byte 8 of
         // AArch64's, the kernel's generic one; each Linux architecture's file gives the byte (`EpollDataAt`), and every call of the
-        // registration (`PollAdd`, from `SocketWaited` and `Rearm`) and of the wait (`PollWait`, from `Polled`) is given, in the
+        // registration (`PollAdd`, from `SocketWaited`, `Rearm` and the wait for a child, `ManyWaited`, and for the pool of
+        // threads for blocking calls from `PoolArm`; issue 661) and of the wait (`PollWait`, from `Polled`) is given, in the
         // function that makes it, what a call of `EpollDataAt` gave there
         const string text = "actor A {\n    pub int Get() => 1\n}\n\na = spawn A()\nprint(a.Get())\n";
         foreach (var (arch, at) in new[] { (Arch.X64, 4), (Arch.Arm64, 8) })
@@ -531,7 +532,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
                     }
                 }
 
-                Assert.True(calls == (callee == "PollAdd" ? 2 : 1), $"{arch}: {calls} calls of `{callee}`");
+                Assert.True(calls == (callee == "PollAdd" ? 4 : 1), $"{arch}: {calls} calls of `{callee}`");
             }
         }
     }

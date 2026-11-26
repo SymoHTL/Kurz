@@ -1718,6 +1718,29 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   gives no event, so that a child's scheduler waits on its timers. The offset of the event's data is the architecture's
   (`EpollDataAt`): 4 in x86-64's packed `struct epoll_event`, 8 in AArch64's. A thread whose page holds no waiter waits in
   `poll` (`Blocked`); a build for Windows gives no call on a socket (S11), and its runtime's functions of the poller are stubs;
+- the pool of threads for blocking calls (S10; issue 661), in a build for Linux: an opening, a read and a write of a file or a
+  pipe, a read of standard input among them, is handed to the pool as a job where the thread's page holds the waiter `Start`
+  puts in at 208 (`BlockingWaiter`), the descriptor is no socket the runtime made (`Mark`, `Socketed`), and `BlockingOffloads`
+  says so: always inside a message, and for the top-level code only where something else is left to run (a queued actor, a
+  timer, a wait in the poller or on the pool, a restart's pause or a child's block), since otherwise nothing could run while it
+  waits. The job (`Handing`) is mapped with the call's bytes or its path at 64, the bytes copied in before a write and out after
+  a read, so that a crash of the actor frees nothing a thread of the pool writes. The scheduler's side (`BlockingWaited`) arms
+  the pool's `eventfd` in the poller, queues the job (`Submit`) and parks as a socket's wait does, its block holding -1 at 40 and
+  the job at 48, counted in `polled`; a thread of the pool (`PoolThread`) makes the call with the code a thread with no waiter
+  runs (`JobRun`), puts the job among the jobs done and adds 1 to the `eventfd`, whose event the scheduler takes (`Polled`,
+  `PoolDrain`): each job's wait ends with 1, or the job is given back where its actor fell (`Fall`, `JobDropped`, which closes
+  the descriptor an opening gave). The pool starts a thread where none is idle and fewer than 512 run, detached and with 2 MiB of
+  stack, and ends one that waited 10 seconds idle, Tokio's defaults, under a mutex and a condition of the C library; where the
+  system refuses a thread and no thread of the pool runs, the process ends with `error: thread-refused (1)`. A child of a `fork`
+  drops the pool (`Forked`), and the scheduler takes the event of the pool's `eventfd` only while that descriptor is the pool's
+  (`PoolHeld`), so that a descriptor of the child that took its number reaches its own waits. The wait for a child and its
+  output (`Drive`, `ChildPolled`) waits in the poller instead, where
+  the thread's page holds the waiter `Start` puts in at 224 (`ManyWaiter`) and `BlockingOffloads` says so, as Go's `os/exec`
+  reads a child's pipes through its netpoller: each of the child's pipes and its descriptor (`pidfd_open`) registered with a
+  block of its own, which `Ended` marks in the block that holds them (`ManyWaited`, -2 at 40, each wait -3), the actor parked
+  until the first event or the bound, and the waits whose event did not come taken out again (`ManyUnwait`), at a fall too;
+  the output is read on the actor's thread into its heap, and the last look of a bound is a `poll` of 0 milliseconds. A build
+  for Windows hands nothing (S11), and its runtime's functions of the pool are stubs;
 - logging (P1 to P7 and P9), in a build for Linux: a program with a log call in one of its files reads
   `KURZ_LOG` alone, since the compiler builds no settings type whose `Logging` part P4 has win, through
   `Variable` before its first statement, after `args`, and hands it to `LogFilter`,
