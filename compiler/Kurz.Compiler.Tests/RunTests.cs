@@ -195,7 +195,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         "system/park-accept-first.kz", "system/park-two-readers.kz", "system/park-read-close.kz", "system/park-read-crash.kz", "system/park-crash-deadlock.kz", "system/park-write.kz",
         "system/park-read-write.kz", "system/park-two-accepts.kz", "system/park-busy-scheduler.kz", "system/park-file-fifo.kz", "system/park-file-crash.kz",
         "system/park-file-fork.kz", "system/park-file-close.kz", "system/park-file-missing.kz", "system/park-file-drained.kz",
-        "system/park-file-fork-wait.kz",
+        "system/park-command-pipes.kz",
         "tests/advance-read-bound.kz",
     ];
 
@@ -229,7 +229,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         "system/command-exit-code.kz", "system/command-input.kz", "system/command-input-stdin.kz", "system/command-not-found.kz", "system/command-nul.kz", "system/command-nul-replaced.kz",
         "system/command-output.kz", "system/command-reuse.kz", "system/command-signal.kz", "system/command-status.kz", "system/command-timeout.kz",
         "system/command-words.kz", "system/spawn-input.kz", "system/spawn-kill.kz", "system/spawn-pipes.kz", "system/status-input.kz", "system/status-piped.kz",
-        "system/park-command-fifo.kz", "system/park-command-crash.kz", "system/park-command-pipes.kz",
+        "system/park-command-fifo.kz", "system/park-command-crash.kz", "system/park-file-fork-wait.kz",
     ];
 
     /// <summary>Cases the checker reads in full and the emitter does not lay out, each with what the emitter says.</summary>
