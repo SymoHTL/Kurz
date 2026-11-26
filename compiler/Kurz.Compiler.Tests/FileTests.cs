@@ -771,8 +771,8 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 IoError e => print(e)
             }
 
-            // the listener's, the program's first descriptor
-            print(Open(3))
+            // the listener's, the program's descriptor after its poller's, 3, which the first socket makes
+            print(Open(4))
             Take(listener) else {
                 IoError e => print(e.Code)
             }
@@ -1460,14 +1460,15 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_socket_is_opened_close_on_exec()
     {
-        // the flags of the listener, the connected stream and the accepted one, the first three descriptors the program opens
+        // the flags of the listener, the connected stream and the accepted one, the three descriptors the program opens after its
+        // poller's, 3, which the first socket makes
         const string flags = """
             void | IoError Flags() {
                 listener = TcpListener.Bind("127.0.0.1:0")
                 client = TcpStream.Connect("127.0.0.1:{listener.Port}")
                 server = listener.Accept()
-                mut n = 3
-                while n <= 5 {
+                mut n = 4
+                while n <= 6 {
                     info = File.ReadAll("/proc/self/fdinfo/{n}")
                     print(string.FromUtf8(info) else {
                         InvalidUtf8 => "not UTF-8"
@@ -1490,7 +1491,7 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
 
         // the positive control: the runtime's socket and accept without `SOCK_CLOEXEC`
-        var without = ListTests.Edited(("runtime/linux/linux.kz", "int fd = socket(family, 524289 + blocking, 0)", "int fd = socket(family, 1 + blocking, 0)"), ("runtime/linux/linux.kz", "accept4(fd, null, null, 524288)", "accept4(fd, null, null, 0)"));
+        var without = ListTests.Edited(("runtime/linux/linux.kz", "int fd = socket(family, 526337, 0)", "int fd = socket(family, 2049, 0)"), ("runtime/linux/linux.kz", "accept4(fd, null, null, 526336)", "accept4(fd, null, null, 2048)"));
         if (CloseOnExec(without, "socket-cloexec-without") is { } withoutFlag)
         {
             Assert.Equal([false, false, false], withoutFlag);
@@ -1726,8 +1727,8 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     /// <summary>
     /// A program that reads the time of the reads (<c>SO_RCVTIMEO</c>, 20) and of the writes (<c>SO_SNDTIMEO</c>, 21) of a descriptor back
-    /// by <c>getsockopt</c>, as its seconds and microseconds: the descriptors 3, 4 and 5 are the listener, the stream <c>Connect</c> made
-    /// and the one <c>Accept</c> gave, the first three the program opens.
+    /// by <c>getsockopt</c>, as its seconds and microseconds: the descriptors 4, 5 and 6 are the listener, the stream <c>Connect</c> made
+    /// and the one <c>Accept</c> gave, the three the program opens after its poller's, 3, which the first socket makes.
     /// </summary>
     private const string Bounds = """
         extern "C" {
@@ -1757,27 +1758,27 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             listener = TcpListener.Bind("127.0.0.1:0")
             client = TcpStream.Connect("127.0.0.1:{listener.Port}")
             server = listener.Accept()
-            mut fd = 3
-            while fd <= 5 {
+            mut fd = 4
+            while fd <= 6 {
                 print("{Bound(fd, 20)} {Bound(fd, 21)}")
                 fd = fd + 1
             }
 
             listener.SetAcceptTimeout(2500000001ns)
-            print("{Bound(3, 20)} {Bound(3, 21)}")
+            print("{Bound(4, 20)} {Bound(4, 21)}")
             second = TcpStream.Connect("127.0.0.1:{listener.Port}")
             accepted = listener.Accept()
-            print("{Bound(7, 20)} {Bound(7, 21)}")
+            print("{Bound(8, 20)} {Bound(8, 21)}")
             listener.SetAcceptTimeout(null)
-            print(Bound(3, 20))
+            print(Bound(4, 20))
             second.Close()
             accepted.Close()
             client.SetReadTimeout(1500000001ns)
             client.SetWriteTimeout(1ns)
-            print(Bound(4, 20))
-            print(Bound(4, 21) != "0 0")
+            print(Bound(5, 20))
+            print(Bound(5, 21) != "0 0")
             client.SetReadTimeout(null)
-            print(Bound(4, 20))
+            print(Bound(5, 20))
             client.Close()
             server.Close()
         }

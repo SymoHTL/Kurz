@@ -1,0 +1,69 @@
+// expect: output
+// | CalleeCrashed
+// | done
+// | slept
+// threads: 1
+// rules: S10, U20
+
+// `Boom`, a call `Helper` makes in the chain of `Outer`'s message (U17), is let in while `Outer` waits in the poller on its read,
+// and its crash takes the read's wait out of the poller and off the timers and gives both its callers `callee-crashed` (U20):
+// `Caller`, whose policy prints it, and `Helper`, whose policy stops it (U25). The byte written to the connection after it
+// reaches no wait whose block the crash freed, and the scheduler, which has nothing to run during the top-level code's sleep,
+// finds nothing registered with the poller
+actor Helper {
+    pub void Poke(Napper n) {
+        print(n.Boom())
+    }
+}
+
+actor Napper {
+    pub int Outer(Helper helper, int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => return -1
+        }
+
+        send helper.Poke(this)
+        mut buffer = Bytes()
+        n = stream.Read(mut buffer, 1) else {
+            IoError e => return -2
+        }
+
+        return n
+    }
+
+    pub int Boom() {
+        throw "boom"
+    }
+}
+
+actor Caller(Napper N, Helper H) {
+    pub void Go(int port) {
+        print(N.Outer(H, port))
+    }
+
+    pub string Done() => "done"
+}
+
+void | IoError Main() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    poker = spawn Helper() on crash stop
+    napper = spawn Napper()
+    c = spawn Caller(napper, poker) on crash (e) {
+        match e.Reason {
+            RuntimeError r => print(r.Kind)
+        }
+
+        restart
+    }
+
+    send c.Go(listener.Port)
+    server = listener.Accept()
+    print(c.Done())
+    server.Write("x".Bytes)
+    Environment.Sleep(20ms)
+    print("slept")
+}
+
+Main() else {
+    IoError e => print(e)
+}

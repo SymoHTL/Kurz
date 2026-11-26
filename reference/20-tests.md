@@ -784,3 +784,64 @@ test "a lambda waits an hour" {
     later()
 }
 ```
+
+Case: [tests/advance-read-bound.kz](../corpus/tests/advance-read-bound.kz)
+```kurz
+// the client's read of a connection that sends nothing waits in the poller with its bound of an hour among the runtime's timers,
+// so that the `advance` of an hour passes it and the read ends with `TimedOut` and the number 11 at the scheduler's turn after it,
+// in milliseconds (Y10, S10, S9); a read that blocked in the kernel would wait the hour out. The test's calls are of its chain,
+// which the client's waiting activation lets in (U17), so that the loop reads "reading" once the read waits, and the `advance`
+// comes after the read's bound stands among the timers
+actor Client {
+    mut string got = "none"
+
+    pub void Run(int port) {
+        stream = TcpStream.Connect("127.0.0.1:{port}") else {
+            IoError e => {
+                got = "connect {e.Kind}"
+                return
+            }
+        }
+
+        stream.SetReadTimeout(1h) else {
+            IoError e => {
+                got = "bound {e.Kind}"
+                return
+            }
+        }
+
+        got = "reading"
+        mut buffer = Bytes()
+        match stream.Read(mut buffer, 1) {
+            int n => got = "read {n}"
+            IoError e => got = "{e.Kind} {e.Code}"
+        }
+    }
+
+    pub string Got() => got
+}
+
+test "a read's bound of an hour passes at the advance" {
+    match TcpListener.Bind("127.0.0.1:0") {
+        TcpListener listener => {
+            c = spawn Client()
+            send c.Run(listener.Port)
+            match listener.Accept() {
+                TcpStream server => {
+                    while c.Got() != "reading" {
+                        Environment.Sleep(1ms)
+                    }
+
+                    advance 1h
+                    check c.Got() == "TimedOut 11"
+                    server.Close() else {
+                        IoError e => print(e)
+                    }
+                }
+                IoError e => print(e)
+            }
+        }
+        IoError e => print(e)
+    }
+}
+```

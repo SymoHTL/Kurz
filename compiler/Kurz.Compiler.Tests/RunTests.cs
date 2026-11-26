@@ -162,7 +162,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             ? CrashLine().Replace(written, string.Empty) : written;
 
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the cases whose <c>system:</c> line names Linux, the stack overflows', nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls, the reads of standard input and running a program. The number for Linux is the count measured with no margin in an image built locally from <c>ci/Dockerfile</c>, whose clang is the point release of the day it was built and not always the one of the image the gates job pulls by its digest (knowledge/the-gates-job-runs-in-its-image.md), so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156); a green gates job shows only that its own image counts at least this number, and a count in that image is one run of the job on a pushed head with the number at 999. The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 724 : 877;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 724 : 884;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -192,6 +192,8 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         "http/client-limits.kz", "http/client-redirects.kz", "http/client-timeout.kz", "http/client-timeout-body.kz",
         "http/http-query.kz",
         "system/command-env-dir.kz",
+        "system/park-accept-first.kz", "system/park-two-readers.kz", "system/park-read-close.kz", "system/park-read-crash.kz", "system/park-crash-deadlock.kz", "system/park-write.kz",
+        "tests/advance-read-bound.kz",
     ];
 
     /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11), the cases of the deadlines that hold their thread by the clock among them (U36 to U45, U49), and the cases of <c>advance</c>, which moves the clock (Y10); a case of a deadline that reads no clock, a <c>within</c> that bounds a call with no such hold, is none of them, and a build for Windows runs it.</summary>
@@ -330,6 +332,8 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             "Worker#2 waits for the decision of Boss#1 on its crash in chain <chain>",
         ["actors/waitline-into-loop.kz"] = "Boss#1 waits at actors/waitline-into-loop.kz:30 on Worker#4 in chain <chain>\n" +
             "Worker#4 waits for the decision of Boss#1 on its crash in chain <chain>",
+        ["system/park-crash-deadlock.kz"] = "Boss#4 waits at system/park-crash-deadlock.kz:62 on Worker#5 in chain <chain>\n" +
+            "Worker#5 waits for the decision of Boss#4 on its crash in chain <chain>",
     };
 
     /// <summary>U63, U64: a case whose <c>deadlock</c> names its loop below its error line, by its <c>rules:</c> line.</summary>
