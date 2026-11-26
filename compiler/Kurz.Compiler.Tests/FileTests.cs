@@ -108,6 +108,66 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(4), $"the run took {clock.Elapsed}");
     }
 
+    [Fact]
+    public void An_actors_read_of_standard_input_runs_on_the_pool_while_the_one_thread_runs_another_actor()
+    {
+        // S10, S22, the product pass's Q6 (issue 661, comment 7182792402): a read of standard input inside a message runs on the pool of
+        // threads for blocking calls while its actor parks, so that `Ticker` answers at once while the pipe's writer waits a second
+        // before its byte, and `print` writes on the thread that runs every actor. A runtime that made the read on that thread would
+        // answer the call of `Tick` only after the byte came, past the bound of 500 milliseconds the program reads on its clock. No
+        // case can give a program an input that comes late, so a test of the suite runs it behind the shell's pipe. A build for
+        // Windows says `not supported` to `Stdin` (S11)
+        const string text = """
+            string Text(Bytes bytes) {
+                text = string.FromUtf8(bytes) else {
+                    InvalidUtf8 => "?"
+                }
+
+                return text
+            }
+
+            actor Ticker {
+                pub string Tick() => "tick"
+            }
+
+            actor Reader {
+                mut string got = ""
+
+                pub void Read() {
+                    mut buffer = Bytes()
+                    match Stdin.Read(mut buffer, 1) {
+                        int n => got = "read {Text(buffer)}"
+                        IoError e => got = "read {e.Kind}"
+                    }
+                }
+
+                pub string Got() => got
+            }
+
+            start = instant.Now
+            r = spawn Reader()
+            t = spawn Ticker()
+            send r.Read()
+            print("{t.Tick()} {instant.Now - start < 500ms}")
+            print(r.Got())
+            """;
+        if (Builder.HostTarget == Target.Windows)
+        {
+            RefusedOnWindows(Compile(text, toolchain.Runtime));
+            return;
+        }
+
+        foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced") })
+        {
+            var compilation = Compile(text, runtime);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var executable = toolchain.Build(compilation.Program, "park-stdin" + suffix);
+            var (code, output, error) = Processes.Capture("/bin/sh", ["-c", "(sleep 1; printf x) | \"$0\"", executable], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" });
+            Assert.Equal(["tick true", "read x"], Toolchain.Lines(output));
+            Assert.Equal((0, ""), (code, error));
+        }
+    }
+
     private const string Rounds = """
         void | IoError Rounds() {
             File.WriteAll("probe.txt", "x".Bytes)
