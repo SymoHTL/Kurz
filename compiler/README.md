@@ -1685,7 +1685,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `instant.Now` and `timestamp.Now`, and so the time of a log call, add it through the runtime's `Ahead` in a build of
   `kurz test` alone, `--release` among them, while every other build reads the system's clock directly and stores nothing
   to `ahead`, a global the optimiser folds to 0 there (`EmitterTests`); `TestEnded` sets it back to 0. A socket's bound and
-  a child process's wait are a blocking `poll` with a timeout of its own, which `advance` does not reach; a build for
+  a child process's wait are a wait in the kernel with a timeout of its own, the socket's option or `poll`'s, which
+  `advance` does not reach, where §11 holds a socket's bound by the poller's timer, which the runtime lacks; a build for
   Windows says `not supported`, as for `instant.Now`;
 - logging (P1 to P7 and P9), in a build for Linux: a program with a log call in one of its files reads
   `KURZ_LOG` alone, since the compiler builds no settings type whose `Logging` part P4 has win, through
