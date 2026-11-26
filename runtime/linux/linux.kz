@@ -2700,7 +2700,9 @@ pub int Variable(byte* key, mut string value) {
 // connection in progress at 144, 8 bytes; the error `SO_ERROR` gives at 152 and its length at 156; the
 // `struct timespec` of the monotonic clock at 160, 16 bytes; the `struct epoll_event` of a registration in the
 // poller at 176, 16 bytes, and the 8 bytes of its data at 192 (`PollAdd`, `PollWait`); the wait of a call that would
-// block at 200, 8 bytes (`Waiter`); and the events `epoll_wait` gives at 256, at most 64 of 16 bytes.
+// block at 200, 8 bytes (`Waiter`); the wait of a call handed to the pool of threads for blocking calls at 208 and
+// whether a call is handed at 216, 8 bytes each (`BlockingWaiter`); and the events `epoll_wait` gives at 256, at most
+// 64 of 16 bytes.
 thread static mut byte* endpoints = null
 
 // The page above, mapped where this thread has none yet: its address, or null where the system refuses it.
