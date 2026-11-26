@@ -266,6 +266,27 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>
+    /// U13, U21, U22, U35: the crash of <c>Parent</c> on a worker thread ends its child, under the world that its crash's thread holds
+    /// while every other thread waits (the runtime's <c>WorldTried</c>, <c>EndChildren</c>), before its restart, so that the top-level
+    /// code, whose call of <c>Kid</c> waits in the inbox behind <c>Boom</c> for that restart, finds the child ended: its call of
+    /// <c>Get</c> raises <c>actor-gone</c>, as the case <c>actors/crash-children-end.kz</c> shows on one thread, whose <c>send</c> to the
+    /// child after <c>Boom</c> has no order on more than one.
+    /// </summary>
+    [Fact]
+    public void The_children_of_an_actor_that_crashes_on_a_worker_thread_end_with_its_crash()
+    {
+        const string text = "actor Child {\n    pub int Get() => 1\n}\n\nactor Parent {\n    mut Child? kid = null\n\n    pub void Make() {\n"
+            + "        kid = spawn Child()\n    }\n\n    pub Child? Kid() => kid\n\n    pub void Boom() {\n        throw \"parent fails\"\n    }\n}\n\n"
+            + "p = spawn Parent()\np.Make()\nkid = p.Kid()\nsend p.Boom()\nprint(p.Kid() == null)\nif kid != null {\n    print(kid.Get())\n}\n";
+        if (Ran(text, "threads-children", "export KURZ_THREADS=4; ") is { } run)
+        {
+            Assert.Equal(1, run.Code);
+            Assert.Equal(["true"], run.Output);
+            Assert.EndsWith("error: actor-gone at program.kz:25\n", run.Error, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
     /// U35: with <c>KURZ_THREADS</c> set to 1 every actor runs on the main thread in the top-level code's waits, first in, first out, as a
     /// case marked <c>// threads: 1</c> runs (assumed in section 6), so that the two actors <c>Go</c> wakes say their lines in the order it
     /// woke them, where one worker thread would run the actor woken last first, from its waker's slot, as Go's <c>runnext</c> runs it

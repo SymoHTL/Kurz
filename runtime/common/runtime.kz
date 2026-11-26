@@ -4077,11 +4077,13 @@ pub void ActorBuilt(byte* state) {
 // and is read before the slot, since `Slot` reads the directory of the table, which no take made before the first
 // actor's.
 pub byte* PerFind(byte* cell) {
+    Pinned()
     raw {
         long number = AtomicLong.FromPtr(Ptr<long>(cell + 16)).Load(MemoryOrder.Acquire)
         if number != 0 {
             byte* state = Lookup(AtomicLong.FromPtr(Ptr<long>(cell + 8)).Load(MemoryOrder.Relaxed), number)
             if state != null {
+                Unpinned()
                 return state
             }
         }
@@ -4094,11 +4096,13 @@ pub byte* PerFind(byte* cell) {
             byte* state = Lookup(AtomicLong.FromPtr(Ptr<long>(cell + 8)).Load(MemoryOrder.Relaxed), again)
             if state != null {
                 Unlock(Ptr<int>(cell))
+                Unpinned()
                 return state
             }
         }
     }
 
+    Unpinned()
     return null
 }
 
@@ -4131,8 +4135,8 @@ pub void PerStarted(byte* cell, byte* state) {
 // The end of the constructor of the one actor of a `per node` type, whose state is `state`, at its start (U52,
 // U53): its supervisor, the code that sent its first message while its constructor ran, so that a crash of that
 // code ended it, half built, becomes the top-level code, the root, so that it outlives that code and ends with
-// the process; then the end of its constructor as at a `spawn` (`ActorBuilt`). The store is a plain one, which
-// holds while one thread runs every program (U35), as `EndChildren` reads the supervisor by a plain load.
+// the process; then the end of its constructor as at a `spawn` (`ActorBuilt`). The store is a plain one, as
+// `EndChildren` reads the supervisor by a plain load, which on worker threads runs under the world, while no turn runs (`WorldTried`).
 pub void PerBuilt(byte* state) {
     raw {
         *Ptr<byte*>(state - 72) = null
@@ -4210,6 +4214,7 @@ pub byte* ActorHeap(long index, long number) {
 // frees their heaps with the process (U35).
 void EndActors() {
     if Threaded() {
+        RootEnded()
         return
     }
 
@@ -4267,8 +4272,8 @@ pub string ActorText(string name, long number) {
 // waits in its chain, or to the end of the inbox (`Moved`); the actor is woken (`Wake`) where it waits neither
 // for its restart (U22) nor for the decision of its block (U34), which the sender reads from the actor's life by
 // a plain load after the push, a word the thread that holds the actor writes with plain stores (`Fall`,
-// `Restart`, `Decided`): the read holds while one thread runs every program (U35), and on more than one it would
-// race those stores, as `Post`'s read of its supervisor's life would. A call or a
+// `Restart`, `Decided`), which on worker threads run under the world, while no turn and no read of the main thread's runs
+// (`WorldTried`, `Pinned`), as `Post`'s read of its supervisor's life does. A call or a
 // `send` to an actor that ended raises `actor-gone` at its line `line` of the file `file`, the message and what
 // crossed into it staying in the heap the running code allocates in (`ActorHeap`) (U6, U20; design record,
 // section 6, the owner, 2026-11-16, #519, comments 6919351399 and 6923513534), before its deadline is
@@ -4432,8 +4437,8 @@ byte* Popped(byte* queue) {
 // other message to the end of the inbox, as tokio's `mpsc` channel pushes a
 // value at the tail of its list (not checked at source), so that an inbox keeps the order in which its messages were sent (U5, U15).
 // `Fall` and `EndActor` move them on a supervisor that the thread does not hold too, where a child's crash
-// escalates through it or ends it as the crash's taker (`Fell`): that holds while one thread runs every program
-// (U35), and on more than one it would make the thread a second consumer of a queue of one consumer.
+// escalates through it or ends it as the crash's taker (`Fell`), which on worker threads run under the world, while no other
+// thread takes a turn (`WorldTried`), so that the thread is the one consumer of that queue.
 void Moved(byte* state) {
     raw {
         mut byte* block = Popped(state - 120)
@@ -4896,6 +4901,7 @@ extern "C" byte* WorkerMain(byte* record) {
 void WorkerTurn() {
     raw {
         byte* record = threadRecord
+        WorldEntered(record)
         long epoch = AtomicLong.FromPtr(Ptr<long>(scheduler)).Load(MemoryOrder.Acquire)
         AtomicLong.FromPtr(Ptr<long>(record + 88)).Store(epoch, MemoryOrder.Release)
         Reclaimed()
@@ -4903,9 +4909,14 @@ void WorkerTurn() {
         tick = now
         Fire(now)
         if AtomicLong.FromPtr(Ptr<long>(scheduler + 72)).Load(MemoryOrder.Acquire) <= now {
+            WorldTaken()
             byte* ended = PauseEnded(now)
             if ended != null {
                 Restart(ended)
+            }
+
+            WorldLeft()
+            if ended != null {
                 return
             }
         }
@@ -5578,28 +5589,294 @@ void Reclaimed() {
     }
 }
 
-// The main thread's epoch held while the top-level code reads an actor's record (`Enqueue`): the epoch of the process stored with a
-// fence with sequential consistency after it, against the one before a free reads the epochs (`Reclaimed`), so that either the free
-// sees the main thread's epoch or the main thread reads no record the free let go of; nothing on a worker, whose turn holds its
-// epoch, nor on one thread.
+// The main thread's epoch held while the top-level code reads an actor's record (`Enqueue`, `PerFind`): the epoch of the process
+// stored with a fence with sequential consistency after it, against the one before a free reads the epochs (`Reclaimed`), so that
+// either the free sees the main thread's epoch or the main thread reads no record the free let go of, and its word of the world set,
+// after the world of a worker let go of (`WorldEntered`), so that no world is held while it reads; a store and a fence of sequential
+// consistency for each send and call of the top-level code with worker threads, as crossbeam-epoch pins each operation (section 6,
+// the owner, 2026-11-26, #519, comment 7192965131, "Pin per send (Recommended)"); nothing on a worker, whose turn holds its epoch
+// and its word, nor on one thread.
 void Pinned() {
     raw {
         byte* record = threadRecord
         if record != null && *Ptr<long>(record + 96) < 0 {
             AtomicLong.FromPtr(Ptr<long>(record + 88)).Store(AtomicLong.FromPtr(Ptr<long>(scheduler)).Load(MemoryOrder.Acquire), MemoryOrder.SeqCst)
             Fence(MemoryOrder.SeqCst)
+            WorldEntered(record)
+            RootEnded()
         }
     }
 }
 
-// The main thread's epoch let go of where it read the records it held it for (`Pinned`).
+// The main thread's epoch and its word of the world let go of where it read the records it held them for (`Pinned`).
 void Unpinned() {
     raw {
         byte* record = threadRecord
         if record != null && *Ptr<long>(record + 96) < 0 {
+            WorldOut(record)
             AtomicLong.FromPtr(Ptr<long>(record + 88)).Store(Never(), MemoryOrder.Release)
         }
     }
+}
+
+// ---- the world of the worker threads (U35) -------------------------------------------------------------------------------------
+
+// The world of the worker threads, held by a thread while it acts on the records of actors it does not hold as one thread acts on
+// them: the take of a crash, its escalation and the end of the children it ends (`Crashed`), the end of an actor (`EndActor`), a
+// restart (`PauseEnded`, `Restart`), the decision of a block (`Decided`) and the walk for the places of a `deadlock` (`Kept`), as
+// Go's `stopTheWorld` holds every other thread at a safe point (not checked at source). Its owner, 1 for the main thread and 2 more
+// than its index for a worker, stands in the word at 88 of the scheduler's block; the word at 108 of each thread's record is set
+// while the thread runs: a worker's from the start of its turns to its sleep in its poller, the main thread's while it reads an
+// actor's record (`Pinned`). The owner waits for the word of every other thread to clear, so that no other thread runs an actor or
+// reads a record while it acts, each of them waiting at the start of its turn for the world to be let go of, which a release store
+// of no owner and a wake of every thread that waits on the word end (`WorldLeft`). One compare-exchange and one fence of sequential
+// consistency on one side, one store and one load of sequential consistency on the other, as a lock of Dekker's has it, so that
+// either the owner sees a thread's word set or the thread sees the owner.
+
+// The owner's mark of this thread (`WorldTried`).
+int WorldMe() {
+    raw {
+        return int(*Ptr<long>(threadRecord + 96) + 2)
+    }
+}
+
+// The word of the world's owner, 0 where none holds it.
+AtomicInt WorldOwner() {
+    raw {
+        return AtomicInt.FromPtr(Ptr<int>(scheduler + 88))
+    }
+}
+
+// The word of the thread whose record is `record`, set while it runs.
+AtomicInt WorldRunning(byte* record) {
+    raw {
+        return AtomicInt.FromPtr(Ptr<int>(record + 108))
+    }
+}
+
+// The word of the thread whose record is `record` set, at the start of a worker's turn and where the main thread reads a record
+// (`Pinned`), and cleared again while another thread holds the world, for as long as that thread holds it (`WorldWaited`).
+void WorldEntered(byte* record) {
+    raw {
+        AtomicInt owner = WorldOwner()
+        AtomicInt word = WorldRunning(record)
+        int me = WorldMe()
+        word.Store(1, MemoryOrder.SeqCst)
+        mut int held = owner.Load(MemoryOrder.SeqCst)
+        while held != 0 && held != me {
+            word.Store(0, MemoryOrder.Release)
+            WorldWaited(held)
+            word.Store(1, MemoryOrder.SeqCst)
+            held = owner.Load(MemoryOrder.SeqCst)
+        }
+    }
+}
+
+// The wait of a thread whose word is clear for the world whose owner was `held` to be let go of, on the owner's word by `futex`
+// (`sys.LockWait`), which a change of the word ends at once.
+void WorldWaited(int held) {
+    raw {
+        AtomicInt owner = WorldOwner()
+        mut int now = held
+        while now != 0 {
+            sys.LockWait(Ptr<int>(scheduler + 88), now)
+            if *Ptr<long>(threadRecord + 96) < 0 {
+                RootEnded()
+            }
+
+            now = owner.Load(MemoryOrder.Acquire)
+        }
+    }
+}
+
+// The wait of the main thread, whose reply the thread of a crash may set under the world (`Signal`), for the world to be let go
+// of, so that the top-level code goes on after the acts of that crash, its log line among them, as on one thread (`RootSlept`).
+void WorldPassed() {
+    raw {
+        int held = WorldOwner().Load(MemoryOrder.Acquire)
+        if held != 0 {
+            WorldWaited(held)
+        }
+    }
+}
+
+// The word of the thread whose record is `record` cleared, where a worker sleeps in its poller (`Polled`) and where the main thread
+// read the records it pinned (`Unpinned`).
+void WorldOut(byte* record) {
+    raw {
+        WorldRunning(record).Store(0, MemoryOrder.Release)
+    }
+}
+
+// Whether this thread holds the world: true on one thread, where no world is; on worker threads the owner's word changed from none
+// to this thread's mark by one compare-exchange, then the wait for the word of every other thread to clear (`WorldGathered`); false
+// where a thread holds it already, this one among them, so that a caller that holds an actor lets go of the act and of the actor
+// rather than wait while another owner may wait for it (`CrashTaken`, `EndTaken`, `WorldHeld`).
+bool WorldTried() {
+    if !Threaded() {
+        return true
+    }
+
+    mut bool held = false
+    raw {
+        match WorldOwner().CompareExchange(0, WorldMe(), MemoryOrder.AcqRel, MemoryOrder.Acquire) {
+            int stored => held = stored == 0
+            NotExchanged<int> missed => held = false
+        }
+    }
+
+    if !held {
+        return false
+    }
+
+    raw {
+        Fence(MemoryOrder.SeqCst)
+    }
+
+    WorldGathered()
+    return true
+}
+
+// The wait of the world's owner for the word of every other thread to clear: the main thread's, then each worker's.
+void WorldGathered() {
+    raw {
+        byte* main = *Ptr<byte*>(scheduler + 64)
+        if main != null && main != threadRecord {
+            WorldQuiet(main)
+        }
+
+        long count = *Ptr<long>(scheduler + 48)
+        mut long index = 0
+        while index < count {
+            byte* record = *Ptr<byte*>(scheduler + 128 + index * 8)
+            if record != null && record != threadRecord {
+                WorldQuiet(record)
+            }
+
+            index = index + 1
+        }
+    }
+}
+
+// The wait for the word of the thread whose record is `record` to clear, loaded with acquire, so that what the thread wrote before it
+// cleared the word is seen.
+void WorldQuiet(byte* record) {
+    raw {
+        AtomicInt word = WorldRunning(record)
+        mut int seen = word.Load(MemoryOrder.Acquire)
+        while seen != 0 {
+            seen = word.Load(MemoryOrder.Acquire)
+        }
+    }
+}
+
+// The world held by a thread that holds no actor, a worker at a restart (`WorkerTurn`) and the main thread at its walk of a
+// `deadlock` and at the decision of a block it runs: the thread's word cleared while it waits for another owner to let go of it,
+// then set again; nothing on one thread.
+void WorldTaken() {
+    if !Threaded() {
+        return
+    }
+
+    while !WorldTried() {
+        raw {
+            byte* record = threadRecord
+            bool was = WorldRunning(record).Load(MemoryOrder.Relaxed) != 0
+            if was {
+                WorldOut(record)
+            }
+
+            WorldWaited(WorldOwner().Load(MemoryOrder.Acquire))
+            if was {
+                WorldRunning(record).Store(1, MemoryOrder.SeqCst)
+            }
+        }
+    }
+}
+
+// The world held by the code of an activation (`RunBlock`): where another thread holds it, the activation sleeps for a millisecond
+// and tries again, as an actor that sleeps (`Park`), so that its actor stands as an actor whose activation waits while the owner
+// acts; the top-level code waits for it (`WorldTaken`).
+void WorldHeld() {
+    if !Threaded() {
+        return
+    }
+
+    mut bool root = false
+    raw {
+        root = running == null
+    }
+
+    if root {
+        WorldTaken()
+        return
+    }
+
+    while !WorldTried() {
+        Park(PauseClock() + 1000000)
+    }
+}
+
+// The world let go of by its owner: no owner stored with release, and every thread that waits on its word woken; nothing on one
+// thread.
+void WorldLeft() {
+    if !Threaded() {
+        return
+    }
+
+    raw {
+        WorldOwner().Store(0, MemoryOrder.Release)
+        mut long woken = sys.LockWake(Ptr<int>(scheduler + 88))
+        while woken > 0 {
+            woken = sys.LockWake(Ptr<int>(scheduler + 88))
+        }
+    }
+}
+
+// The crash of the activation `header` of the actor whose state is `state`, which the thread holds, taken (`Crashed`) under the world,
+// and the actor let go of; where another thread holds the world, the crash kept in the activation, with the values of its throw at
+// 280, 288 and 296, which the thread would read at the take, and the actor let go of and queued again, whose following take takes it
+// (`RunTake`), as a crash the one thread takes after the acts of others.
+void CrashTaken(byte* state, byte* header) {
+    if !WorldTried() {
+        raw {
+            *Ptr<long>(header + 280) = thrownNumber
+            *Ptr<byte*>(header + 288) = thrownSlot
+            *Ptr<byte*>(header + 296) = thrownCopy
+            thrownNumber = 0
+        }
+
+        LetGo(state, true)
+        return
+    }
+
+    raw {
+        holding = state
+        Crashed(state, header)
+        holding = null
+    }
+
+    LetGo(state, false)
+    WorldLeft()
+}
+
+// The end of the actor whose state is `state`, which the thread holds, whose last activation ended with its ENDING bit set (`Run`),
+// under the world, and the actor let go of; where another thread holds the world, the actor let go of and queued again, whose following
+// take ends it (`RunTake`), where no other end came first.
+void EndTaken(byte* state) {
+    if !WorldTried() {
+        LetGo(state, true)
+        return
+    }
+
+    raw {
+        if *Ptr<int>(state - 88) != 3 {
+            EndActor(state)
+        }
+    }
+
+    LetGo(state, false)
+    WorldLeft()
 }
 
 // The time the first restart's pause ends stored for the workers (`WorkerTurn`, `WorkerPark`), the largest `long` for none, under the lock
@@ -5627,6 +5904,7 @@ void PauseNoted() {
 bool RootSlept(byte* reply, long deadline) {
     raw {
         while reply == null || ReplyState(reply) == 0 {
+            RootEnded()
             long now = PauseClock()
             if deadline <= now {
                 RootWaitEnded()
@@ -5652,6 +5930,7 @@ bool RootSlept(byte* reply, long deadline) {
             }
         }
 
+        WorldPassed()
         RootWaitEnded()
     }
 
@@ -6192,7 +6471,9 @@ int Answer(byte* reply, byte* message, string file, int line) {
             long low = *Ptr<long>(message + 32)
             if !RootWait(reply) {
                 mut found = List<long>()
+                WorldTaken()
                 Kept(high, low, mut found)
+                WorldLeft()
                 if found.Count > 0 {
                     DeadlockKept(found)
                 }
@@ -6899,7 +7180,16 @@ void Polled(long nanoseconds) {
             readied = AllocateOwn(1024)
         }
 
+        bool sleeps = nanoseconds != 0 && Threaded() && threadRecord != null && *Ptr<long>(threadRecord + 96) >= 0
+        if sleeps {
+            WorldOut(threadRecord)
+        }
+
         long count = sys.PollWait(nanoseconds, readied, 64, sys.EpollDataAt())
+        if sleeps {
+            WorldEntered(threadRecord)
+        }
+
         if count < 0 {
             mut long each = 0
             while each < waitSlots {
@@ -6981,8 +7271,8 @@ void RunTurn() {
 // (`Building`), each walked from the actor its stack builds up the supervisors that stack builds too (`KeptBuilt`). The walk's order:
 // the starts the top-level code runs, then the actors by the index of their slots, each actor's restart before the starts its
 // activations run, from its top activation down. None is added where none waits, a loop of chains that passes no start among them.
-// The lists are read with plain loads, which holds while one thread runs every program (U35): nothing runs while the top-level
-// code's wait finds nothing left to run.
+// The lists are read with plain loads: nothing runs while the top-level code's wait finds nothing left to run, and on worker threads
+// the walk holds the world (`Answer`, `WorldTried`).
 void Kept(long high, long low, mut List<long> found) {
     raw {
         KeptBuilt(rootBuilding, high, low, mut found)
@@ -7253,6 +7543,19 @@ void RunTake(byte* state) {
         }
 
         byte* top = *Ptr<byte*>(state - 8)
+        if top == null && Threaded() && Ending(state) {
+            EndTaken(state)
+            return
+        }
+
+        if top != null && Threaded() && *Ptr<long>(top + 448) != 0 {
+            thrownNumber = *Ptr<long>(top + 280)
+            thrownSlot = *Ptr<byte*>(top + 288)
+            thrownCopy = *Ptr<byte*>(top + 296)
+            CrashTaken(state, top)
+            return
+        }
+
         if top == null {
             while *Ptr<byte*>(state - 32) != null {
                 byte* message = Taken(state - 32)
@@ -7343,10 +7646,7 @@ void Run(byte* state, byte* header) {
         sys.StackGuard(null, 0)
         std.HeapUse(before)
         if *Ptr<long>(header + 448) != 0 {
-            holding = state
-            Crashed(state, header)
-            holding = null
-            LetGo(state, false)
+            CrashTaken(state, header)
             return
         }
 
@@ -7364,8 +7664,7 @@ void Run(byte* state, byte* header) {
 
             Give(header)
             if below == null && Ending(state) {
-                EndActor(state)
-                LetGo(state, false)
+                EndTaken(state)
                 return
             }
         }
@@ -7765,6 +8064,7 @@ byte* Taker(byte* state) {
 // holds, `count` bytes at `text`, the trace of the calls of the top-level code that waits, and the exit
 // code 1, as `Raise` and `Throw` end it at a raise of the top-level code.
 void Ends(bool hasText, byte* id, long idCount, byte* file, long fileCount, long line, byte* text, long count) {
+    EndHanded(hasText, id, idCount, file, fileCount, line, text, count)
     string what = TextAt(id, idCount)
     string place = TextAt(file, fileCount)
     string below = TextAt(text, count)
@@ -7786,6 +8086,57 @@ void Ends(bool hasText, byte* id, long idCount, byte* file, long fileCount, long
     WriteError("\n")
     sys.Trace()
     sys.Exit(1)
+}
+
+// The words of the end of the process that a worker handed to the main thread (`EndHanded`), published by the mark at 92 of the
+// scheduler's block.
+static mut byte* rootEnd = null
+
+// The end of the process that the top-level code takes from the crash path of a worker (`Ends`), handed to the main thread, whose
+// stack holds the calls of the top-level code that waits, which the trace names: the words of the end stored and marked with
+// release, the main thread woken, in its poller and in its wait for the world, and the worker waiting on the mark to the exit, which
+// the main thread makes at its turn in its wait, at its following read of a record or at its end (`RootEnded`); nothing on the main thread
+// and on one thread.
+void EndHanded(bool hasText, byte* id, long idCount, byte* file, long fileCount, long line, byte* text, long count) {
+    raw {
+        if scheduler == null || threadRecord == null || *Ptr<long>(threadRecord + 96) < 0 {
+            return
+        }
+
+        byte* end = AllocateOwn(64)
+        *Ptr<long>(end) = 0
+        if hasText {
+            *Ptr<long>(end) = 1
+        }
+
+        *Ptr<byte*>(end + 8) = id
+        *Ptr<long>(end + 16) = idCount
+        *Ptr<byte*>(end + 24) = file
+        *Ptr<long>(end + 32) = fileCount
+        *Ptr<long>(end + 40) = line
+        *Ptr<byte*>(end + 48) = text
+        *Ptr<long>(end + 56) = count
+        rootEnd = end
+        AtomicInt.FromPtr(Ptr<int>(scheduler + 92)).Store(1, MemoryOrder.Release)
+        MainWoken()
+        sys.LockWake(Ptr<int>(scheduler + 88))
+        mut bool endless = true
+        while endless {
+            sys.LockWait(Ptr<int>(scheduler + 92), 1)
+        }
+    }
+}
+
+// The end of the process that a worker handed to the main thread (`EndHanded`) made by it, where one stands.
+void RootEnded() {
+    raw {
+        if scheduler == null || AtomicInt.FromPtr(Ptr<int>(scheduler + 92)).Load(MemoryOrder.Acquire) == 0 {
+            return
+        }
+
+        byte* end = rootEnd
+        Ends(*Ptr<long>(end) != 0, *Ptr<byte*>(end + 8), *Ptr<long>(end + 16), *Ptr<byte*>(end + 24), *Ptr<long>(end + 32), *Ptr<long>(end + 40), *Ptr<byte*>(end + 48), *Ptr<long>(end + 56))
+    }
 }
 
 // The fall of the actor whose state is `state` at its crash, `header` its top activation, null where it
@@ -8070,12 +8421,10 @@ void EndActor(byte* state) {
 // holds an actor (`HeldAlone`), the child, where its holder did not end it meanwhile, ended at once or its policy
 // and its supervisor cleared, and let go (`LetGo`), which frees the record of a child that ended where no entry of
 // it stands in the run queue. The child whose crash the thread takes is held by the thread already (`holding`),
-// and acted on under that hold, which `Run` lets go of once the crash was taken. Three of these acts hold while
-// one thread runs every program (U35), and not on more than one: the test of which actors are children reads the
-// child's supervisor and its life by plain loads before any hold, and reads only the life again under it; the bit
-// is set before the hold, so that the child's holder could end the child and its `LetGo` free the record this
-// thread then holds; and the thread that takes a child's crash holds that child and then each of its siblings,
-// so that two threads that each hold one sibling would each wait on the other's hold.
+// and acted on under that hold, which `Run` lets go of once the crash was taken. On worker threads the end runs under
+// the world, while no other thread takes a turn or holds an actor (`WorldTried`), so that the plain loads of the
+// child's supervisor and its life before any hold, the bit set before the hold, and the holds of a child and then
+// each of its siblings meet no other thread, as on one thread.
 void EndChildren(byte* state) {
     raw {
         mut long index = SlotsUsed() - 1
@@ -8218,8 +8567,8 @@ void HeldAlone(byte* state) {
 // and no message of the supervisor does (section 6, assumed there), the thread holding the actor (RUNNING in
 // its state word, `HeldAlone`) outside the run queue, where an entry of it can still stand, before the actor
 // runs again. A crash there is the actor's own (U3). The take off the queue of the pauses lets go of that
-// queue's lock before this hold, and the life is not read again under it, which holds while one thread runs
-// every program (U35): on more than one, the end of the actor's supervisor could end and free it in that gap.
+// queue's lock before this hold, and the life is not read again under it, which holds on worker threads too, where the take and
+// the restart run under the world (`WorkerTurn`, `WorldTried`), so that no end of the actor's supervisor comes in that gap.
 // Its state word says REBUILDING from before the activation starts to the end of the constructor (`Rebuilt`), so
 // that a call of the restart's chain that reaches the actor meanwhile waits in its inbox (`Moved`; U22; section
 // 6, the owner, 2026-11-20, #599, comment 7051501153, "Option 1"); a crash of the constructor leaves the bit set,
@@ -8526,9 +8875,9 @@ byte* RootHeap() {
 // (`Pushed`), which its holder moves to the front of its inbox, after the blocks already there (`Moved`), so that
 // it runs after the current message and before the queued ones in the order of the crashes, and the supervisor
 // woken where it can run it (`Wake`; U28, U34), which its life says, read by a plain load after the push, as
-// `Enqueue` reads it, and which holds while one thread runs every program (U35); for the top-level code, null, at
-// the end of the blocks its wait runs (U33), which wakes nothing, so that the main thread's wait finds the block
-// at its following turn.
+// `Enqueue` reads it, which holds on worker threads under the world (`WorldTried`); for the top-level code, null, at
+// the end of the blocks its wait runs (U33), which wakes nothing on one thread, so that the main thread's wait finds the block
+// at its following turn, and on worker threads wakes the main thread (`MainWoken`).
 void Post(byte* parent, byte* message) {
     raw {
         if parent == null {
@@ -8541,6 +8890,10 @@ void Post(byte* parent, byte* message) {
 
             Append(rootBlocks, message)
             Unlock(RootLock())
+            if Threaded() {
+                MainWoken()
+            }
+
             return
         }
 
@@ -8602,7 +8955,15 @@ void RunBlock(byte* message) {
         extern "C" (byte*, byte*) => void entry = *Ptr<extern "C" (byte*, byte*) => void>(*Ptr<byte*>(side + 56))
         decision = 0
         entry(side, message)
-        Decided(child, message, decision)
+        long word = decision
+        if word != 3 {
+            WorldHeld()
+        }
+
+        Decided(child, message, word)
+        if word != 3 {
+            WorldLeft()
+        }
     }
 }
 
@@ -8627,9 +8988,8 @@ void RootBlock(byte* message) {
 // stack it raised on given back to the pool and the message freed; the restart and the end alone run under the
 // child's hold (`HeldAlone`, `LetGo`), as one actor acts on another (`EndChildren`); `escalate` crashes the
 // supervisor (`Escalate`). The log line, which reads the child's record, the stack's return and the message's free
-// come before that hold, which holds while one thread runs every program (U35): on more than one, a thread that
-// ends the supervisor meanwhile with no hold of it, as a crash it takes ends it (`EndActor`), could end the child
-// and free the record the log line reads (`EndChildren`; inferred).
+// come before that hold, which holds on worker threads too, where the decision is acted on under the world (`RunBlock`,
+// `WorldHeld`), so that no thread ends the supervisor or the child meanwhile.
 void Decided(byte* child, byte* message, long word) {
     raw {
         if word == 3 {
@@ -8670,6 +9030,10 @@ void Escalate(byte* message) {
 
             mut byte* from = header
             if from == null {
+                if threadSide == null {
+                    threadSide = AllocateOwn(320)
+                }
+
                 from = threadSide
             }
 

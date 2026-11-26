@@ -86,6 +86,13 @@ public sealed class Toolchain : IDisposable
         return (code, Lines(output), error);
     }
 
+    /// <summary>Runs a built program as <see cref="Run(string, string?)"/> does, with <c>KURZ_THREADS</c> set to <paramref name="threads"/> (U35).</summary>
+    public static (int Code, IReadOnlyList<string> Output, string Error) Run(string executable, string? trace, string threads)
+    {
+        var (code, output, error) = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = trace, ["KURZ_LOG"] = null, ["KURZ_THREADS"] = threads });
+        return (code, Lines(output), error);
+    }
+
     /// <summary>The lines of a program's output: each ends in a line feed, so the text's last piece is empty and dropped.</summary>
     public static IReadOnlyList<string> Lines(string text)
     {
@@ -355,12 +362,31 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     [MemberData(nameof(RunnableCases))]
     public void A_built_case_runs_as_its_header_says(string relativePath) => RunCase(relativePath, toolchain.Runtime, string.Empty);
 
+    /// <summary>
+    /// U35, section 6: the cases of a crash and its log line, its escalation, its restart after its pause, the end of a supervisor's
+    /// children, the blocks of <c>on crash</c>, <c>attempt</c>, <c>per node</c> and the walk for the places of a <c>deadlock</c>, run on
+    /// four worker threads, where the thread that acts on the records of actors it does not hold holds the world while every other thread
+    /// waits (the runtime's <c>WorldTried</c>), and held to their headers as on one thread; a case marked <c>// threads: 1</c> among them
+    /// holds one order of its lines that four threads keep, its actors running one at a time.
+    /// </summary>
+    public static TheoryData<string> CrashPathCases => new(
+        "actors/crash-log-line.kz", "actors/crash-restarts-fresh.kz", "actors/crash-restart-limit.kz",
+        "actors/crash-escalate-root.kz", "actors/crash-stop.kz", "actors/crash-in-constructor-at-restart.kz",
+        "actors/crash-waiter.kz", "actors/block-stop.kz", "actors/block-throw-root.kz",
+        "actors/block-escalate-root.kz", "actors/attempt-success.kz", "actors/attempt-crash.kz", "actors/attempt-nested.kz",
+        "actors/per-node-child.kz", "actors/per-node-restart.kz", "actors/per-node-escalate.kz", "actors/restart-reentrant.kz");
+
+    [Theory]
+    [MemberData(nameof(CrashPathCases))]
+    public void A_case_of_a_crash_runs_as_its_header_says_on_four_worker_threads(string relativePath) =>
+        RunCase(relativePath, toolchain.Runtime, "-threads", threads: "4");
+
     [Theory]
     [MemberData(nameof(RunnableCases))]
     public void A_built_case_runs_as_its_header_says_where_no_freed_block_can_be_read(string relativePath) =>
         RunCase(relativePath, ListTests.Fenced, "-fenced", NotFenced.ContainsKey(relativePath));
 
-    private void RunCase(string relativePath, CheckedRuntime runtime, string suffix, bool buildOnly = false)
+    private void RunCase(string relativePath, CheckedRuntime runtime, string suffix, bool buildOnly = false, string? threads = null)
     {
         var header = Header(relativePath);
         var (program, notSupported) = Emit(relativePath, header, runtime);
@@ -391,7 +417,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         // the trace on, as a program runs where nobody set KURZ_TRACE; the log line of a crash left out in a case of a crash (E3); a case's
         // `threads: 1` line (chapter 0) asks for the one thread the build runs every program on, first in, first out (U35), so the run sets
         // nothing for it
-        var (code, output, written) = Toolchain.Run(executable, null);
+        var (code, output, written) = threads is null ? Toolchain.Run(executable, null) : Toolchain.Run(executable, null, threads);
         var all = LeftOut(written, header.Rules);
         Assert.Equal(header.OutputLines, output);
         if (header.Tests)
