@@ -442,7 +442,9 @@ public sealed partial class Emitter
             else if (arm.Pattern is ElsePattern)
             {
                 hasElse = true;
-                elseCase = success is VoidType ? Reached(value, union, tag, rest) : (value, union);
+                elseCase = success is VoidType ? Reached(value, union, tag, rest)
+                    : rest.FirstOrDefault(c => c is VoidType) is { } none ? Beside(value, union, tag, none, taken, rest.Where(c => !taken.Any(t => TakesCase(c, t))).ToList())
+                    : (value, union);
                 if (Counted(union))
                 {
                     held = (fn.Alloca(Ir(union), "case"), union);
@@ -506,6 +508,17 @@ public sealed partial class Emitter
         fn.Block(done);
         return (fn.Value($"load {Ir(cases)}, ptr {slot}"), cases);
     }
+
+    /// <summary>
+    /// O7 with A7: the case value that reached the arm <c>else</c> over a union whose success has a value and which holds a <c>void</c> case
+    /// beside it, which has no text, so that the union has none either. Where an arm before it <paramref name="taken"/> took the <c>void</c>
+    /// case, the <paramref name="reached"/> cases, those no arm before it took, are the cases that reach the arm, and its value is theirs, as
+    /// <see cref="Reached"/> gives it, which the throw sets read too. Where none took it, the <c>void</c> case reaches the arm, whose bare
+    /// <c>throw</c> the checker refuses (O7, issue 650), so nothing reads its case: the <c>void</c> case, which holds nothing, and no code,
+    /// since <see cref="Reached"/> branches to nothing on a tag outside its cases.
+    /// </summary>
+    private (string Value, KurzType Type) Beside(string value, UnionType union, string tag, KurzType none, List<KurzType> taken, List<KurzType> reached) =>
+        !taken.Any(t => t is VoidType) || reached.Count == 0 ? (string.Empty, none) : Reached(value, union, tag, reached);
 
     /// <summary>O5: what an arm of <c>else</c> does; in a block, its last statement: the value it recovers with, or what it does.</summary>
     private void ElseArm(Statement body, KurzType success, string? slot)
