@@ -3239,14 +3239,12 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>
-    /// The runtime under the allocator that makes every freed block inaccessible, whose <c>EndActor</c> writes 16 into the word of the heap
+    /// The runtime under the allocator that makes every freed block inaccessible, whose <c>RecordFreed</c> writes 16 into the word of the heap
     /// of a record it frees, before the free, since the pages of a freed heap stay mapped in the allocator's pool, which the fence does not
     /// reach, so that a read of a freed record's heap ends the run.
     /// </summary>
-    private static CheckedRuntime PoisonedEnds => ListTests.Edited([.. ListTests.Fence, ("runtime/common/runtime.kz", "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            std.HeapFree(state - 192)\n",
-            "        if (StateWord(state).Load(MemoryOrder.Acquire) & 3) == 0 {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 192)\n"),
-            ("runtime/common/runtime.kz", "    } else if ended && (seen & 2) == 0 {\n        raw {\n            std.HeapFree(state - 192)\n",
-            "    } else if ended && (seen & 2) == 0 {\n        raw {\n            *Ptr<long>(state - 64) = 16\n            std.HeapFree(state - 192)\n")]);
+    private static CheckedRuntime PoisonedEnds => ListTests.Edited([.. ListTests.Fence, ("runtime/common/runtime.kz", "    raw {\n        std.HeapFree(state - 192)\n",
+            "    raw {\n        *Ptr<long>(state - 64) = 16\n        std.HeapFree(state - 192)\n")]);
 
     [Fact]
     public void A_child_whose_supervisor_ended_while_it_waited_takes_its_own_crash_and_writes_its_log_line()

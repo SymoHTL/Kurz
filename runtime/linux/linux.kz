@@ -79,6 +79,8 @@ extern "C" {
     int pthread_cond_signal(void* condition)
     int pthread_cond_timedwait(void* condition, void* mutex, void* time)
     int eventfd(int value, int options)
+    int sched_getaffinity(int pid, long size, void* mask)
+    long sysconf(int name)
 }
 
 // The platform's unwinder, libgcc_s's, which the trace walks the stack with (design record, section 6),
@@ -96,7 +98,8 @@ static mut byte* argumentValues = null
 // The start of the process: first a closed standard descriptor opened again on `/dev/null`
 // (`Standard`), then the arguments kept, then the signal of a closed pipe, `SIGPIPE` (13), set to
 // ignored, so that a write to a closed pipe returns an error, which `print` raises as `print-failed`
-// (design record, section 6); `SIG_IGN` is the handler 1. Then the handler of a fault, `Faults`.
+// (design record, section 6); `SIG_IGN` is the handler 1. Then the handler of a fault, `Faults`, and the page of the words the
+// threads of the process share (`sysWords`), with the 1 that wakes a thread of the scheduler at 16 (`EventSignal`).
 pub void Start(int count, byte* values) {
     Standard()
     raw {
@@ -104,6 +107,10 @@ pub void Start(int count, byte* values) {
         argumentValues = values
         signal(13, Ptr<void>(1))
         Faults()
+        sysWords = Memory(4096)
+        if sysWords != null {
+            *Ptr<long>(sysWords + 16) = 1
+        }
     }
 }
 
@@ -2673,6 +2680,664 @@ pub int Variable(byte* key, mut string value) {
     return 0
 }
 
+// ---- the count of worker threads (U35) ----------------------------------------------------------------
+
+// The cores the process may use (U35), as Rust 1.82.0's `available_parallelism` counts them on Linux
+// (`library/std/src/sys/pal/unix/thread.rs` of rust-lang/rust, read on 2026-11-26): the processors of its
+// affinity, a set of 1024 (`sched_getaffinity`, 128 bytes), or where that gives none those online (`sysconf` of
+// `_SC_NPROCESSORS_ONLN`, 84), and no more than the CPU quota of its control group (`CpuQuota`). Where neither
+// count can be read, where Rust's call fails, the count is 1, as tokio takes at least 1 core.
+pub int Cores() {
+    long quota = CpuQuota()
+    mut long count = 0
+    raw {
+        byte* set = Memory(4096)
+        if set != null {
+            if sched_getaffinity(0, 128, Ptr<void>(set)) == 0 {
+                mut long i = 0
+                while i < 128 {
+                    mut long bits = long(set[i]) & 255
+                    while bits != 0 {
+                        count = count + (bits & 1)
+                        bits = bits >> 1
+                    }
+
+                    i = i + 1
+                }
+            }
+
+            Release(set, 4096)
+        }
+
+        if count == 0 {
+            long online = sysconf(84)
+            if online > 0 {
+                count = online
+            }
+        }
+    }
+
+    if count == 0 {
+        return 1
+    }
+
+    if count > quota {
+        count = quota
+    }
+
+    if count > 2147483647 {
+        count = 2147483647
+    }
+
+    return int(count)
+}
+
+// The CPU quota of the process's control group in whole cores, rounded down and at least 1, as Rust 1.82.0's
+// `cgroups::quota` reads it (`Cores`): the group a line of `/proc/self/cgroup` names, of version 2 where the line's
+// controllers are empty and of version 1 where they hold `cpu`, a line of version 1 taking the place of any line
+// before it and one of version 2 only of no line; then the least quota of that group and of each group it stands in
+// (`QuotaV2`, `QuotaV1`). The greatest `long` where no quota can be read or none is set.
+long CpuQuota() {
+    mut long quota = 9223372036854775807
+    raw {
+        mut long room = 4096
+        mut byte* text = Memory(room)
+        byte* path = Memory(12288)
+        if text != null && path != null {
+            long count = FileBytes("/proc/self/cgroup\0".Pointer, mut text, mut room)
+            mut long version = 0
+            mut long group = 0
+            mut long groupCount = 0
+            mut long at = 0
+            while at < count {
+                mut long end = at
+                while end < count && text[end] != 10 {
+                    end = end + 1
+                }
+
+                mut long first = at
+                while first < end && text[first] != 58 {
+                    first = first + 1
+                }
+
+                if first < end {
+                    mut long second = first + 1
+                    while second < end && text[second] != 58 {
+                        second = second + 1
+                    }
+
+                    mut long kind = 0
+                    if second == first + 1 {
+                        kind = 2
+                    } else if Listed(text + first + 1, second - first - 1, "cpu") {
+                        kind = 1
+                    }
+
+                    if kind != 0 && (version == 0 || kind == 1) {
+                        if second < end {
+                            version = kind
+                            group = second + 1
+                            groupCount = end - group
+                            if groupCount > 0 {
+                                group = group + 1
+                                groupCount = groupCount - 1
+                            }
+                        } else {
+                            version = 0
+                        }
+                    }
+                }
+
+                at = end + 1
+            }
+
+            if version == 2 {
+                quota = QuotaV2(text + group, groupCount, path)
+            } else if version == 1 {
+                quota = QuotaV1(text + group, groupCount, path)
+            }
+        }
+
+        if text != null {
+            Release(text, room)
+        }
+
+        if path != null {
+            Release(path, 12288)
+        }
+    }
+
+    if quota < 1 {
+        return 1
+    }
+
+    return quota
+}
+
+// The quota of a group of version 2 (`CpuQuota`), `count` bytes at `group`, the leading `/` taken off, with `path` a buffer
+// of 12288 bytes: where `/sys/fs/cgroup/<group>/cgroup.controllers` is there, the least of `limit / period` read from the
+// first line of `cpu.max`, `limit period`, in that group's directory and in each above it to `/sys/fs/cgroup`, a file that
+// cannot be read or a `limit` of `max` passed over, and the walk ended at a first line that is missing or holds no space, as
+// Rust's `?` ends it.
+long QuotaV2(byte* group, long count, byte* path) {
+    mut long quota = 9223372036854775807
+    raw {
+        mut long n = Put(path, 0, "/sys/fs/cgroup".Pointer, 14)
+        if count > 0 {
+            if count > 8192 {
+                return quota
+            }
+
+            path[n] = 47
+            n = Put(path, n + 1, group, count)
+        }
+
+        Put(path, n, "/cgroup.controllers\0".Pointer, 20)
+        if !There(path) {
+            return quota
+        }
+
+        mut long room = 4096
+        mut byte* text = Memory(room)
+        if text == null {
+            return quota
+        }
+
+        mut long dir = n
+        while true {
+            Put(path, dir, "/cpu.max\0".Pointer, 9)
+            long got = FileBytes(path, mut text, mut room)
+            if got >= 0 {
+                mut long end = 0
+                while end < got && text[end] != 10 {
+                    end = end + 1
+                }
+
+                if end > 0 && text[end - 1] == 13 {
+                    end = end - 1
+                }
+
+                mut long space = 0
+                while space < end && text[space] != 32 {
+                    space = space + 1
+                }
+
+                if got == 0 || space == end {
+                    break
+                }
+
+                mut long periodEnd = space + 1
+                while periodEnd < end && text[periodEnd] != 32 {
+                    periodEnd = periodEnd + 1
+                }
+
+                long limit = WholeOf(text, space)
+                long period = WholeOf(text + space + 1, periodEnd - space - 1)
+                if limit >= 0 && period > 0 && limit / period < quota {
+                    quota = limit / period
+                }
+            }
+
+            if dir == 14 {
+                break
+            }
+
+            mut long k = dir - 1
+            while k > 14 && path[k] != 47 {
+                k = k - 1
+            }
+
+            dir = k
+        }
+
+        Release(text, room)
+    }
+
+    return quota
+}
+
+// The quota of a group of version 1 (`CpuQuota`), `count` bytes at `group`, with `path` a buffer of 12288 bytes: the
+// controller's mount tried at `/sys/fs/cgroup/cpu`, then at `/sys/fs/cgroup/cpu,cpuacct`, then where `/proc/self/mountinfo`
+// names it (`Mounted`), the first under which the group's directory is there taken, and in that directory and in each above it
+// to the mount the least of `cpu.cfs_quota_us / cpu.cfs_period_us`, each read with the white space around it taken off, a
+// quota of -1, which is none, passed over, as Rust's `quota_v1` reads them.
+long QuotaV1(byte* group, long count, byte* path) {
+    mut long quota = 9223372036854775807
+    raw {
+        if count > 4096 {
+            return quota
+        }
+
+        mut long room = 4096
+        mut byte* text = Memory(room)
+        if text == null {
+            return quota
+        }
+
+        mut int tried = 0
+        while tried < 3 {
+            mut long m = 0
+            mut byte* within = group
+            mut long withinCount = count
+            if tried == 0 {
+                m = Put(path, 0, "/sys/fs/cgroup/cpu".Pointer, 18)
+            } else if tried == 1 {
+                m = Put(path, 0, "/sys/fs/cgroup/cpu,cpuacct".Pointer, 26)
+            } else {
+                m = Mounted(group, count, path, mut within, mut withinCount)
+            }
+
+            tried = tried + 1
+            if m > 0 {
+                mut long n = m
+                if withinCount > 0 {
+                    path[n] = 47
+                    n = Put(path, n + 1, within, withinCount)
+                }
+
+                path[n] = 0
+                if There(path) {
+                    mut long dir = n
+                    while true {
+                        Put(path, dir, "/cpu.cfs_quota_us\0".Pointer, 18)
+                        long limit = TrimmedWhole(path, mut text, mut room)
+                        Put(path, dir, "/cpu.cfs_period_us\0".Pointer, 19)
+                        long period = TrimmedWhole(path, mut text, mut room)
+                        if limit >= 0 && period > 0 && limit / period < quota {
+                            quota = limit / period
+                        }
+
+                        if dir <= m {
+                            break
+                        }
+
+                        mut long k = dir - 1
+                        while k > m && path[k] != 47 {
+                            k = k - 1
+                        }
+
+                        dir = k
+                    }
+
+                    tried = 3
+                }
+            }
+        }
+
+        Release(text, room)
+    }
+
+    return quota
+}
+
+// The mount of the controller `cpu` of version 1 that holds the group, `count` bytes at `group` (`QuotaV1`), from
+// `/proc/self/mountinfo`, as Rust's `find_mountpoint` reads it: the first line whose type, the third field from its end, is
+// `cgroup` and whose options, its last field, list `cpu`, and whose root, its fourth field after its leading `/`, is the group
+// or a directory the group stands in; its mount point, its fifth field, put at the start of `path`, and the rest of the group
+// after that root put in `within`. The count of the mount point's bytes, or 0 where no line is such or a line has fewer than
+// seven fields, which ends the search as Rust's `?` ends it.
+long Mounted(byte* group, long count, byte* path, mut byte* within, mut long withinCount) {
+    mut long found = 0
+    raw {
+        mut long room = 65536
+        mut byte* text = Memory(room)
+        if text == null {
+            return 0
+        }
+
+        long got = FileBytes("/proc/self/mountinfo\0".Pointer, mut text, mut room)
+        mut long at = 0
+        while found == 0 && at < got {
+            mut long end = at
+            while end < got && text[end] != 10 {
+                end = end + 1
+            }
+
+            mut long first = at
+            while first < end && (text[first] == 32 || text[first] == 9) {
+                first = first + 1
+            }
+
+            mut long last = end
+            while last > first && (text[last - 1] == 32 || text[last - 1] == 9 || text[last - 1] == 13) {
+                last = last - 1
+            }
+
+            mut long fields = 1
+            mut long i = first
+            while i < last {
+                if text[i] == 32 {
+                    fields = fields + 1
+                }
+
+                i = i + 1
+            }
+
+            mut bool stop = fields < 8 || first == last
+            if !stop {
+                long rootAt = Field(text, first, last, 3)
+                long rootEnd = FieldEnd(text, rootAt, last)
+                long mountAt = rootEnd + 1
+                long mountEnd = FieldEnd(text, mountAt, last)
+                mut long optionsAt = last
+                while optionsAt > first && text[optionsAt - 1] != 32 {
+                    optionsAt = optionsAt - 1
+                }
+
+                mut long typeEnd = optionsAt - 1
+                while typeEnd > first && text[typeEnd - 1] != 32 {
+                    typeEnd = typeEnd - 1
+                }
+
+                typeEnd = typeEnd - 1
+                mut long typeAt = typeEnd
+                while typeAt > first && text[typeAt - 1] != 32 {
+                    typeAt = typeAt - 1
+                }
+
+                if typeEnd - typeAt == 6 && Same(text + typeAt, "cgroup".Pointer, 6) &&
+                    Listed(text + optionsAt, last - optionsAt, "cpu") {
+                    if rootEnd == rootAt || text[rootAt] != 47 {
+                        stop = true
+                    } else {
+                        byte* root = text + rootAt + 1
+                        long rootCount = rootEnd - rootAt - 1
+                        if rootCount == 0 || (rootCount <= count && Same(group, root, rootCount) &&
+                            (rootCount == count || group[rootCount] == 47)) {
+                            if mountEnd - mountAt <= 4096 {
+                                found = Put(path, 0, text + mountAt, mountEnd - mountAt)
+                                if rootCount == 0 {
+                                    within = group
+                                    withinCount = count
+                                } else if rootCount == count {
+                                    within = group + count
+                                    withinCount = 0
+                                } else {
+                                    within = group + rootCount + 1
+                                    withinCount = count - rootCount - 1
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if stop {
+                at = got
+            } else {
+                at = end + 1
+            }
+        }
+
+        Release(text, room)
+    }
+
+    return found
+}
+
+// The start of the field `index` of the line from `first` to `last` in `text`, its fields parted by single spaces.
+long Field(byte* text, long first, long last, long index) {
+    mut long at = first
+    mut long seen = 0
+    raw {
+        while seen < index && at < last {
+            if text[at] == 32 {
+                seen = seen + 1
+            }
+
+            at = at + 1
+        }
+    }
+
+    return at
+}
+
+// The end of the field that starts at `at` in `text`, the next space or `last`.
+long FieldEnd(byte* text, long at, long last) {
+    mut long end = at
+    raw {
+        while end < last && text[end] != 32 {
+            end = end + 1
+        }
+    }
+
+    return end
+}
+
+// Whether the `count` bytes at `list`, items parted by `,`, hold the item `item`.
+bool Listed(byte* list, long count, string item) {
+    long itemCount = long(item.Bytes.Count)
+    raw {
+        mut long at = 0
+        while at <= count {
+            mut long end = at
+            while end < count && list[end] != 44 {
+                end = end + 1
+            }
+
+            if end - at == itemCount && Same(list + at, item.Pointer, itemCount) {
+                return true
+            }
+
+            at = end + 1
+        }
+    }
+
+    return false
+}
+
+// Whether the `count` bytes at `a` and at `b` are the same.
+bool Same(byte* a, byte* b, long count) {
+    raw {
+        mut long i = 0
+        while i < count {
+            if a[i] != b[i] {
+                return false
+            }
+
+            i = i + 1
+        }
+    }
+
+    return true
+}
+
+// The `count` bytes at `from` put into `to` at `at`: the place after them.
+long Put(byte* to, long at, byte* from, long count) {
+    raw {
+        mut long i = 0
+        while i < count {
+            to[at + i] = from[i]
+            i = i + 1
+        }
+    }
+
+    return at + count
+}
+
+// Whether the file at `path`, a NUL-ended path, is there, as Rust's `exists` reads it: `stat` gives it.
+bool There(byte* path) {
+    mut bool there = false
+    raw {
+        byte* found = Memory(4096)
+        if found != null {
+            there = stat(path, Ptr<void>(found)) == 0
+            Release(found, 4096)
+        }
+    }
+
+    return there
+}
+
+// The whole number in the file at `path`, a NUL-ended path, the white space around it taken off (`WholeOf`), read
+// into `text` of `room` bytes, which `FileBytes` grows; -1 where it cannot be read or holds no such number.
+long TrimmedWhole(byte* path, mut byte* text, mut long room) {
+    long got = FileBytes(path, mut text, mut room)
+    if got < 0 {
+        return -1
+    }
+
+    mut long first = 0
+    mut long last = got
+    raw {
+        while first < last && (text[first] == 32 || (text[first] >= 9 && text[first] <= 13)) {
+            first = first + 1
+        }
+
+        while last > first && (text[last - 1] == 32 || (text[last - 1] >= 9 && text[last - 1] <= 13)) {
+            last = last - 1
+        }
+    }
+
+    return WholeOf(text + first, last - first)
+}
+
+// The whole number written in the `count` bytes at `text`, in decimal digits after a `+` that may stand first, as Rust
+// reads a `usize`, no greater than the greatest `long`; -1 where they hold none.
+long WholeOf(byte* text, long count) {
+    mut long value = -1
+    raw {
+        mut long i = 0
+        if count > 0 && text[0] == 43 {
+            i = 1
+        }
+
+        if i < count {
+            value = 0
+        }
+
+        while i < count && value >= 0 {
+            long digit = long(text[i]) - 48
+            if digit < 0 || digit > 9 || value > (9223372036854775807 - digit) / 10 {
+                value = -1
+            } else {
+                value = value * 10 + digit
+            }
+
+            i = i + 1
+        }
+    }
+
+    return value
+}
+
+// The bytes of the file at `path`, a NUL-ended path, read to its end into `text`, memory of `room` bytes that `Memory`
+// gave, grown by `Resize` to twice its size where the file fills it: their count, or -1 where the file cannot be opened or
+// read, or the memory cannot be grown. `O_CLOEXEC` is 524288.
+long FileBytes(byte* path, mut byte* text, mut long room) {
+    mut long count = 0
+    raw {
+        int fd = open(path, 524288)
+        if fd < 0 {
+            return -1
+        }
+
+        while count >= 0 {
+            if count == room {
+                byte* grown = Resize(text, room, room * 2)
+                if grown == null {
+                    close(fd)
+                    return -1
+                }
+
+                text = grown
+                room = room * 2
+            }
+
+            long got = read(fd, text + count, room - count)
+            if got == 0 {
+                close(fd)
+                return count
+            }
+
+            if got < 0 {
+                if *__errno_location() != 4 {
+                    count = -1
+                }
+            } else {
+                count = count + got
+            }
+        }
+
+        close(fd)
+    }
+
+    return count
+}
+
+// ---- the worker threads (U35) -------------------------------------------------------------------------
+
+// A worker thread of the scheduler started at `entry` with `argument` (section 6; U35), detached (1), with the stack the C library
+// gives a thread by default, since its actors' messages run on stacks of their own: 0, or the error `pthread_create` gave, negated,
+// where the system refuses it, -12 where the page of this thread cannot be mapped. The attributes of the start stand at 1280 of
+// that page (`Endpoints`) and the identity of the thread at 1408.
+pub long ThreadNew(extern "C" (byte*) => byte* entry, byte* argument) {
+    raw {
+        byte* held = Endpoints()
+        if held == null {
+            return -12
+        }
+
+        void* attributes = Ptr<void>(held + 1280)
+        pthread_attr_init(attributes)
+        pthread_attr_setdetachstate(attributes, 1)
+        int refused = pthread_create(Ptr<long>(held + 1408), attributes, entry, argument)
+        pthread_attr_destroy(attributes)
+        return -long(refused)
+    }
+}
+
+// The start of a worker thread (U35): the handler of a fault and the stack it runs on for this thread, as for the main thread
+// (`Faults`), the handler the process's already and the stack, its guard page and the bounds of the thread's own stack each
+// thread's own.
+pub void ThreadStart() {
+    raw {
+        Faults()
+    }
+}
+
+// An `eventfd` with `EFD_CLOEXEC | EFD_NONBLOCK` (526336), which a thread of the scheduler waits on in its poller and another
+// thread wakes it by (`EventSignal`; section 6, T88): its descriptor, or the failure negated.
+pub long EventNew() {
+    raw {
+        int made = eventfd(0, 526336)
+        if made < 0 {
+            return -long(*__errno_location())
+        }
+
+        return long(made)
+    }
+}
+
+// The thread that waits on the `eventfd` `fd` in its poller woken: 1 added to its count, the 8 bytes at 16 of `sysWords`, or at 232
+// of this thread's page where the start mapped no `sysWords`; a count that stands already wakes it all the same, and so does the
+// largest count, which refuses the write (`EAGAIN`).
+pub void EventSignal(long fd) {
+    raw {
+        if sysWords != null {
+            write(int(fd), sysWords + 16, 8)
+            return
+        }
+
+        byte* held = Endpoints()
+        if held != null {
+            *Ptr<long>(held + 232) = 1
+            write(int(fd), held + 232, 8)
+        }
+    }
+}
+
+// The count of the `eventfd` `fd` read, which sets it to 0, into 8 bytes at 240 of this thread's page, so that each event it
+// gives after this one comes from a wake after this read.
+pub void EventDrain(long fd) {
+    raw {
+        byte* held = Endpoints()
+        if held != null {
+            read(int(fd), held + 240, 8)
+        }
+    }
+}
+
 // ---- sockets (design record, section 12) ------------------------------------------------------------
 
 // The calls on sockets of a program built for Linux (S9), over TCP, as Rust 1.82's `TcpListener` and
@@ -2702,7 +3367,9 @@ pub int Variable(byte* key, mut string value) {
 // poller at 176, 16 bytes, and the 8 bytes of its data at 192 (`PollAdd`, `PollWait`); the wait of a call that would
 // block at 200, 8 bytes (`Waiter`); the wait of a call handed to the pool of threads for blocking calls at 208 and
 // whether a call is handed at 216, 8 bytes each (`BlockingWaiter`); the wait of `Drive` in the poller at 224, 8 bytes
-// (`ManyWaiter`); and the events `epoll_wait` gives at 256, at most 64 of 16 bytes.
+// (`ManyWaiter`); the 8 bytes that wake a thread of the scheduler at 232 and those read off its `eventfd` at 240 (`EventSignal`,
+// `EventDrain`); the events `epoll_wait` gives at 256, at most 64 of 16 bytes; and the attributes of the start of a worker thread at
+// 1280 and its identity at 1408 (`ThreadNew`).
 thread static mut byte* endpoints = null
 
 // The page above, mapped where this thread has none yet: its address, or null where the system refuses it.
@@ -2719,12 +3386,13 @@ byte* Endpoints() {
     return held
 }
 
-// The poller of the process (section 6, assumed there: one poller per process, under `epoll` on Linux, waited on by the
-// scheduler where it runs out of work, as Tokio's driver; issue 658): the descriptor `epoll_create1` gave, with
-// `EPOLL_CLOEXEC` (524288), at the first socket (`Poller`), -1 before it.
-static mut int poller = -1
+// The poller of the thread (section 6, the owner, 2026-11-26, #519, comment 7189038384, T88: one poller under `epoll` for each
+// thread that runs actors, as Seastar's and Glommio's, so that the wake of a wait that parked on a thread stays on that thread; issue
+// 658): the descriptor `epoll_create1` gave, with `EPOLL_CLOEXEC` (524288), at the thread's first socket or, on a thread of the
+// scheduler, at its start (`Poller`), -1 before it.
+thread static mut int poller = -1
 
-// The poller of the process, made where it has none (`poller`): its descriptor, or the failure of `epoll_create1` or of
+// The poller of the thread, made where it has none (`poller`): its descriptor, or the failure of `epoll_create1` or of
 // `pthread_atfork`, which gives a child of a `fork` its own (`Forked`). The opening of a socket makes it first (`Attempt`), so
 // that it takes the descriptor before the first socket's in every run, as Go's `netpollGenericInit` makes its poller at the
 // first descriptor it polls, and a program with no socket opens none.
@@ -2782,8 +3450,9 @@ extern "C" void Forked() {
 // with room for either architecture's; at 128 and 136 the first and the last job queued; at 144 and 176 the first and the last
 // job done; at 152 the count of idle threads, at 156 the count of threads, at 160 the `eventfd` that a job done signals, at 168
 // the count of idle threads woken for a job that have not taken one (Tokio's `num_notify`); at 184 the 8 bytes the scheduler
-// reads that `eventfd` into, at 192 whether the `eventfd`'s registration in the poller is armed (`PoolFlag`), at 248 the
-// identity of a thread started and at 256 its attributes (`Started`), which only the thread that runs every actor writes (U35).
+// reads that `eventfd` into, and at 192 whether the `eventfd`'s registration in the poller is armed (`PoolFlag`). A job whose
+// word at 56 names the box of the jobs done of the thread that handed it, on worker threads (U35), goes to that box and wakes that
+// thread (`PoolThread`), which neither the pool's list of jobs done nor its `eventfd` hears of.
 static mut byte* pool = null
 
 // The pool of threads for blocking calls made where it is not (`pool`): 0, or the failure of the memory, of `eventfd`, made with
@@ -2902,20 +3571,21 @@ pub long Submit(byte* job) {
 
 // A thread of the pool started for the job `job` (`Submit`), detached (1), with 2 MiB of stack, Tokio's default (issue 661, the
 // product pass, comment 7182792402, Q9, a default taken and listed there, which no question put to the owner *(assumed)*), and a page
-// of its own (`PoolThread`): 0. Where the system refuses the page or the thread, the count of threads is
-// lowered again: 0 where another thread of the pool runs, which takes the job from the queue (issue 661, Q2, (c)), else -4101 with
-// the job taken out of the queue, where the scheduler ends the process (Q2, (a)).
+// of its own (`PoolThread`), which holds at 64 the attributes of its start and at 256 its identity, so that two threads that start
+// one each write no word in common (U35): 0. Where the system refuses the page or the thread, the count of threads is lowered
+// again: 0 where another thread of the pool runs, which takes the job from the queue (issue 661, Q2, (c)), else -4101 with the job
+// taken out of the queue, where the scheduler ends the process (Q2, (a)).
 long Started(byte* job) {
     raw {
         byte* at = pool
         byte* own = Memory(4096)
         if own != null {
             *Ptr<byte*>(own) = at
-            void* attributes = Ptr<void>(at + 256)
+            void* attributes = Ptr<void>(own + 64)
             pthread_attr_init(attributes)
             pthread_attr_setstacksize(attributes, 2097152)
             pthread_attr_setdetachstate(attributes, 1)
-            int refused = pthread_create(Ptr<long>(at + 248), attributes, PoolThread, own)
+            int refused = pthread_create(Ptr<long>(own + 256), attributes, PoolThread, own)
             pthread_attr_destroy(attributes)
             if refused == 0 {
                 return 0
@@ -2980,6 +3650,19 @@ extern "C" byte* PoolThread(byte* own) {
 
                 pthread_mutex_unlock(Ptr<void>(at))
                 JobRun(job)
+                byte* box = *Ptr<byte*>(job + 56)
+                if box != null {
+                    // U35: the box of the jobs done of the worker thread that handed it, a queue of many producers and one
+                    // consumer as `runtime/common/`'s `Pushed` keeps one, at 0 its end and at 16 its stub, and at 24 that
+                    // thread's `eventfd`, which wakes it (`runtime/common/`'s `DoneDrain`)
+                    AtomicPtr<byte>.FromPtr(Ptr<byte*>(job)).Store(null, MemoryOrder.Relaxed)
+                    byte* before = AtomicPtr<byte>.FromPtr(Ptr<byte*>(box)).Swap(job, MemoryOrder.AcqRel)
+                    AtomicPtr<byte>.FromPtr(Ptr<byte*>(before)).Store(job, MemoryOrder.Release)
+                    write(int(*Ptr<long>(box + 24)), own + 32, 8)
+                    pthread_mutex_lock(Ptr<void>(at))
+                    continue
+                }
+
                 pthread_mutex_lock(Ptr<void>(at))
                 *Ptr<byte*>(job) = null
                 if *Ptr<byte*>(at + 144) == null {
@@ -3071,8 +3754,9 @@ pub byte* PoolDone() {
 // The wait of a call handed to the pool of threads for blocking calls set to `wait`, and whether a call is handed set to
 // `offloads`, which `runtime/common/` gives at the start of the process, as it gives `Waiter`: given the job, `wait` queues it
 // (`Submit`) and parks the actor that called, or the top-level code, until the job is done, and gives its result, or the failure of
-// the pool or of the poller. They stand in the page of the thread that starts the process at 208 and 216 (`Endpoints`), so that a
-// thread of the pool, whose page holds neither, makes its jobs' calls itself.
+// the pool or of the poller. They stand in the page of the thread that starts the process at 208 and 216 (`Endpoints`), and of each
+// worker thread, which sets them at its start (U35), so that a thread of the pool, whose page holds neither, makes its jobs' calls
+// itself.
 pub void BlockingWaiter(extern "C" (byte*) => long wait, extern "C" () => int offloads) {
     raw {
         byte* held = Endpoints()
@@ -3087,7 +3771,8 @@ pub void BlockingWaiter(extern "C" (byte*) => long wait, extern "C" () => int of
 // gives `Waiter`: given the `struct pollfd`s of `poll`, their count, the bound in nanoseconds and the room of the call of `Drive`
 // (`ChildDropped`), it parks the actor that called, or the top-level code, until the first of their descriptors is ready or the
 // bound passed, and gives what `poll` gives, each ready descriptor's events set to those it waits for, or the failure of the poller,
-// below 0. It stands in the page of the thread that starts the process at 224 (`Endpoints`).
+// below 0. It stands in the page of the thread that starts the process at 224 (`Endpoints`), and of each worker thread, which sets
+// it at its start (U35).
 pub void ManyWaiter(extern "C" (int*, int, long, byte*) => int wait) {
     raw {
         byte* held = Endpoints()
@@ -3138,6 +3823,7 @@ byte* Handing(long kind, int fd, long count) {
         *Ptr<long>(job + 32) = size
         *Ptr<long>(job + 40) = long(fd)
         *Ptr<long>(job + 48) = count
+        *Ptr<byte*>(job + 56) = null
         return job
     }
 }
@@ -3200,12 +3886,13 @@ void Unhanded(byte* job) {
 }
 
 // The jobs of one page given back (`Unhanded`) and kept for the next (`Handing`), linked at 0, at most 64 (`keptJobCount`), so
-// that a small call maps and gives back no memory, as Tokio's blocking pool takes its task's memory from the allocator; read and
-// written by the thread that runs every actor alone (U35), which hands every job and takes every job back.
-static mut byte* keptJobs = null
+// that a small call maps and gives back no memory, as Tokio's blocking pool takes its task's memory from the allocator; each
+// thread's own, since a job is handed and taken back by the thread whose actor makes its call, its jobs done reaching that thread
+// on worker threads (U35, `PoolThread`).
+thread static mut byte* keptJobs = null
 
 // The count of `keptJobs`.
-static mut long keptJobCount = 0
+thread static mut long keptJobCount = 0
 
 // The job `job` given back by the scheduler where the call's actor fell while the job ran (`PoolDrain`), the descriptor an opening
 // gave closed, since no handle holds it (issue 661, the product pass, comment 7182792402, Q3, kept as built, comment 7189038013),
@@ -3252,59 +3939,78 @@ pub void ChildDropped(byte* record) {
     }
 }
 
-// The sockets the runtime made, a byte for each descriptor, 1 for a socket (`Mark`), with `socketSlots` bytes: a call on a socket
-// that would block waits in the poller, so that it is handed to no thread of the pool (`Handing`).
-static mut byte* sockets = null
+// The words of the process this file shares between its threads, a page mapped at the start, while the main thread is the one
+// thread (`Start`), null where the system refused it: at 0 the table of the sockets the runtime made (`Mark`), stored with release
+// and loaded with acquire, and at 64 the mutex its changes hold, zeroed as the C library's initializer is.
+static mut byte* sysWords = null
 
-// The bytes of `sockets`.
-static mut long socketSlots = 0
-
-// Whether `fd` is a socket the runtime made (`sockets`).
+// The sockets the runtime made, a table at 0 of `sysWords`: its count of slots at 0, then an `int` for each descriptor, 1 for a
+// socket (`Mark`): a call on a socket that would block waits in the poller, so that it is handed to no thread of the pool
+// (`Handing`). Whether `fd` is one, its slot loaded through an atomic view, since another thread may mark one while this reads (U35).
 bool Socketed(int fd) {
     raw {
-        return fd >= 0 && long(fd) < socketSlots && int(sockets[long(fd)]) != 0
+        if sysWords == null || fd < 0 {
+            return false
+        }
+
+        byte* table = AtomicPtr<byte>.FromPtr(Ptr<byte*>(sysWords)).Load(MemoryOrder.Acquire)
+        if table == null || long(fd) >= *Ptr<long>(table) {
+            return false
+        }
+
+        return AtomicInt.FromPtr(Ptr<int>(table + 8 + long(fd) * 4)).Load(MemoryOrder.Relaxed) != 0
     }
 }
 
-// The descriptor `fd` marked as a socket the runtime made, or as none (`sockets`), the table grown to hold it, to twice its bytes
-// or to the descriptor's number and 1024 more, whichever is more. A mark the system gives no memory for is lost, and the socket's
-// calls are then handed to the pool, where a call that would block waits in `poll` (`Blocked`).
+// The descriptor `fd` marked as a socket the runtime made, or as none (`Socketed`), under the mutex of `sysWords`, the table grown to
+// hold it, to twice its slots or to the descriptor's number and 1024 more, whichever is more, the slots it held copied and the
+// table before it kept, never given back, since a thread may read it still (U35). A mark the system gives no memory for is lost,
+// and the socket's calls are then handed to the pool, where a call that would block waits in `poll` (`Blocked`).
 void Mark(int fd, bool on) {
     raw {
-        if fd < 0 || (!on && long(fd) >= socketSlots) {
+        if fd < 0 || sysWords == null {
             return
         }
 
-        if long(fd) >= socketSlots {
-            mut long slots = socketSlots * 2
-            if slots < long(fd) + 1024 {
-                slots = long(fd) + 1024
-            }
-
-            byte* grown = Memory(slots)
-            if grown == null {
-                return
-            }
-
-            mut long i = 0
-            while i < socketSlots {
-                grown[i] = sockets[i]
-                i = i + 1
-            }
-
-            if sockets != null {
-                Release(sockets, socketSlots)
-            }
-
-            sockets = grown
-            socketSlots = slots
+        pthread_mutex_lock(Ptr<void>(sysWords + 64))
+        AtomicPtr<byte> at = AtomicPtr<byte>.FromPtr(Ptr<byte*>(sysWords))
+        mut byte* table = at.Load(MemoryOrder.Relaxed)
+        mut long slots = 0
+        if table != null {
+            slots = *Ptr<long>(table)
         }
 
-        if on {
-            sockets[long(fd)] = byte(1)
-        } else {
-            sockets[long(fd)] = byte(0)
+        if long(fd) >= slots && on {
+            mut long grown = slots * 2
+            if grown < long(fd) + 1024 {
+                grown = long(fd) + 1024
+            }
+
+            byte* made = Memory(8 + grown * 4)
+            if made != null {
+                *Ptr<long>(made) = grown
+                mut long i = 0
+                while i < slots {
+                    *Ptr<int>(made + 8 + i * 4) = *Ptr<int>(table + 8 + i * 4)
+                    i = i + 1
+                }
+
+                at.Store(made, MemoryOrder.Release)
+                table = made
+                slots = grown
+            }
         }
+
+        if long(fd) < slots {
+            mut int mark = 0
+            if on {
+                mark = 1
+            }
+
+            AtomicInt.FromPtr(Ptr<int>(table + 8 + long(fd) * 4)).Store(mark, MemoryOrder.Relaxed)
+        }
+
+        pthread_mutex_unlock(Ptr<void>(sysWords + 64))
     }
 }
 
@@ -3312,7 +4018,7 @@ void Mark(int fd, bool on) {
 // process, since this file calls none of that file's functions: given the descriptor, the events of `epoll` it waits for,
 // `EPOLLIN` (1) or `EPOLLOUT` (4), and the bound in nanoseconds, it parks the actor that called, or the top-level code, until the
 // descriptor is ready, 1, or the bound passed, 0, or gives the failure of the poller, below 0. It stands in the page of the thread
-// that starts the process, at 200 (`Endpoints`), the thread that runs every actor (U35), since a function is no constant that a
+// that starts the process, at 200 (`Endpoints`), and of each worker thread, which sets it at its start (U35), since a function is no constant that a
 // `static` can start at (R13); a thread with no waiter in its page waits in `poll` (`Blocked`).
 pub void Waiter(extern "C" (int, int, long) => int wait) {
     raw {

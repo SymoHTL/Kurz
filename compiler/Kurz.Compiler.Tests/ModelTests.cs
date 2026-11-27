@@ -236,19 +236,22 @@ public sealed class ModelTests
 
     /// <summary>
     /// <c>Enqueue</c>'s append of a message to the inbox, one move, as a queue of many senders appends, then its plain read of the actor's
-    /// life, which a restart's plain write races on threads, in the runtime's order, so that a sender that reads the life of an actor that
-    /// waits for its restart appended first, and the restart's <c>Ready</c> sees the message; then, where the actor does not wait for its
-    /// restart, the wake: one atomic <c>or</c> of QUEUED, and where the mark was clear the entry put in the run queue (<c>Wake</c>,
-    /// <c>Queue</c>).
+    /// life, which decides nothing on threads, where the sender wakes the actor whatever its life, since a restart's plain write of the
+    /// life and its read of the queue are a store and a load that no fence orders, which a sender's read can see in either order; then
+    /// the wake: one atomic <c>or</c> of QUEUED, and where the mark was clear the entry put in the run queue (<c>Wake</c>, <c>Queue</c>),
+    /// which a take that finds the actor waiting for its restart lets go of (<c>RunTake</c>).
     /// </summary>
     private static Strand Sender(string name, int at) => new(name, at,
     [
         new("Enqueue", "Pushed(state - 144, message)", _ => true, s => { s[Mail]++; s[at] = 1; }),
-        new("Enqueue", "int life = *Ptr<int>(state - 88)", _ => true, s => { s[at] = s[Life] != 0 ? -1 : 2; }, ["if life != 1 && life != 5 {"]),
+        new("Enqueue", "int life = *Ptr<int>(state - 88)", _ => true, s => { s[at] = 2; }, ["if Threaded() || (life != 1 && life != 5) {"]),
         .. Woken(at, 2, -1),
     ]);
 
-    /// <summary>The wake of the actor from the place <paramref name="from"/>, the strand going on at <paramref name="then"/>.</summary>
+    /// <summary>
+    /// The wake of the actor from the place <paramref name="from"/>, the strand going on at <paramref name="then"/>; the runtime's test
+    /// reads RECLAIMED (64) beside QUEUED, which no move of the models sets (U35, T16).
+    /// </summary>
     private static Move[] Woken(int at, int from, int then) =>
     [
         new("Wake", ".FetchOr(2, MemoryOrder.AcqRel)", _ => true, s =>
@@ -256,7 +259,7 @@ public sealed class ModelTests
             var before = s[Word];
             s[Word] |= Queued;
             s[at] = (before & Queued) == 0 ? from + 1 : then;
-        }, ["if (before & 2) == 0 {"]),
+        }, ["if (before & 66) == 0 {"]),
         new("Queue", "runLast = state", _ => true, s => { s[Entries]++; s[at] = then; }),
     ];
 
@@ -331,7 +334,7 @@ public sealed class ModelTests
     private static Strand Runner(string name, int at, Break broken) => new(name, at,
     [
         .. Taken(at, 0, 3, broken),
-        new("RunOne", "Start(state, message, null)", _ => true, s =>
+        new("RunOne", "Start(state, message, null, null)", _ => true, s =>
         {
             if (s[Mail] > 0 && (broken == Break.RestartRunsEarly || s[Life] == 0))
             {
@@ -344,7 +347,7 @@ public sealed class ModelTests
             s[at + 2] = 0;
             s[at] = 5;
         }, ["if life == 1 || life == 5 {"]),
-        new("Ready", "return *Ptr<byte*>(state - 32) != null", _ => true, s => { s[at + 2] = s[Mail] > 0 ? 1 : 0; s[at] = 5; }),
+        new("Ready", "byte* first = *Ptr<byte*>(state - 32)", _ => true, s => { s[at + 2] = s[Mail] > 0 ? 1 : 0; s[at] = 5; }),
         .. LetGone(at, 5, _ => 0, broken),
     ]);
 
@@ -374,8 +377,8 @@ public sealed class ModelTests
                 s[at] = 3;
             }, ["if (seen & 1) == 0 {"]),
         new("Restart", "*Ptr<int>(state - 88) = 0", _ => true, s => { s[Life] = 0; s[at] = 4; }),
-        new("Restart", "Start(state, message, null)", _ => true, s => { s[Fresh] = 0; s[at] = 5; }),
-        new("Ready", "return *Ptr<byte*>(state - 32) != null", _ => true, s => { s[at + 2] = s[Mail] > 0 ? 1 : 0; s[at] = 6; }),
+        new("Restart", "Start(state, message, null, null)", _ => true, s => { s[Fresh] = 0; s[at] = 5; }),
+        new("Ready", "byte* first = *Ptr<byte*>(state - 32)", _ => true, s => { s[at + 2] = s[Mail] > 0 ? 1 : 0; s[at] = 6; }),
         .. LetGone(at, 6, _ => -1, broken),
     ]);
 
@@ -443,7 +446,7 @@ public sealed class ModelTests
     /// <summary>
     /// The waiter of a call, whose thread holds its actor at the start: the reply's waiter stored (<c>ReplyWaiter</c>) and the message
     /// queued (<c>Enqueue</c>), the reply's word read (<c>Answer</c>), and where it is 0 the activation parked: <c>Ready</c> and the end of
-    /// the hold; then the takes of the actor's entries, each resuming the activation where the word is set (<c>RunOne</c>), as long as it
+    /// the hold; then the takes of the actor's entries, each resuming the activation where the word is set (<c>RunTake</c>), as long as it
     /// neither returned nor crashed.
     /// </summary>
     private static Strand Waiting(int at, Break broken)
@@ -473,7 +476,7 @@ public sealed class ModelTests
             new("Ready", "ReplyState(reply) != 0", _ => true, s => { s[at + 2] = s[Answer] != 0 ? 1 : 0; s[at] = 4; }),
             .. LetGone(at, 4, Then, broken),
             .. Taken(at, 7, 10, broken),
-            new("RunOne", "if reply != null && (ReplyState(reply) != 0 || Waited(reply))", _ => true, s =>
+            new("RunTake", "if reply != null && (ReplyState(reply) != 0 || Waited(reply))", _ => true, s =>
             {
                 if (s[Crashed] == 0 && s[Answer] != 0)
                 {
@@ -599,7 +602,7 @@ public sealed class ModelTests
     /// The waiter of a call with a deadline, whose thread holds its actor at the start: the reply's waiter stored (<c>ReplyWaiter</c>), the
     /// message queued (<c>Enqueue</c>), the reply among the timers (<c>TimerAdd</c>), the loop's test of the reply's word and of the
     /// deadline (<c>Answer</c>), and where neither holds the activation parked: <c>Ready</c> and the end of the hold, then the takes of the
-    /// actor's entries, each resuming the activation where the word is set or the deadline passed (<c>RunOne</c>), which tests again.
+    /// actor's entries, each resuming the activation where the word is set or the deadline passed (<c>RunTake</c>), which tests again.
     /// Out of the loop: the reply off the timers (<c>TimerRemove</c>) and its word read once; where it is set the wait returns, the
     /// activation naming the reply no more, and the strand goes on at the end of the hold, not at <c>Ready</c>, and else
     /// the deadline's <c>call-timeout</c> is the actor's crash, whose fall unhooks the reply as <see cref="Crash"/> does, the waiter's thread
@@ -634,7 +637,7 @@ public sealed class ModelTests
             }),
             .. LetGone(at, 5, Then, broken),
             .. Taken(at, 8, 11, broken),
-            new("RunOne", "if reply != null && (ReplyState(reply) != 0 || Waited(reply))", _ => true, s =>
+            new("RunTake", "if reply != null && (ReplyState(reply) != 0 || Waited(reply))", _ => true, s =>
             {
                 if (s[Crashed] == 0 && (s[Answer] != 0 || s[Due] != 0))
                 {
@@ -673,7 +676,7 @@ public sealed class ModelTests
 
     /// <summary>
     /// The callee of a call with a deadline, once its message is queued: the scheduler's test of the message's deadline at its take
-    /// (<c>RunOne</c>); before it, the run, the take of the reply (<c>ReplyTaken</c>) and, where it owns it, <c>Replied</c>, as
+    /// (<c>RunTake</c>); before it, the run, the take of the reply (<c>ReplyTaken</c>) and, where it owns it, <c>Replied</c>, as
     /// <see cref="Callee"/> has them; past it, the drop (<c>Dropped</c>): the take of the reply, and where it owns it, <c>Signal</c>: the
     /// waiter read, the clock stored in the reply, then the release store of the word <c>dropped</c>, then the wake of the waiter's actor.
     /// </summary>
@@ -685,7 +688,7 @@ public sealed class ModelTests
         var signal = drop + takes;
         return new("callee", at,
         [
-            new("RunOne", "byte* message = Taken(state - 32) if *Ptr<long>(message + 40) > tick", s => s[Published] != 0, s => { s[at] = s[Due] != 0 ? drop : 1; }, ["Dropped(message) } } else {"]),
+            new("RunTake", "byte* message = Taken(state - 32) if *Ptr<long>(message + 40) > tick", s => s[Published] != 0, s => { s[at] = s[Due] != 0 ? drop : 1; }, ["Dropped(message) } } else {"]),
             .. Took(at, 1, answer, -1, _ => true, broken),
             new("Replied", "byte* waiter = *Ptr<byte*>(reply + 8)", _ => true, s => { s[Touched] |= s[Gone]; s[at + 1] = s[Waiter]; s[at] = answer + 1; }),
             new("Replied", ".Store(1, MemoryOrder.Release)", _ => true, s => { s[Touched] |= s[Gone]; s[Answer] = 1; s[at] = answer + 2; }),
@@ -807,14 +810,14 @@ public sealed class ModelTests
     }
 
     /// <summary>
-    /// The holder of the actor: at each take a wake asked for (<c>RunOne</c>), the messages of the queue moved out one by one
+    /// The holder of the actor: at each take a wake asked for (<c>RunTake</c>), the messages of the queue moved out one by one
     /// (<c>Moved</c>, <c>Popped</c>) until <c>Popped</c> gives null: the link of the node at <c>out</c> loaded with acquire, the stub passed
     /// over, the end loaded where the node has no link yet, null where a sender's swap stands before its link, else the stub pushed behind
     /// the last message (<c>Pushed</c>) and its link loaded again; a message taken has <c>out</c> set to its link and its own link cleared.
     /// </summary>
     private static Strand QueueHolder(int at, Break broken) => new("holder", at,
     [
-        new("RunOne", "Moved(state)", s => s[Wakes] > 0, s => { s[Wakes]--; s[at] = 1; }),
+        new("RunTake", "Moved(state) if life == 1 || life == 5", s => s[Wakes] > 0, s => { s[Wakes]--; s[at] = 1; }),
         new("Popped", "mut byte* next = AtomicPtr<byte>.FromPtr(Ptr<byte*>(first)).Load(MemoryOrder.Acquire)", _ => true, s =>
         {
             var first = s[Out];
@@ -1077,18 +1080,17 @@ public sealed class ModelTests
     private const int ChildWaits = 4, ChildEnds = 5, Trespass = 6;
 
     /// <summary>
-    /// The end of the child's supervisor (<c>EndChildren</c>): the child's ENDING bit set by one atomic <c>or</c>, the hold of the child
-    /// outside the run queue (<c>HeldAlone</c>, waiting while a take holds it), the child ended where it has no activation and did not end
-    /// meanwhile, else its policy and supervisor cleared, and the end of the hold (<c>LetGo</c>).
+    /// The end of the child's supervisor (<c>EndChildren</c>): the hold of the child outside the run queue (<c>HeldAlone</c>, waiting while
+    /// a take holds it), then, where the child did not end meanwhile, its ENDING bit set by one atomic <c>or</c> and the child ended where
+    /// it has no activation, else its policy and supervisor cleared, and the end of the hold (<c>LetGo</c>).
     /// </summary>
     private static Strand Ender(int at, Break broken)
     {
         void Trespassed(int[] s) => s[Trespass] |= s[Holders] - s[at + 3] > 0 ? 1 : 0;
         return new("ender", at,
         [
-            new("EndChildren", "StateWord(at).FetchOr(16, MemoryOrder.AcqRel)", _ => true,
-                s => { s[Word] |= 16; s[at] = broken == Break.EndWithoutHold ? 3 : 1; }),
-            new("HeldAlone", "seen = word.Load(MemoryOrder.Acquire) } mut bool stored", _ => true, s => { s[at + 1] = s[Word]; s[at] = 2; }),
+            new("HeldAlone", "seen = word.Load(MemoryOrder.Acquire) } mut bool stored", _ => true,
+                s => { s[at + 1] = s[Word]; s[at] = broken == Break.EndWithoutHold ? 2 : 1; }),
             new("HeldAlone", "Exchanged(word, seen, seen | 1)", s => (s[at + 1] & Running) == 0 || s[Word] != s[at + 1], s =>
             {
                 var seen = s[at + 1];
@@ -1101,19 +1103,26 @@ public sealed class ModelTests
                 s[Word] = seen | Running;
                 s[Holders]++;
                 s[at + 3] = 1;
-                s[at] = 3;
+                s[at] = 2;
             }, ["if (seen & 1) == 0 {"]),
-            new("EndChildren", "if *Ptr<byte*>(at - 8) == null {", _ => true, s =>
+            new("EndChildren", "StateWord(at).FetchOr(16, MemoryOrder.AcqRel)", _ => true, s =>
             {
-                if (s[ChildEnds] == 0)
+                if (s[ChildEnds] != 0)
                 {
-                    Trespassed(s);
-                    s[ChildEnds] += s[ChildWaits] == 0 ? 1 : 0;
+                    s[at] = s[at + 3] != 0 ? 4 : -1;
+                    return;
                 }
 
+                s[Word] |= 16;
+                s[at] = 3;
+            }, ["HeldAlone(at) } if *Ptr<byte*>(at - 72) == state && *Ptr<int>(at - 88) != 3 {"]),
+            new("EndChildren", "if *Ptr<byte*>(at - 8) == null {", _ => true, s =>
+            {
+                Trespassed(s);
+                s[ChildEnds] += s[ChildWaits] == 0 ? 1 : 0;
                 s[at + 2] = 0;
                 s[at] = s[at + 3] != 0 ? 4 : -1;
-            }, ["if *Ptr<int>(at - 88) != 3 {"]),
+            }),
             .. LetGone(at, 4, s => { s[at + 3] = 0; return -1; }, broken),
         ]);
     }
