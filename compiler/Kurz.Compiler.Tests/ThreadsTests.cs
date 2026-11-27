@@ -59,7 +59,7 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("export KURZ_THREADS=1; ")]
     [InlineData("export KURZ_THREADS=4; ")]
     [InlineData("export KURZ_THREADS=007; ")] // digits alone, zeros in front among them
-    [InlineData("")] // not set: the cores are read (`Cores`), and every actor runs on the main thread (`workersAsked`)
+    [InlineData("")] // not set: the cores are read (`Cores`), and as many worker threads start where they are more than 1 (`workersAsked`)
     public void A_KURZ_THREADS_that_is_a_whole_number_above_0_or_none_starts_the_program(string setup)
     {
         if (Ran(Spawns, $"threads-ok-{Math.Abs(setup.GetHashCode(StringComparison.Ordinal))}", setup) is { } run)
@@ -624,7 +624,7 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
             """;
         var program = Builder.Compile(SourceText.FromString("program.kz", text), [], Builder.CheckRuntime(Target.Linux, Arch.X64), testBuild: false, cpu: () => Cpu.Baseline).Program!;
         var defines = program.Ir.Split('\n').Where(l => l.StartsWith("define internal ", StringComparison.Ordinal)).ToList();
-        foreach (var form in new[] { "RootSlept", "QueueLocal", "QueueHeld", "Answered", "Deferred", "PinnedHeld" })
+        foreach (var form in new[] { "RootSlept", "QueueLocal", "QueueHeld", "Answered", "Deferred", "PinnedHeld", "LeftToHolder" })
         {
             var define = defines.Single(l => l.Contains($"@\"rt.common.{form}.", StringComparison.Ordinal));
             Assert.Contains(" noinline", define, StringComparison.Ordinal);

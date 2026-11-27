@@ -544,6 +544,7 @@ public sealed partial class Emitter
     private static readonly HashSet<string> WorkerForms = new(StringComparer.Ordinal)
     {
         "rt.common.RootSlept", "rt.common.QueueLocal", "rt.common.QueueHeld", "rt.common.Answered", "rt.common.Deferred", "rt.common.PinnedHeld",
+        "rt.common.LeftToHolder",
     };
 
     /// <summary>
