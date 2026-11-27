@@ -393,6 +393,132 @@ public sealed partial class Emitter
         return Pair(fn.Value($"extractvalue %kz.obj {value}, 0"), faceTable);
     }
 
+    /// <summary>
+    /// U1: the reference of an actor, held by a value of an interface the actor implements: a block of the heap the code allocates in,
+    /// counted as an instance's is (section 3), that holds the reference's two words, paired with the actor's table for the interface,
+    /// whose slots build a message to the actor (<see cref="ActorSlot"/>), as Rust boxes an actor's handle behind <c>dyn Trait</c>
+    /// (I1 (a) of #519, comment 7211586386, chosen 2026-11-27, comment 7215317481; the box a reading of the build).
+    /// </summary>
+    private string ActorAsInterface(string reference, ClassSymbol actor, InterfaceSymbol face)
+    {
+        var block = ActorBox();
+        var allocated = Allocate(block);
+        fn.Emit($"store i64 1, ptr {allocated}");
+        fn.Emit($"store i64 1, ptr {fn.Value($"getelementptr {block}, ptr {allocated}, i32 0, i32 1")}");
+        fn.Emit($"store %kz.actor {reference}, ptr {fn.Value($"getelementptr {block}, ptr {allocated}, i32 0, i32 2")}");
+        return Pair(allocated, InterfaceTable(actor, face));
+    }
+
+    /// <summary>U1: the IR type of the block that holds an actor's reference for an interface: the strong count, the weak count, then the reference (<see cref="ActorAsInterface"/>).</summary>
+    private string ActorBox()
+    {
+        if (!actorBoxed)
+        {
+            actorBoxed = true;
+            module.Global("%\"c.actor.box\" = type { i64, i64, %kz.actor }");
+        }
+
+        return "%\"c.actor.box\"";
+    }
+
+    private bool actorBoxed;
+
+    private bool faceSited;
+
+    /// <summary>U1: the thread's place of the last call through an interface an actor implements, its file and its line, declared once (<see cref="CallThrough"/>, <see cref="ActorSlot"/>).</summary>
+    private string FaceSite()
+    {
+        if (!faceSited)
+        {
+            faceSited = true;
+            module.Global("@\"kz.face.site\" = internal thread_local global { %kz.str, i32 } zeroinitializer");
+        }
+
+        return "@\"kz.face.site\"";
+    }
+
+    /// <summary>U1: the reference the block of a value of an interface holds, where the value is an actor's (<see cref="ActorAsInterface"/>).</summary>
+    private string BoxedReference(string box) => fn.Value($"load %kz.actor, ptr {fn.Value($"getelementptr {ActorBox()}, ptr {box}, i32 0, i32 2")}");
+
+    /// <summary>
+    /// U1: one strong count less of an actor's block for an interface; the last lets go of the weak count all the strong ones held, whose
+    /// last frees the block, as <see cref="ReleaseInstance"/> and <see cref="ReleaseWeak"/> end an instance with no counted field.
+    /// </summary>
+    private string ReleaseActorBox() => Helper("release.actor.box", "void", ["ptr"], () =>
+    {
+        var strong = fn.Value($"sub i64 {fn.Value("load i64, ptr %a0")}, 1");
+        fn.Emit($"store i64 {strong}, ptr %a0");
+        var last = fn.Label("last");
+        var held = fn.Label("held");
+        fn.CondBranch(fn.Value($"icmp eq i64 {strong}, 0"), last, held);
+        fn.Block(last);
+        fn.Emit($"call void {ReleaseWeakActorBox()}(ptr %a0)");
+        fn.Return(null);
+        fn.Block(held);
+        fn.Return(null);
+    });
+
+    /// <summary>U1, R3: one weak count less of an actor's block for an interface, none for <c>null</c>; the last frees the block.</summary>
+    private string ReleaseWeakActorBox() => Helper("release.weak.actor.box", "void", ["ptr"], () =>
+    {
+        var count = fn.Label("count");
+        var none = fn.Label("none");
+        fn.CondBranch(fn.Value("icmp eq ptr %a0, null"), none, count);
+        fn.Block(count);
+        var block = ActorBox();
+        var weakCount = fn.Value($"getelementptr {block}, ptr %a0, i32 0, i32 1");
+        var weak = fn.Value($"sub i64 {fn.Value($"load i64, ptr {weakCount}")}, 1");
+        fn.Emit($"store i64 {weak}, ptr {weakCount}");
+        var free = fn.Label("free");
+        fn.CondBranch(fn.Value($"icmp eq i64 {weak}, 0"), free, none);
+        fn.Block(free);
+        var end = fn.Value($"getelementptr {block}, ptr null, i32 1");
+        fn.Emit($"call void {StdFunction("Free")}(ptr %a0, i64 {fn.Value($"ptrtoint ptr {end} to i64")})");
+        fn.Return(null);
+        fn.Block(none);
+        fn.Return(null);
+    });
+
+    /// <summary>U1, U2: two actors' blocks for an interface are equal where their references name one actor, the slot and the number (I4 (a) of #519, comment 7211586386, chosen 2026-11-27, comment 7215317481; Q10 of 2026-11-14).</summary>
+    private string ActorBoxEqual() => Helper("equal.actor.box", "i1", ["ptr", "ptr"], () =>
+    {
+        var a = BoxedReference("%a0");
+        var b = BoxedReference("%a1");
+        var slot = fn.Value($"icmp eq i64 {fn.Value($"extractvalue %kz.actor {a}, 0")}, {fn.Value($"extractvalue %kz.actor {b}, 0")}");
+        var number = fn.Value($"icmp eq i64 {fn.Value($"extractvalue %kz.actor {a}, 1")}, {fn.Value($"extractvalue %kz.actor {b}, 1")}");
+        fn.Return($"i1 {fn.Value($"and i1 {slot}, {number}")}");
+    });
+
+    /// <summary>U1, K13: the hash of an actor's block for an interface, <c>%a1</c>, under the keys of a map's block, <c>%a0</c>: that of the two words of its reference (I4 (a), assumed).</summary>
+    private string ActorBoxHash() => Helper("hash.actor.box", "i64", ["ptr", "ptr"], () =>
+    {
+        var words = fn.Value($"getelementptr {ActorBox()}, ptr %a1, i32 0, i32 2");
+        fn.Return($"i64 {fn.Value($"call i64 {StdFunction("MapHash")}(ptr %a0, ptr {words}, i64 16)")}");
+    });
+
+    /// <summary>
+    /// U1, U4: what the slot of the interface's method holds in an actor's table for it: a function that takes the actor's block, reads
+    /// its reference and sends the actor's method that implements the interface's as a message, which waits for its reply, with the
+    /// place of the call through the interface the thread's site holds (<see cref="CallThrough"/>; I1 (a) of #519, comment 7211586386,
+    /// chosen 2026-11-27, comment 7215317481), as a Rust trait implemented for an actor's handle sends in each method.
+    /// </summary>
+    private string ActorSlot(ClassSymbol actor, InterfaceSymbol face, FunctionSymbol method)
+    {
+        var implementation = Implementing(actor, method);
+        var result = Ir(method.ReturnType);
+        var parameters = method.Parameters.Select(p => Ir(p.Type)).ToList();
+        return Helper($"face.actor.{actor.Name}.{face.Name}.{Number(face.Methods.IndexOf(method))}", result, ["ptr", .. parameters], () =>
+        {
+            var reference = BoxedReference("%a0");
+            var site = fn.Value($"load {{ %kz.str, i32 }}, ptr {FaceSite()}");
+            var file = fn.Value($"extractvalue {{ %kz.str, i32 }} {site}, 0");
+            var line = fn.Value($"extractvalue {{ %kz.str, i32 }} {site}, 1");
+            var arguments = implementation.Parameters.Select((p, i) => ($"%a{Number(i + 1)}", p.Type)).ToList();
+            var answer = EmitMessageOf(implementation, reference, arguments, file, line);
+            fn.Return(Types.IsVoid(method.ReturnType) ? null : $"{result} {answer}");
+        });
+    }
+
     /// <summary>K6, K7: the method of the class that implements the interface's method: the nearest of its chain with the method's name, parameter types and <c>mut</c> marks, which a call on an instance of the class runs.</summary>
     private static FunctionSymbol Implementing(ClassSymbol symbol, FunctionSymbol method) =>
         symbol.Chain.SelectMany(c => c.Methods.TryGetValue(method.Name, out var list) ? list : [])
@@ -476,6 +602,20 @@ public sealed partial class Emitter
         }
 
         return (holds, Pair(address, found));
+    }
+
+    /// <summary>
+    /// C4 with U1: branches to <paramref name="take"/> with the reference stored in <paramref name="slot"/> where the value of the interface
+    /// <paramref name="from"/> holds a reference to the actor <paramref name="arm"/>, else to <paramref name="other"/> (#519, comment
+    /// 7211586386, I4 (a), chosen 2026-11-27, comment 7215317481). The actor's table for the interface is its own, so the test is one comparison, and the reference is read
+    /// from the box only once the test held, since a class instance has no such field (<see cref="ActorAsInterface"/>).
+    /// </summary>
+    private void ActorArm(string value, InterfaceSymbol from, ClassSymbol arm, string slot, string take, string other)
+    {
+        var table = fn.Value($"extractvalue %kz.obj {value}, 1");
+        fn.CondBranch(fn.Value($"icmp eq ptr {table}, {InterfaceTable(arm, from)}"), take, other);
+        fn.Block(take);
+        fn.Emit($"store %kz.actor {BoxedReference(fn.Value($"extractvalue %kz.obj {value}, 0"))}, ptr {slot}");
     }
 
     /// <summary>
@@ -663,7 +803,7 @@ public sealed partial class Emitter
                 j => throw new InvalidOperationException($"a default of the method `{f.Name}` of an interface at line {c.Line}"),
                 cConvention: false,
                 owned: false);
-            return CallThrough(f, value, face.Symbol, passed);
+            return CallThrough(f, value, face.Symbol, passed, c.Line);
         }
 
         var (receiver, receiverType) = c.Callee switch
@@ -723,8 +863,16 @@ public sealed partial class Emitter
     /// the method holds in the instance's class's table for the interface (<see cref="InterfaceSlot"/>), as Rust calls through a
     /// <c>dyn Trait</c>'s vtable.
     /// </summary>
-    private string CallThrough(FunctionSymbol method, string value, InterfaceSymbol face, IEnumerable<string> arguments)
+    private string CallThrough(FunctionSymbol method, string value, InterfaceSymbol face, IEnumerable<string> arguments, int line)
     {
+        if (face.ByActor)
+        {
+            // U1: an actor implements the interface, whose slot builds a message that names the call's place, for `call-timeout`,
+            // `actor-gone` and the wait's line (U4, U37), read from the thread's site the call stores first (`ActorSlot`)
+            fn.Emit($"store %kz.str {StringValue(unit.File)}, ptr {FaceSite()}");
+            fn.Emit($"store i32 {Number(line)}, ptr {fn.Value($"getelementptr {{ %kz.str, i32 }}, ptr {FaceSite()}, i32 0, i32 1")}");
+        }
+
         var slot = MethodSlots + face.Methods.IndexOf(method);
         var table = fn.Value($"extractvalue %kz.obj {value}, 1");
         var callee = fn.Value($"load ptr, ptr {fn.Value($"getelementptr ptr, ptr {table}, i64 {Number(slot)}")}");
@@ -1080,6 +1228,18 @@ public sealed partial class Emitter
     /// <summary>K6: the helpers and methods the class's table for the interface holds, made while functions are still emitted.</summary>
     private void PrepareInterfaceTable(ClassSymbol symbol, InterfaceSymbol face)
     {
+        if (symbol.IsActor)
+        {
+            // U1: an actor's block for the interface, and a message for each method (`ActorAsInterface`, `ActorSlot`)
+            ReleaseActorBox();
+            foreach (var method in face.Methods)
+            {
+                ActorSlot(symbol, face, method);
+            }
+
+            return;
+        }
+
         ReleaseInstance(symbol);
         ReleaseWeak(symbol);
         if (Related(symbol))
@@ -1124,6 +1284,25 @@ public sealed partial class Emitter
 
         foreach (var (symbol, face) in interfaceTabled.ToList())
         {
+            if (symbol.IsActor)
+            {
+                // U1: an actor's block compares and hashes by its reference (`ActorBoxEqual`, `ActorBoxHash`), made while functions are
+                // still emitted, as a class's equality is
+                if (comparedThroughInterface.Contains(face) && made.Add("equal actor box"))
+                {
+                    ActorBoxEqual();
+                    more = true;
+                }
+
+                if (hashedThroughInterface.Contains(face) && made.Add("hash actor box"))
+                {
+                    ActorBoxHash();
+                    more = true;
+                }
+
+                continue;
+            }
+
             if (comparedThroughInterface.Contains(face) && made.Add($"equal {symbol.Name}"))
             {
                 ClassEqual(symbol);
@@ -1170,6 +1349,25 @@ public sealed partial class Emitter
 
         foreach (var (symbol, face) in interfaceTabled)
         {
+            if (symbol.IsActor)
+            {
+                // U1: an actor's table for the interface: its block's release and weak release, the equality and the hash of its reference
+                // (I4 (a), assumed), no class's table, since no class test reaches an actor's (C4), no copy (U12), then a message for each
+                // method (`ActorSlot`)
+                List<string> actorEntries =
+                [
+                    ReleaseActorBox(),
+                    ReleaseWeakActorBox(),
+                    comparedThroughInterface.Contains(face) ? ActorBoxEqual() : "null",
+                    hashedThroughInterface.Contains(face) ? ActorBoxHash() : "null",
+                    "null",
+                    "null",
+                    .. face.Methods.Select(method => ActorSlot(symbol, face, method)),
+                ];
+                module.Global($"{InterfaceTable(symbol, face)} = internal constant [{Number(actorEntries.Count)} x ptr] [{string.Join(", ", actorEntries.Select(e => "ptr " + e))}]");
+                continue;
+            }
+
             var entries = new List<string>
             {
                 ReleaseInstance(symbol),

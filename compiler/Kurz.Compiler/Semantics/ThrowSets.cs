@@ -927,14 +927,25 @@ public sealed class ThrowSets
         return overrides.TryGetValue(method, out var found) ? found : [];
     }
 
-    // K7: the method of an interface runs the method of that name and arity of each class that implements the interface
+    // K7: the method of an interface runs the method of that name and arity of each class that implements the interface; an actor
+    // that implements it runs its method in itself, as a message (U1; I1 (a) of #519, comment 7211586386, chosen 2026-11-27, comment 7215317481), which is no code
+    // of the caller's but a site (`ActorImplementers`)
     private IEnumerable<FunctionSymbol> Implementers(FunctionSymbol method) =>
         method.Interface is not { } face
             ? []
-            : AllClasses().Where(c => c.Implements(face))
+            : AllClasses().Where(c => !c.IsActor && c.Implements(face))
                 .SelectMany(c => c.Chain)
                 .SelectMany(c => c.Methods.TryGetValue(method.Name, out var list) ? list : [])
                 .Where(g => !g.IsStatic && g.Parameters.Count == method.Parameters.Count);
+
+    // U1, U56: the actors that implement the interface of the method, each with its method of that name and arity, which a call through
+    // the interface reaches as a message (I1 (a) of #519, comment 7211586386, chosen 2026-11-27, comment 7215317481), an edge to every implementer (T46 (a) of comment
+    // 7051071630)
+    private IEnumerable<(ClassSymbol Actor, FunctionSymbol Method)> ActorImplementers(FunctionSymbol method) =>
+        method.Interface is not { } face
+            ? []
+            : AllClasses().Where(c => c.IsActor && c.Implements(face))
+                .SelectMany(c => (c.Methods.TryGetValue(method.Name, out var list) ? list : []).Where(g => !g.IsStatic && g.Parameters.Count == method.Parameters.Count).Select(g => (c, g)));
 
     private static Dictionary<TypeParameterSymbol, KurzType> Merged(IReadOnlyDictionary<TypeParameterSymbol, KurzType>? map, DataType d)
     {
@@ -1414,6 +1425,11 @@ public sealed class ThrowSets
                         // D16: a data method's function takes the value first, a value of a data type, which is no actor's reference
                         Origin[] arguments = info.Kind == CallKind.Method ? Slots(c, info) : [Origin.Other, .. Slots(c, info)];
                         unit.Edges.AddRange(targets.Select(target => new Edge(target, map, Arguments: arguments)));
+                        foreach (var (actor, implementing) in sets.ActorImplementers(method))
+                        {
+                            unit.Sites.Add(new ActorSite(c, actor, implementing, SiteKind.Wait, Origin.Other, Slots(c, info), file, c.Line, method)); // U56: its receiver from anywhere, through the interface's method
+                        }
+
                         break;
                     }
 
@@ -1835,9 +1851,9 @@ public enum SiteKind
 /// A call through an actor's reference, or a <c>spawn</c>, as the walk met it in a unit of code (U56): the call, the actor it reaches or
 /// makes, the method it calls (null for a <c>spawn</c> and a start), where its receiver and each of its arguments, by the parameter it fills, of the
 /// primary constructor for a <c>spawn</c> (T75 1), come from in that unit (U57), the file it stands in, 0 for the program's and 1 for
-/// <c>std/</c>, and its line.
+/// <c>std/</c>, its line, and the method of the interface a call through one names, null for any other site (U1, T46 (a)).
 /// </summary>
-public sealed record ActorSite(CallExpression Call, ClassSymbol Actor, FunctionSymbol? Method, SiteKind Kind, Origin Receiver, IReadOnlyList<Origin> Arguments, int File, int Line)
+public sealed record ActorSite(CallExpression Call, ClassSymbol Actor, FunctionSymbol? Method, SiteKind Kind, Origin Receiver, IReadOnlyList<Origin> Arguments, int File, int Line, FunctionSymbol? Face = null)
 {
     /// <summary>U58: the line of the word <c>vouch</c> before the call, 0 where none stands.</summary>
     public int Vouch => Call.Vouch;

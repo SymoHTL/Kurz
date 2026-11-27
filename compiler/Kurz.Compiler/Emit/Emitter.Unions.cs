@@ -266,6 +266,13 @@ public sealed partial class Emitter
                         }
 
                         var take = fn.Label("derived");
+                        if (armType is ActorType actorArm)
+                        {
+                            ActorArm(value, ((InterfaceType)type).Symbol, actorArm.Symbol, slot, take, next); // the value holds the actor's reference (U1, C4)
+                            fn.Branch(body);
+                            return slot;
+                        }
+
                         if (armType is ClassType or InterfaceType)
                         {
                             var (holds, held) = armType is ClassType armClass ? ClassArm(value, type, armClass.Symbol) // the instance's class is the arm's or derives from it (K6)
@@ -287,7 +294,7 @@ public sealed partial class Emitter
                     foreach (var c in cases)
                     {
                         var takes = TakesCase(c, armType);
-                        if (!takes && !(armType is DataType or ClassType && c is DataType or ClassType or InterfaceType && Types.Assignable(armType, c)) && !(armType is InterfaceType && c is InterfaceType))
+                        if (!takes && !(armType is DataType or ClassType && c is DataType or ClassType or InterfaceType && Types.Assignable(armType, c)) && !(armType is InterfaceType or ActorType && c is InterfaceType))
                         {
                             continue;
                         }
@@ -300,6 +307,10 @@ public sealed partial class Emitter
                         if (takes)
                         {
                             fn.Emit($"store {Ir(armType)} {Convert(payload, c, armType, tp.Line)}, ptr {slot}");
+                        }
+                        else if (armType is ActorType actorArm)
+                        {
+                            ActorArm(payload, ((InterfaceType)c).Symbol, actorArm.Symbol, slot, fn.Label("derived"), other); // the case's value holds the actor's reference (U1, C4)
                         }
                         else if (armType is ClassType or InterfaceType)
                         {

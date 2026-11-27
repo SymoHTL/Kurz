@@ -1,0 +1,14 @@
+// expect: error send-needs-word at 10
+// rules: U1
+
+class Bag(mut int N)
+
+interface Filler {
+    void Fill(Bag b)
+}
+
+actor Worker : Filler {
+    pub void Fill(Bag b) {
+        print(b.N)
+    }
+}
