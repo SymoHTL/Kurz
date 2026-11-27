@@ -4602,7 +4602,8 @@ int Exchanged(AtomicInt word, int seen, int wanted) {
 // changed first: one atomic `or` marks it QUEUED, and the waker that found the mark clear puts it at the end
 // of the run queue, whether a thread holds it or not, so that an entry of it stands there once; a take that
 // finds it held drops that entry and leaves it to whoever holds it (`Claimed`), which queues it again at the
-// end as it lets go of it (`LetGo`, `ActorBuilt`).
+// end as it lets go of it (`LetGo`, `ActorBuilt`). On worker threads the waker that found the mark clear on an
+// actor that a thread holds or whose constructor runs leaves it to its holder with no entry (`LeftToHolder`).
 void Wake(byte* state) {
     mut int before = 0
     raw {
@@ -4610,12 +4611,40 @@ void Wake(byte* state) {
     }
 
     if (before & 66) == 0 {
-        if Threaded() {
-            QueueLocal(state)
-        } else {
+        if !Threaded() {
             Queue(state)
+        } else if (before & 9) == 0 || !LeftToHolder(state) {
+            QueueLocal(state)
         }
     }
+}
+
+// Whether the actor whose state is `state`, which a thread held or whose constructor ran as a wake on worker threads marked it
+// QUEUED (`Wake`), is left to its holder: the mark turned into NOTIFIED by a compare-exchange while the actor is held, with no entry
+// put where other workers take from, so that the holder queues it again as it lets go of it (`LetGo`, `ActorBuilt`), as tokio's
+// waker marks a running task notified and leaves it to the worker that polls it (not checked at source). No take clears the mark
+// meanwhile, as no entry of it stands. False where the holder let go of it meanwhile, seeing the mark and queueing nothing, so that
+// the waker queues it. An entry of a held actor put where every worker takes from drew the workers that spin to take it and drop it,
+// and the waker put a new one in at the message after it: with no such entry and with the wait of `Stolen` the sends to one actor took
+// 77.9 and 70.5 ms, against 107.9 and 122.6 ms with neither (`KURZ_THREADS=4`, the least of 10 runs in each of two orders; the owner,
+// 2026-11-26, issue 519, comment 7204486070, Q2, the bound of the spin measured).
+bool LeftToHolder(byte* state) {
+    AtomicInt word = StateWord(state)
+    mut int seen = 0
+    raw {
+        seen = word.Load(MemoryOrder.Acquire)
+    }
+
+    while (seen & 9) != 0 {
+        int found = Exchanged(word, seen, (seen & ~2) | 4)
+        if found == seen {
+            return true
+        }
+
+        seen = found
+    }
+
+    return false
 }
 
 // Whether the thread that took the entry of the actor whose state is `state` off the run queue holds the
@@ -5049,7 +5078,13 @@ byte* NextActor(byte* record, bool shared) {
 // An actor stolen by the worker of the record `record` from another worker, null where none is: half of the ring of the first worker
 // that has one, from a worker drawn at random on, as tokio's `steal_work` starts at a random worker (`StealInto`), and else the slot
 // of the actor woken last of one of them, which Go's scheduler steals as `runnext` on its last attempt, so that a worker's own slot
-// is taken by its own thread first where it can be.
+// is taken by its own thread first where it can be. A slot seen holding an actor is taken `SlotWait` after it was seen, as Go's
+// `runqgrab` sleeps 3 µs before it takes the `runnext` of a running P, so that the worker that woke the actor there and then let go
+// of its own goes on with it, where the actor would else move to another worker at every call (not checked at source); only a
+// worker that runs fills its slot (`QueueLocal`), so a slot that holds one is a running worker's. A worker that spins took every
+// slot at each of its turns: with the wait, and with no entry of a held actor (`LeftToHolder`), the calls of one actor to another
+// inside one message took 28.4 and 27.4 ms, against 57.8 and 74.8 ms with neither (`KURZ_THREADS=4`, the least of 10 runs in each of
+// two orders; the owner, 2026-11-26, issue 519, comment 7204486070, Q2, the bound of the spin measured).
 byte* Stolen(byte* record) {
     raw {
         long count = *Ptr<long>(scheduler + 48)
@@ -5071,9 +5106,17 @@ byte* Stolen(byte* record) {
         while i < count {
             byte* victim = Worker((first + i) % count)
             if victim != record {
-                byte* slot = AtomicPtr<byte>.FromPtr(Ptr<byte*>(victim + 16)).Swap(null, MemoryOrder.AcqRel)
-                if slot != null {
-                    return slot
+                AtomicPtr<byte> cell = AtomicPtr<byte>.FromPtr(Ptr<byte*>(victim + 16))
+                if cell.Load(MemoryOrder.Relaxed) != null {
+                    long due = PauseClock() + SlotWait()
+                    while PauseClock() < due {
+                        sys.SpinHint()
+                    }
+
+                    byte* slot = cell.Swap(null, MemoryOrder.AcqRel)
+                    if slot != null {
+                        return slot
+                    }
                 }
             }
 
@@ -5083,6 +5126,9 @@ byte* Stolen(byte* record) {
         return null
     }
 }
+
+// The time a worker waits before it takes another worker's slot of the actor woken last, in nanoseconds (`Stolen`), Go's 3 µs.
+long SlotWait() => 3000
 
 // The head of a ring: two counters of 31 bits in one word, the one where a thread that steals takes from, `steal`, and the one
 // where the ring's own thread takes from, `real`, which are the same while nobody steals, as tokio packs its two `u32` heads.

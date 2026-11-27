@@ -2303,7 +2303,10 @@ process may use (section 6, Q4 of comment 6946532526), where that count is more 
 the top-level code alone and sleeps in its poller while it waits (`RootSlept`). Each worker takes an actor from the queue of
 its thread that nobody steals, which holds the actors whose activation parked on it, then from its slot of the actor woken
 last, from its ring of 256 slots, as tokio's `queue::Local`, and from the shared queue, which it reads first at every 61st
-turn, and else steals half of another worker's ring, or its slot (`WorkerTurn`, `NextActor`, `StealInto`). A worker with
+turn, and else steals half of another worker's ring, or its slot 3 µs after it saw an actor there, as Go's `runqgrab` waits
+before it takes the `runnext` of a running P (`WorkerTurn`, `NextActor`, `StealInto`, `Stolen`, `SlotWait`). On worker threads a wake of an actor
+that a thread holds or whose constructor runs marks it NOTIFIED and puts no entry in, as tokio's waker of a running task
+(`Wake`, `LeftToHolder`). A worker with
 nothing to take spins for 20 µs before it parks, where fewer than half the workers look for work, marked as one that looks,
 so that an actor put where any worker can take it wakes no parked worker meanwhile, each turn of the spin a turn of the worker
 with the hint of a spin to the core, as Go's runtime keeps spinning threads and tokio a searching worker (the owner,

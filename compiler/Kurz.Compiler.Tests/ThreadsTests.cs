@@ -624,7 +624,7 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
             """;
         var program = Builder.Compile(SourceText.FromString("program.kz", text), [], Builder.CheckRuntime(Target.Linux, Arch.X64), testBuild: false, cpu: () => Cpu.Baseline).Program!;
         var defines = program.Ir.Split('\n').Where(l => l.StartsWith("define internal ", StringComparison.Ordinal)).ToList();
-        foreach (var form in new[] { "RootSlept", "QueueLocal", "QueueHeld", "Answered", "Deferred", "PinnedHeld" })
+        foreach (var form in new[] { "RootSlept", "QueueLocal", "QueueHeld", "Answered", "Deferred", "PinnedHeld", "LeftToHolder" })
         {
             var define = defines.Single(l => l.Contains($"@\"rt.common.{form}.", StringComparison.Ordinal));
             Assert.Contains(" noinline", define, StringComparison.Ordinal);
