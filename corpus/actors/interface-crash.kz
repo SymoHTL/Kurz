@@ -1,0 +1,17 @@
+// expect: throws callee-crashed at 13
+// | 5
+// rules: U1, U20
+
+interface Divider {
+    int Div(int a, int b)
+}
+
+actor Calc : Divider {
+    pub int Div(int a, int b) => a / b
+}
+
+int Use(Divider d, int b) => d.Div(10, b)
+
+c = spawn Calc() on crash stop
+print(Use(c, 2))
+print(Use(c, 0))

@@ -906,6 +906,11 @@ public sealed partial class Emitter
             return AsInterface(value, ic.Symbol, face.Symbol); // K6: the instance with its class's table for the interface
         }
 
+        if (from is ActorType ia && to is InterfaceType actorFace)
+        {
+            return ActorAsInterface(value, ia.Symbol, actorFace.Symbol); // U1: the reference in a block of its own with the actor's table for the interface
+        }
+
         if (from is WeakRefType fw && to is WeakRefType tw)
         {
             return Layout.Fat(tw.Target.Symbol) && !Layout.Fat(fw.Target.Symbol) ? Pair(value, Table(fw.Target.Symbol)) : value; // R3 with K6: the same weak count
@@ -1070,7 +1075,7 @@ public sealed partial class Emitter
             case ClassType c:
                 return InstanceText(value, c); // A5
             case InterfaceType face:
-                return face.Symbol.TextMethod is { } faceText ? CallThrough(faceText, value, face.Symbol, []) // A10
+                return face.Symbol.TextMethod is { } faceText ? CallThrough(faceText, value, face.Symbol, [], line) // A10
                     : namesClasses ? FaceText(value, face.Symbol) // O7: in the text of a thrown value, that of the instance's class
                     : throw new InvalidOperationException($"`{face}` declares no `Text()`: `no-text`, which the checker reports (A10)");
             case WeakRefType w:

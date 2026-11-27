@@ -2675,6 +2675,26 @@ ask about it.
   programs of `ListTests` and by the cases `control/match-interface-arm.kz`,
   `control/match-base-class-arm.kz`, `control/match-interface-test.kz`, `control/match-data-base-arm.kz`
   and `outcomes/else-interface-arm.kz`.
+- U1 with K6: a value of an interface an actor names is the pair of a counted box, `{ strong, weak,
+  reference }`, which holds the actor's reference, and the actor's table for the interface, as Rust's
+  `Rc<dyn Trait>` pairs a counted block with a table of methods; each slot of that table loads the
+  reference from the box and sends the method's message as a call through the reference does, its
+  arguments written into the actor's heap, and waits for the reply, and the call's file and line reach
+  the slot through a thread's own word that the call through the interface stores before it, so that a
+  crash, a deadline and the method's own bound stand at that call; `==` and the hash compare and hash
+  the two words of the reference, and an arm of the actor over such a value compares the table with the
+  actor's and loads the reference once that comparison held (the owner, 2026-11-27, #519, comment 7215317481,
+  to I1 to I4 of comment 7211586386) *(assumed: the mechanism, which no answer gave)*. The checker holds each method of such an interface to
+  what crosses with no word at the line that names it, and the walk of the throw sets gives a call
+  through the interface a site that waits on each actor that implements it, a loop's text naming the
+  interface's method beside the actor's (U56, T46 (a)), and `send` before such a call is `syntax` (U6); the text of
+  `send-needs-word` there is the product pass's, comment 7211645920, item 5, which the owner kept (Q8). `print` of such a
+  value calls the interface's `Text()` through the table, a message as any call through it is (A10). Pinned by
+  `CheckerTests` and by the cases `actors/interface-call.kz`, `actors/interface-arm.kz`, `actors/interface-arm-face.kz`,
+  `actors/interface-text.kz`, `actors/interface-method-private.kz`,
+  `actors/interface-crash.kz`, `actors/interface-within.kz`, `actors/interface-crossing.kz`,
+  `actors/interface-mut-parameter.kz`, `actors/interface-missing-method.kz`, `actors/interface-send.kz` and
+  `actors/interface-call-loop.kz`.
 - G2 to G4: a `Regex` is the standard library's: the pattern parsed into a tree, the automaton's size counted from the tree
   before anything is built (G2), then the automaton of Thompson's construction, which a Pike VM runs, as Rust's `PikeVM`, so
   that a search takes time in proportion to the automaton's states times one more than the positions a thread carries
@@ -3299,8 +3319,8 @@ or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` 
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
 type or a time type (T10, T29);
 a modifier of a method on a top-level function, which leaves the function and every call of its
-name unread (K7, M6); of an actor, a clause after its name but `stack` and the words of a policy (U1, U27), the block of `on crash` after a `per` actor's name among them, a modifier but `pub`, type parameters and
-an interface, which an actor may declare (U1), a `static` method and an immutable `static` field of a type that holds no class,
+name unread (K7, M6); of an actor, a clause after its name but `stack` and the words of a policy (U1, U27), the block of `on crash` after a `per` actor's name among them, a modifier but `pub`, type parameters, which
+an actor may declare (U1), arguments after an interface after its name, which an actor has no constructor to take (U1, K10), a generic interface after its name (U1, T19), a `static` method and an immutable `static` field of a type that holds no class,
 or of a type not written (U1), and a modifier of a method but `pub`, which a method
 may take as a class's does (U1, U9), each of which leaves the
 actor and every use of its name unread, besides what a class's body does not read, as the checker's `syntax` for a base after

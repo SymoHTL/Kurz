@@ -1,0 +1,16 @@
+// expect: error syntax at 16
+// rules: U1
+
+// every call through an interface waits, so `send` stands before none
+interface Logger {
+    void Note(string s)
+}
+
+actor Sink : Logger {
+    pub void Note(string s) {
+        print(s)
+    }
+}
+
+Logger l = spawn Sink()
+send l.Note("a")
