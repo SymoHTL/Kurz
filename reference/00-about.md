@@ -10,7 +10,9 @@ It covers the sequential core, what a program without actors needs, the actors o
 `mock`, the test's clock and the cluster test, of which chapter 20 holds only the rules that read
 their forms, answer `not supported` and state what the record decides of them (Y8 to Y10), packages, clients
 and what the build proves, its contracts, laws and tests with parameters (sections 6, 7 and 9 to 13 of the
-record) are outside it.
+record) are outside it. No rule of this reference reads the forms of what the build proves: the build reads
+`requires`, `ensures`, `invariant`, `law` and the parameters of a test as text no rule gives a meaning, and
+refuses them with the error of the first token it cannot read there, `braces-required` or `syntax` (E4).
 
 ## The status of a rule
 
