@@ -239,15 +239,16 @@ public sealed class ModelTests
 
     /// <summary>
     /// <c>Enqueue</c>'s append of a message to the inbox, one move, as a queue of many senders appends, then its plain read of the actor's
-    /// life, which decides nothing on threads, where the sender wakes the actor whatever its life, since a restart's plain write of the
-    /// life and its read of the queue are a store and a load that no fence orders, which a sender's read can see in either order; then
-    /// the wake in the form <paramref name="workers"/> names (<see cref="Woken"/>), whose entry a take that finds the actor waiting for its
-    /// restart lets go of (<c>RunTake</c>).
+    /// life, by which the form of one thread passes the wake over where the actor waits for its restart (the life 1), the message left
+    /// in the inbox that the end of the restart's hold reads (<c>Ready</c>), and which decides nothing on threads (<paramref name="workers"/>),
+    /// where the sender wakes the actor whatever its life, since a restart's plain write of the life and its read of the queue are a store
+    /// and a load that no fence orders, which a sender's read can see in either order; then the wake in the form <paramref name="workers"/>
+    /// names (<see cref="Woken"/>), whose entry a take that finds the actor waiting for its restart lets go of (<c>RunTake</c>).
     /// </summary>
     private static Strand Sender(string name, int at, bool workers, Break broken) => new(name, at,
     [
         new("Enqueue", "Pushed(state - 144, message)", _ => true, s => { s[Mail]++; s[at] = 1; }),
-        new("Enqueue", "int life = *Ptr<int>(state - 88)", _ => true, s => { s[at] = 2; }, ["if Threaded() || (life != 1 && life != 5) {"]),
+        new("Enqueue", "int life = *Ptr<int>(state - 88)", _ => true, s => { s[at] = workers || s[Life] != 1 ? 2 : -1; }, ["if Threaded() || (life != 1 && life != 5) {"]),
         .. Woken(at, 2, -1, workers, broken),
     ]);
 
@@ -305,16 +306,20 @@ public sealed class ModelTests
     private static int WokenMoves(bool workers) => Woken(0, 0, -1, workers, Break.None).Length;
 
     /// <summary>
-    /// The take of an entry off the run queue at the place <paramref name="from"/> and the hold of the actor (<c>Claimed</c>: a load, then
-    /// a compare-exchange, made again on what it found): RUNNING where neither RUNNING nor BUILDING is set, the strand going on at
-    /// <paramref name="held"/>, else NOTIFIED, the strand back at <paramref name="from"/>; QUEUED cleared either way.
+    /// The take of an entry off the run queue at the place <paramref name="from"/>, by the one thread (<c>RunOne</c>) or, where
+    /// <paramref name="workers"/>, by a worker thread's turn, which gives what it took to <c>RunTake</c> (<c>WorkerTurn</c>), and the hold of
+    /// the actor (<c>Claimed</c>: a load, then a compare-exchange, made again on what it found): RUNNING where neither RUNNING nor BUILDING
+    /// is set, the strand going on at <paramref name="held"/>, else NOTIFIED, the strand back at <paramref name="from"/>; QUEUED cleared
+    /// either way.
     /// </summary>
-    private static Move[] Taken(int at, int from, int held, Break broken)
+    private static Move[] Taken(int at, int from, int held, Break broken, bool workers = false)
     {
         var holds = broken switch { Break.RunningNotHeld => Building, Break.BuildingNotHeld => Running, _ => Running | Building };
         return
         [
-            new("RunOne", "runFirst = *Ptr<byte*>(state - 16)", s => s[Entries] > 0, s => { s[Entries]--; s[at] = from + 1; }),
+            workers
+                ? new Move("WorkerTurn", "byte* state = NextActor(record, shared)", s => s[Entries] > 0, s => { s[Entries]--; s[at] = from + 1; })
+                : new Move("RunOne", "runFirst = *Ptr<byte*>(state - 16)", s => s[Entries] > 0, s => { s[Entries]--; s[at] = from + 1; }),
             new("Claimed", "word.Load(MemoryOrder.Acquire)", _ => true, s => { s[at + 1] = s[Word]; s[at] = from + 2; }),
             new("Claimed", "Exchanged(word, seen, wanted)", _ => true, s =>
             {
@@ -369,13 +374,14 @@ public sealed class ModelTests
     /// <summary>
     /// A thread of the scheduler: the take of an entry and the hold (<c>RunOne</c>, <c>Claimed</c>), the first message of the inbox
     /// started where it holds the actor and the actor does not wait for its restart (<c>RunOne</c>), <c>Ready</c> read after the switch
-    /// back, and the end of the hold (<c>LetGo</c>); then another entry. One that starts at the place 4 holds the actor already, its
-    /// message ran.
+    /// back, and the end of the hold (<c>LetGo</c>); then another entry. Where <paramref name="workers"/>, the take and the start are a
+    /// worker thread's (<c>WorkerTurn</c>, <c>RunTake</c>), which the models on worker threads run, so that a change of those lines turns
+    /// the guard red there. One that starts at the place 4 holds the actor already, its message ran.
     /// </summary>
-    private static Strand Runner(string name, int at, Break broken) => new(name, at,
+    private static Strand Runner(string name, int at, bool workers, Break broken) => new(name, at,
     [
-        .. Taken(at, 0, 3, broken),
-        new("RunOne", "Start(state, message, null, null)", _ => true, s =>
+        .. Taken(at, 0, 3, broken, workers),
+        new(workers ? "RunTake" : "RunOne", workers ? "Start(state, message, null, Adopted(state, message))" : "Start(state, message, null, null)", _ => true, s =>
         {
             if (s[Mail] > 0 && (broken == Break.RestartRunsEarly || s[Life] == 0))
             {
@@ -464,8 +470,9 @@ public sealed class ModelTests
         : null;
 
     /// <summary>
-    /// The models of the state word, each of three threads, with the wake in the form <paramref name="workers"/> names, whose models
-    /// are named with " on worker threads" (<see cref="Woken"/>).
+    /// The models of the state word, each of three threads, with the wake, the sender's read of the life and the runner's take in the form
+    /// <paramref name="workers"/> names, whose models are named with " on worker threads" (<see cref="Woken"/>, <see cref="Sender"/>,
+    /// <see cref="Runner"/>).
     /// </summary>
     private static Model[] WordModels(Break broken, bool workers)
     {
@@ -474,21 +481,21 @@ public sealed class ModelTests
         [
             // a message sent while the actor's constructor runs: it starts once `ActorBuilt` ran (U17)
             new("a wake while the constructor runs" + on, Start(3, (Word, Building)),
-                [Builder(At(0), broken), Sender("sender", At(1), workers, broken), Runner("runner", At(2), broken)], Always, WordAtRest),
+                [Builder(At(0), broken), Sender("sender", At(1), workers, broken), Runner("runner", At(2), workers, broken)], Always, WordAtRest),
 
             // a message sent while a thread holds the actor: a second thread takes its entry, which the holder queues again; on worker
             // threads the holder queues it again with no entry
             new("a wake while a thread holds the actor" + on, Start(3, (Word, Running), (Holders, 1), (Built, 1), (At(0), 4)),
-                [Runner("holder", At(0), broken), Runner("runner", At(1), broken), Sender("sender", At(2), workers, broken)], Always, WordAtRest),
+                [Runner("holder", At(0), workers, broken), Runner("runner", At(1), workers, broken), Sender("sender", At(2), workers, broken)], Always, WordAtRest),
 
             // two senders, one thread
             new("two wakes" + on, Start(3, (Built, 1)),
-                [Sender("first", At(0), workers, broken), Sender("second", At(1), workers, broken), Runner("runner", At(2), broken)], Always, WordAtRest),
+                [Sender("first", At(0), workers, broken), Sender("second", At(1), workers, broken), Runner("runner", At(2), workers, broken)], Always, WordAtRest),
 
             // a restart while an entry of the actor, queued before its crash, stands in the run queue with a message in its inbox, and a
             // message sent meanwhile: a take passes the actor over while it waits for its restart, and the restart waits for that take
             new("a take while a restart starts" + on, Start(3, (Built, 1), (Life, 1), (Fresh, 1), (Word, Queued), (Entries, 1), (Mail, 1)),
-                [Restarter(At(0), broken), Runner("runner", At(1), broken), Sender("sender", At(2), workers, broken)], Always, WordAtRest),
+                [Restarter(At(0), broken), Runner("runner", At(1), workers, broken), Sender("sender", At(2), workers, broken)], Always, WordAtRest),
         ];
     }
 
