@@ -6351,9 +6351,13 @@ thread has passed a turn since its end (§6, the owner, 2026-11-20, #519, commen
 code raises `deadlock` at the line of its call where no worker thread has an actor to run, no timer is
 pending, the timers of the calls that wait counting for nothing and an activation asleep counting, and
 no poller holds a registration, as Go's `checkdead` *(assumed in §6)*. The build starts worker threads
-on Linux alone, where `KURZ_THREADS` sets a count of more than 1; where it is not set, a program runs
-every actor on the main thread, as a case marked `// threads: 1` runs, and not on the count of the
-cores §6 holds (`compiler/README.md`). On worker threads a
+on Linux alone, where the count is more than 1; a count of 1, which `KURZ_THREADS` sets or a process
+that may use one core gives, runs every actor on the main thread, as a case marked `// threads: 1` runs,
+and so does a build for Windows (`compiler/README.md`) *(assumed in §6)*. A worker thread with nothing
+to run spins a short while before it parks, so that a wake finds it awake, as Go's runtime keeps
+spinning threads and Tokio a searching worker (§6, the owner, 2026-11-26, #519, comment 7204486070, Q2,
+"Spin before park (Recommended)"), for 20 µs, where fewer than half the workers look for work, and the
+`deadlock` of a wait of the top-level code is raised once the spins ended *(assumed in §6)*. On worker threads a
 crash, an end, a restart and the decision of a block hold only the actors they touch, and a crash reaches
 its supervisor and its links as a signal, as Erlang's exit signals do, a check of the whole process left for
 the deadlock of the top-level code alone (§6, the owner, 2026-11-26, #519, comment 7194874125, "Per-actor
