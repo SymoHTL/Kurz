@@ -876,12 +876,13 @@ test "a read's bound of an hour passes at the advance" {
 
 ### Y11 (decided, §2) The seed of a run
 
-A run of `kurz test` takes a seed, a `ulong`: the keys a map's hash switches to (M9), the chain IDs and
-the variation of a restart's pause (U17, U23) are drawn from a generator the seed starts, and the actors
-ready at a turn of the one thread that runs a test's actors (U35) run in an order that a second generator
-the seed starts draws, so that a run that failed replays its draws and its order from its seed (§2, the
-owner, 2026-11-26, issue 657, comment 7189038775, Q1 b). A run where no seed is given takes a new one from
-the system's randomness, and the line of each failed test names it after `FAILED`, in parentheses, so that
+A run of `kurz test` takes a seed, a `ulong`: the keys a map's hash switches to (M9) and the chain IDs
+(U17) are drawn from a generator the seed starts, and the actors ready at a turn of the one thread that
+runs a test's actors (U35) run in an order that a second generator the seed starts draws, so that a run
+that failed replays its draws and its order from its seed (§2, the owner, 2026-11-26, issue 657, comment
+7189038775, Q1 b); the variation of a restart's pause (U23) is drawn from the first generator too (§2,
+assumed there). A run where no seed is given takes a new one, 8 bytes of the system's randomness (§2,
+assumed there), and the line of each failed test names it after `FAILED`, in parentheses, so that
 `kurz test --seed 1234 users.kz` runs with it (§2, the owner, 2026-11-26, comment 7189038775, Q2 a and
 Q3 a; the parentheses assumed there):
 
@@ -896,15 +897,16 @@ The seed is written in decimal digits alone; any other value, an empty one among
 with `error: seed (<the value>)` on standard error and the exit code 1, and a run whose tests all passed
 names no seed (§2, the owner, 2026-11-27, issue 657, comment 7215317771, Q1, Q2 and Q3 of comment
 7205593463). `--seed` stands before the file, once, as the other options do (Y2), a value it refuses
-ends the command before its build, and a second `--seed`, or none after the flag, is an error of its
-usage (§2, assumed there). The draws and the order come from two generators apart, so that a draw a test
+ends the command before its build, and so before the start of the built program that reads
+`KURZ_THREADS` (U35), and a second `--seed`, or none after the flag, is an error of its usage, as
+`kurz run`, `kurz build` and `kurz exec` make a `--seed` (§2, assumed there). The draws and the order come from two generators apart, so that a draw a test
 adds moves no order (§2, the owner, 2026-11-27, comment 7215317771, Q8). Both are xoshiro256++, started
 by SplitMix64 from the seed, the draws by its first four words and the order by the four after them;
 the actors ready at a turn are those queued when the scheduler takes
 the first of them, the actors they wake queued behind them, and each take is one of those left, at the
 index the next word gives modulo their count, a turn ending before the test's actor that an `advance`
 parked where an actor stands before it, so that the actors the moved clock woke run before the test goes
-on (Y10) (§2, assumed there). A test build asks the system for no
+on (Y10) (§2, assumed there). A build of `kurz test` asks the system for no
 randomness, so that it never ends with `random-failed` (M9), and its keys and chain IDs follow from the
 seed its failed lines show (§2, assumed there). A seed replays the draws and the order alone, on the
 build that printed it, with no promise across versions of the compiler (§2, the owner, 2026-11-27,

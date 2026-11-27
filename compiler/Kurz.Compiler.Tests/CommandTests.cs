@@ -491,6 +491,7 @@ public sealed class CommandTests : IDisposable
     [InlineData("test", "a.kz", "--seed")]
     [InlineData("run", "--seed", "1", "a.kz")] // Y11: the seed is `test`'s alone
     [InlineData("build", "--seed", "1", "a.kz")]
+    [InlineData("exec", "--seed", "1", "print(1)")]
     public void A_command_line_the_command_cannot_read_gets_the_usage_and_exit_1(params string[] arguments) =>
         Assert.Equal(
             (1, "", "usage: kurz --version [--verbose]\n       kurz build [--release] [--lines] [--cpu <name>] <file.kz> [-o <output>]\n"
@@ -554,6 +555,12 @@ public sealed class CommandTests : IDisposable
         var one = Processes.Capture(Host, [Dll, "test", "--seed", drawn.ToString(System.Globalization.CultureInfo.InvariantCulture), source], null, TimeSpan.FromMinutes(2),
             new Dictionary<string, string?> { ["XDG_CACHE_HOME"] = Path.Combine(root, "cache"), ["KURZ_TRACE"] = "0", ["KURZ_THREADS"] = "1" });
         Assert.Equal((0, "a\nb\nc\nd\ntest \"speaks\" ... ok\n1 test: 1 passed, 0 failed\n", ""), one);
+
+        // U35, Q5 (c) of comment 7205593463: `KURZ_THREADS` set to more than 1 leaves a test's actors on one thread, so the seed's order
+        // holds there too
+        var four = Processes.Capture(Host, [Dll, "test", "--seed", drawn.ToString(System.Globalization.CultureInfo.InvariantCulture), source], null, TimeSpan.FromMinutes(2),
+            new Dictionary<string, string?> { ["XDG_CACHE_HOME"] = Path.Combine(root, "cache"), ["KURZ_TRACE"] = "0", ["KURZ_THREADS"] = "4" });
+        Assert.Equal((0, string.Concat(orders[drawn - 1].Select(c => $"{c}\n")) + "test \"speaks\" ... ok\n1 test: 1 passed, 0 failed\n", ""), four);
     }
 
     /// <summary>The actor of the tests of the seed, which prints its name for <c>Say</c> (Y11).</summary>

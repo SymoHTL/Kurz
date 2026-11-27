@@ -6343,7 +6343,7 @@ actors that are ready first in, first out, the top-level code's wait running the
 `KURZ_THREADS` set to 1 runs so too *(assumed in §6)*, and the tests of `kurz test` run every actor on
 one thread, with `KURZ_THREADS` set to more than 1 too (§6, the owner, 2026-11-27, comment 7215317771,
 Q5), the actors ready at a turn in the
-order their seed draws where `KURZ_THREADS` is not 1 (Y11; §2). Each worker
+order their seed draws where `KURZ_THREADS` is not 1 (Y11; §2, that exception assumed there). Each worker
 thread has a poller and timers of its own, and a wake of an actor on another thread is a push to that
 thread's queue and one write of its `eventfd` (§6, the owner, 2026-11-26, #519, comment 7189038384,
 T88). A worker whose `eventfd` or record the system refuses ends the start with `thread-refused` too
