@@ -23,8 +23,10 @@ before its fixes (comment 7210832380, `KURZ_THREADS=4`, the least of 10 runs):
   it (`SlotWait` in `Stolen`), as Go's `runqgrab` waits before it takes the `runnext` of a running P
   (not checked at source).
 
-Measured each alone on 2026-11-27 (20 runs in each of two orders, the machine loaded by other work),
-each fix made its row faster and no row slower beyond the noise, the bar the owner set for keeping
+Measured each alone on 2026-11-27 (20 runs in each of two orders, the machine loaded by other work,
+and the four actors' counts, which send four messages, again in four orders of up to 40 runs, alike
+in every variant within the noise), each fix made its row faster and no row slower beyond the
+noise, the bar the owner set for keeping
 it (issue 39, comment 7221780113); the numbers stand in section 6 of the design record. A model of
 the wake (`ModelTests`) finds the lost wake of a form that turns the mark whether the actor is held
 or not (`Break.LeftUnheld`).
