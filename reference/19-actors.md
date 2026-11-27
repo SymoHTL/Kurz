@@ -2560,8 +2560,9 @@ threads, the end of the process gives the memory back, as a Rust or Go program's
 other threads with no join (§6, the owner, 2026-11-26, #519, comment 7194874125, "One thread only
 (Recommended)"). No message holds that end: on one thread a message runs only while the top-level code waits, so
 that none runs when it ends, and with worker threads a message still running on another worker then
-is cut with the process, its lines after
-that point never running, as a Rust or Go program's other threads end when `main` returns (§6, the owner,
+is cut at the end of the process, which follows the top-level code's last statement, its lines after
+that moment never running, what it printed before it standing in the output and a line whose write the
+system took in part standing there in part *(assumed: the build's `print`, A1)*, as a Rust or Go program's other threads end when `main` returns (§6, the owner,
 2026-11-26, #519, comment 7198702144, 1, "Cut it, as Rust and Go (Recommended)").
 
 No case: for the end of the top-level code, since which message runs when it ends is the scheduler's to
@@ -6746,13 +6747,16 @@ have run on fewer (§6, the cost of that answer). The id is `thread-refused` (§
 2026-11-26, #519, comment 7204486070), its start is the moment
 the scheduler starts its worker threads, at the program's first `spawn` or first form that splits its
 work, the threads that did start ending with the process, and its line is `error: thread-refused
-(<the count of worker threads asked>)` on standard error, with no place and no trace *(assumed in
-§6)*. The main thread runs the top-level code alone, and
-sleeps while it waits (U18; §6, Q3), except in a case marked `// threads: 1`, where its wait runs the ready actors and
-no worker thread runs (§6, the owner, 2026-11-17, #570, comment 6961064167, Q1). A message parked in a wait goes on on the thread that parked it,
+(<the count of worker threads asked>)` on standard error, and `error: thread-refused (1)` for a thread of the
+pool of blocking calls that the system refuses while no thread of that pool runs, with no place and no trace
+*(assumed in §6)*. The main thread runs the top-level code alone, and
+sleeps while it waits (U18; §6, Q3), except in a case marked `// threads: 1`, in a program whose count is 1,
+in the tests of `kurz test` and in a program built for Windows, where its wait runs the ready actors and
+no worker thread runs (§6, the owner, 2026-11-17, #570, comment 6961064167, Q1; for a count of 1, Q5 of
+comment 7207859311; the tests of `kurz test` and the build for Windows as this rule says of each). A message parked in a wait goes on on the thread that parked it,
 and an actor between messages moves to any thread (§6, the owner, 2026-11-17, #519, comment
 6946657505, Q2, "Stays on its thread (Recommended)"). A message that runs on another thread when the
-top-level code ends is cut with the process, its lines after that point never running (U13; §6, the
+top-level code ends is cut at the end of the process, its lines after that moment never running (U13; §6, the
 owner, 2026-11-26, #519, comment 7198702144, 1); a supervisor that is running acts on its child's crash once its own message
 ends or waits (U22) *(assumed in §6)*. In a case marked `// threads: 1` (chapter 0) one thread runs the
 actors that are ready first in, first out, the top-level code's wait running them (§6, the owner,
@@ -6760,8 +6764,8 @@ actors that are ready first in, first out, the top-level code's wait running the
 `KURZ_THREADS` set to 1 runs so too (§6, the owner, 2026-11-27, #519, comment 7215317481, Q5 of comment
 7207859311), and so do the tests of `kurz test` *(assumed in §6)*. Each worker
 thread has a poller and timers of its own, and a wake of an actor on another thread is a push to that
-thread's queue and one write of its `eventfd` (§6, the owner, 2026-11-26, #519, comment 7189038384,
-T88). A worker whose `eventfd` or record the system refuses ends the start with `thread-refused` too
+thread's queue and one write of its `eventfd`, the wake of a thread on Linux, the one system the build
+starts worker threads on (§6, the owner, 2026-11-26, #519, comment 7189038384, T88). A worker whose `eventfd` or record the system refuses ends the start with `thread-refused` too
 *(assumed in §6)*. A message to an actor on another thread is built in a heap of its own and copied
 into the receiver's heap by the receiver at its turn, and a result into the waiter's heap as its wait
 returns (§6, the owner, 2026-11-20, #519, comment 7051492844, T17, 1); since a sender cannot know the
@@ -6769,7 +6773,9 @@ thread that takes its receiver, on worker threads every message the code of an a
 level builds has a heap of its own *(assumed in §6)*, where on one thread a message is built in the
 heap of its callee (`compiler/README.md`); the message's heap of its own is freed when the message
 ends (§6, the owner, 2026-11-26, #519, comment 7192965131), and an ended actor's first page is freed once every
-thread has passed a turn since its end (§6, the owner, 2026-11-20, #519, comment 7051492844, T16, 2). A wait of the top-level
+thread has passed a turn since its end (§6, the owner, 2026-11-20, #519, comment 7051492844, T16, 2), a parked
+worker and the main thread outside a `send` or a call of the top-level code counting as having passed one
+*(assumed in §6)*. A wait of the top-level
 code raises `deadlock` at the line of its call where no worker thread has an actor to run or spins, no
 timer is pending, the timers of the calls that wait counting for nothing and an activation asleep
 counting, and no poller holds a registration, a job handed to the pool of threads for blocking calls
@@ -6803,7 +6809,9 @@ ends is cut (§6, comment 7198702144, 1), which on one thread cannot happen, sin
 only while the top-level code waits; and memory grows by what each worker thread holds, its record, its
 poller and its `eventfd` (§6, T88), and by the heap of its own that each message has on worker threads
 *(assumed in §6)*. On worker threads a
-crash, an end, a restart and the decision of a block hold only the actors they touch, and a crash reaches
+crash, an end, a restart and the decision of a block hold only the actors they touch, a hold making its
+thread the one that may run or change the actor while it lasts, the thread of a crash holding the actor that
+crashed and the end of an actor holding each of its children before it ends it *(assumed in §6)*, and a crash reaches
 its supervisor and its links as a signal, as Erlang's exit signals do, a check of the whole process left for
 the deadlock of the top-level code and the confirmation of a loop that the walk of layer 3 finds (T72 2)
 (§6, the owner, 2026-11-26, #519, comment 7194874125, "Per-actor holds (Recommended)", narrowed by comment

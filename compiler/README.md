@@ -2325,8 +2325,9 @@ pause again, since the decision of a block that the top-level code runs makes it
 restart's pause, wakes the main thread, whose wait then raises `deadlock` (`WorkerPark`, `RootSlept`), a worker counting itself so
 only after its last look at its queues found nothing, so that the main thread counts no worker that goes on with an actor. A message's
 arguments are copied into the receiver's heap at its turn, and a result into the waiter's heap as its wait returns (T17 1:
-`MessageQueued`, `Adopted`, `ResultHeap`, `ResultOwn`); an ended actor's first page, and a message's heap of its own, are
-freed once every thread passed a turn since (T16 2: `Deferred`, `Reclaimed`, `Reclaims`), a worker storing the epoch at its
+`MessageQueued`, `Adopted`, `ResultHeap`, `ResultOwn`); an ended actor's first page is freed once every thread passed a turn since
+(T16 2), and a message's heap of its own when the message ends, its memory taken back the same way, once every thread
+passed a turn since (issue 519, comment 7192965131: `Deferred`, `Reclaimed`, `Reclaims`), a worker storing the epoch at its
 turn with a fence of sequential consistency after it (`WorkerTurn`), as the main thread's pin does, the main thread reading the
 block of its call's message after the push only under the lock of the process, where its wait found nothing left to run (`Answer`),
 and holding its epoch around a `send` or a call of the top-level code (`Pinned`). A message on one thread pays, at each form on its path
@@ -2335,7 +2336,7 @@ that only the worker threads go on in, the test of the worker threads, a load an
 holds none of them, and a worker with `RunTake`; the emitter marks the forms that only the worker threads reach, which the
 path of one thread calls after a test, `noinline` and `cold` (`Emitter.WorkerForms`), and the helpers of that path that the
 worker threads call too `alwaysinline` (`Emitter.InLine`), as LLVM put each into its callers while the build had no worker
-threads, which `ThreadsTests` reads in the IR of a release build. `ThreadsTests` runs these on four worker threads: calls
+threads, which `ThreadsTests` reads in the IR of one thread that clang optimises with `-O2`, as a release build optimises it. `ThreadsTests` runs these on four worker threads: calls
 and sends that cross strings and lists between heaps, the order of one sender's messages, a sleep, a `deadlock` and a
 start whose `eventfd` the system refuses. A crash, its escalation and its restart, the end of an actor and of its children
 and the decision of a block of `on crash` hold only the actors they touch (section 6, comment 7194874125, 1): the thread
