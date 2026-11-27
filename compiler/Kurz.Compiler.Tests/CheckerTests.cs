@@ -9214,12 +9214,14 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 14)], Errors(ActorCounter + "c = spawn Counter()\nprint(c == 1)\n"));
     }
 
-    [Theory]
-    [InlineData(3, "P8, U1", "actor A {\n    pub void Go() {\n        Log.Information(\"go\")\n    }\n}\n")]
-    public void A_log_call_inside_an_actor_is_not_supported(int line, string rule, string program)
+    [Fact]
+    public void A_log_call_inside_an_actor_is_checked_as_one_outside_it()
     {
-        // P8: what a line written inside an actor holds is open
-        NotSupportedAt(line, rule, program);
+        // P8: a log call stands in an actor's method as in a class's (section 12, the owner, 2026-11-27, #274, comment 7216348897), its
+        // template's holes, a field of the actor among them, and its level checked as anywhere else
+        Assert.Empty(Errors("actor A {\n    int n = 1\n\n    pub void Go(int k) {\n        Log.Information(\"go {k} {n}\")\n    }\n}\n"));
+        Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("actor A {\n    pub void Go() {\n        Log.Notice(\"go\")\n    }\n}\n"));
+        Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("actor A {\n    pub void Go() {\n        Log.Information(\"go {missing}\")\n    }\n}\n"));
     }
 
     [Fact]

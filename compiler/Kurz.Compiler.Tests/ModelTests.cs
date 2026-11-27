@@ -1317,7 +1317,7 @@ public sealed class ModelTests
         Held(
         [
             ("Print", "StreamLock(fd)", "sys.WriteOut(fd, buffer + done, total - done)", "StreamUnlock(fd)"),
-            ("LogLine", "StreamLock(2)", "sys.Write(2, logBuffer + done, n - done)", "StreamUnlock(2)"),
+            ("LogSpanned", "StreamLock(2)", "sys.Write(2, logBuffer + done, n - done)", "StreamUnlock(2)"),
             ("SlotsUsed", "Lock(SlotLock())", "used = slotsUsed", "Unlock(SlotLock())"),
             ("SlotTake", "Lock(SlotLock())", "mut long index = slotFree", "Unlock(SlotLock())"),
             ("SlotFree", "Lock(SlotLock())", "slotFree = index", "Unlock(SlotLock())"),
