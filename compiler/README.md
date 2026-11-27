@@ -2299,7 +2299,11 @@ with the system's own room, as Rust's released library does (section 2);
 reads the guarantee in force on Windows and on Linux compiles the program alone.
 
 The worker threads of section 6 (U35) run on Linux, as many as `KURZ_THREADS` sets or, where it is not set, as the cores the
-process may use (section 6, Q4 of comment 6946532526), where that count is more than 1. The main thread runs
+process may use (section 6, Q4 of comment 6946532526), where that count is more than 1. A program that ran every actor on
+the main thread sees three things change on them, and `KURZ_THREADS=1` runs it so again (the owner, 2026-11-27, issue 519,
+comment 7216530837): the actors that are ready no longer run first in, first out, a message still running on a worker thread
+when the top-level code ends is cut (U13), and memory grows by each worker's record, poller and `eventfd` and by the heap
+of its own of each message (`MessageHeapNew`). The main thread runs
 the top-level code alone and sleeps in its poller while it waits (`RootSlept`). Each worker takes an actor from the queue of
 its thread that nobody steals, which holds the actors whose activation parked on it, then from its slot of the actor woken
 last, from its ring of 256 slots, as tokio's `queue::Local`, and from the shared queue, which it reads first at every 61st
@@ -2310,7 +2314,8 @@ that a thread holds or whose constructor runs marks it NOTIFIED and puts no entr
 nothing to take spins for 20 µs before it parks, where fewer than half the workers look for work, marked as one that looks,
 so that an actor put where any worker can take it wakes no parked worker meanwhile, each turn of the spin a turn of the worker
 with the hint of a spin to the core, as Go's runtime keeps spinning threads and tokio a searching worker (the owner,
-2026-11-26, issue 519, comment 7204486070, Q2: `Spun`, `SpinBound`, `sys.SpinHint`). It then parks in a poller of its own,
+2026-11-26, issue 519, comment 7204486070, Q2, and for the bound, the half and a spinner that counts as one with work,
+2026-11-27, comment 7215317481: `Spun`, `SpinBound`, `sys.SpinHint`). It then parks in a poller of its own,
 with timers of its own (T88), and another thread wakes it through its
 `eventfd`, as a restart's pause that ends first of all wakes one parked worker, whose park reads the time of the first
 pause again, since the decision of a block that the top-level code runs makes its pause on the main thread (`Pause`,
