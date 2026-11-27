@@ -5,7 +5,7 @@
 // rules: Y10
 
 // a block of `within` is a block nested in the test, so that `advance` stands among the test's own statements there, and the clock
-// an actor reads after it is an hour on
+// an actor reads after it is an hour on; the block's bound of two hours is longer than the `advance`, which passes no deadline of it
 actor Clock {
     pub instant Now() => instant.Now
 }
@@ -13,7 +13,7 @@ actor Clock {
 test "an advance inside within" {
     c = spawn Clock()
     before = c.Now()
-    within 1s {
+    within 2h {
         advance 1h
     }
 

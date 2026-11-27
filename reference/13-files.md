@@ -1155,7 +1155,8 @@ Case: [system/park-file-close.kz](../corpus/system/park-file-close.kz)
 // `Shut`, a call of the chain, is let in while `Run`'s read of a FIFO runs on the pool of threads for blocking calls (S10), and its
 // `Close` through the copy `held` ends the handle at once while the read in flight keeps the descriptor (S5): that read gets the
 // byte the top-level code writes once `Shut` returned, and the next read through `f` gets the error of a closed handle, `Other`
-// with the number 9. The top-level code calls `Result` until `Poke` ran, so that it writes the byte after the `Close`
+// with the number 9. The top-level code calls `Result` until `Poke` ran, so that it writes the byte after the `Close`. S5 alone is
+// the subject, the descriptor a call in flight keeps past a `Close`; S10 and U17 it passes through
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
@@ -1806,7 +1807,14 @@ top-level code as the root actor under the scheduler from its first line (§6, t
 2026-11-13, #519, comment 6847932993, Q7, "both not") *(assumed, §6, §12: the reading of that answer
 said back on 2026-11-13, under which §12's "Block the thread" of 2026-10-29 describes the language as it stood
 without actors)*. A program without actors serves one connection at a time (§12, the owner,
-2026-10-30, "One at a time").
+2026-10-30, "One at a time"). A wait for a child, `Command`'s run to its end (S18) and a spawned
+child's wait (S19), parks the actor in the same way, the child's pipes and the descriptor of its
+process waiting under `epoll`, with no thread of the pool for each child (§12, the owner, 2026-11-26,
+issue 661, comment 7189038013, Q14 (a)). A crash of the actor over such a wait closes the pipes the
+call holds to the child and the descriptor of its process, and leaves the child to run, not waited
+for, as Rust's `Child` that is dropped leaves it (§12, assumed there). In the child of a `fork`, which
+a program makes in `raw` (R7) and which has no thread of the pool, each call that waited on the pool
+ends with `Other` and the number 125, `ECANCELED` (§12, assumed there).
 
 Case: [system/park-accept-first.kz](../corpus/system/park-accept-first.kz)
 ```kurz
@@ -2085,11 +2093,11 @@ Main() else {
 
 Case: [system/park-crash-deadlock.kz](../corpus/system/park-crash-deadlock.kz)
 ```kurz
-// `Boom`'s crash takes `Outer`'s wait on its read out of the poller, as in `park-read-crash.kz` (S10, U20). Then `Boss`'s `Go`
-// waits on `Get`, queued behind `Fail` in `Worker`'s inbox, and the block of `Worker`'s policy waits behind `Go`, a loop that a
-// crash closes and that layer 3 does not see (U60): the top-level code's wait on `Go` finds no actor left to run, no timer
-// pending and nothing registered with the poller, so that it is `deadlock` at its line (U18), and not a wait in the poller
-// without end. The combination is under test: S10 and U18 its subject, U20 and U64 the rules it passes through
+// `Boom`'s crash takes `Outer`'s wait on its read out of the poller, which `park-read-crash.kz` holds (S10, U20). Then `Boss`'s
+// `Go` waits on `Get`, queued behind `Fail` in `Worker`'s inbox, and the block of `Worker`'s policy waits behind `Go`, a loop that a
+// crash closes and that layer 3 does not see (U60): the top-level code's wait on `Go` finds no actor left to run, no timer pending
+// and nothing registered with the poller, so that it is `deadlock` at its line (U18), and not a wait in the poller without end.
+// U18 alone is the subject, the end the top-level code's wait reaches once nothing is registered; S10, U20 and U64 it passes through
 actor Helper {
     pub void Poke(Napper n) {
         print(n.Boom())
@@ -2632,7 +2640,8 @@ Case: [system/park-file-crash.kz](../corpus/system/park-file-crash.kz)
 // `Boom`, a call `Helper` makes in the chain of `Outer`'s message (U17), is let in while `Outer` waits on the pool of threads for
 // blocking calls for its opening of a FIFO, and its crash drops the job and gives both its callers `callee-crashed` (U20): `Caller`,
 // whose policy prints it, and `Helper`, whose policy stops it (U25). The opening ends once the top-level code opens the FIFO to
-// write, on a thread of the pool, with no wait left to wake, and `Reader`'s read of a file on the pool after it reads its byte
+// write, on a thread of the pool, with no wait left to wake, and `Reader`'s read of a file on the pool after it reads its byte.
+// S10 alone is the subject, the job of a call whose actor fell dropped; U20 it passes through
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
@@ -2776,7 +2785,8 @@ Case: [system/park-command-crash.kz](../corpus/system/park-command-crash.kz)
 // `Boom`, a call `Helper` makes in the chain of `Outer`'s message (U17), is let in while `Outer` waits in the poller for a child,
 // `cat` of a FIFO, and its output, and its crash takes those waits out of the poller and gives both its callers `callee-crashed`
 // (U20): `Caller`, whose policy prints it, and `Helper`, whose policy stops it (U25). The child ends once the top-level code opens
-// the FIFO to write, with no wait left to wake, and `Runner`'s wait for a child of its own after it gives that child's output
+// the FIFO to write, with no wait left to wake, and `Runner`'s wait for a child of its own after it gives that child's output.
+// S10 alone is the subject, the waits for a child taken out of the poller at a fall; S18 and U20 it passes through
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
@@ -2853,14 +2863,277 @@ Main() else {
 }
 ```
 
+Case: [system/park-command-pipes.kz](../corpus/system/park-command-pipes.kz)
+```kurz
+// `Boom`, a call `Helper` makes in the chain of `Outer`'s message (U17), is let in while `Outer` waits in the poller for a child,
+// `cat` of a FIFO, and its output, and its crash closes the two pipes the call holds to the child (S10): the count of the process's
+// open descriptors, which the system lists in `/proc/self/fd`, is the same once the crash is over as before it. A crash that left the
+// pipes open would leave two more. `Runner`'s wait for a child of its own and its read of a file make the poller and the pool of
+// threads for blocking calls before the first count, so that neither is counted once only, and the top-level code opens the FIFO to
+// write once the crash is over, so that the child ends. S10 alone is the subject, the fall of a wait for a child; S18 and U20 it
+// passes through
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+actor Helper {
+    pub void Poke(Napper n) {
+        print(n.Boom())
+    }
+}
+
+actor Napper {
+    pub int Outer(Helper helper) {
+        send helper.Poke(this)
+        o = Command.New("cat").Arg("park-command-pipes").Output() else {
+            IoError e => return -1
+            ExitError e => return -2
+        }
+
+        return o.Stdout.Count
+    }
+
+    pub int Boom() {
+        throw "boom"
+    }
+}
+
+actor Caller(Napper N, Helper H) {
+    pub void Go() {
+        print(N.Outer(H))
+    }
+
+    pub string Done() => "done"
+}
+
+actor Runner {
+    pub string Run() {
+        o = Command.New("printf").Arg("y").Output() else {
+            IoError e => return "run {e.Kind}"
+            ExitError e => return "exit {e}"
+        }
+
+        bytes = File.ReadAll("park-command-pipes.txt") else {
+            IoError e => return "read {e.Kind}"
+        }
+
+        return "out {Text(o.Stdout)} {Text(bytes)}"
+    }
+}
+
+void | IoError | ExitError Main() {
+    k = File.Create("park-command-pipes.txt")
+    k.Write("k".Bytes)
+    k.Close()
+    Command.New("mkfifo").Arg("park-command-pipes").Status()
+    runner = spawn Runner()
+    print(runner.Run())
+    before = Directory.List("/proc/self/fd").Count
+    poker = spawn Helper() on crash stop
+    napper = spawn Napper()
+    c = spawn Caller(napper, poker) on crash (e) {
+        match e.Reason {
+            RuntimeError r => print(r.Kind)
+        }
+
+        restart
+    }
+
+    send c.Go()
+    print(c.Done())
+    w = File.Create("park-command-pipes")
+    w.Close()
+    print(Directory.List("/proc/self/fd").Count - before)
+    File.Delete("park-command-pipes")
+    File.Delete("park-command-pipes.txt")
+}
+
+Main() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}
+```
+
+Case: [system/park-file-drained.kz](../corpus/system/park-file-drained.kz)
+```kurz
+// `Outer` opens a FIFO, a call on the pool of threads for blocking calls (S10) that ends once a writer opens it, and `Boom`, a call
+// `Helper` makes in the chain of `Outer`'s message (U17), is let in over that wait and sleeps 0.4 seconds before it throws. The
+// top-level code opens the FIFO to write 0.1 seconds in, so that the opening's job ends while `Boom` sleeps and the scheduler takes
+// its end before the crash: the fall gives that job back and closes the descriptor the opening gave, as it closes one whose job
+// ends after the fall (issue 661, the product pass, comment 7182792402, Q3), so that the count of the process's open descriptors,
+// which the system lists in `/proc/self/fd`, is the same once the crash is over as before it. A fall that left the job would leave
+// one more. `Reader`'s read of a file makes the pool before the first count. S10 alone is the subject; U20 it passes through
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+actor Helper {
+    pub void Poke(Napper n) {
+        print(n.Boom())
+    }
+}
+
+actor Napper {
+    pub int Outer(Helper helper) {
+        send helper.Poke(this)
+        f = File.Open("park-file-drained") else {
+            IoError e => return -1
+        }
+
+        f.Close() else {
+            IoError e => return -2
+        }
+
+        return 1
+    }
+
+    pub int Boom() {
+        Environment.Sleep(400ms)
+        throw "boom"
+    }
+}
+
+actor Caller(Napper N, Helper H) {
+    pub void Go() {
+        print(N.Outer(H))
+    }
+
+    pub string Done() => "done"
+}
+
+actor Reader {
+    pub string Read() {
+        bytes = File.ReadAll("park-file-drained.txt") else {
+            IoError e => return "read {e.Kind}"
+        }
+
+        return Text(bytes)
+    }
+}
+
+void | IoError | ExitError Main() {
+    k = File.Create("park-file-drained.txt")
+    k.Write("k".Bytes)
+    k.Close()
+    Command.New("mkfifo").Arg("park-file-drained").Status()
+    reader = spawn Reader()
+    print(reader.Read())
+    before = Directory.List("/proc/self/fd").Count
+    poker = spawn Helper() on crash stop
+    napper = spawn Napper()
+    c = spawn Caller(napper, poker) on crash (e) {
+        match e.Reason {
+            RuntimeError r => print(r.Kind)
+        }
+
+        restart
+    }
+
+    send c.Go()
+    Environment.Sleep(100ms)
+    w = File.Create("park-file-drained")
+    w.Close()
+    print(c.Done())
+    print(Directory.List("/proc/self/fd").Count - before)
+    File.Delete("park-file-drained")
+    File.Delete("park-file-drained.txt")
+}
+
+Main() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}
+```
+
+Case: [system/park-file-fork-wait.kz](../corpus/system/park-file-fork-wait.kz)
+```kurz
+// `Opener`'s opening of a FIFO runs on the pool of threads for blocking calls (S10) and waits for a writer, and the top-level code
+// forks while it waits. The child of a `fork` drops the pool, whose threads it has none of, and the opening's wait in the child
+// ends with `Other` and the number 125, `ECANCELED`, so that the child's call of `Got`, queued behind it, gets its answer; a child
+// that kept the wait would wait without end, the wait counted among the registrations of the poller, which raises no `deadlock`
+// (U18). The parent waits for the child, then opens the FIFO to write, so that its own opening ends
+extern "C" {
+    int fork()
+    int waitpid(int pid, int* status, int options)
+    void _exit(int code)
+}
+
+actor Opener {
+    mut string got = "none"
+
+    pub void Open() {
+        f = File.Open("park-file-fork-wait") else {
+            IoError e => {
+                got = "open {e.Kind} {e.Code}"
+                return
+            }
+        }
+
+        got = "open"
+        f.Close() else {
+            IoError e => got = "close {e.Kind}"
+        }
+    }
+
+    pub string Got() => got
+}
+
+void | IoError | ExitError Main() {
+    Command.New("mkfifo").Arg("park-file-fork-wait").Status()
+    o = spawn Opener()
+    send o.Open()
+    Environment.Sleep(100ms)
+    mut int child = 0
+    raw {
+        child = fork()
+    }
+
+    // a fork that failed ends the case before the writer, so that no `waitpid` takes a pid below 0
+    if child < 0 {
+        print("fork failed")
+        return
+    }
+
+    if child == 0 {
+        print("child {o.Got()}")
+        raw {
+            _exit(0)
+        }
+    }
+
+    raw {
+        waitpid(child, null, 0)
+    }
+
+    w = File.Create("park-file-fork-wait")
+    w.Close()
+    print("parent {o.Got()}")
+    File.Delete("park-file-fork-wait")
+}
+
+Main() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}
+```
+
 Case: [system/park-file-fork.kz](../corpus/system/park-file-fork.kz)
 ```kurz
 // `Filer`'s read of a file runs on the pool of threads for blocking calls (S10), so that the scheduler takes the events of the
 // pool's `eventfd`. The child of a `fork` drops the pool and its `eventfd`, whose number its accepted connection then takes, and
 // the child's read of that connection waits in the poller of its own: the event of the connection reaches the read, and not the
 // pool the child does not have. The child writes `w` before its read, and the parent writes its byte 0.2 seconds after it reads
-// `w`, so that the read waits for the byte. That the read ends as its byte comes, and not at its bound of 5 seconds, is a bound
-// of time, which `FileTests` holds
+// `w`, so that the read waits for the byte. What this case's output holds is that the child's read gets its byte after the
+// `fork`; a read whose event the pool's drain took would get it too, at its bound of 5 seconds, where the read looks at its
+// descriptor once more, so that the read's end as its byte comes is a bound of time, which `FileTests` holds and this case does not
 extern "C" {
     int fork()
     int waitpid(int pid, long status, int options)
@@ -3814,6 +4087,8 @@ Run() else {
 Case: [system/park-command-fifo.kz](../corpus/system/park-command-fifo.kz)
 
 Case: [system/park-command-crash.kz](../corpus/system/park-command-crash.kz)
+
+Case: [system/park-command-pipes.kz](../corpus/system/park-command-pipes.kz)
 
 ### S19 (decided, §12) A child beside the program, and its input
 

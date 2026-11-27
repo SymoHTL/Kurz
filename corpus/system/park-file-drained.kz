@@ -1,0 +1,99 @@
+// expect: output
+// | k
+// | CalleeCrashed
+// | done
+// | 0
+// threads: 1
+// rules: S10, U20
+
+// `Outer` opens a FIFO, a call on the pool of threads for blocking calls (S10) that ends once a writer opens it, and `Boom`, a call
+// `Helper` makes in the chain of `Outer`'s message (U17), is let in over that wait and sleeps 0.4 seconds before it throws. The
+// top-level code opens the FIFO to write 0.1 seconds in, so that the opening's job ends while `Boom` sleeps and the scheduler takes
+// its end before the crash: the fall gives that job back and closes the descriptor the opening gave, as it closes one whose job
+// ends after the fall (issue 661, the product pass, comment 7182792402, Q3), so that the count of the process's open descriptors,
+// which the system lists in `/proc/self/fd`, is the same once the crash is over as before it. A fall that left the job would leave
+// one more. `Reader`'s read of a file makes the pool before the first count. S10 alone is the subject; U20 it passes through
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+actor Helper {
+    pub void Poke(Napper n) {
+        print(n.Boom())
+    }
+}
+
+actor Napper {
+    pub int Outer(Helper helper) {
+        send helper.Poke(this)
+        f = File.Open("park-file-drained") else {
+            IoError e => return -1
+        }
+
+        f.Close() else {
+            IoError e => return -2
+        }
+
+        return 1
+    }
+
+    pub int Boom() {
+        Environment.Sleep(400ms)
+        throw "boom"
+    }
+}
+
+actor Caller(Napper N, Helper H) {
+    pub void Go() {
+        print(N.Outer(H))
+    }
+
+    pub string Done() => "done"
+}
+
+actor Reader {
+    pub string Read() {
+        bytes = File.ReadAll("park-file-drained.txt") else {
+            IoError e => return "read {e.Kind}"
+        }
+
+        return Text(bytes)
+    }
+}
+
+void | IoError | ExitError Main() {
+    k = File.Create("park-file-drained.txt")
+    k.Write("k".Bytes)
+    k.Close()
+    Command.New("mkfifo").Arg("park-file-drained").Status()
+    reader = spawn Reader()
+    print(reader.Read())
+    before = Directory.List("/proc/self/fd").Count
+    poker = spawn Helper() on crash stop
+    napper = spawn Napper()
+    c = spawn Caller(napper, poker) on crash (e) {
+        match e.Reason {
+            RuntimeError r => print(r.Kind)
+        }
+
+        restart
+    }
+
+    send c.Go()
+    Environment.Sleep(100ms)
+    w = File.Create("park-file-drained")
+    w.Close()
+    print(c.Done())
+    print(Directory.List("/proc/self/fd").Count - before)
+    File.Delete("park-file-drained")
+    File.Delete("park-file-drained.txt")
+}
+
+Main() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}

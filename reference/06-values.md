@@ -148,26 +148,28 @@ is. Leaving `mut` out at the call is the compile error `mut-at-call`. What may s
 a call is a `mut` variable or a path from one, through fields of `data` values, to the value that
 is passed (`Fill(mut c.Items)`), or a `mut` field of the instance named alone in its method (M4,
 K7); a call result or a literal cannot stand there, and `mut` in front of an argument whose parameter
-is not `mut` is `mut-at-call` as well. Passing one variable or one path twice as `mut`
-(`Swap(mut a, mut a)`), or a variable or a path beside a longer path into it
+is not `mut` is `mut-at-call` as well. Passing one variable, one path or one `mut` field of the
+instance named alone in its method twice as `mut` (`Swap(mut a, mut a)`, `Two(mut Items, mut Items)`),
+or a variable or a path beside a longer path into it
 (`Pair(mut p.In, mut p.In.A)`), is `mut-at-call` too: each `mut` parameter is the only way its value
 changes while the function runs (M3). The path of `data` fields after `mut` is decided (§4, the
 owner, 2026-11-25, issue 646, comment 7167181142, "Decide + build") *(proposed: a `mut` field of the
 instance named alone in its method after `mut`, and the uses of `mut-at-call` for `mut` in front of
-an argument whose parameter is not `mut` and for one variable or path passed twice or beside a
-longer path into it)*.
+an argument whose parameter is not `mut` and for one variable, path or field named alone passed twice,
+or a variable or path beside a longer path into it)*.
 
 A path of `data` fields passed as `mut`, `Grow(mut b.Items)`, gives the callee the place at the end of
 the path, as C#'s `ref b.Items` and Rust's `&mut b.items` do: a block on the path that another value
 holds is copied first, as an assignment into the path copies it (M4), so that a variable that held it
 keeps its value, and one the variable holds alone is written where it stands (§4, the owner, 2026-11-25,
-"Copy if shared"). An item of a list, an entry of a map, a field of a class instance, a `weak`
-reference on the path, and a path that ends at a `weak` field given to a strong `mut T?` parameter
-stay `not supported` (§4, the owner, 2026-11-25, "Data fields only"). *(assumed, §4: the place is
-taken after the other arguments ran, as a variable's is; a path to a `weak` field given to a
+"Copy if shared"). An item of a list, an entry of a map, a field of a class instance and a `weak`
+reference on the path stay `not supported` (§4, the owner, 2026-11-25, "Data fields only").
+*(assumed, §4: the place is taken after the other arguments ran, as a variable's is; a path that
+ends at a `weak` field given to a strong `mut T?` parameter is `not supported`, and one given to a
 `mut weak T?` parameter keeps the `type-mismatch` the build gives it, since a read of the field is the
-strong `T?` (R3); a `weak` field named alone in its method, which is no path, stays `not supported` as
-a path to one does.)*
+strong `T?` (R3); a `weak` field named alone in its method, which is no path, is `not supported`
+given to a strong `mut T?` parameter and `type-mismatch` given to a `mut weak T?` one, as a path to
+one is.)*
 
 Within one expression, a read of what a call takes as `mut`, of a value that holds it or of one it
 holds (the variable itself, a path of fields, an item of a list), is the compile error
