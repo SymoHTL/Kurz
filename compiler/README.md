@@ -285,15 +285,16 @@ checks either.
 
 `kurz test [--release] [--lines] [--cpu <name>] [--seed <N>] <file.kz>` builds the file's tests in place of its
 top-level code, which does not run, and runs them in a place of its own as `kurz run` runs a program,
-with no word for the program: `--` and an argument after the file are the usage's, since a test reads no
-`args` (Y2, F17). It writes `test "name" ... ok` or `test "name" ... FAILED` for each test, in the order of
+with no word for the program: `--`, an argument and an option after the file are the usage's, since a test reads no
+`args` (Y2, F17, Y11). It writes `test "name" ... ok` or `test "name" ... FAILED (seed 1234)`, the seed of the run, for each test, in the order of
 the file, after the lines the test printed, the words of a failed test's crash indented under its
 `FAILED` line, and then the counts, `2 tests: 1 passed, 1 failed`, `1 test:` for one (Y3), and ends with
 0 where every test passed and 1 where one failed (Q4). A program the checker accepts with no test gets
 `error: no test in <file>` and a `help:` line naming the form, and the exit code 1 (Y4, Q6).
-The run takes the seed `--seed` gives, a `ulong` in digits alone, or a new one from the system's
-randomness, and a failed test's line names it, `test "name" ... FAILED (seed 1234)`; a value that is no
-`ulong` gets `error: seed (<the value>)` and the exit code 1, before the build (Y11).
+The run takes the seed `--seed` gives, a `ulong` in digits alone, the word after the flag whatever it is,
+or a new one that the command draws from the system's randomness with .NET's `RandomNumberGenerator`
+before the build, and a failed test's line names it; a value that is no `ulong` gets `error: seed (<the
+value>)` and the exit code 1, before the build, and a `--seed` that is the last word gets the usage (Y11).
 `CommandTests` holds each of these.
 
 Any other command line gets the usage on standard error and the exit code 1:

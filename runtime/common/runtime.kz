@@ -3180,7 +3180,8 @@ void LogRefused(byte* entry, long count) {
 static mut int workerCount = 0
 
 // Whether `KURZ_THREADS` set 1 (`ThreadsRead`), with which a run of `kurz test` takes its ready actors first in, first out under any
-// seed, as a case marked `// threads: 1` does (`RunTests`; Y11, U35; section 2, assumed there).
+// seed, as a case marked `// threads: 1` does (`RunTests`; Y11, U35; section 2, assumed there): only a build for Linux reads the
+// variable, so that in a build for Windows this stays false and the seed draws the order whatever `KURZ_THREADS` holds.
 static mut bool oneAsked = false
 
 // The count of worker threads the first `spawn` starts (`WorkersStart`), the count `KURZ_THREADS` set, or where it is not set the
@@ -4346,6 +4347,7 @@ void EndActors() {
         runFirst = null
         runLast = null
         turnLeft = 0
+        advanced = null
         if sharedWords != null {
             Lock(PauseLock())
             paused = null
@@ -10695,7 +10697,7 @@ thread static mut long testWordsRoom = 0
 // error line (`LoopFirst`, `LoopLines`; the owner, 2026-11-23, #622, comment 7095825069, 1), each indented by four spaces as the
 // calls kept out are *(assumed: the form of those calls' lines, comment 7067139953)*; then every actor the test made ends at once
 // (`TestEnded`; F6). The line of its result is written on standard output after the lines the test printed (F4), `test "name" ...
-// ok` or `test "name" ... FAILED`, the words indented by four spaces under a failed one, and after the last test the counts, `2 tests:
+// ok` or `test "name" ... FAILED (seed 1234)`, the words indented by four spaces under a failed one, and after the last test the counts, `2 tests:
 // 1 passed, 1 failed`, `1 test:` for one (Q3, F21); the process then ends with the exit code 0 where every test passed, else 1 (Q4).
 // A line the runner cannot write raises `print-failed` at the line of the test it reports, the counts at the last test's line (A17).
 // Before the first test the runner starts the generators of the build's seed, `seed`, from which the draws of the runtime follow, and

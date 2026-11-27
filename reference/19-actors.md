@@ -2783,7 +2783,9 @@ restart runs its constructor takes no call of the restart's chain, which waits i
 constructor's end (U22; §6, the owner, 2026-11-20, #599, comment 7051501153, "Option 1"). The chain ID is 16 bytes,
 drawn at random from a generator of its thread that the system's randomness seeds once, and a system
 that gives no randomness when a thread starts its first chain ends the program with `random-failed`,
-as a thread's first map does (M9) *(assumed in §6)*.
+as a thread's first map does (M9) *(assumed in §6)*. A build of `kurz test` seeds that generator from
+the draws of its seed in place of the system's randomness, and so never ends with `random-failed` there
+(Y11; §2, assumed there).
 
 Case: [actors/callback.kz](../corpus/actors/callback.kz)
 ```kurz
@@ -5466,7 +5468,8 @@ of 30 s since the last restart with no crash, as Akka's backoff supervisor waits
 clock of the runtime, the taken points of comment 6899225864). What doubles is the pause before its
 variation, the cap holds that pause before it is varied, so that a pause reaches 36 s, and the run of
 30 s counts from the start of the last restart *(assumed: as §6 marks them, readings of the build
-that the answer of 2026-10-30 did not give)*. While a pause runs, a wait of the top-level code that
+that the answer of 2026-10-30 did not give)*. In a build of `kurz test` the thread's generator is the
+one the draws of its seed start, so that a seed replays the variation too (Y11; §2, assumed there). While a pause runs, a wait of the top-level code that
 finds nothing else to run sleeps until it ends, and raises no `deadlock` (U18)
 (§6, the taken points of comment 6899225864). A corpus case crashes at most three times, about
 0.7 s of pauses, unless it writes `after 1ms` (U26) *(assumed: as §6 marks it)*. The case below holds

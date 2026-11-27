@@ -86,8 +86,8 @@ its `// build:` line where it has one and before its `// allow:` line, and takes
 corpus line of issue 586, comment 6993110710); the runner runs it with the seed 0, so that its lines are the same on every run,
 and builds it, where it is marked `// threads: 1`, with its ready actors first in, first out under that seed, which a build for
 Windows, reading no `KURZ_THREADS`, gets from the build alone (Y11; §2, assumed there).
-A case whose output follows one thread's order carries the line `// threads: 1`, with which the runner
-runs it on one thread (U35; §6, the owner, 2026-11-17, #519, comment 6946657505, Q5, "// threads: 1
+A case whose output follows one thread's order of its ready actors, first in, first out, carries the line `// threads: 1`, with which the runner
+runs it on one thread, while a case of `kurz test` without the line shows the order its seed 0 draws (Y11) (U35; §6, the owner, 2026-11-17, #519, comment 6946657505, Q5, "// threads: 1
 header (Recommended)"), and `compiler/README.md` says whether a runner reads it. The line stands after its `// system:`
 line where it has one and before its `// rules:` line, and takes no other count *(assumed: the line as that answer
 gives it, in the place of the other optional lines, which the answer did not name)*. A header out of the shape this

@@ -115,7 +115,8 @@ flowchart TD
         or another result;
         and the corpus runner, which builds every case that expects a run and that the compiler emits with the
         pinned clang and runs it with `KURZ_THREADS` taken away, on the threads U35 gives a program where it is not
-        set, a case marked `// threads: 1` on one, the cases of a crash and of the blocks of `on crash`, `attempt` and
+        set, a case marked `// threads: 1` on one, a case of `kurz test` with the seed 0 (Y11), one marked
+        `// threads: 1` built with its ready actors first in, first out, which on Windows the build alone gives, the cases of a crash and of the blocks of `on crash`, `attempt` and
         `per node` that its list `CrashPathCases` names again on four worker threads (U35), which on Windows, where no
         worker thread starts, is a run of one thread again, and every case again under an allocator that makes every
         freed block inaccessible, but for

@@ -8,8 +8,9 @@
 // command: test
 // rules: Y11
 
-// the four speakers are ready at one turn, and run in the order that the seed 0, which the runner gives, draws for them, and not in
-// the order of their sends, first in, first out
+// the four speakers are ready at one turn, and run in the order that the seed 0, which the runner gives, draws for them by Y11's take,
+// each take a word of the order modulo the count of those left, which keep their order in the queue, and not in the order of their
+// sends, first in, first out
 actor Speaker(string Name) {
     pub void Say() {
         print(Name)
