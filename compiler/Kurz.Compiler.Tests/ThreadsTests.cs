@@ -138,6 +138,80 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>
+    /// The program of <see cref="A_call_through_an_interface_on_worker_threads_frees_the_heap_of_its_message"/>: 300000 calls of one
+    /// actor to another through an interface inside one message, then the line <c>VmHWM</c> of the system's <c>/proc/self/status</c>,
+    /// the peak of the process's resident memory.
+    /// </summary>
+    private const string InterfaceCalls = """
+        interface Store {
+            long Get(string key)
+        }
+
+        actor Cache : Store {
+            pub long Get(string key) => long(key.Bytes.Count)
+        }
+
+        actor Driver {
+            pub long Run(int count) {
+                Store c = spawn Cache()
+                mut long total = 0
+                mut int i = 0
+                while i < count {
+                    total = total + c.Get("item number {i}")
+                    i = i + 1
+                }
+
+                return total
+            }
+        }
+
+        string | IoError Peak() {
+            bytes = File.ReadAll("/proc/self/status")
+            text = string.FromUtf8(bytes) else {
+                InvalidUtf8 => ""
+            }
+
+            for line in text.Split('\n') {
+                if line.StartsWith("VmHWM:") {
+                    return line
+                }
+            }
+
+            return "none"
+        }
+
+        void | IoError Show() {
+            print(spawn Driver().Run(300000))
+            print(Peak())
+        }
+
+        Show() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    /// <summary>
+    /// U1, U35, T17: a call through an interface that an actor implements builds its message in a heap of its own on worker threads, which
+    /// the field of the message names (<c>Emitter.OwnHeapStored</c>), so that the receiver copies the arguments out of it and frees it, as
+    /// every other message's: 300000 such calls inside one message on four worker threads keep the peak of the process's resident memory
+    /// under 64 MiB. Built with the slot that left that field unwritten, the program kept every such heap: its peak was 234.8 MB on four
+    /// worker threads, against 9.6 MB with the field written and 8.7 MB for the same calls made directly (2026-11-27, `--release` builds).
+    /// </summary>
+    [Fact]
+    public void A_call_through_an_interface_on_worker_threads_frees_the_heap_of_its_message()
+    {
+        if (Ran(InterfaceCalls, "threads-interface-heap", "export KURZ_THREADS=4; ") is { } run)
+        {
+            Assert.Equal((0, ""), (run.Code, run.Error));
+            Assert.Equal("5288890", run.Output[0]);
+            var peak = Regex.Match(run.Output[1], "^VmHWM:\\s+([0-9]+) kB$");
+            Assert.True(peak.Success, run.Output[1]);
+            Assert.True(long.Parse(peak.Groups[1].Value, CultureInfo.InvariantCulture) < 65536, run.Output[1]);
+        }
+    }
+
+    /// <summary>
     /// U35, T16 2: the wait of a call of the top-level code reads no block of the call's message after its push, since the callee's
     /// worker can run the message and free its heap of its own while the main thread holds no epoch (`OwnLeft`, `Unpinned`), but where
     /// it finds nothing left to run, under the lock of the process (`Answer`): 2000 calls to fresh actors on four worker threads, built
