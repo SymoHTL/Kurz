@@ -278,14 +278,15 @@ public sealed partial class Checker
     /// The text of <c>send-needs-word</c> at the interface after an actor's name: for a type that crosses with <c>copy</c> or
     /// <c>move</c>, the words of item 5 of the product pass (comment 7211645920), "`Cache` implements `Store`, whose method `Get` takes
     /// `List&lt;int&gt;`, which crosses into an actor only with `copy` or `move` (U12)", and the same with "gives" for a result, which
-    /// the owner kept (Q8, 2026-11-27, comment 7215317481); for a type that never crosses, the same head with the reason it never does
-    /// <i>(assumed: no text of the pass names that kind)</i>.
+    /// the owner kept (Q8, 2026-11-27, comment 7215317481); for a type that never crosses, the same head with the reason it never does,
+    /// a result's text naming its way back to the caller, as the result's <c>pointer-crosses</c> does <i>(assumed: no text of the pass
+    /// names that kind)</i>.
     /// </summary>
     private static string CrossingText(ClassSymbol actor, InterfaceSymbol face, FunctionSymbol m, string verb, KurzType type, ActorCrossing kind, string? why)
     {
         var head = $"`{actor.Name}` implements `{face.Name}`, whose method `{m.Name}` {verb} `{type}`";
         return kind == ActorCrossing.Never
-            ? $"{head}, which never crosses into an actor: it reaches {why} (U1, U12)"
+            ? $"{head}, which never crosses {(verb == "gives" ? "back to the caller" : "into an actor")}: it reaches {why} (U1, U12)"
             : $"{head}, which crosses into an actor only with `copy` or `move` (U12)";
     }
 

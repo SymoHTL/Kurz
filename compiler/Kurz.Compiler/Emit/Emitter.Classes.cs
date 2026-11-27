@@ -489,7 +489,7 @@ public sealed partial class Emitter
         fn.Return($"i1 {fn.Value($"and i1 {slot}, {number}")}");
     });
 
-    /// <summary>U1, K13: the hash of an actor's block for an interface, <c>%a1</c>, under the keys of a map's block, <c>%a0</c>: that of the two words of its reference (I4 (a), assumed).</summary>
+    /// <summary>U1, K13: the hash of an actor's block for an interface, <c>%a1</c>, under the keys of a map's block, <c>%a0</c>: that of the two words of its reference (I4 (a) of #519, comment 7211586386, chosen 2026-11-27, comment 7215317481; assumed: the box and its two words, the mechanism no answer gave).</summary>
     private string ActorBoxHash() => Helper("hash.actor.box", "i64", ["ptr", "ptr"], () =>
     {
         var words = fn.Value($"getelementptr {ActorBox()}, ptr %a1, i32 0, i32 2");
@@ -1358,7 +1358,7 @@ public sealed partial class Emitter
             if (symbol.IsActor)
             {
                 // U1: an actor's table for the interface: its block's release and weak release, the equality and the hash of its reference
-                // (I4 (a), assumed), null for the link a class's arm reads, which so answers false for an actor's table (`ClassArm`,
+                // (I4 (a), chosen 2026-11-27, comment 7215317481; assumed: the mechanism), null for the link a class's arm reads, which so answers false for an actor's table (`ClassArm`,
                 // `Descends`), an arm of another interface finding the actor's table by `FaceArm`'s search of the implementers, and null
                 // for the copy, since `CrossingOf` refuses every value of an interface, which no word makes cross, so that no copy reads
                 // it, as a class's table for an interface holds null there, then a message for each method (`ActorSlot`)

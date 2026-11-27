@@ -8337,7 +8337,7 @@ public sealed class CheckerTests
     {
         // U1: the clauses after the name (section 6, Q1 of issue 519, comment 6866132292), but `stack` and the words of a policy (U27), so the
         // block of `on crash` and a `per` actor's policy among them (Q15 of 2026-11-13), a modifier of the actor, type parameters, which
-        // Q26 of comment 6881678834 lets an actor declare and the build does not read; `static` members, which U1 reads
+        // Q26 of comment 6882624606 lets an actor declare and the build does not read; `static` members, which U1 reads
         // as K18 reads a class's and the build does not read; U9: a modifier of a method but `pub`, which Q26 lets a method take as a class's
         // does and the build does not read; `spawn` of an actor with type parameters, with its type arguments (U2, U14), its arguments read
         // loosely (E1)
@@ -8349,8 +8349,9 @@ public sealed class CheckerTests
     [Fact]
     public void An_actor_s_reference_is_a_value_of_an_interface_the_actor_implements()
     {
-        // U1 (#519, comment 7211586386, I1 (a), chosen 2026-11-27, comment 7215317481): an actor names an interface after its name, declared before or after it, and
-        // implements its methods as a class does (K6); its reference is a value of that interface and of no other
+        // U1 (#519, comment 7211586386, I1 (a), chosen 2026-11-27, comment 7215317481): an actor names an interface after its name, and its
+        // reference is a value of that interface and of no other; the interface declared before or after it, and its methods implemented
+        // as a class implements them, `missing-member` where one lacks (K7) (assumed, as §6 marks them)
         const string cache = "actor Cache : Store {\n    pub long Get(string key) => 5\n}\n\n";
         Assert.Empty(Errors(StoreFace + cache + "long Read(Store s) => s.Get(\"a\")\n\nc = spawn Cache()\nprint(Read(c))\n"));
         Assert.Empty(Errors(cache + StoreFace + "Store s = spawn Cache()\nprint(s.Get(\"a\"))\n"));
@@ -8379,13 +8380,16 @@ public sealed class CheckerTests
         Assert.Empty(Errors("interface Namer {\n    string Name(string prefix)\n}\n\nactor P : Namer {\n    pub string Name(string prefix) => prefix\n}\n"));
 
         // the texts: item 5 of the product pass (comment 7211645920), kept by the owner (Q8, comment 7215317481), for a parameter and,
-        // with "gives", for a result; a type that never crosses keeps the same head with its reason (assumed)
+        // with "gives", for a result; a type that never crosses keeps the same head with its reason, a result's text naming its way
+        // back to the caller, as the result's `pointer-crosses` does (assumed)
         Assert.Equal("`Worker` implements `Filler`, whose method `Fill` takes `Bag`, which crosses into an actor only with `copy` or `move` (U12)",
             ErrorText(bag + "interface Filler {\n    void Fill(Bag b)\n}\n\nactor Worker : Filler {\n    pub void Fill(Bag b) {\n        print(b.N)\n    }\n}\n"));
         Assert.Equal("`Worker` implements `Maker`, whose method `Make` gives `Bag`, which crosses into an actor only with `copy` or `move` (U12)",
             ErrorText(bag + "interface Maker {\n    Bag Make()\n}\n\nactor Worker : Maker {\n    pub Bag Make() => Bag(1)\n}\n"));
         Assert.StartsWith("`Worker` implements `Caller`, whose method `Call` takes `(int) => int`, which never crosses into an actor: it reaches a function value",
             ErrorText("interface Caller {\n    void Call((int) => int f)\n}\n\nactor Worker : Caller {\n    pub void Call((int) => int f) {\n        print(f(1))\n    }\n}\n"));
+        Assert.StartsWith("`Worker` implements `Shop`, whose method `Find` gives `Store`, which never crosses back to the caller: it reaches",
+            ErrorText(StoreFace + "interface Shop {\n    Store Find()\n}\n\nclass Fixed : Store {\n    pub long Get(string key) => 7\n}\n\nactor Worker : Shop {\n    pub Store Find() => Fixed()\n}\n"));
         Assert.StartsWith("`n` of `Taker.Take` is a `mut` parameter, and a call through `Taker` on the actor `T` is a message",
             ErrorText("interface Taker {\n    void Take(mut int n)\n}\n\nactor T : Taker {\n    pub void Take(mut int n) {\n        n = 1\n    }\n}\n"));
 

@@ -46,15 +46,18 @@ build says `not supported` to a generic actor.
 
 An actor's reference is a value of every interface the actor names, and a call through the
 interface on such a value is a message the actor runs in turn, a call that waits, with the bound
-its method declares (U36) and its crash and deadline at the line of that call (U20), and `send`
-before it is `syntax`, its text naming the interface's method (U6); a parameter or a result of a
+the actor's method declares, as a call through the actor's own reference has it, an interface's
+method taking no `within` (U36, U41), and its crash and deadline at the line of that call (U20);
+`send` before any call through the interface is `syntax`, whatever the value holds, since `send`
+stands before a call through an actor's reference by its written type, its text naming the
+interface's method (U6); a parameter or a result of a
 method of such an interface that does not cross into an actor with no word is `send-needs-word`
 (U12) at the line that names the interface, since no word stands at a call through it but the
 `move` of a parameter written `move`; `==` and a
 key of the interface's type over such a value are those of the reference, which equals no class
 instance, and an arm of the actor's type in a `match` over the interface takes the values that hold
 its references, as a class's arm takes its instances (C4); a call through the interface is an edge
-to every actor that implements it (U56) (§6, the owner, 2026-11-27, #519, comment 7215317481, I1 to
+to every actor that implements it (U56; §6, 2026-11-20, #519, comment 7051071630, T46 (a)) (§6, the owner, 2026-11-27, #519, comment 7215317481, I1 to
 I4, and Q6 to Q8 of the product pass, comment 7211645920, for the texts) *(assumed, as §6 marks
 them: the interface declared before or after the actor, and a method of it the actor lacks
 `missing-member` and one it declares with no `pub` `interface-method-private`, as a class's are
@@ -353,13 +356,13 @@ interface Store {
 }
 
 interface Named {
-    string Text()
+    string Name()
 }
 
 actor Cache : Store, Named {
     pub long Get(string key) => 5
 
-    pub string Text() => "cache"
+    pub string Name() => "cache"
 }
 
 class Fixed : Store {
@@ -367,7 +370,7 @@ class Fixed : Store {
 }
 
 string Kind(Store s) => match s {
-    Named n => "named {n.Text()}"
+    Named n => "named {n.Name()}"
     else => "plain {s.Get("a")}"
 }
 
