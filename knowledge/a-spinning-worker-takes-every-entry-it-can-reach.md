@@ -24,9 +24,9 @@ before its fixes (comment 7210832380, `KURZ_THREADS=4`, the least of 10 runs):
   (not checked at source).
 
 Measured each alone on 2026-11-27 (20 runs in each of two orders, the machine loaded by other work,
-and the four actors' counts, which send four messages, again in four orders of up to 40 runs, alike
-in every variant within the noise), each fix made its row faster and no row slower beyond the
-noise, the bar the owner set for keeping
+and the four actors' counts, which send four messages, again in six orders of up to 100 runs, alike
+in every variant within the noise, issue 39, comment 7226765242), each fix made its row faster
+and no row slower beyond the noise, the bar the owner set for keeping
 it (issue 39, comment 7221780113); the numbers stand in section 6 of the design record. A model of
 the wake (`ModelTests`) finds the lost wake of a form that turns the mark whether the actor is held
 or not (`Break.LeftUnheld`).
