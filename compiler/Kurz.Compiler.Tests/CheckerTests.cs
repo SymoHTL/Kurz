@@ -8380,6 +8380,17 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.MutInMessage, 5)], Errors("interface Taker {\n    void Take(mut int n)\n}\n\nactor T : Taker {\n    pub void Take(mut int n) {\n        n = 1\n    }\n}\n"));
         Assert.Empty(Errors("interface Namer {\n    string Name(string prefix)\n}\n\nactor P : Namer {\n    pub string Name(string prefix) => prefix\n}\n"));
 
+        // the texts: item 5 of the product pass (comment 7211645920), kept by the owner (Q8, comment 7215317481), for a parameter and,
+        // with "gives", for a result; a type that never crosses keeps the same head with its reason (assumed)
+        Assert.Equal("`Worker` implements `Filler`, whose method `Fill` takes `Bag`, which crosses into an actor only with `copy` or `move` (U1, U12)",
+            ErrorText(bag + "interface Filler {\n    void Fill(Bag b)\n}\n\nactor Worker : Filler {\n    pub void Fill(Bag b) {\n        print(b.N)\n    }\n}\n"));
+        Assert.Equal("`Worker` implements `Maker`, whose method `Make` gives `Bag`, which crosses into an actor only with `copy` or `move` (U1, U12)",
+            ErrorText(bag + "interface Maker {\n    Bag Make()\n}\n\nactor Worker : Maker {\n    pub Bag Make() => Bag(1)\n}\n"));
+        Assert.StartsWith("`Worker` implements `Caller`, whose method `Call` takes `(int) => int`, which never crosses into an actor: it reaches a function value",
+            ErrorText("interface Caller {\n    void Call((int) => int f)\n}\n\nactor Worker : Caller {\n    pub void Call((int) => int f) {\n        print(f(1))\n    }\n}\n"));
+        Assert.StartsWith("`n` of `Taker.Take` is a `mut` parameter, and a call through `Taker` on the actor `T` is a message",
+            ErrorText("interface Taker {\n    void Take(mut int n)\n}\n\nactor T : Taker {\n    pub void Take(mut int n) {\n        n = 1\n    }\n}\n"));
+
         // the same interface on a class alone holds nothing to the crossing (K6)
         Assert.Empty(Errors(bag + "interface Filler {\n    void Fill(Bag b)\n}\n\nclass Worker : Filler {\n    pub void Fill(Bag b) {\n        print(b.N)\n    }\n}\n"));
     }

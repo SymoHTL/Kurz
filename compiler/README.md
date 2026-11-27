@@ -2628,8 +2628,11 @@ ask about it.
   to I1 to I4 of comment 7211586386) *(assumed: the mechanism, which no answer gave)*. The checker holds each method of such an interface to
   what crosses with no word at the line that names it, and the walk of the throw sets gives a call
   through the interface a site that waits on each actor that implements it, a loop's text naming the
-  interface's method beside the actor's (U56, T46 (a)), and `send` before such a call is `syntax` (U6). Pinned by
+  interface's method beside the actor's (U56, T46 (a)), and `send` before such a call is `syntax` (U6); the text of
+  `send-needs-word` there is the product pass's, comment 7211645920, item 5, which the owner kept (Q8). `print` of such a
+  value calls the interface's `Text()` through the table, a message as any call through it is (A10). Pinned by
   `CheckerTests` and by the cases `actors/interface-call.kz`, `actors/interface-arm.kz`, `actors/interface-arm-face.kz`,
+  `actors/interface-text.kz`, `actors/interface-method-private.kz`,
   `actors/interface-crash.kz`, `actors/interface-within.kz`, `actors/interface-crossing.kz`,
   `actors/interface-mut-parameter.kz`, `actors/interface-missing-method.kz`, `actors/interface-send.kz` and
   `actors/interface-call-loop.kz`.
