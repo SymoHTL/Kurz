@@ -4927,8 +4927,9 @@ extern "C" byte* WorkerMain(byte* record) {
     return null
 }
 
-// One turn of a worker thread: the epoch of the frees read and stored for the thread (`Reclaimed`), the frees whose epoch every thread
-// passed made, the clock read and the thread's timers fired (`Fire`), a restart whose pause ended run (`PauseEnded`, `Restart`), and
+// One turn of a worker thread: the epoch of the frees read and stored for the thread (`Reclaimed`), with a fence of sequential
+// consistency after the store, as the main thread's pin has (`PinnedHeld`), so that no read of the turn comes before the store a thread
+// that frees reads, as crossbeam-epoch's pin fences (not checked at source), the frees whose epoch every thread passed made, the clock read and the thread's timers fired (`Fire`), a restart whose pause ended run (`PauseEnded`, `Restart`), and
 // at every 61st turn a look at the poller with no wait while a registration waits, as on one thread (`RunTurn`), and the shared queue
 // read first; then an actor it can take run (`NextActor`, `RunTake`), or the thread parked (`WorkerPark`).
 void WorkerTurn() {
@@ -4936,7 +4937,8 @@ void WorkerTurn() {
         byte* record = threadRecord
         WorldEntered(record)
         long epoch = AtomicLong.FromPtr(Ptr<long>(scheduler)).Load(MemoryOrder.Acquire)
-        AtomicLong.FromPtr(Ptr<long>(record + 88)).Store(epoch, MemoryOrder.Release)
+        AtomicLong.FromPtr(Ptr<long>(record + 88)).Store(epoch, MemoryOrder.SeqCst)
+        Fence(MemoryOrder.SeqCst)
         Reclaimed()
         long now = PauseClock()
         tick = now
@@ -5418,11 +5420,13 @@ void Woken(byte* record) {
 }
 
 // The park of the worker of the record `record` that found nothing to take at `now` (`WorkerTurn`): under the lock of the parked
-// threads it marks itself parked, and parked with nothing pending where no activation sleeps among its timers (`Sleeping`), the timers
-// of its calls that wait counting for nothing, as on one thread (`RootLoop`; U18, U42), its poller holds no registration and no
-// restart's pause pends (section 6: Go's `checkdead` counts the timers and the poller); a worker that looked for work stops
-// looking; then the fence of `Notified` and a last look at the queues it takes from and at the time the first pause ends, which ends
-// the park where a queue holds an actor or a pause was made since its first look (`Pause`).
+// threads it marks itself parked, and a worker that looked for work stops looking; then the fence of `Notified` and a last look at the
+// queues it takes from and at the time the first pause ends, which ends the park where a queue holds an actor or a pause was made since
+// its first look (`Pause`). Only after that look, under the lock again and while no waker took it off the parked ones, it counts itself
+// parked with nothing pending, where no activation sleeps among its timers (`Sleeping`), the timers of its calls that wait counting for
+// nothing, as on one thread (`RootLoop`; U18, U42), its poller holds no registration and no restart's pause pends (section 6: Go's
+// `checkdead` counts the timers and the poller), as Go's `stopm` puts a thread on the idle list after the last look of `findrunnable` at
+// the run queues (not checked at source), so that the main thread never counts a worker whose last look finds an actor.
 // Where it is the last worker to park with nothing pending while the top-level code waits, it wakes the main thread, which then
 // reads whether anything is left (`RootSlept`; section 6, the owner's `deadlock` of the top-level code, the mechanism assumed there,
 // Go's `checkdead` run by the thread that goes idle last). Its epoch is then the largest `long`, since a parked thread reads no
@@ -5437,22 +5441,28 @@ void WorkerPark(byte* record, long now) {
         AtomicInt.FromPtr(Ptr<int>(record + 80)).Store(1, MemoryOrder.SeqCst)
         AtomicInt parked = AtomicInt.FromPtr(Ptr<int>(scheduler + 80))
         parked.Store(parked.Load(MemoryOrder.Relaxed) + 1, MemoryOrder.SeqCst)
-        if empty {
-            *Ptr<int>(record + 84) = 1
-            *Ptr<int>(scheduler + 16) = *Ptr<int>(scheduler + 16) + 1
-        }
-
         if *Ptr<int>(record + 104) != 0 {
             *Ptr<int>(record + 104) = 0
             AtomicInt.FromPtr(Ptr<int>(scheduler + 84)).FetchSub(1, MemoryOrder.SeqCst)
         }
 
-        bool last = empty && long(*Ptr<int>(scheduler + 16)) == *Ptr<long>(scheduler + 48) && *Ptr<int>(scheduler + 20) != 0
         Unlock(IdleLock())
         Fence(MemoryOrder.SeqCst)
         if HasWork(record) || AtomicLong.FromPtr(Ptr<long>(scheduler + 72)).Load(MemoryOrder.Acquire) != pause {
             Unparked(record)
             return
+        }
+
+        mut bool last = false
+        if empty {
+            Lock(IdleLock())
+            if AtomicInt.FromPtr(Ptr<int>(record + 80)).Load(MemoryOrder.Relaxed) != 0 {
+                *Ptr<int>(record + 84) = 1
+                *Ptr<int>(scheduler + 16) = *Ptr<int>(scheduler + 16) + 1
+                last = long(*Ptr<int>(scheduler + 16)) == *Ptr<long>(scheduler + 48) && *Ptr<int>(scheduler + 20) != 0
+            }
+
+            Unlock(IdleLock())
         }
 
         if last {
@@ -6497,11 +6507,25 @@ int Answer(byte* reply, byte* message, string file, int line) {
     sys.Entered()
     raw {
         if running == null {
-            long high = *Ptr<long>(message + 24)
-            long low = *Ptr<long>(message + 32)
+            // the chain of the message read before the wait on one thread, where a restart during the wait can free the heap that
+            // holds the message, and on worker threads only under the lock of the process, where no thread runs and its reply has no
+            // answer, since the callee's worker frees the heap of its own of a message that ran once every thread passed a turn
+            // since (`OwnLeft`), and the main thread holds no epoch while it waits (`Enqueue`, `Unpinned`)
+            mut long high = 0
+            mut long low = 0
+            if !Threaded() {
+                high = *Ptr<long>(message + 24)
+                low = *Ptr<long>(message + 32)
+            }
+
             if !RootWait(reply) {
                 mut found = List<long>()
                 WorldTaken()
+                if Threaded() {
+                    high = *Ptr<long>(message + 24)
+                    low = *Ptr<long>(message + 32)
+                }
+
                 Kept(high, low, mut found)
                 if found.Count > 0 {
                     DeadlockKept(found)
@@ -7982,16 +8006,21 @@ byte* BlockOf(byte* child) {
 // activation `header` on the reply `reply` confirmed under the lock of the process (`WorldTaken`): the walk made again while no other
 // thread runs, and where it finds the loop still, its text set in `text` (`LoopText`) and the deadline of that reply set to 0, so that
 // the line ends at this wait for every walk after it (`Onward`, `Waited`) and one loop raises one `deadlock`, the header still naming
-// the reply, which the waiter's fall unhooks; false where the loop is gone, the wait going on.
+// the reply, which the waiter's fall unhooks; false where the loop is gone, the wait going on. A reply its callee answered on another
+// thread before the lock was taken ends the loop too, though the walk may still find it: the walk's first hop reads the callee from the
+// reply and not its word (`Looped`, the bound aside of T66 1), while the first hop of the text reads that word (`Onward`) and ends the
+// line there, so a text of such a loop would name no actor at its first wait.
 bool LoopHeld(byte* header, byte* reply, mut string text) {
     WorldTaken()
     mut bool found = false
     raw {
-        long hops = Looped(header, reply)
-        if hops > 0 {
-            text = LoopText(*Ptr<byte*>(header + 320), hops)
-            *Ptr<long>(reply + 16) = 0
-            found = true
+        if ReplyState(reply) == 0 {
+            long hops = Looped(header, reply)
+            if hops > 0 {
+                text = LoopText(*Ptr<byte*>(header + 320), hops)
+                *Ptr<long>(reply + 16) = 0
+                found = true
+            }
         }
     }
 

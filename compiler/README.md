@@ -2310,11 +2310,14 @@ nothing to take parks in a poller of its own, with timers of its own (T88), and 
 `eventfd`, as a restart's pause that ends first of all wakes one parked worker, whose park reads the time of the first
 pause again, since the decision of a block that the top-level code runs makes its pause on the main thread (`Pause`,
 `NotifyOne`, `WorkerPark`); the last worker to park with nothing pending, no activation asleep, no registration of its poller and no
-restart's pause, wakes the main thread, whose wait then raises `deadlock` (`WorkerPark`, `RootSlept`). A message's
+restart's pause, wakes the main thread, whose wait then raises `deadlock` (`WorkerPark`, `RootSlept`), a worker counting itself so
+only after its last look at its queues found nothing, so that the main thread counts no worker that goes on with an actor. A message's
 arguments are copied into the receiver's heap at its turn, and a result into the waiter's heap as its wait returns (T17 1:
 `MessageQueued`, `Adopted`, `ResultHeap`, `ResultOwn`); an ended actor's first page, and a message's heap of its own, are
-freed once every thread passed a turn since (T16 2: `Deferred`, `Reclaimed`, `Reclaims`), the main thread holding its
-epoch around a `send` or a call of the top-level code (`Pinned`). A message on one thread pays the tests of the worker
+freed once every thread passed a turn since (T16 2: `Deferred`, `Reclaimed`, `Reclaims`), a worker storing the epoch at its
+turn with a fence of sequential consistency after it (`WorkerTurn`), as the main thread's pin does, the main thread reading the
+block of its call's message after the push only under the lock of the process, where its wait found nothing left to run (`Answer`),
+and holding its epoch around a `send` or a call of the top-level code (`Pinned`). A message on one thread pays the tests of the worker
 threads alone (the owner, 2026-11-26, issue 519, comment 7204486070, Q1): the main thread takes an actor with `RunOne`, which
 holds none of them, and a worker with `RunTake`; the emitter marks the forms that only the worker threads reach, which the
 path of one thread calls after a test, `noinline` and `cold` (`Emitter.WorkerForms`), and the helpers of that path that the
@@ -2330,7 +2333,8 @@ supervisor's queue of blocks before the fall of the actor that sends it, moved t
 and taken before its messages, as a BEAM process handles its signals before its messages and Akka keeps its system
 messages ahead of the mailbox (`Forwarded`, `SignalPushed`, `Moved`, `Signaled`), and dropped with its log line in
 its sender's name where the supervisor waits for its restart or for a block's decision (`SignalLeft`). The walk of a
-`deadlock` runs with no lock and confirms a loop it found under the lock of the process (T72 2: `LoopHeld`), which the
+`deadlock` runs with no lock and confirms a loop it found under the lock of the process (T72 2: `LoopHeld`) while the
+wait's own reply has no answer, since an answer its callee gave on another thread before the lock ends the loop, which the
 wait of the top-level code that finds nothing left to run takes too (`Kept`, `Stuck`), and nothing else takes
 (`WorldTaken`). The end of the process that the top-level code takes from a worker's crash is made by the main thread,
 whose stack holds the calls the trace names (`EndHanded`, `RootEnded`), at its turn in its wait, at its following read
