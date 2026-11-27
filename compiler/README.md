@@ -2298,15 +2298,74 @@ with the system's own room, as Rust's released library does (section 2);
 `TraceTests.A_program_on_Windows_starts_with_the_guarantee_of_its_main_threads_stack_set_to_0x5000_bytes`
 reads the guarantee in force on Windows and on Linux compiles the program alone.
 
+The worker threads of section 6 (U35) run on Linux where `KURZ_THREADS` sets a count of more than 1. The main thread runs
+the top-level code alone and sleeps in its poller while it waits (`RootSlept`). Each worker takes an actor from the queue of
+its thread that nobody steals, which holds the actors whose activation parked on it, then from its slot of the actor woken
+last, from its ring of 256 slots, as tokio's `queue::Local`, and from the shared queue, which it reads first at every 61st
+turn, and else steals half of another worker's ring, or its slot (`WorkerTurn`, `NextActor`, `StealInto`). A worker with
+nothing to take parks in a poller of its own, with timers of its own (T88), and another thread wakes it through its
+`eventfd`, as a restart's pause that ends first of all wakes one parked worker, whose park reads the time of the first
+pause again, since the decision of a block that the top-level code runs makes its pause on the main thread (`Pause`,
+`NotifyOne`, `WorkerPark`); the last worker to park with nothing pending, no activation asleep, no registration of its poller and no
+restart's pause, wakes the main thread, whose wait then raises `deadlock` (`WorkerPark`, `RootSlept`), a worker counting itself so
+only after its last look at its queues found nothing, so that the main thread counts no worker that goes on with an actor. A message's
+arguments are copied into the receiver's heap at its turn, and a result into the waiter's heap as its wait returns (T17 1:
+`MessageQueued`, `Adopted`, `ResultHeap`, `ResultOwn`); an ended actor's first page, and a message's heap of its own, are
+freed once every thread passed a turn since (T16 2: `Deferred`, `Reclaimed`, `Reclaims`), a worker storing the epoch at its
+turn with a fence of sequential consistency after it (`WorkerTurn`), as the main thread's pin does, the main thread reading the
+block of its call's message after the push only under the lock of the process, where its wait found nothing left to run (`Answer`),
+and holding its epoch around a `send` or a call of the top-level code (`Pinned`). A message on one thread pays the tests of the worker
+threads alone (the owner, 2026-11-26, issue 519, comment 7204486070, Q1): the main thread takes an actor with `RunOne`, which
+holds none of them, and a worker with `RunTake`; the emitter marks the forms that only the worker threads reach, which the
+path of one thread calls after a test, `noinline` and `cold` (`Emitter.WorkerForms`), and the helpers of that path that the
+worker threads call too `alwaysinline` (`Emitter.InLine`), as LLVM put each into its callers while the build had no worker
+threads, which `ThreadsTests` reads in the IR of a release build. `ThreadsTests` runs these on four worker threads: calls
+and sends that cross strings and lists between heaps, the order of one sender's messages, a sleep, a `deadlock` and a
+start whose `eventfd` the system refuses. A crash, its escalation and its restart, the end of an actor and of its children
+and the decision of a block of `on crash` hold only the actors they touch (section 6, comment 7194874125, 1): the thread
+that runs an actor's crash holds that actor, and the end of its children holds each child before it ends it, a child that
+runs waiting for its holder to let go of it (`HeldAlone`, `EndChildren`). A crash that passes up, an escalation or the
+`restart-limit` of a `max N in`, goes to the supervisor as a signal, a block in a heap of its own pushed on the
+supervisor's queue of blocks before the fall of the actor that sends it, moved to the front of its inbox before its blocks
+and taken before its messages, as a BEAM process handles its signals before its messages and Akka keeps its system
+messages ahead of the mailbox (`Forwarded`, `SignalPushed`, `Moved`, `Signaled`), and dropped with its log line in
+its sender's name where the supervisor waits for its restart or for a block's decision (`SignalLeft`). The walk of a
+`deadlock` runs with no lock and confirms a loop it found under the lock of the process (T72 2: `LoopHeld`) while the
+wait's own reply has no answer, since an answer its callee gave on another thread before the lock ends the loop, which the
+wait of the top-level code that finds nothing left to run takes too (`Kept`, `Stuck`), and nothing else takes
+(`WorldTaken`). The end of the process that the top-level code takes from a worker's crash is made by the main thread,
+whose stack holds the calls the trace names (`EndHanded`, `RootEnded`), at its turn in its wait, at its following read
+of a record or at its end. `RunTests` runs the cases of a crash, its log line, its escalation, its restart, the blocks of
+`on crash`, `attempt`, `per node` and the walk of a `deadlock` on four worker threads, held to their headers, and
+`ThreadsTests` the end of a crashed supervisor's children, a crash whose restart a long message of another worker does
+not hold back, an escalation and a `restart-limit` that reach the supervisor as signals, and a loop that two actors close
+at once, which raises one `deadlock`. What is not built on worker threads, each a reading of the code that no run checks
+(inferred): a timeout of a call while its callee copies the result leaks that result's heap; the reference that a `per
+node` lookup of the top-level code gives is read after its pin (`PerFind`); the offset that a test's `advance` adds to the
+clock (`ahead`) is a plain word that `Advance` writes while another worker reads it with no order; the walk with no lock reads
+the two words of an activation's wait, the message of a call's wait at 432 and the block at 360, one after the other, so that
+an activation that moved meanwhile from a call's wait to a sleep or a wait in the poller is read as a call whose reply is that
+block (`Onward`); and a main thread whose code
+calls nothing of the runtime takes no end a worker handed it. The process ends with every actor's heap held, freeing none, and the end
+of the process gives the memory back (section 6, comment 7194874125, 2: `EndActors`). A build for
+Windows starts no worker thread: its `Cores` gives 1 and its runtime reads no `KURZ_THREADS`. No run on Arm, and no
+ThreadSanitizer job, checks the orders of the atomic operations of the worker threads, and no run under a CPU quota of a
+control group checks their count.
+
 Of section 6 the emitter builds the actors of one thread, each message run to its end or to a wait that parks it (Q1 (a), the
 answers of 2026-11-14, issue 519, comment 6880404917), and no case shows
 where a program it builds differs from the section: every actor runs on the one thread the runtime
 runs, each message on a stack of its own ("The runtime"), its state word, and the choice of the one owner of
 each reply of its calls by a swap, changed by atomic operations that hold on any number of threads ("What the
 emitter emits"), while the lifetimes of the message a crash's swap reads and of the record of the waiter's actor,
-which the owner of a reply reads after its store, hold on one thread alone, with no worker thread, no line `threads`
-and no `KURZ_THREADS` read (U35), so that a program started with a `KURZ_THREADS` that U35 refuses, `0`
-among them, runs on the one thread with no error line, and the compiler reads no `project.kz`, so no line
+which the owner of a reply reads after its store, hold on one thread alone, with no worker thread and no line `threads`
+(U35): the start of a program built for Linux with a `spawn` reads `KURZ_THREADS` and ends with `threads-variable`
+where U35 refuses its value, `0` among them, and otherwise keeps the count it gives, or the cores the process may use
+where it is not set, counted as Rust 1.90.0's `available_parallelism` counts them, its affinity and the CPU quota of its
+control group (`ThreadsRead`, `Cores`), and starts that many worker threads at its first `spawn` only where `KURZ_THREADS`
+sets a count of more than 1 (`workersAsked`, `WorkersStart`; the paragraph of the worker threads), every other program and every
+test of `kurz test` running every actor on the main thread, as a case marked `// threads: 1` runs, and a build for Windows reads
+no `KURZ_THREADS`, its runtime giving no variable of the environment (S14); the compiler reads no `project.kz`, so no line
 of one reaches it, and the top-level code's wait runs the scheduler in place on the
 main thread's stack, where U18 has the main thread sleep beside the worker threads, and messages run only while the top-level
 code waits for a call's result, one message of each actor in turn, so that a `send` made after the
