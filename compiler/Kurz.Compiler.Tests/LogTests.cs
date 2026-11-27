@@ -100,17 +100,43 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
         }
     }
 
+    /// <summary>P8: the chain ID in the span of a line, which the test names by a letter of its own for each chain, in the order they appear.</summary>
+    [GeneratedRegex(@"\{chain=([0-9a-f]{32})\}")]
+    private static partial Regex SpanChain();
+
     [Fact]
-    public void A_line_written_while_a_message_runs_holds_none_of_the_actors_parts()
+    public void A_line_written_while_a_message_runs_holds_the_actors_span_with_the_chain_of_that_message()
     {
-        // P8: a line a function writes while an actor's message runs is P7's layout, with no chain ID and none of the actor's parts, and
-        // nothing stands in their place
-        const string text = "void Note(int n) {\n    Log.Information(\"noted {n}\")\n}\n\nactor Keeper {\n    mut int total = 0\n\n    pub int Add(int n) {\n        total = total + n\n        Note(total)\n        return total\n    }\n}\n\nk = spawn Keeper()\nprint(k.Add(2))\n";
+        // P8: a line of an actor's method and a line a function writes while the message runs hold the actor's type and the message's
+        // chain between the level and the category, the category staying the function's; the line of the crash takes the span of the
+        // actor it names with the chain of the message that crashed (Q7); each call of the top-level code starts a chain of its own, and
+        // a line of the top-level code holds no span, before the actor and after it (Q2)
+        const string text = "void Note(int n) {\n    Log.Information(\"noted {n}\")\n}\n\nactor Keeper {\n    mut int total = 0\n\n    pub int Add(int n) {\n        total = total + n\n        Note(total)\n        Log.Information(\"added {n}\")\n        return total\n    }\n\n    pub void Fail() {\n        Log.Warning(\"failing\")\n        throw \"down\"\n    }\n}\n\nLog.Information(\"at the top\")\nk = spawn Keeper()\nprint(k.Add(2))\nsend k.Fail()\nprint(k.Add(3))\nNote(0)\n";
         if (Logged(text, "log-in-message") is { } run)
         {
             Assert.Equal(0, run.Code);
-            Assert.Equal(["2"], run.Output);
-            Assert.Equal(["Information program: noted 2 n=2"], run.Lines);
+            Assert.Equal(["2", "3"], run.Output);
+            var chains = new List<string>();
+            var named = run.Lines.Select(line => SpanChain().Replace(line, chain =>
+            {
+                if (!chains.Contains(chain.Groups[1].Value))
+                {
+                    chains.Add(chain.Groups[1].Value);
+                }
+
+                return $"{{chain={(char)('A' + chains.IndexOf(chain.Groups[1].Value))}}}";
+            })).ToList();
+            Assert.Equal(
+            [
+                "Information program: at the top",
+                "Information Keeper{chain=A}: program: noted 2 n=2",
+                "Information Keeper{chain=A}: Keeper: added 2 n=2",
+                "Warning Keeper{chain=B}: Keeper: failing",
+                "Error Keeper{chain=B}: Kurz.Actor: Keeper#1 crashed: thrown \"down\" at program.kz:17",
+                "Information Keeper{chain=C}: program: noted 3 n=3",
+                "Information Keeper{chain=C}: Keeper: added 3 n=3",
+                "Information program: noted 0 n=0",
+            ], named);
         }
     }
 
@@ -303,6 +329,13 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
         Assert.Equal((DiagnosticKind.NotSupported, 2), (diagnostic.Kind, diagnostic.Line)); // E2: the id and the line, not the wording
         Assert.NotNull(Builder.Compile(SourceText.FromString("program.kz", text), [], Builder.CheckRuntime(Target.Linux), testBuild: true).Program); // the positive control
+
+        // P8: a log call inside an actor's method, which a build for Linux takes, keeps that `not supported` at its line (S11)
+        const string inActor = "actor A {\n    pub void Go() {\n        Log.Information(\"x\")\n    }\n}\n\na = spawn A()\na.Go()\n";
+        var inside = Builder.Compile(SourceText.FromString("program.kz", inActor), [], Builder.CheckRuntime(Target.Windows), testBuild: true);
+        Assert.Null(inside.Program);
+        Assert.Contains(inside.Diagnostics.Items, d => (d.Kind, d.Line) == (DiagnosticKind.NotSupported, 3));
+        Assert.NotNull(Builder.Compile(SourceText.FromString("program.kz", inActor), [], Builder.CheckRuntime(Target.Linux), testBuild: true).Program);
     }
 
     [Theory]
@@ -322,6 +355,24 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
             Assert.Equal(["done"], run.Output);
             var log = File.ReadAllText(Path.Combine(toolchain.Directory, name, "log.txt"));
             Assert.Equal([line, "Information program: c", "Information program: d"], Unstamped(log, before, DateTime.UtcNow));
+        }
+    }
+
+    [Fact]
+    public void The_line_that_names_dropped_lines_holds_no_span_before_an_actors_line_and_print_in_an_actor_writes_none()
+    {
+        // P8, Q7: the line of `Kurz.Log` that names the lines dropped before it holds no span, written in the one write of the line of
+        // an actor's message, which holds the actor's; a `print` of that message writes its value alone
+        const string text = "void | IoError Empty() {\n    File.WriteAll(\"log.txt\", \"\".Bytes)\n}\n\nactor Keeper {\n    pub int Add(int n) {\n        print(\"adding\")\n        Log.Information(\"added {n}\")\n        return n\n    }\n}\n\nLog.Information(\"a\")\nEmpty() else {\n    IoError e => print(e)\n}\n\nk = spawn Keeper()\nprint(k.Add(2))\n";
+        const string name = "log-dropped-actor";
+        var before = DateTime.UtcNow;
+        if (Ran(text, name, "printf '%0600d' 0 > log.txt; trap '' XFSZ; ulimit -f 1; exec 2>>log.txt; ") is { } run)
+        {
+            Assert.Equal((0, ""), (run.Code, run.Error));
+            Assert.Equal(["adding", "2"], run.Output);
+            var log = File.ReadAllText(Path.Combine(toolchain.Directory, name, "log.txt"));
+            Assert.Equal(["Warning Kurz.Log: dropped 1 line", "Information Keeper{chain=A}: Keeper: added 2 n=2"],
+                Unstamped(log, before, DateTime.UtcNow).Select(line => SpanChain().Replace(line, "{chain=A}")).ToList());
         }
     }
 
@@ -400,7 +451,9 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
         Assert.Equal((0, "test \"ten days on\" ... ok\ntest \"back\" ... ok\n2 tests: 2 passed, 0 failed\n"), (code, output));
         var lines = Toolchain.Lines(error);
         Assert.Equal(3, lines.Count);
-        Assert.Equal(["Information program: later", "Error Kurz.Actor: Crasher#2 crashed: thrown \"down\" at program.kz:3"], Unstamped($"{lines[0]}\n{lines[1]}\n", before.AddDays(10), after.AddDays(10)));
+        // a line of the test's own actor holds no span (P8, assumed in section 12), the crash of the actor it spawned holds that actor's
+        Assert.Equal(["Information program: later", "Error Crasher{chain=A}: Kurz.Actor: Crasher#2 crashed: thrown \"down\" at program.kz:3"],
+            Unstamped($"{lines[0]}\n{lines[1]}\n", before.AddDays(10), after.AddDays(10)).Select(line => SpanChain().Replace(line, "{chain=A}")).ToList());
         Assert.Equal(["Information program: now"], Unstamped($"{lines[2]}\n", before, after));
     }
 
