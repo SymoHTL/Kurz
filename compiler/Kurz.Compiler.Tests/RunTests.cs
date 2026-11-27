@@ -373,7 +373,9 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     {
         var bytes = File.ReadAllBytes(Path.Combine(CorpusTests.Root, "corpus", relativePath));
         var source = SourceText.FromBytes(relativePath, bytes, out _)!;
-        var compilation = Builder.Compile(source, header.Grants, runtime ?? toolchain.Runtime, testBuild: header.Build != BuildKind.Release, tests: header.Tests);
+        // Y11, chapter 0: a case that runs its tests runs with the seed 0, and one marked `// threads: 1` with its ready actors first in,
+        // first out, which a build for Windows, which reads no `KURZ_THREADS`, gets from the build alone
+        var compilation = Builder.Compile(source, header.Grants, runtime ?? toolchain.Runtime, testBuild: header.Build != BuildKind.Release, tests: header.Tests, ordered: header.OneThread);
         Assert.False(compilation.Diagnostics.HasErrors, $"{relativePath}: the compiler refuses a case that expects a run: {string.Join("; ", compilation.Diagnostics.Sorted)}");
         if (compilation.Program is { } program)
         {
@@ -471,7 +473,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             Assert.Equal("", all);
             if (header.Expectation == Expectation.Throws)
             {
-                var failed = output.ToList().FindIndex(l => l.EndsWith(" ... FAILED", StringComparison.Ordinal));
+                var failed = output.ToList().FindIndex(l => l.EndsWith(" ... FAILED (seed 0)", StringComparison.Ordinal)); // Y11, chapter 0: the seed 0
                 Assert.True(failed >= 0 && failed + 1 < output.Count, $"{relativePath}: no `FAILED` line with its words under it");
                 Assert.StartsWith($"    {header.ErrorId} ", output[failed + 1], StringComparison.Ordinal);
                 Assert.EndsWith($" at {relativePath}:{header.ErrorLine}", output[failed + 1], StringComparison.Ordinal);

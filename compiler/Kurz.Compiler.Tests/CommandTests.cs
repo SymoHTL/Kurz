@@ -487,13 +487,81 @@ public sealed class CommandTests : IDisposable
     [InlineData("test", "a.kz", "b.kz")]
     [InlineData("test", "--release", "--release", "a.kz")]
     [InlineData("test", "a.kz", "--cpu")]
+    [InlineData("test", "--seed", "1", "--seed", "1", "a.kz")] // Y11: `--seed` once, and a value after it
+    [InlineData("test", "a.kz", "--seed")]
+    [InlineData("run", "--seed", "1", "a.kz")] // Y11: the seed is `test`'s alone
+    [InlineData("build", "--seed", "1", "a.kz")]
     public void A_command_line_the_command_cannot_read_gets_the_usage_and_exit_1(params string[] arguments) =>
         Assert.Equal(
             (1, "", "usage: kurz --version [--verbose]\n       kurz build [--release] [--lines] [--cpu <name>] <file.kz> [-o <output>]\n"
                 + "       kurz run [--release] [--lines] [--cpu <name>] <file.kz> [-- <argument>...]\n       kurz exec [--release] [--lines] [--cpu <name>] \"<program text>\" [-- <argument>...]\n"
-                + "       kurz test [--release] [--lines] [--cpu <name>] <file.kz>\n"
+                + "       kurz test [--release] [--lines] [--cpu <name>] [--seed <N>] <file.kz>\n"
                 + "       run and exec pass the words after -- to the program\n"),
             Kurz(arguments));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("x")]
+    [InlineData("-1")]
+    [InlineData("+1")]
+    [InlineData(" 1")]
+    [InlineData("1.0")]
+    [InlineData("18446744073709551616")]
+    public void A_seed_that_is_no_ulong_in_digits_ends_the_command_before_its_build(string value) =>
+        // Y11: the value of `--seed` in digits alone, 0 to the greatest `ulong`; any other ends the command with its line, before the
+        // file is read, so that a file that is not there is not named
+        Assert.Equal((1, "", $"error: seed ({value})\n"), Kurz("test", "--seed", value, "missing.kz"));
+
+    [Fact]
+    public void Test_with_no_seed_takes_a_new_one_which_the_failed_line_names_and_which_replays_the_run()
+    {
+        // Y11, Q2 a, Q3 a: with no `--seed` the run takes a new seed, the failed test's line names it in digits, and `--seed` with it
+        // writes the same lines, the order of the ready actors among them
+        var source = Path.Combine(root, "replays.kz");
+        File.WriteAllText(source, Speakers + "test \"speaks\" {\n" + Spawned + "    check false\n}\n");
+        var first = KurzWithPlaces("test", source);
+        var seed = Regex.Match(first.Output, "^test \"speaks\" \\.\\.\\. FAILED \\(seed ([0-9]+)\\)$", RegexOptions.Multiline);
+        Assert.True(seed.Success, first.Output);
+        Assert.Equal(first, KurzWithPlaces("test", "--seed", seed.Groups[1].Value, source));
+    }
+
+    [Fact]
+    public void A_seed_orders_the_actors_ready_at_a_turn_the_same_on_every_run_and_KURZ_THREADS_1_keeps_their_queue()
+    {
+        // Y11, Q1 b: the four actors woken at one turn print in an order their seed draws, every one once, the same for a seed on each run,
+        // and more than one order across the seeds; on Linux `KURZ_THREADS` set to 1 runs them first in, first out under any seed (U35)
+        var source = Path.Combine(root, "orders.kz");
+        File.WriteAllText(source, Speakers + "test \"speaks\" {\n" + Spawned + "}\n");
+        var orders = new List<string>();
+        for (var seed = 1; seed <= 6; seed++)
+        {
+            var (code, output, error) = KurzWithPlaces("test", "--seed", seed.ToString(System.Globalization.CultureInfo.InvariantCulture), source);
+            Assert.Equal((0, ""), (code, error));
+            var lines = output.Split('\n');
+            Assert.Equal(["a", "b", "c", "d"], lines[..4].Order().ToList());
+            Assert.Equal(["test \"speaks\" ... ok", "1 test: 1 passed, 0 failed", ""], lines[4..].ToList());
+            orders.Add(string.Concat(lines[..4]));
+        }
+
+        Assert.True(orders.Distinct().Count() > 1, string.Join(" ", orders));
+        Assert.Equal(orders[2], string.Concat(KurzWithPlaces("test", "--seed", "3", source).Output.Split('\n')[..4]));
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var drawn = orders.FindIndex(o => o != "abcd") + 1;
+        var one = Processes.Capture(Host, [Dll, "test", "--seed", drawn.ToString(System.Globalization.CultureInfo.InvariantCulture), source], null, TimeSpan.FromMinutes(2),
+            new Dictionary<string, string?> { ["XDG_CACHE_HOME"] = Path.Combine(root, "cache"), ["KURZ_TRACE"] = "0", ["KURZ_THREADS"] = "1" });
+        Assert.Equal((0, "a\nb\nc\nd\ntest \"speaks\" ... ok\n1 test: 1 passed, 0 failed\n", ""), one);
+    }
+
+    /// <summary>The actor of the tests of the seed, which prints its name for <c>Say</c> (Y11).</summary>
+    private const string Speakers = "actor Speaker(string Name) {\n    pub void Say() {\n        print(Name)\n    }\n\n    pub int Said() => 1\n}\n\n";
+
+    /// <summary>A test's four speakers, each sent <c>Say</c> before the call that waits for all four, so that all four are ready at one turn.</summary>
+    private const string Spawned = "    a = spawn Speaker(\"a\")\n    b = spawn Speaker(\"b\")\n    c = spawn Speaker(\"c\")\n    d = spawn Speaker(\"d\")\n"
+        + "    send a.Say()\n    send b.Say()\n    send c.Say()\n    send d.Say()\n    check a.Said() + b.Said() + c.Said() + d.Said() == 4\n";
 
     /// <summary>
     /// Runs <c>kurz</c> with the places under the test's directory on Linux; on Windows the known folder is the system's answer and
@@ -544,10 +612,11 @@ public sealed class CommandTests : IDisposable
     public void Test_writes_a_line_for_each_test_the_words_under_a_failed_one_and_the_counts_and_exits_1_where_one_failed_else_0()
     {
         // Y3, Q3, Q4, F1, F21: `ok` or `FAILED` for each test, the words of the failed test's crash indented under its line, the counts,
-        // `1 test:` for one, and the exit code 1 where a test failed, 0 where every test passed
+        // `1 test:` for one, and the exit code 1 where a test failed, 0 where every test passed; Y11: the failed line names the seed, the
+        // greatest `ulong` among the values `--seed` takes
         var source = Path.Combine(root, "adds.kz");
         File.WriteAllText(source, "test \"adds\" {\n    check 1 + 1 == 2\n}\n\ntest \"counts\" {\n    names = [\"a\", \"b\", \"c\"]\n    check names.Count == 2\n}\n");
-        Assert.Equal((1, $"test \"adds\" ... ok\ntest \"counts\" ... FAILED\n    check-failed \"names.Count == 2 (3 == 2)\" at {source}:7\n2 tests: 1 passed, 1 failed\n", ""), KurzWithPlaces("test", source));
+        Assert.Equal((1, $"test \"adds\" ... ok\ntest \"counts\" ... FAILED (seed 18446744073709551615)\n    check-failed \"names.Count == 2 (3 == 2)\" at {source}:7\n2 tests: 1 passed, 1 failed\n", ""), KurzWithPlaces("test", "--seed", "18446744073709551615", source));
         var one = Path.Combine(root, "one.kz");
         File.WriteAllText(one, "test \"adds\" {\n    check 1 + 1 == 2\n}\n");
         Assert.Equal((0, "test \"adds\" ... ok\n1 test: 1 passed, 0 failed\n", ""), KurzWithPlaces("test", one));
@@ -570,7 +639,7 @@ public sealed class CommandTests : IDisposable
         // test after it runs
         var source = Path.Combine(root, "crash.kz");
         File.WriteAllText(source, "test \"throws\" {\n    throw \"down\"\n}\n\ntest \"passes\" {\n    print(\"ran\")\n}\n");
-        Assert.Equal((1, $"test \"throws\" ... FAILED\n    thrown \"down\" at {source}:2\nran\ntest \"passes\" ... ok\n2 tests: 1 passed, 1 failed\n", ""), KurzWithPlaces("test", source));
+        Assert.Equal((1, $"test \"throws\" ... FAILED (seed 1)\n    thrown \"down\" at {source}:2\nran\ntest \"passes\" ... ok\n2 tests: 1 passed, 1 failed\n", ""), KurzWithPlaces("test", "--seed", "1", source));
     }
 
     [Fact]
@@ -583,8 +652,8 @@ public sealed class CommandTests : IDisposable
         File.WriteAllText(source, "actor Worker {\n    pub void Fail() {\n        throw \"down\"\n    }\n\n    pub int Get() => 1\n}\n\n"
             + "test \"waits\" {\n    w = spawn Worker() on crash (c) {\n        restart\n    }\n\n    send w.Fail()\n    print(w.Get())\n}\n\n"
             + "test \"after\" {\n    print(\"after\")\n}\n");
-        var run = KurzWithPlaces("test", source);
-        Assert.Equal((1, $"test \"waits\" ... FAILED\n    deadlock at {source}:9\n    test#1 waits at {source}:15 on Worker#2 in chain <chain>\n"
+        var run = KurzWithPlaces("test", "--seed", "1", source);
+        Assert.Equal((1, $"test \"waits\" ... FAILED (seed 1)\n    deadlock at {source}:9\n    test#1 waits at {source}:15 on Worker#2 in chain <chain>\n"
             + "    Worker#2 waits for the decision of test#1 on its crash in chain <chain>\nafter\ntest \"after\" ... ok\n2 tests: 1 passed, 1 failed\n", ""),
             (run.Code, RunTests.Chains(run.Output), run.Error));
     }
@@ -616,7 +685,7 @@ public sealed class CommandTests : IDisposable
         // section 2, T5: `kurz test` builds the test build unless `--release` says otherwise, as `run` does
         var source = Path.Combine(root, "wraps.kz");
         File.WriteAllText(source, "int Bump(int n) => n + 1\n\ntest \"wraps\" {\n    print(Bump(2147483647))\n}\n");
-        Assert.Equal((1, $"test \"wraps\" ... FAILED\n    overflow at {source}:1\n1 test: 0 passed, 1 failed\n", ""), KurzWithPlaces("test", source));
+        Assert.Equal((1, $"test \"wraps\" ... FAILED (seed 1)\n    overflow at {source}:1\n1 test: 0 passed, 1 failed\n", ""), KurzWithPlaces("test", "--seed", "1", source));
         Assert.Equal((0, "-2147483648\ntest \"wraps\" ... ok\n1 test: 1 passed, 0 failed\n", ""), KurzWithPlaces("test", "--release", source));
     }
 
@@ -626,7 +695,7 @@ public sealed class CommandTests : IDisposable
         // Y6, Q1, F1: `Bump()` prints once, and the failure shows its value before the right side's
         var source = Path.Combine(root, "once.kz");
         File.WriteAllText(source, "int Bump() {\n    print(\"bump\")\n    return 2\n}\n\ntest \"bump is one\" {\n    check Bump() == 1\n}\n");
-        Assert.Equal((1, $"bump\ntest \"bump is one\" ... FAILED\n    check-failed \"Bump() == 1 (2 == 1)\" at {source}:7\n1 test: 0 passed, 1 failed\n", ""), KurzWithPlaces("test", source));
+        Assert.Equal((1, $"bump\ntest \"bump is one\" ... FAILED (seed 1)\n    check-failed \"Bump() == 1 (2 == 1)\" at {source}:7\n1 test: 0 passed, 1 failed\n", ""), KurzWithPlaces("test", "--seed", "1", source));
     }
 
     [Fact]
@@ -655,8 +724,8 @@ public sealed class CommandTests : IDisposable
 
         var deep = Path.Combine(root, "deep.kz");
         File.WriteAllText(deep, "int Down(int n) {\n    int deeper = Down(n + 1)\n    print(deeper)\n    return deeper\n}\n\ntest \"recurses\" {\n    print(Down(0))\n}\n");
-        Assert.Equal((1, "test \"recurses\" ... FAILED\n    stack-overflow (no line tables: build with --lines)\n1 test: 0 passed, 1 failed\n", ""), KurzWithPlaces("test", "--release", deep));
-        Assert.Equal((1, $"test \"recurses\" ... FAILED\n    stack-overflow at {deep}:2\n1 test: 0 passed, 1 failed\n", ""), KurzWithPlaces("test", "--release", "--lines", deep));
+        Assert.Equal((1, "test \"recurses\" ... FAILED (seed 1)\n    stack-overflow (no line tables: build with --lines)\n1 test: 0 passed, 1 failed\n", ""), KurzWithPlaces("test", "--release", "--seed", "1", deep));
+        Assert.Equal((1, $"test \"recurses\" ... FAILED (seed 1)\n    stack-overflow at {deep}:2\n1 test: 0 passed, 1 failed\n", ""), KurzWithPlaces("test", "--seed", "1", "--release", "--lines", deep));
     }
 
     [Fact]

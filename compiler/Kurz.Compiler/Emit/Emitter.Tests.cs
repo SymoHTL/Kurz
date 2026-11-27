@@ -14,7 +14,8 @@ public sealed partial class Emitter
     /// in the order of the file, each entry the test's function, its name as written and its line, and the runtime's <c>RunTests</c>,
     /// which runs each in an actor of its own and ends the process with the exit code of the run (Q4). A test's function is queued as a
     /// function the code calls is, with its own line as the statement that queued it, and named by that line, since its name, a string
-    /// literal, holds what no IR name may (<see cref="Instance"/>); a trace names it <c>test "name"</c>.
+    /// literal, holds what no IR name may (<see cref="Instance"/>); a trace names it <c>test "name"</c>. The runner takes the build's seed,
+    /// its bits as an <c>i64</c>, and starts its generators with it before the first test, and whether the build is ordered (Y11).
     /// </summary>
     private void EmitTestRun()
     {
@@ -30,7 +31,7 @@ public sealed partial class Emitter
         }
 
         module.Global($"@kz.tests = internal constant [{Number(entries.Count)} x {{ ptr, %kz.str, i64 }}] [{string.Join(", ", entries)}]");
-        fn.Emit($"call void {RuntimeFunction("RunTests")}(ptr @kz.tests, i64 {Number(entries.Count)}, %kz.str {StringValue(unit.File)})");
+        fn.Emit($"call void {RuntimeFunction("RunTests")}(ptr @kz.tests, i64 {Number(entries.Count)}, %kz.str {StringValue(unit.File)}, i64 {Number(unchecked((long)seed))}, i1 {(ordered ? "true" : "false")})");
     }
 
     /// <summary>

@@ -4712,7 +4712,91 @@ byte* MapBlock(long room, long entry, ulong key0, ulong key1, mut long asked) {
     return p
 }
 
-// The keys of the thread's maps, taken from the system's randomness at its first map: true where the
+// The words of the two generators of a run of `kurz test` (Y11; section 2, the owner, 2026-11-26, issue
+// 657, comment 7189038775, Q1 b), null in every other build: at 0 the four words of the draws, from which
+// the keys of a map's hash and the generator of the chain IDs are drawn in place of the system's
+// randomness (`Drawn`), and at 32 the four of the order of the actors ready at a turn (`OrderWord`), each
+// xoshiro256++, started by SplitMix64 from the seed, the draws by its first four words and the order by
+// the four after them, as `rand_xoshiro` seeds xoshiro256++ from a `u64` (not checked at source), so that a
+// draw a test adds moves no order (section 2, assumed there). The runner of the tests starts them before
+// the first test (`Seed`), and one thread runs every actor of that build (U35), so that a plain word holds
+// them.
+static mut byte* seeded = null
+
+// The generators of a run of `kurz test` started from `seed` (`seeded`): the next eight words of
+// SplitMix64 from it, as its authors give it (Steele, Lea and Flood; Vigna's `splitmix64.c`).
+pub void Seed(ulong seed) {
+    raw {
+        byte* words = AllocateIn(null, 64)
+        mut ulong x = seed
+        mut long i = 0
+        while i < 8 {
+            x = x +% 0x9E3779B97F4A7C15UL
+            mut ulong z = x
+            z = (z ^ (z >> 30)) *% 0xBF58476D1CE4E5B9UL
+            z = (z ^ (z >> 27)) *% 0x94D049BB133111EBUL
+            *Ptr<ulong>(words + i * 8) = z ^ (z >> 31)
+            i = i + 1
+        }
+
+        seeded = words
+    }
+}
+
+// `count` random bytes at `at`: the system's, or in a run of `kurz test` the next words of its draws
+// (`seeded`), each word's bytes in the order memory holds them, the first bytes of the last where `count`
+// is no multiple of 8; false where the system gave none.
+pub bool Drawn(byte* at, long count) {
+    raw {
+        if seeded == null {
+            return sys.Random(at, count)
+        }
+
+        mut long i = 0
+        while i < count {
+            mut ulong word = NextWord(seeded)
+            byte* bytes = Ptr<byte>(&word)
+            mut long b = 0
+            while b < 8 && i < count {
+                at[i] = bytes[b]
+                b = b + 1
+                i = i + 1
+            }
+        }
+    }
+
+    return true
+}
+
+// The next word of the order of the actors ready at a turn of a run of `kurz test` (`seeded`, Y11), which
+// only a run that `Seed` started asks for.
+pub ulong OrderWord() {
+    raw {
+        return NextWord(seeded + 32)
+    }
+}
+
+// The next 64 bits of the generator whose four words stand at `s`, xoshiro256++ as its authors give it
+// (Blackman and Vigna, `xoshiro256plusplus.c`), the generator of Rust's `SmallRng` on a 64-bit machine.
+pub ulong NextWord(byte* s) {
+    raw {
+        ulong s0 = *Ptr<ulong>(s)
+        ulong s1 = *Ptr<ulong>(s + 8)
+        ulong s2 = *Ptr<ulong>(s + 16) ^ s0
+        ulong s3 = *Ptr<ulong>(s + 24) ^ s1
+        ulong sum = s0 +% *Ptr<ulong>(s + 24)
+        ulong result = (sum << 23 | sum >> 41) +% s0
+        ulong t = s1 << 17
+        *Ptr<ulong>(s + 8) = s1 ^ s2
+        *Ptr<ulong>(s) = s0 ^ s3
+        *Ptr<ulong>(s + 16) = s2 ^ t
+        *Ptr<ulong>(s + 24) = s3 << 45 | s3 >> 19
+        return result
+    }
+}
+
+// The keys of the thread's maps, taken from the system's randomness at its first map, or in a run of
+// `kurz test` from its draws (`Drawn`, Y11): true where the
 // thread has them, and false where the system gave none, the keys then not taken, which the emitted
 // code ends the program for with `random-failed` before it makes the map (M9; the owner, 2026-10-30,
 // "End with an error, as Rust").
@@ -4722,7 +4806,7 @@ pub bool MapKeys() {
     mut ulong key1 = 0
     raw {
         if !mapKeyed {
-            keyed = sys.Random(Ptr<byte>(&key0), 8) && sys.Random(Ptr<byte>(&key1), 8)
+            keyed = Drawn(Ptr<byte>(&key0), 8) && Drawn(Ptr<byte>(&key1), 8)
             if keyed {
                 mapKey0 = key0
                 mapKey1 = key1

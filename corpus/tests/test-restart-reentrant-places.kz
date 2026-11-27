@@ -1,6 +1,6 @@
 // expect: throws deadlock at 48
 // | 0
-// | test "keeps out calls of thirteen places" ... FAILED
+// | test "keeps out calls of thirteen places" ... FAILED (seed 0)
 // |     deadlock at tests/test-restart-reentrant-places.kz:48
 // |     kept out at tests/test-restart-reentrant-places.kz:49
 // |     kept out at tests/test-restart-reentrant-places.kz:50
@@ -14,12 +14,12 @@
 // |     kept out at tests/test-restart-reentrant-places.kz:58
 // |     ... and 2 more
 // | 0
-// | test "keeps out calls of three places, two of them twice" ... FAILED
+// | test "keeps out calls of three places, two of them twice" ... FAILED (seed 0)
 // |     deadlock at tests/test-restart-reentrant-places.kz:48 (2 calls)
 // |     kept out at tests/test-restart-reentrant-places.kz:49 (2 calls)
 // |     kept out at tests/test-restart-reentrant-places.kz:60
 // | 0
-// | test "keeps out two calls of one place" ... FAILED
+// | test "keeps out two calls of one place" ... FAILED (seed 0)
 // |     deadlock at tests/test-restart-reentrant-places.kz:48 (2 calls)
 // | 3 tests: 0 passed, 3 failed
 // command: test

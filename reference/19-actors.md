@@ -6146,8 +6146,10 @@ top-level code ends is cut with the process, its lines after that point never ru
 owner, 2026-11-26, #519, comment 7198702144, 1); a supervisor that is running acts on its child's crash once its own message
 ends or waits (U22) *(assumed in §6)*. In a case marked `// threads: 1` (chapter 0) one thread runs the
 actors that are ready first in, first out, the top-level code's wait running them (§6, the owner,
-2026-11-17, #570, comment 6961064167, Q1, "FIFO, as the build (Recommended)"). A program run with
-`KURZ_THREADS` set to 1 runs so too, and so do the tests of `kurz test` *(assumed in §6)*. Each worker
+2026-11-17, #570, comment 6961064167, Q1, "FIFO, as the build (Recommended)"), under any seed of
+`kurz test` (Y11) *(assumed in §2)*. A program run with `KURZ_THREADS` set to 1 runs so too, and the
+tests of `kurz test` run every actor on one thread *(assumed in §6)*, the actors ready at a turn in the
+order their seed draws where `KURZ_THREADS` is not 1 (Y11; §2). Each worker
 thread has a poller and timers of its own, and a wake of an actor on another thread is a push to that
 thread's queue and one write of its `eventfd` (§6, the owner, 2026-11-26, #519, comment 7189038384,
 T88). A worker whose `eventfd` or record the system refuses ends the start with `thread-refused` too

@@ -8,6 +8,7 @@ here: `invalid-source` (L1), since the tools read every case as UTF-8, and `file
 `invalid-argument` (S13), since a case gives its program no argument, and `log-filter` (P4, P5), since a case gives its program no environment, and `threads-line` and
 `threads-variable` (U35), since a case is a single file with no `project.kz` and gives its program no
 environment, and `thread-refused` (U35), since a case cannot make its system refuse a worker thread,
+and `seed` (Y11), since the runner gives a case's command no seed but 0,
 and `ambiguous-name` (F10), since it takes two folders, or a folder and a line of `project.kz`, and a case is a single file, and so do the forms of `redeclared` and `unknown-name` that F10 gives at a `use` line or at a folder's own name after `as` renamed it, other than `unknown-name` for a path that names nothing, which has its cases, for the reasons F10's `No case:` line gives, the row of `redeclared` naming only the rules of its cases; the five exceptions are
 `print-failed` (A1), which has its row by the owner's choice (§6, 2026-10-21), `allocation-failed`
 (O11), which has its row by the owner's choice (§6, 2026-10-23), `random-failed` (M9), which has

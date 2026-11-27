@@ -1,7 +1,7 @@
 // expect: throws overflow at 22
 // | test "a long wait" ... ok
 // | test "a long wait again" ... ok
-// | test "two long waits" ... FAILED
+// | test "two long waits" ... FAILED (seed 0)
 // |     overflow at tests/advance-overflow.kz:22
 // | 3 tests: 2 passed, 1 failed
 // command: test
