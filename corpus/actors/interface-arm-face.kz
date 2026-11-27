@@ -1,0 +1,31 @@
+// expect: output
+// | named cache
+// | plain 7
+// rules: U1
+
+// an arm of a second interface the actor names takes the value, and its call is a message too
+interface Store {
+    long Get(string key)
+}
+
+interface Named {
+    string Text()
+}
+
+actor Cache : Store, Named {
+    pub long Get(string key) => 5
+
+    pub string Text() => "cache"
+}
+
+class Fixed : Store {
+    pub long Get(string key) => 7
+}
+
+string Kind(Store s) => match s {
+    Named n => "named {n.Text()}"
+    else => "plain {s.Get("a")}"
+}
+
+print(Kind(spawn Cache()))
+print(Kind(Fixed()))

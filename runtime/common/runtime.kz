@@ -3179,9 +3179,10 @@ void LogRefused(byte* entry, long count) {
 // The count of worker threads of a program with a `spawn` (U35), which its start reads (`ThreadsRead`); 0 in any other program.
 static mut int workerCount = 0
 
-// The count of worker threads the first `spawn` starts (`WorkersStart`), the count `KURZ_THREADS` set where it is more than 1, else 0,
-// so that a program run with no `KURZ_THREADS`, or with 1, runs every actor on the main thread in its waits, first in, first out,
-// as a case marked `// threads: 1` runs (U35), and `kurz test`, which sets it to 0, too (`RunTests`).
+// The count of worker threads the first `spawn` starts (`WorkersStart`), the count `KURZ_THREADS` set, or where it is not set the
+// cores the process may use (section 6, the owner, 2026-11-17, #519, comment 6946657505, Q4), where that count is more than 1, else 0,
+// so that a program run with `KURZ_THREADS` set to 1, or on one core, runs every actor on the main thread in its waits, first in,
+// first out, as a case marked `// threads: 1` runs (U35), and `kurz test`, which sets it to 0, too (`RunTests`).
 static mut int workersAsked = 0
 
 // The count of worker threads of a program with a `spawn` (U35), `found` as the target's `Variable` gave it for `KURZ_THREADS`:
@@ -3201,6 +3202,9 @@ pub void ThreadsRead(int found, string text) {
         int cores = sys.Cores()
         raw {
             workerCount = cores
+            if cores > 1 {
+                workersAsked = cores
+            }
         }
 
         return
@@ -4670,7 +4674,8 @@ int Exchanged(AtomicInt word, int seen, int wanted) {
 // changed first: one atomic `or` marks it QUEUED, and the waker that found the mark clear puts it at the end
 // of the run queue, whether a thread holds it or not, so that an entry of it stands there once; a take that
 // finds it held drops that entry and leaves it to whoever holds it (`Claimed`), which queues it again at the
-// end as it lets go of it (`LetGo`, `ActorBuilt`).
+// end as it lets go of it (`LetGo`, `ActorBuilt`). On worker threads the waker that found the mark clear on an
+// actor that a thread holds or whose constructor runs leaves it to its holder with no entry (`LeftToHolder`).
 void Wake(byte* state) {
     mut int before = 0
     raw {
@@ -4678,12 +4683,40 @@ void Wake(byte* state) {
     }
 
     if (before & 66) == 0 {
-        if Threaded() {
-            QueueLocal(state)
-        } else {
+        if !Threaded() {
             Queue(state)
+        } else if (before & 9) == 0 || !LeftToHolder(state) {
+            QueueLocal(state)
         }
     }
+}
+
+// Whether the actor whose state is `state`, which a thread held or whose constructor ran as a wake on worker threads marked it
+// QUEUED (`Wake`), is left to its holder: the mark turned into NOTIFIED by a compare-exchange while the actor is held, with no entry
+// put where other workers take from, so that the holder queues it again as it lets go of it (`LetGo`, `ActorBuilt`), as tokio's
+// waker marks a running task notified and leaves it to the worker that polls it (not checked at source). No take clears the mark
+// meanwhile, as no entry of it stands. False where the holder let go of it meanwhile, seeing the mark and queueing nothing, so that
+// the waker queues it. An entry of a held actor put where every worker takes from drew the workers that spin to take it and drop it,
+// and the waker put a new one in at the message after it: with no such entry and with the wait of `Stolen` the sends to one actor took
+// 77.9 and 70.5 ms, against 107.9 and 122.6 ms with neither (`KURZ_THREADS=4`, the least of 10 runs in each of two orders; the owner,
+// 2026-11-26, issue 519, comment 7204486070, Q2, the bound of the spin measured).
+bool LeftToHolder(byte* state) {
+    AtomicInt word = StateWord(state)
+    mut int seen = 0
+    raw {
+        seen = word.Load(MemoryOrder.Acquire)
+    }
+
+    while (seen & 9) != 0 {
+        int found = Exchanged(word, seen, (seen & ~2) | 4)
+        if found == seen {
+            return true
+        }
+
+        seen = found
+    }
+
+    return false
 }
 
 // Whether the thread that took the entry of the actor whose state is `state` off the run queue holds the
@@ -4920,8 +4953,8 @@ void ThreadRefused(long count) {
 // 48 the box of the jobs done of the pool of threads for blocking calls that this thread handed, the same shape at 48, 56 and 64,
 // and at 72 the thread's `eventfd`, which the pool's thread writes after its push (`sys.PoolThread`, `DoneDrain`); at 80 whether
 // it is parked and at 84 whether it parked with nothing pending (`WorkerPark`); at 88 the epoch it read at its last turn, the largest `long`
-// while it holds no record (`Reclaimed`); at 96 its index; at 104 whether it was woken to look for work and has found none since
-// (`NotifyOne`); and from 128 the 256 slots of its ring. Null where the system refuses the page or the `eventfd`.
+// while it holds no record (`Reclaimed`); at 96 its index; at 104 whether it was woken to look for work, or spins before its park,
+// and has found none since (`NotifyOne`, `Spun`); and from 128 the 256 slots of its ring. Null where the system refuses the page or the `eventfd`.
 byte* RecordNew(long index) {
     raw {
         byte* record = sys.Memory(4096)
@@ -4982,7 +5015,8 @@ extern "C" byte* WorkerMain(byte* record) {
 // consistency after the store, as the main thread's pin has (`PinnedHeld`), so that no read of the turn comes before the store a thread
 // that frees reads, as crossbeam-epoch's pin fences (not checked at source), the frees whose epoch every thread passed made, the clock read and the thread's timers fired (`Fire`), a restart whose pause ended run (`PauseEnded`, `Restart`), and
 // at every 61st turn a look at the poller with no wait while a registration waits, as on one thread (`RunTurn`), and the shared queue
-// read first; then an actor it can take run (`NextActor`, `RunTake`), or the thread parked (`WorkerPark`).
+// read first; then an actor it can take run (`NextActor`, `RunTake`), or the thread's spin before its park gone on with for this turn
+// (`Spun`), or the thread parked (`WorkerPark`).
 void WorkerTurn() {
     raw {
         byte* record = threadRecord
@@ -5014,6 +5048,7 @@ void WorkerTurn() {
 
         byte* state = NextActor(record, shared)
         if state != null {
+            spinUntil = 0
             if *Ptr<int>(record + 104) != 0 {
                 *Ptr<int>(record + 104) = 0
                 if AtomicInt.FromPtr(Ptr<int>(scheduler + 84)).FetchSub(1, MemoryOrder.SeqCst) == 1 {
@@ -5025,7 +5060,53 @@ void WorkerTurn() {
             return
         }
 
+        if Spun(record, now) {
+            return
+        }
+
         WorkerPark(record, now)
+    }
+}
+
+// The time at which this worker thread's spin before its park ends, 0 while it does not spin (`Spun`).
+thread static mut long spinUntil = 0
+
+// The time a worker thread with nothing to take spins before it parks, in nanoseconds (`Spun`).
+long SpinBound() => 20000
+
+// Whether the worker of the record `record`, which found nothing to take at `now` (`WorkerTurn`), spins for one more turn before it
+// parks (`WorkerPark`), so that a wake finds it awake, as Go's runtime keeps spinning threads and Tokio a searching worker (section 6,
+// the owner, 2026-11-26, #519, comment 7204486070, Q2, "Spin before park (Recommended)"): the first such turn starts the spin where
+// fewer than half the workers look for work, as tokio lets a worker search while fewer than half of them search (not checked at
+// source), marking the worker as one that looks, so that an actor put where any worker can take it wakes no parked worker meanwhile
+// (`NotifyOne`), and the turns after it spin on until `SpinBound` passed since that first turn, each with the hint of a spin to the
+// core (`sys.SpinHint`); a turn reads the epoch, the clock, the timers, the pauses and the world as every turn does, so that a timer
+// due, a restart's pause and a thread that holds the world are taken while it spins. False where the spin is over or none starts,
+// the worker then parking, where it stops looking.
+bool Spun(byte* record, long now) {
+    raw {
+        if spinUntil == 0 {
+            if *Ptr<int>(record + 104) == 0 {
+                AtomicInt looking = AtomicInt.FromPtr(Ptr<int>(scheduler + 84))
+                if long(looking.Load(MemoryOrder.SeqCst)) * 2 >= *Ptr<long>(scheduler + 48) {
+                    return false
+                }
+
+                *Ptr<int>(record + 104) = 1
+                looking.FetchAdd(1, MemoryOrder.SeqCst)
+            }
+
+            spinUntil = now + SpinBound()
+            return true
+        }
+
+        if now < spinUntil {
+            sys.SpinHint()
+            return true
+        }
+
+        spinUntil = 0
+        return false
     }
 }
 
@@ -5069,7 +5150,13 @@ byte* NextActor(byte* record, bool shared) {
 // An actor stolen by the worker of the record `record` from another worker, null where none is: half of the ring of the first worker
 // that has one, from a worker drawn at random on, as tokio's `steal_work` starts at a random worker (`StealInto`), and else the slot
 // of the actor woken last of one of them, which Go's scheduler steals as `runnext` on its last attempt, so that a worker's own slot
-// is taken by its own thread first where it can be.
+// is taken by its own thread first where it can be. A slot seen holding an actor is taken `SlotWait` after it was seen, as Go's
+// `runqgrab` sleeps 3 µs before it takes the `runnext` of a running P, so that the worker that woke the actor there and then let go
+// of its own goes on with it, where the actor would else move to another worker at every call (not checked at source); only a
+// worker that runs fills its slot (`QueueLocal`), so a slot that holds one is a running worker's. A worker that spins took every
+// slot at each of its turns: with the wait, and with no entry of a held actor (`LeftToHolder`), the calls of one actor to another
+// inside one message took 28.4 and 27.4 ms, against 57.8 and 74.8 ms with neither (`KURZ_THREADS=4`, the least of 10 runs in each of
+// two orders; the owner, 2026-11-26, issue 519, comment 7204486070, Q2, the bound of the spin measured).
 byte* Stolen(byte* record) {
     raw {
         long count = *Ptr<long>(scheduler + 48)
@@ -5091,9 +5178,17 @@ byte* Stolen(byte* record) {
         while i < count {
             byte* victim = Worker((first + i) % count)
             if victim != record {
-                byte* slot = AtomicPtr<byte>.FromPtr(Ptr<byte*>(victim + 16)).Swap(null, MemoryOrder.AcqRel)
-                if slot != null {
-                    return slot
+                AtomicPtr<byte> cell = AtomicPtr<byte>.FromPtr(Ptr<byte*>(victim + 16))
+                if cell.Load(MemoryOrder.Relaxed) != null {
+                    long due = PauseClock() + SlotWait()
+                    while PauseClock() < due {
+                        sys.SpinHint()
+                    }
+
+                    byte* slot = cell.Swap(null, MemoryOrder.AcqRel)
+                    if slot != null {
+                        return slot
+                    }
                 }
             }
 
@@ -5103,6 +5198,9 @@ byte* Stolen(byte* record) {
         return null
     }
 }
+
+// The time a worker waits before it takes another worker's slot of the actor woken last, in nanoseconds (`Stolen`), Go's 3 µs.
+long SlotWait() => 3000
 
 // The head of a ring: two counters of 31 bits in one word, the one where a thread that steals takes from, `steal`, and the one
 // where the ring's own thread takes from, `real`, which are the same while nobody steals, as tokio packs its two `u32` heads.
@@ -5418,7 +5516,8 @@ void Notified(byte* record) {
 }
 
 // One parked worker woken to look for work, after an actor was put where any worker can take it (`QueueLocal`), where a worker is
-// parked and none woken so before looks for work still, as tokio's `notify_parked` wakes one where no worker is searching (not checked
+// parked and none woken so before, nor one that spins before its park (`Spun`), looks for work still, as tokio's `notify_parked`
+// wakes one where no worker is searching (not checked
 // at source): the fence of `Notified`, the first parked worker but this thread taken off the parked ones under their lock, marked as
 // one that looks, which wakes one more where it finds work (`WorkerTurn`), and its `eventfd` written.
 void NotifyOne() {

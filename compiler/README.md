@@ -2298,12 +2298,25 @@ with the system's own room, as Rust's released library does (section 2);
 `TraceTests.A_program_on_Windows_starts_with_the_guarantee_of_its_main_threads_stack_set_to_0x5000_bytes`
 reads the guarantee in force on Windows and on Linux compiles the program alone.
 
-The worker threads of section 6 (U35) run on Linux where `KURZ_THREADS` sets a count of more than 1. The main thread runs
+The worker threads of section 6 (U35) run on Linux, as many as `KURZ_THREADS` sets or, where it is not set, as the cores the
+process may use (section 6, Q4 of comment 6946532526), where that count is more than 1. A program that ran every actor on
+the main thread sees three things change on them, and `KURZ_THREADS=1` runs it so again (the owner, 2026-11-27, issue 519,
+comment 7216530837): the actors that are ready no longer run first in, first out, a message still running on a worker thread
+when the top-level code ends is cut (U13), and memory grows by each worker's record, poller and `eventfd` and by the heap
+of its own of each message (`MessageHeapNew`). The main thread runs
 the top-level code alone and sleeps in its poller while it waits (`RootSlept`). Each worker takes an actor from the queue of
 its thread that nobody steals, which holds the actors whose activation parked on it, then from its slot of the actor woken
 last, from its ring of 256 slots, as tokio's `queue::Local`, and from the shared queue, which it reads first at every 61st
-turn, and else steals half of another worker's ring, or its slot (`WorkerTurn`, `NextActor`, `StealInto`). A worker with
-nothing to take parks in a poller of its own, with timers of its own (T88), and another thread wakes it through its
+turn, and else steals half of another worker's ring, or its slot 3 µs after it saw an actor there, as Go's `runqgrab` waits
+before it takes the `runnext` of a running P (`WorkerTurn`, `NextActor`, `StealInto`, `Stolen`, `SlotWait`). On worker threads a wake of an actor
+that a thread holds or whose constructor runs marks it NOTIFIED and puts no entry in, as tokio's waker of a running task
+(`Wake`, `LeftToHolder`). A worker with
+nothing to take spins for 20 µs before it parks, where fewer than half the workers look for work, marked as one that looks,
+so that an actor put where any worker can take it wakes no parked worker meanwhile, each turn of the spin a turn of the worker
+with the hint of a spin to the core, as Go's runtime keeps spinning threads and tokio a searching worker (the owner,
+2026-11-26, issue 519, comment 7204486070, Q2, and for the bound, the half and a spinner that counts as one with work,
+2026-11-27, comment 7215317481: `Spun`, `SpinBound`, `sys.SpinHint`). It then parks in a poller of its own,
+with timers of its own (T88), and another thread wakes it through its
 `eventfd`, as a restart's pause that ends first of all wakes one parked worker, whose park reads the time of the first
 pause again, since the decision of a block that the top-level code runs makes its pause on the main thread (`Pause`,
 `NotifyOne`, `WorkerPark`); the last worker to park with nothing pending, no activation asleep, no registration of its poller and no
@@ -2362,9 +2375,11 @@ which the owner of a reply reads after its store, hold on one thread alone, with
 (U35): the start of a program built for Linux with a `spawn` reads `KURZ_THREADS` and ends with `threads-variable`
 where U35 refuses its value, `0` among them, and otherwise keeps the count it gives, or the cores the process may use
 where it is not set, counted as Rust 1.90.0's `available_parallelism` counts them, its affinity and the CPU quota of its
-control group (`ThreadsRead`, `Cores`), and starts that many worker threads at its first `spawn` only where `KURZ_THREADS`
-sets a count of more than 1 (`workersAsked`, `WorkersStart`; the paragraph of the worker threads), every other program and every
-test of `kurz test` running every actor on the main thread, as a case marked `// threads: 1` runs, and a build for Windows reads
+control group (`ThreadsRead`, `Cores`), and starts that many worker threads at its first `spawn` where that count is more
+than 1 (`workersAsked`, `WorkersStart`; the paragraph of the worker threads), a program run with `KURZ_THREADS` set to 1 or in a
+process that may use one core, and every test of `kurz test`, running every actor on the main thread, as a case marked
+`// threads: 1` runs; `ActorTests`, whose programs hold the actors of that one thread, runs each with `KURZ_THREADS` set to 1,
+and so does the fenced program of `ListTests` whose expectation follows that thread's order; and a build for Windows reads
 no `KURZ_THREADS`, its runtime giving no variable of the environment (S14); the compiler reads no `project.kz`, so no line
 of one reaches it, and the top-level code's wait runs the scheduler in place on the
 main thread's stack, where U18 has the main thread sleep beside the worker threads, and messages run only while the top-level
@@ -2682,6 +2697,26 @@ ask about it.
   programs of `ListTests` and by the cases `control/match-interface-arm.kz`,
   `control/match-base-class-arm.kz`, `control/match-interface-test.kz`, `control/match-data-base-arm.kz`
   and `outcomes/else-interface-arm.kz`.
+- U1 with K6: a value of an interface an actor names is the pair of a counted box, `{ strong, weak,
+  reference }`, which holds the actor's reference, and the actor's table for the interface, as Rust's
+  `Rc<dyn Trait>` pairs a counted block with a table of methods; each slot of that table loads the
+  reference from the box and sends the method's message as a call through the reference does, its
+  arguments written into the actor's heap, and waits for the reply, and the call's file and line reach
+  the slot through a thread's own word that the call through the interface stores before it, so that a
+  crash, a deadline and the method's own bound stand at that call; `==` and the hash compare and hash
+  the two words of the reference, and an arm of the actor over such a value compares the table with the
+  actor's and loads the reference once that comparison held (the owner, 2026-11-27, #519, comment 7215317481,
+  to I1 to I4 of comment 7211586386) *(assumed: the mechanism, which no answer gave)*. The checker holds each method of such an interface to
+  what crosses with no word at the line that names it, and the walk of the throw sets gives a call
+  through the interface a site that waits on each actor that implements it, a loop's text naming the
+  interface's method beside the actor's (U56, T46 (a)), and `send` before such a call is `syntax` (U6); the text of
+  `send-needs-word` there is the product pass's, comment 7211645920, item 5, which the owner kept (Q8). `print` of such a
+  value calls the interface's `Text()` through the table, a message as any call through it is (A10). Pinned by
+  `CheckerTests` and by the cases `actors/interface-call.kz`, `actors/interface-arm.kz`, `actors/interface-arm-face.kz`,
+  `actors/interface-text.kz`, `actors/interface-method-private.kz`,
+  `actors/interface-crash.kz`, `actors/interface-within.kz`, `actors/interface-crossing.kz`,
+  `actors/interface-mut-parameter.kz`, `actors/interface-missing-method.kz`, `actors/interface-send.kz` and
+  `actors/interface-call-loop.kz`.
 - G2 to G4: a `Regex` is the standard library's: the pattern parsed into a tree, the automaton's size counted from the tree
   before anything is built (G2), then the automaton of Thompson's construction, which a Pike VM runs, as Rust's `PikeVM`, so
   that a search takes time in proportion to the automaton's states times one more than the positions a thread carries
@@ -3306,8 +3341,8 @@ or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` 
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
 type or a time type (T10, T29);
 a modifier of a method on a top-level function, which leaves the function and every call of its
-name unread (K7, M6); of an actor, a clause after its name but `stack` and the words of a policy (U1, U27), the block of `on crash` after a `per` actor's name among them, a modifier but `pub`, type parameters and
-an interface, which an actor may declare (U1), a `static` method and an immutable `static` field of a type that holds no class,
+name unread (K7, M6); of an actor, a clause after its name but `stack` and the words of a policy (U1, U27), the block of `on crash` after a `per` actor's name among them, a modifier but `pub`, type parameters, which
+an actor may declare (U1), arguments after an interface after its name, which an actor has no constructor to take (U1, K10), a generic interface after its name (U1, T19), a `static` method and an immutable `static` field of a type that holds no class,
 or of a type not written (U1), and a modifier of a method but `pub`, which a method
 may take as a class's does (U1, U9), each of which leaves the
 actor and every use of its name unread, besides what a class's body does not read, as the checker's `syntax` for a base after
