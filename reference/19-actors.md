@@ -6767,9 +6767,27 @@ thread has passed a turn since its end (§6, the owner, 2026-11-20, #519, commen
 code raises `deadlock` at the line of its call where no worker thread has an actor to run, no timer is
 pending, the timers of the calls that wait counting for nothing and an activation asleep counting, and
 no poller holds a registration, as Go's `checkdead` *(assumed in §6)*. The build starts worker threads
-on Linux alone, where `KURZ_THREADS` sets a count of more than 1; where it is not set, a program runs
-every actor on the main thread, as a case marked `// threads: 1` runs, and not on the count of the
-cores §6 holds (`compiler/README.md`). On worker threads a
+on Linux alone, where the count is more than 1, and a build for Windows runs every actor on the main
+thread (`compiler/README.md`); a count of 1, which `KURZ_THREADS` sets or a process that may use one core
+gives, runs every actor on the main thread, as a case marked `// threads: 1` runs, with nothing said (§6,
+the owner, 2026-11-27, #519, comment 7215317481, Q5 of comment 7207859311, "Main thread, quietly
+(Recommended)"). A worker thread with nothing to run spins a short while before it parks, so that a wake
+finds it awake, as Go's runtime keeps spinning threads and Tokio a searching worker (§6, the owner,
+2026-11-26, #519, comment 7204486070, Q2, "Spin before park (Recommended)"), for 20 µs, where fewer than
+half of all the workers look for work, as tokio's, and a spinning worker counts as one that has work, so
+that the `deadlock` of a wait of the top-level code is raised once the spins ended (§6, the owner,
+2026-11-27, #519, comment 7215317481, Q3 and Q3b of comment 7210832380 and Q9 of comment 7207859311). A
+worker takes another worker's slot of the actor woken last only 3 µs after it saw an actor there, as Go's
+`runqgrab` waits, and a wake of an actor that a thread holds, or whose constructor runs, puts no entry in
+and leaves it to its holder, as tokio's waker of a running task marks it notified *(assumed in §6)*. A
+program that ran every actor on the main thread sees three things change on worker threads, and
+`KURZ_THREADS=1` runs it so again (the owner, 2026-11-27, #519, comment 7216530837, Q2 of comment
+7207859311, "The pass's three (Recommended)"): the actors that are ready no longer run first in, first
+out (§6, Q5 of comment 6847932993); a message still running on a worker thread when the top-level code
+ends is cut (§6, comment 7198702144, 1), which on one thread cannot happen, since a message runs there
+only while the top-level code waits; and memory grows by what each worker thread holds, its record, its
+poller and its `eventfd` (§6, T88), and by the heap of its own that each message has on worker threads
+*(assumed in §6)*. On worker threads a
 crash, an end, a restart and the decision of a block hold only the actors they touch, and a crash reaches
 its supervisor and its links as a signal, as Erlang's exit signals do, a check of the whole process left for
 the deadlock of the top-level code alone (§6, the owner, 2026-11-26, #519, comment 7194874125, "Per-actor

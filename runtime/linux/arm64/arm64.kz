@@ -93,6 +93,14 @@ pub long LockWake(int* word) {
     return result
 }
 
+// The hint of a spin's wait to the core, `isb sy`, as Rust's `core::hint::spin_loop` gives it on AArch64, where `yield` does nothing
+// on most cores (not checked at source), for a worker thread's spin before its park (`Spun` in `runtime/common/`).
+pub naked void SpinHint() {
+    asm(
+        "isb sy",
+        "ret")
+}
+
 // The byte of `st_mode` in the `struct stat` that `stat` and `fstat` fill on AArch64, 16, after `st_dev` and `st_ino`,
 // where 24 is `st_uid` (the kernel's generic `asm-generic/stat.h`, as a system installs it, which Arm
 // Linux takes; the C library's struct on AArch64 not checked at source), where x86-64's is 24; the emitted

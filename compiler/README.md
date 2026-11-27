@@ -2300,12 +2300,25 @@ with the system's own room, as Rust's released library does (section 2);
 `TraceTests.A_program_on_Windows_starts_with_the_guarantee_of_its_main_threads_stack_set_to_0x5000_bytes`
 reads the guarantee in force on Windows and on Linux compiles the program alone.
 
-The worker threads of section 6 (U35) run on Linux where `KURZ_THREADS` sets a count of more than 1. The main thread runs
+The worker threads of section 6 (U35) run on Linux, as many as `KURZ_THREADS` sets or, where it is not set, as the cores the
+process may use (section 6, Q4 of comment 6946532526), where that count is more than 1. A program that ran every actor on
+the main thread sees three things change on them, and `KURZ_THREADS=1` runs it so again (the owner, 2026-11-27, issue 519,
+comment 7216530837): the actors that are ready no longer run first in, first out, a message still running on a worker thread
+when the top-level code ends is cut (U13), and memory grows by each worker's record, poller and `eventfd` and by the heap
+of its own of each message (`MessageHeapNew`). The main thread runs
 the top-level code alone and sleeps in its poller while it waits (`RootSlept`). Each worker takes an actor from the queue of
 its thread that nobody steals, which holds the actors whose activation parked on it, then from its slot of the actor woken
 last, from its ring of 256 slots, as tokio's `queue::Local`, and from the shared queue, which it reads first at every 61st
-turn, and else steals half of another worker's ring, or its slot (`WorkerTurn`, `NextActor`, `StealInto`). A worker with
-nothing to take parks in a poller of its own, with timers of its own (T88), and another thread wakes it through its
+turn, and else steals half of another worker's ring, or its slot 3 µs after it saw an actor there, as Go's `runqgrab` waits
+before it takes the `runnext` of a running P (`WorkerTurn`, `NextActor`, `StealInto`, `Stolen`, `SlotWait`). On worker threads a wake of an actor
+that a thread holds or whose constructor runs marks it NOTIFIED and puts no entry in, as tokio's waker of a running task
+(`Wake`, `LeftToHolder`). A worker with
+nothing to take spins for 20 µs before it parks, where fewer than half the workers look for work, marked as one that looks,
+so that an actor put where any worker can take it wakes no parked worker meanwhile, each turn of the spin a turn of the worker
+with the hint of a spin to the core, as Go's runtime keeps spinning threads and tokio a searching worker (the owner,
+2026-11-26, issue 519, comment 7204486070, Q2, and for the bound, the half and a spinner that counts as one with work,
+2026-11-27, comment 7215317481: `Spun`, `SpinBound`, `sys.SpinHint`). It then parks in a poller of its own,
+with timers of its own (T88), and another thread wakes it through its
 `eventfd`, as a restart's pause that ends first of all wakes one parked worker, whose park reads the time of the first
 pause again, since the decision of a block that the top-level code runs makes its pause on the main thread (`Pause`,
 `NotifyOne`, `WorkerPark`); the last worker to park with nothing pending, no activation asleep, no registration of its poller and no
@@ -2364,9 +2377,11 @@ which the owner of a reply reads after its store, hold on one thread alone, with
 (U35): the start of a program built for Linux with a `spawn` reads `KURZ_THREADS` and ends with `threads-variable`
 where U35 refuses its value, `0` among them, and otherwise keeps the count it gives, or the cores the process may use
 where it is not set, counted as Rust 1.90.0's `available_parallelism` counts them, its affinity and the CPU quota of its
-control group (`ThreadsRead`, `Cores`), and starts that many worker threads at its first `spawn` only where `KURZ_THREADS`
-sets a count of more than 1 (`workersAsked`, `WorkersStart`; the paragraph of the worker threads), every other program and every
-test of `kurz test` running every actor on the main thread, as a case marked `// threads: 1` runs, and a build for Windows reads
+control group (`ThreadsRead`, `Cores`), and starts that many worker threads at its first `spawn` where that count is more
+than 1 (`workersAsked`, `WorkersStart`; the paragraph of the worker threads), a program run with `KURZ_THREADS` set to 1 or in a
+process that may use one core, and every test of `kurz test`, running every actor on the main thread, as a case marked
+`// threads: 1` runs; `ActorTests`, whose programs hold the actors of that one thread, runs each with `KURZ_THREADS` set to 1,
+and so does the fenced program of `ListTests` whose expectation follows that thread's order; and a build for Windows reads
 no `KURZ_THREADS`, its runtime giving no variable of the environment (S14); the compiler reads no `project.kz`, so no line
 of one reaches it, and the top-level code's wait runs the scheduler in place on the
 main thread's stack, where U18 has the main thread sleep beside the worker threads, and messages run only while the top-level

@@ -4607,6 +4607,15 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         return Toolchain.Run(toolchain.Build(compilation.Program, name));
     }
 
+    // A program built and run as `BuildAndRun` runs it, with `KURZ_THREADS` set to 1, on one thread (U35), for a program whose
+    // expectation follows that thread's order of the actors, first in, first out, as a corpus case marked `// threads: 1` does.
+    private (int Code, IReadOnlyList<string> Output, string Error) BuildAndRunOne(string text, CheckedRuntime runtime, string name)
+    {
+        var compilation = Compile(text, runtime);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        return Toolchain.Run(toolchain.Build(compilation.Program, name), "0", "1");
+    }
+
     private static void Ran((int Code, IReadOnlyList<string> Output, string Error) run, int code, string[] lines, string error)
     {
         Assert.Equal(lines, run.Output);
@@ -5535,7 +5544,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // frees its heap whole, its first page with it, and its slot of the table (section 6, the owner, 2026-11-16, #519, comment
         // 6919351399): built in a heap of its own (Emitter.EmitMessage) and copied at its queueing into the heap the top-level code
         // allocates in, since the reference finds no actor (the runtime's `ActorHeap`), so that no block of the freed heap is written, and
-        // the call raises `actor-gone` at its line
+        // the call raises `actor-gone` at its line; on one thread, whose order runs `Boom` in the wait of the argument, where worker threads
+        // can run `Sum` before the crash of `Parent` ends its child
         const string actorEndWait = """
             actor Slow {
                 pub int Get() => 7
@@ -5571,7 +5581,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             """;
-        var endWait = BuildAndRun(actorEndWait, fenced, "actor-end-wait-fenced");
+        var endWait = BuildAndRunOne(actorEndWait, fenced, "actor-end-wait-fenced");
         var (endCrashed, endOthers) = ActorTests.Logged(endWait.Error);
         Assert.Equal(["Parent#1 crashed: thrown \"parent\" at program.kz:19"], endCrashed);
         Ran((endWait.Code, endWait.Output, endOthers), 1, ["47"], "error: actor-gone at program.kz:31\n");

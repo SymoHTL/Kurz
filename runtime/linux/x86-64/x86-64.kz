@@ -80,6 +80,14 @@ pub long LockWake(int* word) {
     return result
 }
 
+// The hint of a spin's wait to the core, `pause`, as Rust's `core::hint::spin_loop` gives it on x86-64 (not checked at source), for
+// a worker thread's spin before its park (`Spun` in `runtime/common/`).
+pub naked void SpinHint() {
+    asm(
+        "pause",
+        "ret")
+}
+
 // The byte of `st_mode` in the `struct stat` that `stat` and `fstat` fill on x86-64, 24, after `st_dev`, `st_ino` and
 // an `st_nlink` of 8 bytes (the kernel's `asm/stat.h` of x86-64, as a system installs it; the C library's
 // struct on x86-64 not checked at source), where AArch64's is 16; the emitted `Directory.Create` passes it to
