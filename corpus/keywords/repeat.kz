@@ -1,0 +1,20 @@
+// expect: output
+// | 0
+// | 1
+// | 2
+// allow: keywords
+// rules: J2, J4
+
+keyword repeat <int times> <block body> {
+    mut i = 0
+    while i < times {
+        body
+        i = i + 1
+    }
+}
+
+mut k = 0
+repeat 3 {
+    print(k)
+    k = k + 1
+}

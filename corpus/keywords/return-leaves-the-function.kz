@@ -1,0 +1,22 @@
+// expect: output
+// | 5
+// | -1
+// allow: keywords
+// rules: J6
+
+keyword unless <bool ok> <block body> {
+    if !ok {
+        body
+    }
+}
+
+int Positive(int x) {
+    unless x > 0 {
+        return -1
+    }
+
+    return x
+}
+
+print(Positive(5))
+print(Positive(-2))

@@ -13,7 +13,7 @@ namespace Kurz.Compiler.Syntax;
 /// reported on the line where the text stops making sense, and a case holds one error (E1): after
 /// it the rest of the statement is skipped.
 /// </summary>
-public sealed class Parser
+public sealed partial class Parser
 {
     private readonly SourceText source;
     private readonly List<Token> tokens;
@@ -46,8 +46,9 @@ public sealed class Parser
     {
         var tokens = new Lexer(source, diagnostics).Lex();
         var parser = new Parser(source, tokens, diagnostics);
+        var keywords = parser.ReadKeywords(); // J1: before the statements, so that a use may stand before its declaration and in a template
         var statements = parser.ParseStatementsUntil(TokenKind.EndOfFile);
-        return new ProgramSyntax(statements);
+        return new ProgramSyntax(statements) { Keywords = keywords };
     }
 
     private sealed class ParseError(int line, string message) : Exception(message)
@@ -389,7 +390,11 @@ public sealed class Parser
             try
             {
                 var statement = ParseStatement();
-                statements.Add(statement);
+                if (statement is not KeywordDeclaration)
+                {
+                    statements.Add(statement); // J1: a declaration stands in the program's list of keywords alone
+                }
+
                 EndStatement();
             }
             catch (ParseError e)
@@ -582,6 +587,11 @@ public sealed class Parser
 
         if (token.Kind == TokenKind.Name)
         {
+            if (TryKeyword(out var keyword))
+            {
+                return keyword!; // J1, J3: a keyword's declaration, or a use of a keyword the file declares
+            }
+
             if (deciding && token.Text is "restart" or "stop" or "escalate" && Peek().Kind != TokenKind.Assign)
             {
                 return ParseDecision(); // U29: a decision of the block; the words stay names elsewhere, and before `=` there too, as `send` does (U6)
@@ -2742,6 +2752,7 @@ public sealed class Parser
                 Advance();
                 return ParseStringLiteral(token);
             case TokenKind.Name:
+                KeywordInExpression(); // J9, J11: a keyword's word is no name, and its use as an expression is not supported
                 Advance();
                 if (At(TokenKind.Arrow) && !noLambda)
                 {
@@ -2902,7 +2913,15 @@ public sealed class Parser
                 Keep(diagnostic);
             }
 
-            var inner = new Parser(source, holeTokens, diagnostics) { speculating = speculating, pending = pending };
+            if (expansion is not null)
+            {
+                holeTokens = expansion(holeTokens); // J4, J7: a hole of a template stands at the use, with the template's names renamed
+            }
+
+            var inner = new Parser(source, holeTokens, diagnostics)
+            {
+                speculating = speculating, pending = pending, table = table, expansion = expansion, expansionDepth = expansionDepth,
+            };
             badLines.UnionWith(inner.badLines);
             inner.suppressNewlines = 1;
             var expression = inner.ParseExpression();

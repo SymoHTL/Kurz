@@ -41,6 +41,7 @@ public sealed class CorpusTests
     private static readonly HashSet<string> FrontEndIds =
     [
         ErrorIds.Syntax, ErrorIds.Semicolon, ErrorIds.ReservedWord, ErrorIds.BracesRequired, ErrorIds.UnknownEscape, ErrorIds.BlockIndentation,
+        ErrorIds.KeywordRedefined, ErrorIds.KeywordNoMatch, ErrorIds.KeywordDepth, ErrorIds.KeywordJump, // J3, J6, J8, J9: the parser fills a use
     ];
 
     /// <summary>
@@ -126,7 +127,7 @@ public sealed class CorpusTests
     }
 
     /// <summary>
-    /// Whether the front end is the side that raises the error a case expects. Five of its ids are the front end's
+    /// Whether the front end is the side that raises the error a case expects. Nine of its ids are the front end's
     /// alone; <c>syntax</c> is raised by both sides, by the front end for text it cannot read and by the checker
     /// for the shapes E4 leaves to it, which the parser reads as sound (the readings in <c>compiler/README.md</c>:
     /// a value on its own as a statement, a <c>void</c> call where a value stands, D13's <c>match</c> on a set of
@@ -279,6 +280,8 @@ public sealed class CorpusTests
     [InlineData("// expect: output\n// | 1\n// allow: raw\n// rules: R7\n\nraw {\n    print(1)\n}\n", "raw", 6)]
     [InlineData("// expect: error raw-required at 5\n// allow: native\n// rules: R7\n\nx\n", "native", 5)]
     [InlineData("// expect: output\n// | 1\n// build: release\n// allow: raw native\n// rules: R7\n\nx\n", "raw native", 7)]
+    [InlineData("// expect: output\n// allow: keywords\n// rules: J10\n\nx\n", "keywords", 5)]
+    [InlineData("// expect: output\n// allow: raw native keywords\n// rules: J10\n\nx\n", "raw native keywords", 5)]
     public void A_grant_line_gives_the_case_the_grants_it_names(string text, string grants, int bodyLine)
     {
         var header = CaseHeader.Parse(text, out var problem);
@@ -379,11 +382,12 @@ public sealed class CorpusTests
     [InlineData("// expect: output\n// allow: network\n// rules: R7\n\nx\n")]
     [InlineData("// expect: output\n// allow: native raw\n// rules: R7\n\nx\n")]
     [InlineData("// expect: output\n// allow: raw raw\n// rules: R7\n\nx\n")]
+    [InlineData("// expect: output\n// allow: keywords raw\n// rules: R7\n\nx\n")]
     [InlineData("// expect: output\n// allow:\n// rules: R7\n\nx\n")]
     public void A_grant_line_the_header_does_not_take_is_refused_as_such(string text)
     {
-        // R7: the line takes `raw`, `native` or `raw native`, in that order; another is named as the grant line it is, not as a missing rules line
+        // R7, J10: the line takes `raw`, `native` and `keywords`, one or more, in that order; another is named as the grant line it is, not as a missing rules line
         Assert.Null(CaseHeader.Parse(text, out var problem));
-        Assert.Equal("the `// allow:` line is not `// allow: raw`, `// allow: native` or `// allow: raw native`", problem);
+        Assert.Equal("the `// allow:` line is not `// allow:` and one or more of `raw`, `native` and `keywords`, in that order", problem);
     }
 }

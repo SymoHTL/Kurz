@@ -199,6 +199,11 @@ public static class ErrorIds
     public const string PointerCrosses = "pointer-crosses";
     public const string CallLoop = "call-loop";
     public const string AdvanceOutside = "advance-outside";
+    public const string KeywordRedefined = "keyword-redefined";
+    public const string KeywordNoMatch = "keyword-no-match";
+    public const string KeywordDepth = "keyword-depth";
+    public const string KeywordJump = "keyword-jump";
+    public const string KeywordGrant = "keyword-grant";
 
     /// <summary>L1 names this id in its rule and keeps it out of the table, which lists the ids cases expect: no corpus file can be a file that is not UTF-8.</summary>
     public const string InvalidSource = "invalid-source";

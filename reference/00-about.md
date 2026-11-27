@@ -6,7 +6,8 @@ nothing to the design: where the record is silent, a rule here is marked `propos
 and it stays that way until the owner has answered.
 
 It covers the sequential core, what a program without actors needs, the actors of one machine
-(chapter 19) and a program's tests (chapter 20). The rest of actors, distribution, keywords, jobs,
+(chapter 19), a program's tests (chapter 20) and the keywords a file declares, used where a statement
+stands (chapter 21). The rest of actors, distribution, keywords, jobs,
 `mock`, the test's clock and the cluster test, of which chapter 20 holds only the rules that read
 their forms, answer `not supported` and state what the record decides of them (Y8 to Y10), packages, clients
 and what the build proves, its contracts, laws and tests with parameters (sections 6, 7 and 9 to 13 of the
