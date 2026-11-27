@@ -1,8 +1,8 @@
 // expect: throws thrown at 13
-// | test "throws" ... FAILED
+// | test "throws" ... FAILED (seed 0)
 // |     thrown "down" at tests/two-tests-fail.kz:13
 // | ran
-// | test "throws again" ... FAILED
+// | test "throws again" ... FAILED (seed 0)
 // |     thrown "again" at tests/two-tests-fail.kz:18
 // | 2 tests: 0 passed, 2 failed
 // command: test

@@ -3179,6 +3179,10 @@ void LogRefused(byte* entry, long count) {
 // The count of worker threads of a program with a `spawn` (U35), which its start reads (`ThreadsRead`); 0 in any other program.
 static mut int workerCount = 0
 
+// Whether `KURZ_THREADS` set 1 (`ThreadsRead`), with which a run of `kurz test` takes its ready actors first in, first out under any
+// seed, as a case marked `// threads: 1` does (`RunTests`; Y11, U35; section 2, assumed there).
+static mut bool oneAsked = false
+
 // The count of worker threads the first `spawn` starts (`WorkersStart`), the count `KURZ_THREADS` set, or where it is not set the
 // cores the process may use (section 6, the owner, 2026-11-17, #519, comment 6946657505, Q4), where that count is more than 1, else 0,
 // so that a program run with `KURZ_THREADS` set to 1, or on one core, runs every actor on the main thread in its waits, first in,
@@ -3236,6 +3240,8 @@ pub void ThreadsRead(int found, string text) {
         workerCount = int(value)
         if value > 1 {
             workersAsked = int(value)
+        } else {
+            oneAsked = true
         }
     }
 }
@@ -3747,6 +3753,20 @@ pub string ExitErrorText(ExitError e) {
 // the thread that runs the actors takes the first off (`RunOne`).
 static mut byte* runFirst = null
 static mut byte* runLast = null
+
+// The run queue of a run of `kurz test`, whose actors ready at a turn run in the order its seed draws (Y11; section 2, the owner,
+// 2026-11-26, issue 657, comment 7189038775, Q1 b): `shuffled` where the runner started the seed's generators and `KURZ_THREADS` did
+// not set 1 and the build is not the corpus runner's of a case marked `// threads: 1` (`RunTests`, `oneAsked`), and `turnLeft` the count
+// of the actors of the turn not yet taken, those queued when the
+// scheduler took its first, 0 where the next take starts a turn; the actors their messages wake stand behind them, in the next turn
+// (`DrawnTake`; section 2, assumed there). One thread runs the actors of that build (U35), so plain words hold them.
+static mut bool shuffled = false
+static mut long turnLeft = 0
+
+// The state of the test's actor that an `advance` parked (`Advance`), null for none: in a run whose order the seed draws, a turn
+// that it would join ends before it where an actor stands before it, so that the actors the moved clock woke, which its timer
+// fires after, run before it goes on, as Y10 has them (`DrawnTake`; Y11; section 2, assumed there).
+static mut byte* advanced = null
 
 // The table of the slots of the actors of the process (design record, section 6, the owner, 2026-11-16, #519,
 // comment 6919351399, "Erlang: id + generation"): an actor's reference is the index of its slot and its number,
@@ -4325,6 +4345,7 @@ void EndActors() {
 
         runFirst = null
         runLast = null
+        turnLeft = 0
         if sharedWords != null {
             Lock(PauseLock())
             paused = null
@@ -5160,7 +5181,7 @@ byte* NextActor(byte* record, bool shared) {
 byte* Stolen(byte* record) {
     raw {
         long count = *Ptr<long>(scheduler + 48)
-        long first = long(NextChainWord(Generator()) % ulong(count))
+        long first = long(std.NextWord(Generator()) % ulong(count))
         mut long i = 0
         while i < count {
             byte* victim = Worker((first + i) % count)
@@ -8210,17 +8231,24 @@ void Deadlocked(string text, string file, int line) {
 // its turn (`LetGo`, in `Run` where it runs); a passed-over actor is let go at once and not queued again for
 // its own inbox. A message whose deadline passed at the scheduler's turn is dropped at its take, from the inbox
 // and from the side list, before the next is taken (`Dropped`; U37), and a top activation whose deadline
-// passed goes on (`Waited`). This take is the one thread's; the worker threads take an actor with `RunTake`, and no test of the
-// worker threads stands on this path (the owner, 2026-11-26, #519, comment 7204486070, Q1).
+// passed goes on (`Waited`). This take is the one thread's, of the actor the seed draws in a run of `kurz test` that `shuffled`
+// marks (`DrawnTake`); the worker threads take an actor with `RunTake`, and no test of the worker threads stands on this path (the
+// owner, 2026-11-26, #519, comment 7204486070, Q1).
 void RunOne() {
     raw {
-        byte* state = runFirst
-        runFirst = *Ptr<byte*>(state - 16)
-        if runFirst == null {
-            runLast = null
+        mut byte* state = null
+        if shuffled {
+            state = DrawnTake()
+        } else {
+            state = runFirst
+            runFirst = *Ptr<byte*>(state - 16)
+            if runFirst == null {
+                runLast = null
+            }
+
+            *Ptr<byte*>(state - 16) = null
         }
 
-        *Ptr<byte*>(state - 16) = null
         if (StateWord(state).Load(MemoryOrder.Acquire) & 1) == 0 && *Ptr<int>(state - 88) == 3 {
             std.HeapFree(state - 192)
             return
@@ -8272,6 +8300,51 @@ void RunOne() {
         }
 
         LetGo(state, false)
+    }
+}
+
+// The take of a run of `kurz test` off the run queue, which holds an actor (`RunOne`, `shuffled`): at the start of a turn the count of
+// the actors queued, then one of the turn's actors not yet taken, at the index the next word of the seed's order gives modulo their
+// count, unlinked from the queue, so that a turn's actors run in an order the seed draws, each once, and the actors they wake run in
+// the turn after it (Y11; section 2, assumed there: the bias of the modulo below a count over 2 to the 64th). The walk to the index
+// costs a step for each actor before it, which only that build pays.
+byte* DrawnTake() {
+    raw {
+        if turnLeft == 0 {
+            mut byte* queued = runFirst
+            while queued != null && (queued != advanced || turnLeft == 0) {
+                turnLeft = turnLeft + 1
+                queued = *Ptr<byte*>(queued - 16)
+            }
+        }
+
+        mut long index = long(std.OrderWord() % ulong(turnLeft))
+        turnLeft = turnLeft - 1
+        mut byte* before = null
+        mut byte* state = runFirst
+        while index > 0 {
+            before = state
+            state = *Ptr<byte*>(state - 16)
+            index = index - 1
+        }
+
+        byte* after = *Ptr<byte*>(state - 16)
+        if before == null {
+            runFirst = after
+        } else {
+            *Ptr<byte*>(before - 16) = after
+        }
+
+        if after == null {
+            runLast = before
+        }
+
+        if state == advanced {
+            advanced = null
+        }
+
+        *Ptr<byte*>(state - 16) = null
+        return state
     }
 }
 
@@ -8458,18 +8531,18 @@ thread static mut byte* chains = null
 void NewChain(byte* at) {
     raw {
         byte* s = Generator()
-        *Ptr<ulong>(at) = NextChainWord(s)
-        *Ptr<ulong>(at + 8) = NextChainWord(s)
+        *Ptr<ulong>(at) = std.NextWord(s)
+        *Ptr<ulong>(at + 8) = std.NextWord(s)
     }
 }
 
-// The four words of the thread's generator, seeded at its first use (above), which a chain ID and the
-// variation of a restart's pause draw from (U23).
+// The four words of the thread's generator, seeded at its first use (above), in a run of `kurz test` from the draws of its seed
+// (`std.Drawn`, Y11), which a chain ID and the variation of a restart's pause draw from (U23), xoshiro256++ (`std.NextWord`).
 byte* Generator() {
     raw {
         if chains == null {
             chains = AllocateOwn(32)
-            if !sys.Random(chains, 32) {
+            if !std.Drawn(chains, 32) {
                 RandomFailed()
             }
         }
@@ -8478,24 +8551,6 @@ byte* Generator() {
     }
 }
 
-// The next 64 bits of the generator whose four words stand at `s`, xoshiro256++ as its authors give it
-// (Blackman and Vigna, `xoshiro256plusplus.c`), the generator of Rust's `SmallRng` on a 64-bit machine.
-ulong NextChainWord(byte* s) {
-    raw {
-        ulong s0 = *Ptr<ulong>(s)
-        ulong s1 = *Ptr<ulong>(s + 8)
-        ulong s2 = *Ptr<ulong>(s + 16) ^ s0
-        ulong s3 = *Ptr<ulong>(s + 24) ^ s1
-        ulong sum = s0 +% *Ptr<ulong>(s + 24)
-        ulong result = (sum << 23 | sum >> 41) +% s0
-        ulong t = s1 << 17
-        *Ptr<ulong>(s + 8) = s1 ^ s2
-        *Ptr<ulong>(s) = s0 ^ s3
-        *Ptr<ulong>(s + 16) = s2 ^ t
-        *Ptr<ulong>(s + 24) = s3 << 45 | s3 >> 19
-        return result
-    }
-}
 
 // ---- crashes and restarts (chapter 19, U19 to U24) ----------------------------------------------
 
@@ -9639,7 +9694,7 @@ void Pause(byte* state) {
 
         *Ptr<long>(side + 16) = pause
         long span = pause / 5
-        long varied = long(NextChainWord(Generator()) % ulong(2 * span + 1)) - span
+        long varied = long(std.NextWord(Generator()) % ulong(2 * span + 1)) - span
         long due = now + pause + varied
         *Ptr<long>(side + 32) = due
         Lock(PauseLock())
@@ -9815,6 +9870,9 @@ pub bool Advance(long nanoseconds) {
         }
 
         ahead = ahead + nanoseconds
+        if shuffled {
+            advanced = *Ptr<byte*>(running + 320)
+        }
     }
 
     Park(PauseClock())
@@ -10588,12 +10646,19 @@ thread static mut long testWordsRoom = 0
 // ok` or `test "name" ... FAILED`, the words indented by four spaces under a failed one, and after the last test the counts, `2 tests:
 // 1 passed, 1 failed`, `1 test:` for one (Q3, F21); the process then ends with the exit code 0 where every test passed, else 1 (Q4).
 // A line the runner cannot write raises `print-failed` at the line of the test it reports, the counts at the last test's line (A17).
-pub void RunTests(byte* table, long count, string file) {
+// Before the first test the runner starts the generators of the build's seed, `seed`, from which the draws of the runtime follow, and
+// the order of the actors ready at a turn where the build is not `ordered`, the corpus runner's build of a case marked `// threads: 1`
+// (chapter 0), and `KURZ_THREADS` did not set 1 (`shuffled`), and a failed test's line names the seed
+// after `FAILED`, `test "name" ... FAILED (seed 1234)` (Y11; section 2, the owner, 2026-11-26, issue 657, comment 7189038775, Q1 b,
+// Q2 a and Q3 a; the parentheses assumed there).
+pub void RunTests(byte* table, long count, string file, ulong seed, bool ordered) {
     mut byte* name = null
     mut byte* run = null
     mut byte* reply = null
+    std.Seed(seed)
     raw {
         workersAsked = 0
+        shuffled = !ordered && !oneAsked
         name = AllocateOwn(16)
         *Ptr<byte*>(name) = "test".Pointer
         *Ptr<long>(name + 8) = 4
@@ -10641,7 +10706,7 @@ pub void RunTests(byte* table, long count, string file) {
                 }
             }
 
-            Print(1, "test {written} ... FAILED", file, line)
+            Print(1, "test {written} ... FAILED (seed {seed})", file, line)
             Print(1, "    {words}", file, line)
             mut int further = 1
             while further < lines.Count {
@@ -10779,6 +10844,8 @@ void TestEnded() {
 
         runFirst = null
         runLast = null
+        turnLeft = 0
+        advanced = null
         long used = SlotsUsed()
         mut long index = 0
         while index < used {

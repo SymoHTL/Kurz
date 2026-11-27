@@ -283,7 +283,7 @@ words (the owner, 2026-10-29, "Keep these words"), the first on Linux and the se
 no child inherits the lock file, they check on Linux alone, reading `/proc`: on Windows nothing
 checks either.
 
-`kurz test [--release] [--lines] [--cpu <name>] <file.kz>` builds the file's tests in place of its
+`kurz test [--release] [--lines] [--cpu <name>] [--seed <N>] <file.kz>` builds the file's tests in place of its
 top-level code, which does not run, and runs them in a place of its own as `kurz run` runs a program,
 with no word for the program: `--` and an argument after the file are the usage's, since a test reads no
 `args` (Y2, F17). It writes `test "name" ... ok` or `test "name" ... FAILED` for each test, in the order of
@@ -291,6 +291,9 @@ the file, after the lines the test printed, the words of a failed test's crash i
 `FAILED` line, and then the counts, `2 tests: 1 passed, 1 failed`, `1 test:` for one (Y3), and ends with
 0 where every test passed and 1 where one failed (Q4). A program the checker accepts with no test gets
 `error: no test in <file>` and a `help:` line naming the form, and the exit code 1 (Y4, Q6).
+The run takes the seed `--seed` gives, a `ulong` in digits alone, or a new one from the system's
+randomness, and a failed test's line names it, `test "name" ... FAILED (seed 1234)`; a value that is no
+`ulong` gets `error: seed (<the value>)` and the exit code 1, before the build (Y11).
 `CommandTests` holds each of these.
 
 Any other command line gets the usage on standard error and the exit code 1:
@@ -299,7 +302,7 @@ Any other command line gets the usage on standard error and the exit code 1:
            kurz build [--release] [--lines] [--cpu <name>] <file.kz> [-o <output>]
            kurz run [--release] [--lines] [--cpu <name>] <file.kz> [-- <argument>...]
            kurz exec [--release] [--lines] [--cpu <name>] "<program text>" [-- <argument>...]
-           kurz test [--release] [--lines] [--cpu <name>] <file.kz>
+           kurz test [--release] [--lines] [--cpu <name>] [--seed <N>] <file.kz>
            run and exec pass the words after -- to the program
 
 ### Readings the record leaves open to the command
@@ -2406,9 +2409,11 @@ emitted `spawn` keeps a copy of the constructor's arguments in the spawner's hea
 function that constructs the state again from them, and each call site of a message gets a table
 of the function that runs it and the one that copies it into a new heap. Chapter 0's line
 `// threads: 1`, on a case whose output follows one thread's order, is read by `tools/lint_reference.py` and by the
-corpus runner's reading of a header (`CaseHeader`), each refusing another count, and the runner does nothing more for
-it: the build runs every actor on its one thread, the ready actors first in, first out, the top-level code's wait
-running them, which is U35's order for such a case. A message any of whose
+corpus runner's reading of a header (`CaseHeader`), each refusing another count, and the runner runs such a case
+with `KURZ_THREADS` set to 1, and builds one that runs its tests ordered (Y11), so that the build runs every actor
+on its one thread, the ready actors first in, first out, the top-level code's wait running them, which is U35's
+order for such a case, under the seed 0 that the runner gives every case of `kurz test`, and on Windows too, whose
+build reads no `KURZ_THREADS`. A message any of whose
 arguments can wait, one that runs a call anywhere in it, is built in a
 heap of its own (`MessageHeapNew`) and at its queueing copied by that copy into the heap its actor has
 then, its own heap freed, as Erlang builds a message in the sender's heap and copies it into the

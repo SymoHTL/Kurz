@@ -1,6 +1,6 @@
 // expect: throws check-failed at 15
 // | test "adds" ... ok
-// | test "counts" ... FAILED
+// | test "counts" ... FAILED (seed 0)
 // |     check-failed "names.Count == 2 (3 == 2)" at tests/check-fails-in-test.kz:15
 // | 2 tests: 1 passed, 1 failed
 // command: test

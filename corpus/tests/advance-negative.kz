@@ -1,5 +1,5 @@
 // expect: throws advance-negative at 10
-// | test "the clock goes back" ... FAILED
+// | test "the clock goes back" ... FAILED (seed 0)
 // |     advance-negative at tests/advance-negative.kz:10
 // | 1 test: 0 passed, 1 failed
 // command: test

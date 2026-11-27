@@ -1,5 +1,5 @@
 // expect: throws thrown at 10
-// | test "child escalates" ... FAILED
+// | test "child escalates" ... FAILED (seed 0)
 // |     thrown "down" at tests/test-child-escalates.kz:10
 // | 1 test: 0 passed, 1 failed
 // command: test

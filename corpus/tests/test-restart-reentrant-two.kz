@@ -1,7 +1,7 @@
 // expect: throws deadlock at 25
 // | 0
 // | 0
-// | test "restarts two actors into calls they keep out" ... FAILED
+// | test "restarts two actors into calls they keep out" ... FAILED (seed 0)
 // |     deadlock at tests/test-restart-reentrant-two.kz:25
 // |     kept out at tests/test-restart-reentrant-two.kz:42
 // | 1 test: 0 passed, 1 failed
