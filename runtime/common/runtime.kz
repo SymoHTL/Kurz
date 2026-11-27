@@ -3182,7 +3182,7 @@ static mut int workerCount = 0
 // The count of worker threads the first `spawn` starts (`WorkersStart`), the count `KURZ_THREADS` set, or where it is not set the
 // cores the process may use (section 6, the owner, 2026-11-17, #519, comment 6946657505, Q4), where that count is more than 1, else 0,
 // so that a program run with `KURZ_THREADS` set to 1, or on one core, runs every actor on the main thread in its waits, first in,
-// first out, as a case marked `// threads: 1` runs (U35), and `kurz test`, which sets it to 0, too (`RunTests`).
+// first out, as a case marked `// threads: 1` runs (U35), and `kurz test`, which sets `workersAsked` to 0, too (`RunTests`).
 static mut int workersAsked = 0
 
 // The count of worker threads of a program with a `spawn` (U35), `found` as the target's `Variable` gave it for `KURZ_THREADS`:
@@ -5072,14 +5072,16 @@ void WorkerTurn() {
 // The time at which this worker thread's spin before its park ends, 0 while it does not spin (`Spun`).
 thread static mut long spinUntil = 0
 
-// The time a worker thread with nothing to take spins before it parks, in nanoseconds (`Spun`).
+// The time a worker thread with nothing to take spins before it parks, in nanoseconds (`Spun`): 20 µs from the first turn that finds
+// nothing (section 6, the owner, 2026-11-27, #519, comment 7215317481, Q3 of comment 7210832380, "20 us, as built (Recommended)").
 long SpinBound() => 20000
 
 // Whether the worker of the record `record`, which found nothing to take at `now` (`WorkerTurn`), spins for one more turn before it
 // parks (`WorkerPark`), so that a wake finds it awake, as Go's runtime keeps spinning threads and Tokio a searching worker (section 6,
-// the owner, 2026-11-26, #519, comment 7204486070, Q2, "Spin before park (Recommended)"): the first such turn starts the spin where
-// fewer than half the workers look for work, as tokio lets a worker search while fewer than half of them search (not checked at
-// source), marking the worker as one that looks, so that an actor put where any worker can take it wakes no parked worker meanwhile
+// the owner, 2026-11-26, #519, Q2 of comment 7200036109 (comment 7204486070), "Spin before park (Recommended)"): the first such turn
+// starts the spin where fewer than half the workers look for work, as tokio lets a worker search while fewer than half of them search
+// (not checked at source; the owner, 2026-11-27, #519, comment 7215317481, Q3b of comment 7210832380, "Half of all, tokio (Recommended)"),
+// marking the worker as one that looks, so that an actor put where any worker can take it wakes no parked worker meanwhile
 // (`NotifyOne`), and the turns after it spin on until `SpinBound` passed since that first turn, each with the hint of a spin to the
 // core (`sys.SpinHint`); a turn reads the epoch, the clock, the timers, the pauses and the world as every turn does, so that a timer
 // due, a restart's pause and a thread that holds the world are taken while it spins. False where the spin is over or none starts,
@@ -10636,6 +10638,7 @@ pub void RunTests(byte* table, long count, string file) {
     mut byte* run = null
     mut byte* reply = null
     raw {
+        // U35: the tests of `kurz test` run every actor on the main thread, as a case marked `// threads: 1` runs (assumed in section 6)
         workersAsked = 0
         name = AllocateOwn(16)
         *Ptr<byte*>(name) = "test".Pointer

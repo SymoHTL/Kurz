@@ -730,7 +730,7 @@ public sealed partial class Emitter
         var adopt = MessageCopy(f, copiesInto, inPlace: true);
         module.Global($"{table} = private unnamed_addr constant [4 x ptr] [ptr {run}, ptr {copy}, ptr {MessageDrop(f)}, ptr {adopt}]");
         fn.Emit($"store ptr {table}, ptr {MessageField(message, block, 1)}");
-        fn.Emit($"store ptr {own ?? heap}, ptr {MessageField(message, block, 6)}"); // U35: the heap it is built in, a heap of its own on worker threads, the one `ActorHeap` makes there too, which the runtime's `Enqueue` reads there alone and clears on every thread before any read, so that on one thread, where `heap` is the actor's, no read follows (T17)
+        OwnHeapStored(message, block, heap); // the heap it is built in, of its own or `ActorHeap`'s
         for (var i = 0; i < arguments.Count; i++)
         {
             fn.Emit($"store {arguments[i]}, ptr {MessageField(message, block, MessageArguments + i)}");
@@ -849,7 +849,7 @@ public sealed partial class Emitter
         var adopt = MessageCopy(f, copiesInto, inPlace: true);
         module.Global($"{table} = private unnamed_addr constant [4 x ptr] [ptr {run}, ptr {copy}, ptr {MessageDrop(f)}, ptr {adopt}]");
         fn.Emit($"store ptr {table}, ptr {MessageField(message, block, 1)}");
-        fn.Emit($"store ptr {heap}, ptr {MessageField(message, block, 6)}"); // U35: the heap it is built in, which it names while queued on worker threads (the runtime's `Enqueue`; T17)
+        OwnHeapStored(message, block, heap); // the heap it is built in, `ActorHeap`'s
         for (var i = 0; i < crossed.Count; i++)
         {
             fn.Emit($"store {crossed[i]}, ptr {MessageField(message, block, MessageArguments + i)}");
@@ -962,8 +962,8 @@ public sealed partial class Emitter
     /// value by the environment of its lambda (<paramref name="copiesInto"/>); the message's own block goes with the crashed heap, or with
     /// the message's own heap. Where <paramref name="inPlace"/> holds, the fourth function of the table, which the runtime calls at the
     /// turn of a message queued with its heap of its own on worker threads (the runtime's <c>Adopted</c>; U35, T17): each argument's copy
-    /// stored in the message's own block, in the place the method reads, and nothing given. The word of the heap of its own (field 6)
-    /// is copied as it stands: 0 on one thread, which the runtime's <c>Enqueue</c> left there; on worker threads the heap of its own
+    /// stored in the message's own block, in the place the method reads, and nothing given. The word of the heap of its own (field 6,
+    /// <see cref="OwnHeapStored"/>) is copied as it stands: 0 on one thread, which the runtime's <c>Enqueue</c> left there; on worker threads the heap of its own
     /// of the message copied after a crash, which the copy's activation then frees at its end (the runtime's <c>Adopted</c>,
     /// <c>OwnLeft</c>), so that the one word names that heap from the copy as it did from the message.
     /// </summary>
@@ -1048,14 +1048,27 @@ public sealed partial class Emitter
 
     private string MessageField(string message, string block, int index) => fn.Value($"getelementptr {message}, ptr {block}, i32 0, i32 {Number(index)}");
 
+    /// <summary>
+    /// U35, T17: the word of the message <paramref name="block"/> that names its heap of its own (field 6), with one meaning at every
+    /// site that builds a message: the heap <paramref name="heap"/> the message is built in where the runtime's <c>ActorHeap</c> or
+    /// <c>MessageHeapNew</c> gave it, which on worker threads is a heap made for the message, that the runtime's <c>Enqueue</c> takes off
+    /// the list of the heaps being built and the receiver copies the arguments out of and frees (<c>Adopted</c>, <c>OwnLeft</c>); null
+    /// where the message is built in a heap neither gave, the child's of an <c>attempt</c>, which no free of a message's heap may reach.
+    /// <c>Enqueue</c> reads the word on worker threads alone and clears it on every thread before any other read, so that on one thread,
+    /// where <c>ActorHeap</c> gives the actor's heap, nothing reads it; from the message's start the word holds the deadline of a
+    /// <c>within</c> block (the runtime's <c>BlockEnter</c>).
+    /// </summary>
+    private void OwnHeapStored(string message, string block, string? heap) => fn.Emit($"store ptr {heap ?? "null"}, ptr {MessageField(message, block, 6)}");
+
     /// <summary>The size of a value of the IR type, in bytes.</summary>
     private string IrSize(string irType) => fn.Value($"ptrtoint ptr {fn.Value($"getelementptr {irType}, ptr null, i32 1")} to i64");
 
     /// <summary>
     /// U35: in a program built for Linux with a <c>spawn</c> in one of its files, <c>KURZ_THREADS</c> read before the first statement,
     /// which the runtime's <c>ThreadsRead</c> takes as the count of worker threads or refuses, the cores the process may use where it is
-    /// not set; a program with no <c>spawn</c> reads none, as a program with neither a log call nor a <c>spawn</c> reads no
-    /// <c>KURZ_LOG</c> (P5).
+    /// not set, and no worker thread starts unless that count is more than 1, a count of 1 running every actor on the main thread (the
+    /// runtime's <c>WorkersStart</c>); a program with no <c>spawn</c> reads none, as a program with neither a log call nor a <c>spawn</c>
+    /// reads no <c>KURZ_LOG</c> (P5).
     /// </summary>
     private void EmitThreadsStart()
     {
@@ -1140,7 +1153,7 @@ public sealed partial class Emitter
         fn.Emit($"store ptr null, ptr {fn.Value($"getelementptr {replyType}, ptr {reply}, i32 0, i32 {Number(ReplyHeap + 1)}")}");
         fn.Emit($"call void {RuntimeFunction("ReplyWaiter")}(ptr {reply})"); // the waiter before the message is queued
         fn.Emit($"store ptr {reply}, ptr {MessageField(message, queued, 2)}");
-        fn.Emit($"store ptr null, ptr {MessageField(message, queued, 6)}"); // U35: built in the child's heap, no heap of its own (the runtime's `Enqueue`)
+        OwnHeapStored(message, queued, null); // built in the child's heap, which no `ActorHeap` gave
         fn.Emit($"call void {RuntimeFunction("Enqueue")}({ReferenceWords(reference)}, ptr {queued}, i1 true, i64 9223372036854775807, %kz.str {StringValue(unit.File)}, i32 {Number(a.Line)})");
         var crash = fn.Value($"call ptr {RuntimeFunction("Attempted")}(ptr {reply}, ptr {queued}, %kz.str {StringValue(unit.File)}, i32 {Number(a.Line)})");
         var result = fn.Alloca(Ir(union), "attempt");
