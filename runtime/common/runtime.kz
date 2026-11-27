@@ -5381,8 +5381,8 @@ extern "C" int SocketWaited(int fd, int events, long nanoseconds) {
     return result
 }
 
-// The wait of `Drive` for its child and its output in the poller (`sys.ManyWaiter`; issue 661, Q14 (a); S10, S18): each of the
-// `count` `struct pollfd`s of `poll` at `pollfds` whose descriptor is not below 0 registered for its events with a block shaped as
+// The wait of `Drive` for its child and its output in the poller (`sys.ManyWaiter`; issue 661, Q14 (a), comment 7189038013; S10,
+// S18): each of the `count` `struct pollfd`s of `poll` at `pollfds` whose descriptor is not below 0 registered for its events with a block shaped as
 // `SocketWaited`'s, whose word its event sets (`Polled`), at 16 the block `holder` that holds the waits, at 24 the descriptor and at
 // 40 the mark -3, so that its event sets the word of `holder` too (`Ended`); `holder` shaped as `SocketWaited`'s block, with the
 // deadline `nanoseconds` from now, at 40 the mark -2, so that a fall takes each wait out (`Fall`, `ManyUnwait`), at 48 the waits, at
@@ -5553,11 +5553,13 @@ void HandedOut(byte* block) {
 
 // The waits on the pool of threads for blocking calls in the child of a `fork`, which drops the pool and has none of its threads
 // (`sys.Forked`), found where jobs are handed while the pool's `eventfd` is not the one the scheduler armed: each wait whose end the
-// scheduler had not taken ended with -125, `ECANCELED`, put as its job's result too, so that its call gets `Other` with the number
-// 125 (S1) and gives its job back, and no wait waits without end for a job no thread makes *(assumed: the number, which no answer
-// names)*; the count of jobs handed set to 0 and the `eventfd` to none, so that the child's
-// first call makes a pool of its own (`sys.PoolEvent`). A job the parent's pool ended before the `fork` whose end the scheduler had
-// not taken is ended so too, and a descriptor its opening gave stays open in the child (inferred).
+// scheduler had not taken ended, so that no wait waits without end for a job no thread makes: a job a thread of the parent's pool
+// ended before the `fork` keeps the result that thread put in it, so that its call reads its bytes, or the descriptor its opening
+// gave, which the child's copy holds as the parent's does (`sys.Handing`'s mark at 16, which the call replaced), and any other job
+// gets -125, `ECANCELED`, as its result, so that its call gets `Other` with the number 125 (S1) and gives its job back *(assumed:
+// the number, which no answer names)*; the count of jobs handed set to 0 and the `eventfd` to none, so that the child's first call
+// makes a pool of its own (`sys.PoolEvent`). A job whose actor fell before the `fork` stands in no wait, and the child neither
+// gives it back nor closes a descriptor its opening gave (inferred).
 void PoolLost() {
     raw {
         if handed == 0 || poolEvent == sys.PoolHeld() {
@@ -5570,8 +5572,12 @@ void PoolLost() {
             *Ptr<byte*>(at + 64) = null
             *Ptr<byte*>(at + 72) = null
             if *Ptr<long>(at) == 0 {
-                *Ptr<long>(*Ptr<byte*>(at + 48) + 16) = -125
-                Ended(at, -125)
+                byte* job = *Ptr<byte*>(at + 48)
+                if *Ptr<long>(job + 16) == -4102 {
+                    *Ptr<long>(job + 16) = -125
+                }
+
+                Ended(at, 1)
             }
 
             at = next
@@ -6174,10 +6180,12 @@ bool Runs(byte* state, byte* message) {
 // a child whose block of `on crash` waits, whose block runs after the supervisor's current message (U28), and the actor that the
 // reply of the top activation reaches, which `Enqueue` stored in it; null where the line ends: at a child whose block the
 // top-level code runs (U33), at a top activation that runs, whose reply is set or whose deadline passed, and at one that waits on
-// no call, a sleep (`Park`) or a wait in the poller (`SocketWaited`), whose block at 360 is no reply, the sleep's of 48 bytes and
-// the poller wait's of 64 (its link to the next wait of its descriptor at 48, its events at 56), read only after the word at
-// 432, which names the message of a call's wait (`Answer`) and no message of those (U60; assumed: a sleep and a wait in the
-// poller wait on no actor, so that the line ends there).
+// no call, a sleep (`Park`), a wait in the poller (`SocketWaited`), a wait for a child (`ManyWaited`) or a wait on the pool of
+// threads for blocking calls (`BlockingWaited`), whose block at 360 is no reply, the sleep's of 48 bytes, `SocketWaited`'s of 64
+// (its link to the next wait of its descriptor at 48, its events at 56), `ManyWaited`'s holder of 72 (its waits at 48, their count
+// at 56, the room of the call at 64) and `BlockingWaited`'s of 80 (its job at 48, its links among the waits on the pool at 64 and
+// 72), read only after the word at 432, which names the message of a call's wait (`Answer`) and no message of those (U60;
+// assumed: a sleep and a wait in the poller wait on no actor, so that the line ends there).
 byte* Onward(byte* callee) {
     raw {
         if *Ptr<int>(callee - 88) == 5 {

@@ -2897,7 +2897,7 @@ Case: [system/park-crash-deadlock.kz](../corpus/system/park-crash-deadlock.kz)
 // `Go` waits on `Get`, queued behind `Fail` in `Worker`'s inbox, and the block of `Worker`'s policy waits behind `Go`, a loop that a
 // crash closes and that layer 3 does not see (U60): the top-level code's wait on `Go` finds no actor left to run, no timer pending
 // and nothing registered with the poller, so that it is `deadlock` at its line (U18), and not a wait in the poller without end.
-// U18 alone is the subject, the end the top-level code's wait reaches once nothing is registered; S10, U20 and U64 it passes through
+// U18 alone is the subject, the end of the top-level code's wait once nothing is registered; S10, U20, U60 and U64 it passes through
 actor Helper {
     pub void Poke(Napper n) {
         print(n.Boom())
@@ -3452,7 +3452,7 @@ Case: [system/park-file-crash.kz](../corpus/system/park-file-crash.kz)
 // blocking calls for its opening of a FIFO, and its crash drops the job and gives both its callers `callee-crashed` (U20): `Caller`,
 // whose policy prints it, and `Helper`, whose policy stops it (U25). The opening ends once the top-level code opens the FIFO to
 // write, on a thread of the pool, with no wait left to wake, and `Reader`'s read of a file on the pool after it reads its byte.
-// S10 alone is the subject, the job of a call whose actor fell dropped; U20 it passes through
+// S10 alone is the subject, the job of a call whose actor fell dropped; U17, U20 and U25 it passes through
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
@@ -3546,7 +3546,7 @@ Case: [system/park-command-crash.kz](../corpus/system/park-command-crash.kz)
 // `cat` of a FIFO, and its output, and its crash takes those waits out of the poller and gives both its callers `callee-crashed`
 // (U20): `Caller`, whose policy prints it, and `Helper`, whose policy stops it (U25). The child ends once the top-level code opens
 // the FIFO to write, with no wait left to wake, and `Runner`'s wait for a child of its own after it gives that child's output.
-// S10 alone is the subject, the waits for a child taken out of the poller at a fall; S18 and U20 it passes through
+// S10 alone is the subject, the waits for a child taken out of the poller at a fall; S18, U17, U20 and U25 it passes through
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
@@ -3630,8 +3630,8 @@ Case: [system/park-command-pipes.kz](../corpus/system/park-command-pipes.kz)
 // open descriptors, which the system lists in `/proc/self/fd`, is the same once the crash is over as before it. A crash that left the
 // pipes open would leave two more. `Runner`'s wait for a child of its own and its read of a file make the poller and the pool of
 // threads for blocking calls before the first count, so that neither is counted once only, and the top-level code opens the FIFO to
-// write once the crash is over, so that the child ends. S10 alone is the subject, the fall of a wait for a child; S18 and U20 it
-// passes through
+// write once the crash is over, so that the child ends. S10 alone is the subject, the fall of a wait for a child; S18, U17, U20 and
+// U25 it passes through
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
@@ -3726,7 +3726,10 @@ Case: [system/park-file-drained.kz](../corpus/system/park-file-drained.kz)
 // its end before the crash: the fall gives that job back and closes the descriptor the opening gave, as it closes one whose job
 // ends after the fall (issue 661, the product pass, comment 7182792402, Q3), so that the count of the process's open descriptors,
 // which the system lists in `/proc/self/fd`, is the same once the crash is over as before it. A fall that left the job would leave
-// one more. `Reader`'s read of a file makes the pool before the first count. S10 alone is the subject; U20 it passes through
+// one more. `Reader`'s read of a file makes the pool before the first count. The case rests on a margin of time that no rule fixes:
+// an opening that ended after the fall, its descriptor closed as that one's is, would give the same count, so that the case holds
+// the fall over a job whose end was taken only where the opening ends within `Boom`'s 0.4 seconds. S10 alone is the subject, the
+// fall over a job whose end the scheduler took; U17, U20 and U25 it passes through
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"

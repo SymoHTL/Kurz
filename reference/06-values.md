@@ -152,11 +152,15 @@ is not `mut` is `mut-at-call` as well. Passing one variable, one path or one `mu
 instance named alone in its method twice as `mut` (`Swap(mut a, mut a)`, `Two(mut Items, mut Items)`),
 or a variable or a path beside a longer path into it
 (`Pair(mut p.In, mut p.In.A)`), is `mut-at-call` too: each `mut` parameter is the only way its value
-changes while the function runs (M3). The path of `data` fields after `mut` is decided (§4, the
-owner, 2026-11-25, issue 646, comment 7167181142, "Decide + build") *(proposed: a `mut` field of the
-instance named alone in its method after `mut`, and the uses of `mut-at-call` for `mut` in front of
-an argument whose parameter is not `mut` and for one variable, path or field named alone passed twice,
-or a variable or path beside a longer path into it)*.
+changes while the function runs (M3). A field of the instance named alone meets no longer path into
+it at a call: such a path runs through the class instance, which stays `not supported` as a field of
+a class instance on a path does, so that `Pair(mut In, mut In.A)` in a method of a class with a
+`mut` field `In` is `not supported` at its second argument. The path of `data` fields after `mut` is
+decided (§4, the owner, 2026-11-25, issue 646, comment 7167181142, "Decide + build") *(proposed: a
+`mut` field of the instance named alone in its method after `mut`, and the uses of `mut-at-call` for
+`mut` in front of an argument whose parameter is not `mut` and for one variable, path or field named
+alone passed twice, or a variable or path beside a longer path into it, a field named alone meeting
+none)*.
 
 A path of `data` fields passed as `mut`, `Grow(mut b.Items)`, gives the callee the place at the end of
 the path, as C#'s `ref b.Items` and Rust's `&mut b.items` do: a block on the path that another value
@@ -167,9 +171,9 @@ reference on the path stay `not supported` (§4, the owner, 2026-11-25, "Data fi
 *(assumed, §4: the place is taken after the other arguments ran, as a variable's is; a path that
 ends at a `weak` field given to a strong `mut T?` parameter is `not supported`, and one given to a
 `mut weak T?` parameter keeps the `type-mismatch` the build gives it, since a read of the field is the
-strong `T?` (R3); a `weak` field named alone in its method, which is no path, is `not supported`
-given to a strong `mut T?` parameter and `type-mismatch` given to a `mut weak T?` one, as a path to
-one is.)*
+strong `T?` (R3).)* *(proposed, as the field named alone after `mut` that it rests on is: a `weak`
+field named alone in its method, which is no path, is `not supported` given to a strong `mut T?`
+parameter and `type-mismatch` given to a `mut weak T?` one, as a path to one is.)*
 
 Within one expression, a read of what a call takes as `mut`, of a value that holds it or of one it
 holds (the variable itself, a path of fields, an item of a list), is the compile error

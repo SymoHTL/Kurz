@@ -11,8 +11,8 @@
 // open descriptors, which the system lists in `/proc/self/fd`, is the same once the crash is over as before it. A crash that left the
 // pipes open would leave two more. `Runner`'s wait for a child of its own and its read of a file make the poller and the pool of
 // threads for blocking calls before the first count, so that neither is counted once only, and the top-level code opens the FIFO to
-// write once the crash is over, so that the child ends. S10 alone is the subject, the fall of a wait for a child; S18 and U20 it
-// passes through
+// write once the crash is over, so that the child ends. S10 alone is the subject, the fall of a wait for a child; S18, U17, U20 and
+// U25 it passes through
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"

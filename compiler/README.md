@@ -1689,8 +1689,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `kurz test` alone, `--release` among them, while every other build reads the system's clock directly and stores nothing
   to `ahead`, a global the optimiser folds to 0 there (`EmitterTests`); `TestEnded` sets it back to 0. A socket's bound is
   a deadline among the timers, as a sleep's is (`SocketWaited`, in the item of a call on a socket that would block), which
-  `advance` passes; a child process's wait is a wait in
-  the kernel with a timeout of its own, `poll`'s, which `advance` does not reach; a build for Windows says `not supported`,
+  `advance` passes; a child process's wait waits in the poller where the scheduler hands calls (`ManyWaited`), each turn
+  of it under a deadline among the timers, which `advance` passes, and `Drive` reads the bound of the child's run (S20)
+  from the system's monotonic clock after each turn, so that `advance` ends a turn of the wait and does not shorten that
+  bound, and elsewhere in `poll`, whose timeout `advance` does not reach; a build for Windows says `not supported`,
   as for `instant.Now`;
 - a call on a socket that would block (S10), in a build for Linux: every socket is opened with `SOCK_NONBLOCK` and stays so,
   a read, a write, an `Accept` and a connect in progress are tried first, and one that fails with `EAGAIN` on a socket, which
