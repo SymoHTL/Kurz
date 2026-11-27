@@ -192,16 +192,23 @@ so that a call in the actor's own method names its type as the span and as the c
 owner, 2026-11-27, #274, comment 7216348897, Q1 "Rust span first (Recommended)" and Q3 "All 32 hex
 digits (Recommended)"). A key or a name is written as a `string` field's value is (P7; Q4, "As is
 (Recommended)"), and the node stands there only in a program that names nodes (Q6, "Only where nodes
-are named (Recommended)"). A line written outside every actor's message, the top-level code's among
-them, holds nothing in their place (Q2, "Nothing (Recommended)"); a line that a function writes while a
+are named (Recommended)"), written as a `string` field's value is *(assumed in §12)*. A key that is a
+`secret`, or holds a secret field, is the compile error `secret-logged` at each log call that would
+write its actor's span (§12, the owner, 2026-11-27, #39, comment 7223019465, "Compile error
+(Recommended)"), and the line of such an actor's crash writes the key as `[secret]` (§12, the owner,
+2026-11-27, #39, comment 7223109037, "Key as [secret] (Recommended)"). A line written outside every
+actor's message, the top-level code's among them, holds nothing in their place (Q2, "Nothing
+(Recommended)"), the line of an actor's crash aside, which Q7 gives the span of the actor it names
+whether a message runs or not; a line that a function writes while a
 message runs carries that message's span, its category staying the function's (Q5, "Yes, the message's
 span (Recommended)"); `print` writes no span, the line of an actor's crash takes the span of the
 actor it names (U24), and the line of `Kurz.Log` that names dropped lines takes none (Q7, "print
 plain, crash gets span (Recommended)"). The fields are named `key`, `node` and `chain`, in that order,
 a name written under `key` as a key is, and a test's own actor of `kurz test`, which the program does
 not declare, writes no span, as the top-level code writes none, and the line of a crash that carries
-no chain, the `restart-limit` of a supervisor that runs no message, writes the type's name alone as its
-span, `Sup:`, as `tracing_subscriber::fmt` writes a span with no field *(assumed in §12)*. The build has no
+no chain, the `restart-limit` of a supervisor that runs no message, leaves out the field `chain` alone,
+its key, its name and its node standing as in any span, and writes the type's name alone, `Sup:`, where
+no field is left, as `tracing_subscriber::fmt` writes a span with no field *(assumed in §12)*. The build has no
 actor with a key or a name and no program that names nodes, so its span holds the chain alone
 (`compiler/README.md`).
 
