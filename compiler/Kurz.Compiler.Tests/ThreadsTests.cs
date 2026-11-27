@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Kurz.Compiler.Build;
+using Kurz.Compiler.Emit;
 using Kurz.Compiler.Text;
 using Xunit;
 
@@ -19,16 +20,17 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     /// <summary>
     /// The program built for Linux and run by <c>/bin/sh</c> as <c>exec "$0"</c> after <paramref name="setup"/>, with <c>KURZ_THREADS</c>
-    /// taken away and <c>KURZ_TRACE=0</c>: its exit code, its lines and its error stream; null on Windows.
+    /// taken away and <c>KURZ_TRACE=0</c>, with the runtime <paramref name="runtime"/> or the toolchain's: its exit code, its lines and its
+    /// error stream; null on Windows.
     /// </summary>
-    private (int Code, IReadOnlyList<string> Output, string Error)? Ran(string text, string name, string setup)
+    private (int Code, IReadOnlyList<string> Output, string Error)? Ran(string text, string name, string setup, CheckedRuntime? runtime = null)
     {
         if (Builder.HostTarget == Target.Windows)
         {
             return null;
         }
 
-        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: true);
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], runtime ?? toolchain.Runtime, testBuild: true);
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, name);
         var (code, output, error) = Processes.Capture("/bin/sh", ["-c", $"{setup}exec \"$0\"", executable], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = "0", ["KURZ_THREADS"] = null });
@@ -127,6 +129,41 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
         {
             Assert.Equal((0, ""), (run.Code, run.Error));
             Assert.Equal(["true", "1800", "last r299"], run.Output);
+        }
+    }
+
+    /// <summary>
+    /// U35, T16 2: the wait of a call of the top-level code reads no block of the call's message after its push, since the callee's
+    /// worker can run the message and free its heap of its own while the main thread holds no epoch (`OwnLeft`, `Unpinned`), but where
+    /// it finds nothing left to run, under the lock of the process (`Answer`): 2000 calls to fresh actors on four worker threads, built
+    /// with the allocator that makes every block it frees inaccessible (<see cref="ListTests.Fenced"/>), so that such a read ends the run
+    /// with the system's signal: while the wait read the message's chain before it, 64 of 100 runs of this program ended so beside a run
+    /// of the suite, and none of 100 after the change. A run on a machine with no other load ends so less often, so that this test can
+    /// pass on a build that reads the freed block.
+    /// </summary>
+    [Fact]
+    public void The_wait_of_a_call_of_the_top_level_code_reads_no_block_of_its_message_that_a_worker_freed()
+    {
+        const string text = """
+            actor Echo {
+                pub int Get(int n) => n
+            }
+
+            mut sum = 0
+            mut i = 0
+            while i < 2000 {
+                e = spawn Echo()
+                sum = sum + e.Get(i)
+                i = i + 1
+            }
+
+            print(sum)
+
+            """;
+        if (Ran(text, "threads-echo-fenced", "export KURZ_THREADS=4; ", ListTests.Fenced) is { } run)
+        {
+            Assert.Equal((0, ""), (run.Code, run.Error));
+            Assert.Equal(["1999000"], run.Output);
         }
     }
 
@@ -556,7 +593,8 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// U35: the path of a message on one thread pays the tests of the worker threads alone (the owner, 2026-11-26, #519, comment
     /// 7204486070, Q1): the emitter marks the forms only the worker threads reach <c>noinline</c> and <c>cold</c>
     /// (<c>Emitter.WorkerForms</c>), and the helpers of that path that the worker threads call too <c>alwaysinline</c>
-    /// (<c>Emitter.InLine</c>). A program of sends and a call to an actor, its IR optimised as a release build optimises it, calls
+    /// (<c>Emitter.InLine</c>). A program of sends and a call to an actor, built for Linux on x86-64 on every machine, since a build
+    /// for Windows starts no worker thread (<c>compiler/README.md</c>), its IR optimised as a release build optimises it, calls
     /// none of the helpers, which stayed calls without the mark, and still calls <c>RootSlept</c>, which its one caller took in
     /// without its mark (LLVM writes a name without its quotes where it needs none).
     /// </summary>
@@ -584,7 +622,7 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(c.Get())
 
             """;
-        var program = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: false).Program!;
+        var program = Builder.Compile(SourceText.FromString("program.kz", text), [], Builder.CheckRuntime(Target.Linux, Arch.X64), testBuild: false, cpu: () => Cpu.Baseline).Program!;
         var defines = program.Ir.Split('\n').Where(l => l.StartsWith("define internal ", StringComparison.Ordinal)).ToList();
         foreach (var form in new[] { "RootSlept", "QueueLocal", "QueueHeld", "Answered", "Deferred", "PinnedHeld" })
         {
@@ -598,7 +636,7 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var input = Path.Combine(directory, "program.ll");
         var output = Path.Combine(directory, "optimised.ll");
         File.WriteAllText(input, program.Ir);
-        List<string> arguments = ["-O2", "-S", "-emit-llvm", input, "-o", output];
+        List<string> arguments = ["--target=x86_64-unknown-linux-gnu", "-O2", "-S", "-emit-llvm", input, "-o", output];
         if (program.CpuFlag is { } cpu)
         {
             arguments.Add(cpu);
