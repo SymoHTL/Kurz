@@ -329,6 +329,13 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
         Assert.Equal((DiagnosticKind.NotSupported, 2), (diagnostic.Kind, diagnostic.Line)); // E2: the id and the line, not the wording
         Assert.NotNull(Builder.Compile(SourceText.FromString("program.kz", text), [], Builder.CheckRuntime(Target.Linux), testBuild: true).Program); // the positive control
+
+        // P8: a log call inside an actor's method, which a build for Linux takes, keeps that `not supported` at its line (S11)
+        const string inActor = "actor A {\n    pub void Go() {\n        Log.Information(\"x\")\n    }\n}\n\na = spawn A()\na.Go()\n";
+        var inside = Builder.Compile(SourceText.FromString("program.kz", inActor), [], Builder.CheckRuntime(Target.Windows), testBuild: true);
+        Assert.Null(inside.Program);
+        Assert.Contains(inside.Diagnostics.Items, d => (d.Kind, d.Line) == (DiagnosticKind.NotSupported, 3));
+        Assert.NotNull(Builder.Compile(SourceText.FromString("program.kz", inActor), [], Builder.CheckRuntime(Target.Linux), testBuild: true).Program);
     }
 
     [Theory]
@@ -348,6 +355,24 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
             Assert.Equal(["done"], run.Output);
             var log = File.ReadAllText(Path.Combine(toolchain.Directory, name, "log.txt"));
             Assert.Equal([line, "Information program: c", "Information program: d"], Unstamped(log, before, DateTime.UtcNow));
+        }
+    }
+
+    [Fact]
+    public void The_line_that_names_dropped_lines_holds_no_span_before_an_actors_line_and_print_in_an_actor_writes_none()
+    {
+        // P8, Q7: the line of `Kurz.Log` that names the lines dropped before it holds no span, written in the one write of the line of
+        // an actor's message, which holds the actor's; a `print` of that message writes its value alone
+        const string text = "void | IoError Empty() {\n    File.WriteAll(\"log.txt\", \"\".Bytes)\n}\n\nactor Keeper {\n    pub int Add(int n) {\n        print(\"adding\")\n        Log.Information(\"added {n}\")\n        return n\n    }\n}\n\nLog.Information(\"a\")\nEmpty() else {\n    IoError e => print(e)\n}\n\nk = spawn Keeper()\nprint(k.Add(2))\n";
+        const string name = "log-dropped-actor";
+        var before = DateTime.UtcNow;
+        if (Ran(text, name, "printf '%0600d' 0 > log.txt; trap '' XFSZ; ulimit -f 1; exec 2>>log.txt; ") is { } run)
+        {
+            Assert.Equal((0, ""), (run.Code, run.Error));
+            Assert.Equal(["adding", "2"], run.Output);
+            var log = File.ReadAllText(Path.Combine(toolchain.Directory, name, "log.txt"));
+            Assert.Equal(["Warning Kurz.Log: dropped 1 line", "Information Keeper{chain=A}: Keeper: added 2 n=2"],
+                Unstamped(log, before, DateTime.UtcNow).Select(line => SpanChain().Replace(line, "{chain=A}")).ToList());
         }
     }
 

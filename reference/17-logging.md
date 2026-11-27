@@ -186,7 +186,7 @@ No case: as P6's.
 A line written while an actor's message runs holds that actor as a span between the level and the
 category, as Rust's `tracing_subscriber::fmt` writes a span before the target: the name of the
 actor's type, then in braces its key or its name where it has one, the node where the program names
-nodes, and `chain=` with the chain's ID in 32 lowercase hexadecimal digits, then a colon,
+nodes, and `chain=` with the chain's ID in 32 hexadecimal digits, lowercase (§12, assumed there), then a colon,
 `2026-11-05T01:23:45.678Z Information Cache{key="eu" chain=4bf92f35a1b2c3d4e5f60718293a4b5c}: Orders: Paid 17 order.Id=17`,
 so that a call in the actor's own method names its type as the span and as the category (§12, the
 owner, 2026-11-27, #274, comment 7216348897, Q1 "Rust span first (Recommended)" and Q3 "All 32 hex
