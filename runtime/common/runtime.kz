@@ -5645,11 +5645,19 @@ void Pinned() {
     raw {
         byte* record = threadRecord
         if record != null && *Ptr<long>(record + 96) < 0 {
-            AtomicLong.FromPtr(Ptr<long>(record + 88)).Store(AtomicLong.FromPtr(Ptr<long>(scheduler)).Load(MemoryOrder.Acquire), MemoryOrder.SeqCst)
-            Fence(MemoryOrder.SeqCst)
-            WorldEntered(record)
-            RootEnded()
+            PinnedHeld(record)
         }
+    }
+}
+
+// The pin of `Pinned` on the main thread with worker threads, whose record is `record`, a call of its own, so that `Pinned` stays a
+// test where a build of one thread reaches it (`Emitter.WorkerForms`).
+void PinnedHeld(byte* record) {
+    raw {
+        AtomicLong.FromPtr(Ptr<long>(record + 88)).Store(AtomicLong.FromPtr(Ptr<long>(scheduler)).Load(MemoryOrder.Acquire), MemoryOrder.SeqCst)
+        Fence(MemoryOrder.SeqCst)
+        WorldEntered(record)
+        RootEnded()
     }
 }
 
@@ -7907,7 +7915,8 @@ void Deadlocked(string text, string file, int line) {
 // its turn (`LetGo`, in `Run` where it runs); a passed-over actor is let go at once and not queued again for
 // its own inbox. A message whose deadline passed at the scheduler's turn is dropped at its take, from the inbox
 // and from the side list, before the next is taken (`Dropped`; U37), and a top activation whose deadline
-// passed goes on (`Waited`).
+// passed goes on (`Waited`). This take is the one thread's; the worker threads take an actor with `RunTake`, and no test of the
+// worker threads stands on this path (the owner, 2026-11-26, #519, comment 7204486070, Q1).
 void RunOne() {
     raw {
         byte* state = runFirst
@@ -7917,17 +7926,68 @@ void RunOne() {
         }
 
         *Ptr<byte*>(state - 16) = null
-        RunTake(state)
+        if (StateWord(state).Load(MemoryOrder.Acquire) & 1) == 0 && *Ptr<int>(state - 88) == 3 {
+            std.HeapFree(state - 192)
+            return
+        }
+
+        if !Claimed(state) {
+            return
+        }
+
+        int life = *Ptr<int>(state - 88)
+        if life == 3 {
+            LetGo(state, false)
+            return
+        }
+
+        Moved(state)
+        if life == 1 || life == 5 {
+            LetGo(state, false)
+            return
+        }
+
+        byte* top = *Ptr<byte*>(state - 8)
+        if top == null {
+            while *Ptr<byte*>(state - 32) != null {
+                byte* message = Taken(state - 32)
+                if *Ptr<long>(message + 40) > tick {
+                    Start(state, message, null, null)
+                    return
+                }
+
+                Dropped(message)
+            }
+        } else {
+            byte* reply = *Ptr<byte*>(top + 360)
+            while *Ptr<byte*>(top + 376) != null {
+                byte* message = Taken(top + 376)
+                if *Ptr<long>(message + 40) > tick {
+                    Start(state, message, top, null)
+                    return
+                }
+
+                Dropped(message)
+            }
+
+            if reply != null && (ReplyState(reply) != 0 || Waited(reply)) {
+                Run(state, top)
+                return
+            }
+        }
+
+        LetGo(state, false)
     }
 }
 
-// The take of the actor whose state is `state`, off the run queue (`RunOne`) or off a queue of a worker thread (`WorkerTurn`), as
-// `RunOne` has it; on worker threads an actor whose top activation parked on another thread is let go of at once, which puts it in
-// that thread's queue that nobody steals from (`LetGo`, `QueueHeld`; section 6, Q2 of comment 6946532526), and the record of an
-// ended one is freed by the one thread that sets its RECLAIMED bit (`Reclaims`, `RecordFreed`; T16); a signal at the front of its
-// inbox, the crash a child passed up (`Forwarded`), is taken before anything else, the crash of the actor (`Signaled`), and
-// dropped where the actor waits for its restart or for the decision of its block (`SignalsLeft`); the queues are moved again once the
-// reply of the top activation reads set, so that a signal pushed before the fall that set it is taken before that activation goes on.
+// The take of the actor whose state is `state` off a queue of a worker thread (`WorkerTurn`), as `RunOne` has it on one thread: an
+// actor whose top activation parked on another thread is let go of at once, which puts it in that thread's queue that nobody steals
+// from (`LetGo`, `QueueHeld`; section 6, Q2 of comment 6946532526), and the record of an ended one is freed by the one thread that
+// sets its RECLAIMED bit (`Reclaims`, `RecordFreed`; T16); a signal at the front of its inbox, the crash a child passed up
+// (`Forwarded`), is taken before anything else, the crash of the actor (`Signaled`), and dropped where the actor waits for its
+// restart or for the decision of its block (`SignalsLeft`); a message starts with its heap of its own adopted (`Adopted`); the queues
+// are moved again once the reply of the top activation reads set, so that a signal pushed before the fall that set it is taken before
+// that activation goes on.
 void RunTake(byte* state) {
     raw {
         if (StateWord(state).Load(MemoryOrder.Acquire) & 1) == 0 && *Ptr<int>(state - 88) == 3 && Reclaims(state, true) {
@@ -7946,7 +8006,7 @@ void RunTake(byte* state) {
         }
 
         byte* parked = *Ptr<byte*>(state - 8)
-        if parked != null && Threaded() && *Ptr<byte*>(parked + 272) != threadRecord {
+        if parked != null && *Ptr<byte*>(parked + 272) != threadRecord {
             LetGo(state, true)
             return
         }
@@ -7970,7 +8030,7 @@ void RunTake(byte* state) {
             while *Ptr<byte*>(state - 32) != null {
                 byte* message = Taken(state - 32)
                 if *Ptr<long>(message + 40) > tick {
-                    Start(state, message, null)
+                    Start(state, message, null, Adopted(state, message))
                     return
                 }
 
@@ -7981,7 +8041,7 @@ void RunTake(byte* state) {
             while *Ptr<byte*>(top + 376) != null {
                 byte* message = Taken(top + 376)
                 if *Ptr<long>(message + 40) > tick {
-                    Start(state, message, top)
+                    Start(state, message, top, Adopted(state, message))
                     return
                 }
 
@@ -7989,14 +8049,12 @@ void RunTake(byte* state) {
             }
 
             if reply != null && (ReplyState(reply) != 0 || Waited(reply)) {
-                if Threaded() {
-                    Moved(state)
-                    byte* first = *Ptr<byte*>(state - 32)
-                    if first != null && *Ptr<byte*>(first + 8) == SignalTable() {
-                        Taken(state - 32)
-                        Signaled(state, first)
-                        return
-                    }
+                Moved(state)
+                byte* first = *Ptr<byte*>(state - 32)
+                if first != null && *Ptr<byte*>(first + 8) == SignalTable() {
+                    Taken(state - 32)
+                    Signaled(state, first)
+                    return
                 }
 
                 Run(state, top)
@@ -8010,8 +8068,10 @@ void RunTake(byte* state) {
 
 // A new activation of the actor whose state is `state` for `message`, on a stack of the size the
 // actor asked for, above the activation `below`, null where the actor is idle, whose chain it takes and
-// whose side list it takes over, and its run from its first frame, `ActorStart`.
-void Start(byte* state, byte* message, byte* below) {
+// whose side list it takes over, and its run from its first frame, `ActorStart`; its header names the
+// message's heap of its own `own`, which `Run` lets go of at the activation's end, null on one thread and
+// for none, and the thread it runs on, null on one thread (`threadRecord`).
+void Start(byte* state, byte* message, byte* below, byte* own) {
     raw {
         byte* header = Held(*Ptr<long>(state - 48))
         *Ptr<byte*>(header + 320) = state
@@ -8036,11 +8096,8 @@ void Start(byte* state, byte* message, byte* below) {
         }
 
         *Ptr<byte*>(state - 8) = header
-        if Threaded() {
-            *Ptr<byte*>(header + 272) = threadRecord
-            *Ptr<byte*>(header + 264) = Adopted(state, message)
-        }
-
+        *Ptr<byte*>(header + 272) = threadRecord
+        *Ptr<byte*>(header + 264) = own
         sys.Enter(header, header, ActorStart)
         Run(state, header)
     }
@@ -8081,10 +8138,7 @@ void Run(byte* state, byte* header) {
                 *Ptr<byte*>(below + 384) = *Ptr<byte*>(header + 384)
             }
 
-            if Threaded() {
-                OwnLeft(*Ptr<byte*>(header + 264))
-            }
-
+            OwnLeft(*Ptr<byte*>(header + 264))
             Give(header)
             if below == null && Ending(state) {
                 EndActor(state)
@@ -9384,7 +9438,7 @@ void Restart(byte* state) {
         NewChain(message + 24)
         *Ptr<long>(message + 40) = Never()
         *Ptr<long>(message + 48) = 0
-        Start(state, message, null)
+        Start(state, message, null, null)
     }
 }
 

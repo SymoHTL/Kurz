@@ -327,14 +327,14 @@ public sealed class ModelTests
 
     /// <summary>
     /// A thread of the scheduler: the take of an entry and the hold (<c>RunOne</c>, <c>Claimed</c>), the first message of the inbox
-    /// started where it holds the actor and the actor does not wait for its restart (<c>RunTake</c>), <c>Ready</c> read after the switch
+    /// started where it holds the actor and the actor does not wait for its restart (<c>RunOne</c>), <c>Ready</c> read after the switch
     /// back, and the end of the hold (<c>LetGo</c>); then another entry. One that starts at the place 4 holds the actor already, its
     /// message ran.
     /// </summary>
     private static Strand Runner(string name, int at, Break broken) => new(name, at,
     [
         .. Taken(at, 0, 3, broken),
-        new("RunTake", "Start(state, message, null)", _ => true, s =>
+        new("RunOne", "Start(state, message, null, null)", _ => true, s =>
         {
             if (s[Mail] > 0 && (broken == Break.RestartRunsEarly || s[Life] == 0))
             {
@@ -377,7 +377,7 @@ public sealed class ModelTests
                 s[at] = 3;
             }, ["if (seen & 1) == 0 {"]),
         new("Restart", "*Ptr<int>(state - 88) = 0", _ => true, s => { s[Life] = 0; s[at] = 4; }),
-        new("Restart", "Start(state, message, null)", _ => true, s => { s[Fresh] = 0; s[at] = 5; }),
+        new("Restart", "Start(state, message, null, null)", _ => true, s => { s[Fresh] = 0; s[at] = 5; }),
         new("Ready", "byte* first = *Ptr<byte*>(state - 32)", _ => true, s => { s[at + 2] = s[Mail] > 0 ? 1 : 0; s[at] = 6; }),
         .. LetGone(at, 6, _ => -1, broken),
     ]);
