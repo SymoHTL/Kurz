@@ -6361,6 +6361,9 @@ finds it awake, as Go's runtime keeps spinning threads and Tokio a searching wor
 half of all the workers look for work, as tokio's, and a spinning worker counts as one that has work, so
 that the `deadlock` of a wait of the top-level code is raised once the spins ended (§6, the owner,
 2026-11-27, #519, comment 7215317481, Q3 and Q3b of comment 7210832380 and Q9 of comment 7207859311). A
+worker takes another worker's slot of the actor woken last only 3 µs after it saw an actor there, as Go's
+`runqgrab` waits, and a wake of an actor that a thread holds, or whose constructor runs, puts no entry in
+and leaves it to its holder, as tokio's waker of a running task marks it notified *(assumed in §6)*. A
 program that ran every actor on the main thread sees three things change on worker threads, and
 `KURZ_THREADS=1` runs it so again (the owner, 2026-11-27, #519, comment 7216530837, Q2 of comment
 7207859311, "The pass's three (Recommended)"): the actors that are ready no longer run first in, first
