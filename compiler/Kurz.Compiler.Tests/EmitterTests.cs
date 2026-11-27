@@ -504,8 +504,9 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // S10, issue 658: the data of an `epoll_event` stands at byte 4 of x86-64's struct, which the kernel packs, and at byte 8 of
         // AArch64's, the kernel's generic one; each Linux architecture's file gives the byte (`EpollDataAt`), and every call of the
-        // registration (`PollAdd`, from `SocketWaited`, `Rearm` and the wait for a child, `ManyWaited`, and for the pool of
-        // threads for blocking calls from `PoolArm`; issue 661) and of the wait (`PollWait`, from `Polled`) is given, in the
+        // registration (`PollAdd`, from `SocketWaited`, `Rearm` and the wait for a child, `ManyWaited`, for the pool of
+        // threads for blocking calls from `PoolArm`, issue 661, and for the event of a worker thread from `WakeArmed`, U35) and of the
+        // wait (`PollWait`, from `Polled`) is given, in the
         // function that makes it, what a call of `EpollDataAt` gave there
         const string text = "actor A {\n    pub int Get() => 1\n}\n\na = spawn A()\nprint(a.Get())\n";
         foreach (var (arch, at) in new[] { (Arch.X64, 4), (Arch.Arm64, 8) })
@@ -532,7 +533,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
                     }
                 }
 
-                Assert.True(calls == (callee == "PollAdd" ? 4 : 1), $"{arch}: {calls} calls of `{callee}`");
+                Assert.True(calls == (callee == "PollAdd" ? 5 : 1), $"{arch}: {calls} calls of `{callee}`");
             }
         }
     }
@@ -1732,13 +1733,15 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     /// <summary>The lines of a program's IR that hold an atomic instruction of the program's own, which the values given mark.</summary>
     private static List<string> AtomicLines(EmittedProgram program) =>
-        program.Ir.ReplaceLineEndings("\n").Split('\n').Where(l => Regex.IsMatch(l, @"\b(load atomic|store atomic|atomicrmw|cmpxchg|fence) .*\b7000\d\b|^\s*fence ")).ToList();
+        Regex.Match(program.Ir.ReplaceLineEndings("\n"), @"^define [^\n]*@kz\.main\([^\n]*\n(.*?)\n\}\n", RegexOptions.Multiline | RegexOptions.Singleline).Groups[1].Value
+            .Split('\n').Where(l => Regex.IsMatch(l, @"\b(load atomic|store atomic|atomicrmw|cmpxchg|fence) .*\b7000\d\b|^\s*fence ")).ToList();
 
     [Fact]
     public void An_atomic_member_with_its_order_written_is_one_llvm_instruction_of_that_order_aligned_to_its_word()
     {
         // R19 (section 6, 2026-11-17, comment 6946657505, Q1): Rust's lowering, `Relaxed` LLVM's `monotonic`; the values 70001 to
-        // 70009 mark the program's own instructions among the runtime's
+        // 70009 mark the program's own instructions among the runtime's, which are read in the program's `main`, where its fence stands
+        // apart from the runtime's of the worker threads (U35)
         const string text = "mut long w = 5\nmut int i = 1\nmut bool b = false\nmut long* slot = &w\na = AtomicLong.FromPtr(&w)\nn = AtomicInt.FromPtr(&i)\n"
             + "c = AtomicBool.FromPtr(&b)\np = AtomicPtr<long>.FromPtr(&slot)\nraw {\n"
             + "    a.Store(70001, MemoryOrder.Release)\n    print(a.Swap(70002, MemoryOrder.AcqRel))\n    print(a.FetchAdd(70003, MemoryOrder.Acquire))\n"
@@ -1798,7 +1801,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // of them owns it, as tokio's `oneshot` decides by one word (not checked at source); the owner reads the waiter, then stores the
         // reply's word with release, then wakes (`Replied`, `Signal`), the waiter loads it with acquire (`ReplyState`), which the
         // waits, the readiness, the take and the crash call (`Answer`, its loop in the top-level code in `RootLoop`, its loop in an activation and its
-        // kind, `Ready`, `RunOne`, `Fall`), as the crash and the end take a reply by the swap (`Fall`, `EndActor`); a wake sets QUEUED by
+        // kind, `Ready`, `RunTake`, `Fall`), as the crash and the end take a reply by the swap (`Fall`, the end's `Drained`); a wake sets QUEUED by
         // one `or` (`Wake`), a take, a hold's end, a constructor's end and a restart's hold change the state word by one compare-exchange
         // (`Exchanged`) after a load with acquire, the restart's hold loading it with acquire again while a take holds the actor
         // (`HeldAlone`); the orders are Rust's for each, which a thread of their own needs and one thread does not show
@@ -1846,9 +1849,10 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         InOrder(Runtime("Answer"), state, state);
         InOrder(Runtime("RootLoop"), state);
         InOrder(Runtime("Ready"), state);
-        InOrder(Runtime("RunOne"), state);
+        InOrder(Runtime("RunTake"), state);
         InOrder(Runtime("Fall"), state, taken, state, taken);
-        InOrder(Runtime("EndActor"), taken);
+        InOrder(Runtime("EndActor"), @"call void @""rt\.common\.Drained\.\d+""");
+        InOrder(Runtime("Drained"), taken);
 
         Ran(Toolchain.Run(toolchain.Build(program, "reply-orders")), 0, ["2"], string.Empty);
     }
@@ -1863,8 +1867,8 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // release before the wake (`LockTried`, `LockSpun`, `Lock`, `Unlock`); the count of the actors is one relaxed add (`ActorNew`); a
         // slot is set with release, its state before its number, cleared with release, its number before its link, and looked up with
         // no lock by three loads with acquire, the number, the state and the number again (`SlotTake`, `SlotFree`, `Lookup`); the orders
-        // are what a thread of its own needs and one thread does not show; the end of a supervisor sets its child's ENDING bit by one `or`
-        // with acquire and release before it holds the child, and the child's holder loads it with acquire (`EndChildren`, `Ending`)
+        // are what a thread of its own needs and one thread does not show; the end of a supervisor holds its child, then sets its ENDING bit by
+        // one `or` with acquire and release, and the child's holder loads it with acquire (`EndChildren`, `Ending`)
         const string text = "actor Counter {\n    mut long count = 0\n\n    pub void Add(long n) {\n        count = count + n\n    }\n\n    pub long Get() => count\n}\n\n"
             + "c = spawn Counter()\nsend c.Add(2)\nprint(c.Get())\n";
         var program = Emit(text);
@@ -1903,7 +1907,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             @"store atomic i64 %[\w.]+, ptr %[\w.]+ release, align 8", @"call void @""rt\.common\.Unlock\.\d+""");
         InOrder(Runtime("Lookup"), @"load atomic i64, ptr %[\w.]+ acquire, align 8", @"load atomic ptr, ptr %[\w.]+ acquire, align 8",
             @"load atomic i64, ptr %[\w.]+ acquire, align 8");
-        InOrder(Runtime("EndChildren"), @"atomicrmw or ptr %[\w.]+, i32 16 acq_rel, align 4", @"call void @""rt\.common\.HeldAlone\.\d+""",
+        InOrder(Runtime("EndChildren"), @"call void @""rt\.common\.HeldAlone\.\d+""", @"atomicrmw or ptr %[\w.]+, i32 16 acq_rel, align 4",
             @"call void @""rt\.common\.LetGo\.\d+""");
         InOrder(Runtime("Ending"), @"load atomic i32, ptr %[\w.]+ acquire, align 4");
         Ran(Toolchain.Run(toolchain.Build(program, "shared-orders")), 0, ["2"], string.Empty);

@@ -51,6 +51,12 @@ public sealed partial record CaseHeader(
     /// </summary>
     public bool Tests { get; init; }
 
+    /// <summary>
+    /// Whether the header holds the line <c>// threads: 1</c>: a case whose output follows one thread's order, which the runner runs on
+    /// one thread, first in, first out (U35; section 6, the owner, 2026-11-17, #570, comment 6961064167).
+    /// </summary>
+    public bool OneThread { get; init; }
+
     [GeneratedRegex(@"^// expect: (?:(output)|(throws) ([a-z][a-z-]*) at (\d+)|error ([a-z][a-z-]*) at (\d+))$")]
     private static partial Regex ExpectLine();
 
@@ -153,6 +159,7 @@ public sealed partial record CaseHeader(
             i++;
         }
 
+        var oneThread = false;
         if (i < lines.Length && lines[i].StartsWith("// threads:", StringComparison.Ordinal))
         {
             if (lines[i] != "// threads: 1")
@@ -161,6 +168,7 @@ public sealed partial record CaseHeader(
                 return null;
             }
 
+            oneThread = true;
             i++;
         }
 
@@ -187,6 +195,6 @@ public sealed partial record CaseHeader(
         }
 
         problem = null;
-        return new CaseHeader(expectation, id, errorLine, output, build, grants, system, rules, body, i + 1) { Tests = tests };
+        return new CaseHeader(expectation, id, errorLine, output, build, grants, system, rules, body, i + 1) { Tests = tests, OneThread = oneThread };
     }
 }
