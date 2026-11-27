@@ -4607,8 +4607,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         return Toolchain.Run(toolchain.Build(compilation.Program, name));
     }
 
-    // A program built and run as `BuildAndRun` runs it, with `KURZ_THREADS` set to 1, on one thread (U35), for a program whose
-    // expectation follows that thread's order of the actors, first in, first out, as a corpus case marked `// threads: 1` does.
+    // A program built as `BuildAndRun` builds it and run with `KURZ_THREADS` set to 1, on one thread (U35), for a program whose
+    // expectation follows that thread's order of the actors, first in, first out, as a corpus case marked `// threads: 1` does, and with
+    // `KURZ_TRACE` set to 0, where `BuildAndRun` leaves the trace on, so that the error line stands alone on standard error, as
+    // `ActorTests` runs its programs.
     private (int Code, IReadOnlyList<string> Output, string Error) BuildAndRunOne(string text, CheckedRuntime runtime, string name)
     {
         var compilation = Compile(text, runtime);

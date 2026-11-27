@@ -963,7 +963,8 @@ public sealed partial class Emitter
     /// the message's own heap. Where <paramref name="inPlace"/> holds, the fourth function of the table, which the runtime calls at the
     /// turn of a message queued with its heap of its own on worker threads (the runtime's <c>Adopted</c>; U35, T17): each argument's copy
     /// stored in the message's own block, in the place the method reads, and nothing given. The word of the heap of its own (field 6,
-    /// <see cref="OwnHeapStored"/>) is copied as it stands: 0 on one thread, which the runtime's <c>Enqueue</c> left there; on worker threads the heap of its own
+    /// <see cref="OwnHeapStored"/>) is copied as it stands, as the <c>i64</c> the message's type gives it, since the one word holds a
+    /// heap's address, stored as a <c>ptr</c>, before the message starts and the deadline of a <c>within</c> block after: 0 on one thread, which the runtime's <c>Enqueue</c> left there; on worker threads the heap of its own
     /// of the message copied after a crash, which the copy's activation then frees at its end (the runtime's <c>Adopted</c>,
     /// <c>OwnLeft</c>), so that the one word names that heap from the copy as it did from the message.
     /// </summary>

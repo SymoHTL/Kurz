@@ -4699,8 +4699,10 @@ void Wake(byte* state) {
 // meanwhile, as no entry of it stands. False where the holder let go of it meanwhile, seeing the mark and queueing nothing, so that
 // the waker queues it. An entry of a held actor put where every worker takes from drew the workers that spin to take it and drop it,
 // and the waker put a new one in at the message after it: with no such entry and with the wait of `Stolen` the sends to one actor took
-// 77.9 and 70.5 ms, against 107.9 and 122.6 ms with neither (`KURZ_THREADS=4`, the least of 10 runs in each of two orders; the owner,
-// 2026-11-26, issue 519, comment 7204486070, Q2, the bound of the spin measured).
+// 77.9 and 70.5 ms, against 107.9 and 122.6 ms with neither (`KURZ_THREADS=4`, the least of 10 runs in each of two orders), and with no
+// such entry alone 98.8 and 91.6 ms, against 114.9 and 100.6 with neither (the least of 20 runs in each of two orders). Assumed in
+// section 6, and kept there by the owner's answer that a fix stays where no row is slower beyond the noise (2026-11-27, issue 39,
+// comment 7221780113), the rows measured there.
 bool LeftToHolder(byte* state) {
     AtomicInt word = StateWord(state)
     mut int seen = 0
@@ -5160,7 +5162,9 @@ byte* NextActor(byte* record, bool shared) {
 // worker that runs fills its slot (`QueueLocal`), so a slot that holds one is a running worker's. A worker that spins took every
 // slot at each of its turns: with the wait, and with no entry of a held actor (`LeftToHolder`), the calls of one actor to another
 // inside one message took 28.4 and 27.4 ms, against 57.8 and 74.8 ms with neither (`KURZ_THREADS=4`, the least of 10 runs in each of
-// two orders; the owner, 2026-11-26, issue 519, comment 7204486070, Q2, the bound of the spin measured).
+// two orders), and with the wait alone 28.0 and 29.7 ms, against 65.8 and 50.2 with neither (the least of 20 runs in each of two
+// orders). Assumed in section 6, and kept there by the owner's answer that a fix stays where no row is slower beyond the noise
+// (2026-11-27, issue 39, comment 7221780113), the rows measured there.
 byte* Stolen(byte* record) {
     raw {
         long count = *Ptr<long>(scheduler + 48)

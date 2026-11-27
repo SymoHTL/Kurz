@@ -6801,9 +6801,13 @@ nothing, a worker starts to spin while twice the count of the workers that look 
 of all the workers, so that one of two workers spins, two of three and two of four, a worker refused the
 spin parks at once, and a worker that a wake marked as one that looks spins with no such check, as
 tokio's worker woken as a searcher *(assumed in §6)*. A
-worker takes another worker's slot of the actor woken last only 3 µs after it saw an actor there, as Go's
-`runqgrab` waits, and a wake of an actor that a thread holds, or whose constructor runs, puts no entry in
-and leaves it to its holder, as tokio's waker of a running task marks it notified *(assumed in §6)*. A
+worker that saw an actor in another worker's slot of the actor woken last spins 3 µs before it takes
+whatever that slot holds, that actor or another, as Go's `runqgrab` waits, a slot being filled only by a
+running worker; and on worker threads, the path of a message on one thread kept as it was (§6, the owner,
+2026-11-26, #519, comment 7204486070, Q1 of comment 7200036109), a wake of an actor that a thread holds,
+or whose constructor runs, puts no entry in and leaves it to its holder, as tokio's waker of a running
+task marks it notified *(assumed in §6; both kept by the owner's answer of 2026-11-27, #39, comment
+7221780113, as no row measured slower beyond the noise, §6)*. A
 program that ran every actor on the main thread sees three things change on worker threads, and
 `KURZ_THREADS=1` runs it so again (the owner, 2026-11-27, #519, comment 7216530837, Q2 of comment
 7207859311, "The pass's three (Recommended)"): the actors that are ready no longer run first in, first

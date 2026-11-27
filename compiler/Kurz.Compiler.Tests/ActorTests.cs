@@ -35,7 +35,10 @@ namespace Kurz.Compiler.Tests;
 /// thrown value's copy, the variables it takes after the spawn's arguments, a thrown <c>null</c>, the runtime's error, an overflow, the
 /// blocks dropped, and memory over 10,000 crashes it restarts. Each program runs with <c>KURZ_THREADS</c> set to 1, which runs that one
 /// thread (U35), since a program where it is not set runs on as many worker threads as the cores (section 6, Q4 of comment 6946532526),
-/// whose order and heaps these expectations do not follow, as a corpus case marked <c>// threads: 1</c> runs on one thread.
+/// whose order and heaps these expectations do not follow, as a corpus case marked <c>// threads: 1</c> runs on one thread. The owner's
+/// answer that a test sets it only where it follows one thread's order or counts heaps (2026-11-27, #519, comment 7215317481, Q1 of
+/// comment 7207859311) holds for the class as a whole while issue 673 reads the run of the class on the cores, in which 47 of its 169
+/// tests failed, among them failures that are neither an order nor a count of heaps.
 /// </summary>
 public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
