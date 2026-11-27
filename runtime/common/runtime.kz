@@ -3314,11 +3314,11 @@ pub void LogLine(int level, string category, string message, string fields, long
 // feed before both. A write the system refuses, or one that takes no byte, raises nothing: the line is counted as dropped, and the
 // stream stands inside a line where the bytes taken end inside one; a line of the dropped lines taken whole is not counted again. The
 // line is put together and written under the lock of standard error (`StreamLock`), which keeps the count and the flag with it.
-void LogSpanned(int level, string category, string message, string fields, long nanoseconds, byte* written, byte* chain) {
+void LogSpanned(int level, string category, string message, string fields, long nanoseconds, byte* named, byte* chain) {
     mut long size = 128 + long(category.Bytes.Count) + 2 * long(message.Bytes.Count) + 2 * long(fields.Bytes.Count)
     raw {
-        if written != null {
-            size = size + *Ptr<long>(written + 8) + 48
+        if named != null {
+            size = size + *Ptr<long>(named + 8) + 48
         }
     }
 
@@ -3366,7 +3366,7 @@ void LogSpanned(int level, string category, string message, string fields, long 
         logBuffer[n] = 32
         n = LogPut(logBuffer, n + 1, LogLevelName(level))
         logBuffer[n] = 32
-        n = LogSpan(logBuffer, n + 1, written, chain)
+        n = LogSpan(logBuffer, n + 1, named, chain)
         n = LogPut(logBuffer, n, category)
         logBuffer[n] = 58
         logBuffer[n + 1] = 32
