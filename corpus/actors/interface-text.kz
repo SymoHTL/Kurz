@@ -1,0 +1,27 @@
+// expect: output
+// | 1
+// | 2
+// | cache 2
+// rules: U1
+
+// `print` of a value of an interface that declares `Text()` calls it, a message where the value holds an actor's reference
+interface Store {
+    long Get(string key)
+    string Text()
+}
+
+actor Cache : Store {
+    mut long reads = 0
+
+    pub long Get(string key) {
+        reads = reads + 1
+        return reads
+    }
+
+    pub string Text() => "cache {reads}"
+}
+
+Store s = spawn Cache()
+print(s.Get("a"))
+print(s.Get("b"))
+print(s)

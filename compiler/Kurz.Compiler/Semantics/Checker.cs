@@ -407,6 +407,9 @@ public sealed partial class Checker
         // `std/`, declared before the file's own types, so that a declaration of their names is `redeclared` (V9)
         DeclarePrelude();
 
+        // U1: an actor reads an interface after its name that the file declares after it (`NamesReadInterface`)
+        fileInterfaces.UnionWith(program.Statements.OfType<TypeDeclaration>().Where(t => t.Kind == TypeDeclarationKind.Interface).Select(t => t.Name));
+
         // F6: the functions and data types of the file are visible in the whole file, so their names are declared before
         // anything is checked, in source order, so that a name declared twice is `redeclared` at the later declaration (V9)
         foreach (var s in program.Statements)

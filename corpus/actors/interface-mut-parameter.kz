@@ -1,0 +1,12 @@
+// expect: error mut-in-message at 8
+// rules: U1
+
+interface Taker {
+    void Take(mut int n)
+}
+
+actor T : Taker {
+    pub void Take(mut int n) {
+        n = 1
+    }
+}

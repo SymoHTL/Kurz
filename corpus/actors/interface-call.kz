@@ -1,0 +1,30 @@
+// expect: output
+// | 2
+// | 4
+// | 7
+// rules: U1
+
+// a call through the interface on an actor is a message the actor runs in turn; on a class it is a call
+interface Store {
+    long Get(string key)
+}
+
+actor Cache : Store {
+    mut long reads = 0
+
+    pub long Get(string key) {
+        reads = reads + key.Bytes.Count
+        return reads
+    }
+}
+
+class Fixed : Store {
+    pub long Get(string key) => 7
+}
+
+long Read(Store s) => s.Get("ab")
+
+c = spawn Cache()
+print(Read(c))
+print(Read(c))
+print(Read(Fixed()))

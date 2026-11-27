@@ -1,0 +1,16 @@
+// expect: error call-loop at 14
+// rules: U1, U56
+
+// a call through an interface waits on every actor that implements it
+interface Pinger {
+    int Ping()
+}
+
+actor A : Pinger {
+    pub int Ping() => 1
+
+    pub int Go() {
+        Pinger p = spawn A()
+        return p.Ping()
+    }
+}

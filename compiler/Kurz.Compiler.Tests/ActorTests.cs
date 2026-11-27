@@ -33,7 +33,9 @@ namespace Kurz.Compiler.Tests;
 /// and <c>print-failed</c> and <c>not-char-boundary</c> in a message. Last, the block of <c>on crash</c> (U28 to U34): at the root and in
 /// an actor, its order among the supervisor's messages, the state it reads, its three decisions, a throw in it, the type's block, the
 /// thrown value's copy, the variables it takes after the spawn's arguments, a thrown <c>null</c>, the runtime's error, an overflow, the
-/// blocks dropped, and memory over 10,000 crashes it restarts.
+/// blocks dropped, and memory over 10,000 crashes it restarts. Each program runs with <c>KURZ_THREADS</c> set to 1, which runs that one
+/// thread (U35), since a program where it is not set runs on as many worker threads as the cores (section 6, Q4 of comment 6946532526),
+/// whose order and heaps these expectations do not follow, as a corpus case marked <c>// threads: 1</c> runs on one thread.
 /// </summary>
 public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -41,7 +43,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], runtime, testBuild, tests: tests);
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
-        return Toolchain.Run(toolchain.Build(compilation.Program, name), trace);
+        return Toolchain.Run(toolchain.Build(compilation.Program, name), trace, "1");
     }
 
     private static void Ran((int Code, IReadOnlyList<string> Output, string Error) run, int code, IReadOnlyList<string> lines, string error)
@@ -1887,7 +1889,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         const string text = "actor Reader {\n    pub int Read() {\n        raw {\n            int* p = Ptr<int>(8)\n            return *p\n        }\n    }\n}\n\nr = spawn Reader()\nprint(r.Read())\n";
         var compilation = Builder.Compile(SourceText.FromString("program.kz", text), ["raw"], toolchain.Runtime, true);
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
-        var run = Toolchain.Run(toolchain.Build(compilation.Program, "actor-fault-elsewhere"), null);
+        var run = Toolchain.Run(toolchain.Build(compilation.Program, "actor-fault-elsewhere"), null, "1");
         Assert.Equal((139, ""), (run.Code, run.Error));
     }
 
@@ -1993,7 +1995,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         var compilation = Builder.Compile(SourceText.FromString("program.kz", text), ["raw", "native"], toolchain.Runtime, true);
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
-        Ran(Toolchain.Run(toolchain.Build(compilation.Program, "actor-guarantee"), null), 0, ["20480"], "");
+        Ran(Toolchain.Run(toolchain.Build(compilation.Program, "actor-guarantee"), null, "1"), 0, ["20480"], "");
     }
 
     // ---- waiting anywhere (design record, section 6, "Deadlocks", layer 1; the owner, 2026-11-15, #519) ------------------------------
@@ -2833,7 +2835,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, "actor-pause-sleeps");
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        var run = Toolchain.Run(executable, "0");
+        var run = Toolchain.Run(executable, "0", "1");
         watch.Stop();
         Ran((run.Code, run.Output, Logged(run.Error).Others), 0, ["1"], "");
         Assert.True(watch.ElapsedMilliseconds >= 80, $"the run took {watch.ElapsedMilliseconds} ms");
@@ -2988,7 +2990,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, true);
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, "actor-log-line");
-        var on = Toolchain.Run(executable, "0");
+        var on = Toolchain.Run(executable, "0", "1");
         Assert.Equal(0, on.Code);
         Assert.Equal(["1"], on.Output);
         var line = Assert.Single(Toolchain.Lines(on.Error));
@@ -2998,7 +3000,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             return; // the filter is read on Linux alone (P4)
         }
 
-        var off = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = "0", ["KURZ_LOG"] = "Kurz.Actor=None" });
+        var off = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = "0", ["KURZ_LOG"] = "Kurz.Actor=None", ["KURZ_THREADS"] = "1" });
         Assert.Equal((0, "1\n", ""), (off.Code, off.Output, off.Error));
     }
 
@@ -3445,6 +3447,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
         };
         info.Environment["KURZ_TRACE"] = "0";
+        info.Environment["KURZ_THREADS"] = "1";
         using var process = System.Diagnostics.Process.Start(info)!;
         try
         {
@@ -4370,6 +4373,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
         };
         info.Environment["KURZ_TRACE"] = "0";
+        info.Environment["KURZ_THREADS"] = "1";
         using var process = System.Diagnostics.Process.Start(info)!;
         try
         {
@@ -7649,13 +7653,13 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, "test-words-log-off");
         string[] lines = ["1", "test \"spawns\" ... ok", "test \"throws\" ... FAILED (seed 0)", "    thrown \"down\" at program.kz:11", "2 tests: 1 passed, 1 failed"];
-        Ran(Toolchain.Run(executable, "0"), 1, lines, "");
+        Ran(Toolchain.Run(executable, "0", "1"), 1, lines, "");
         if (!OperatingSystem.IsLinux())
         {
             return;
         }
 
-        var off = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = "0", ["KURZ_LOG"] = "Kurz.Actor=None" });
+        var off = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = "0", ["KURZ_LOG"] = "Kurz.Actor=None", ["KURZ_THREADS"] = "1" });
         Assert.Equal((1, string.Join("\n", lines) + "\n", ""), (off.Code, off.Output, off.Error));
     }
 }

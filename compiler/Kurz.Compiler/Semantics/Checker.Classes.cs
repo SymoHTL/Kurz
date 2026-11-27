@@ -798,6 +798,10 @@ public sealed partial class Checker
         foreach (var symbol in classDeclared)
         {
             CheckImplementations(symbol);
+            if (symbol.IsActor)
+            {
+                CheckActorInterfaces(symbol); // U1, U12: what crosses through each interface the actor implements
+            }
         }
     }
 

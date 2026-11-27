@@ -1,0 +1,13 @@
+// expect: error interface-method-private at 10
+// rules: U1
+
+// a method the interface asks of an actor is one of its `pub` methods, as a class's is (K7)
+interface Store {
+    long Get(string key)
+}
+
+actor Cache : Store {
+    long Get(string key) => 5
+}
+
+print("cache")

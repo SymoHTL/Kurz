@@ -299,6 +299,10 @@ pub long EpollDataAt() => 0
 // asks for them (`ThreadsRead`): 1.
 pub int Cores() => 1
 
+// The hint of a spin's wait of `runtime/common/` on Windows, where no worker thread spins, since none starts (U35): nothing.
+pub void SpinHint() {
+}
+
 // The worker threads of `runtime/common/` on Windows, where a build reads no `KURZ_THREADS` and every actor runs on the main thread
 // (U35, `compiler/README.md`), so that nothing starts one: no thread is started, no `eventfd` made and no thread woken.
 pub long ThreadNew(extern "C" (byte*) => byte* entry, byte* argument) => -38
