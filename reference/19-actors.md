@@ -2543,8 +2543,8 @@ print(Rethrown(1, false))
 
 ### U13 (decided, §6) The end of the program drops what is queued
 
-When the top-level code ends, a message that runs in an actor it spawned runs to its end, and the
-messages still queued behind it are dropped, since the end of the root actor stops its children
+When the top-level code ends, the messages still queued in an actor it spawned are dropped, since
+the end of the root actor stops its children
 after their current message (§6, the owner, 2026-11-13, #519, comment 6847932993, Q16, and the owner, 2026-11-14, #519, comment 6880404917,
 Q8, "All nine leans (Recommended)"). The end of any actor stops the actors it spawned so, after
 their current message, their queued messages dropped, so that the end of the top-level code reaches
@@ -2553,13 +2553,14 @@ every actor of the machine (§6, the owner, 2026-10-30, "With its supervisor", a
 (U2), so that the callers that wait on them wake with `actor-gone` in that order *(assumed: §6, as the
 actors the build kept before the table were ended newest first, which this order keeps where no slot
 was taken again)*. A message parked in a wait when the top-level code ends
-is no current message that holds that end, and is dropped with the process, as a queued one is, its lines after the wait never running, as tokio
+is dropped with the process, as a queued one is, its lines after the wait never running, as tokio
 drops its tasks when its runtime shuts down (§6, the owner, 2026-11-15, #519, comment 6892835500, Q5, "Rust:
 dropped"). The heap of every actor is freed whole at the end of the program on one thread; with worker
 threads, the end of the process gives the memory back, as a Rust or Go program's return from `main` ends its
 other threads with no join (§6, the owner, 2026-11-26, #519, comment 7194874125, "One thread only
-(Recommended)"). A message that runs to its end when the top-level code ends is so on one thread; with
-worker threads, a message still running on another worker then is cut with the process, its lines after
+(Recommended)"). No message holds that end: on one thread a message runs only while the top-level code waits, so
+that none runs when it ends, and with worker threads a message still running on another worker then
+is cut with the process, its lines after
 that point never running, as a Rust or Go program's other threads end when `main` returns (§6, the owner,
 2026-11-26, #519, comment 7198702144, 1, "Cut it, as Rust and Go (Recommended)").
 
@@ -6734,8 +6735,9 @@ reads `TOKIO_WORKER_THREADS` as a whole number and refuses an empty one; a conta
 its whole cores, rounded down and at least 1, as Rust's `available_parallelism` counts it; and a bad
 `KURZ_THREADS` ends the process before its first statement with the line `error: threads-variable
 (<the value>)` on standard error and the exit code 1, as a bad `KURZ_LOG` ends it with `log-filter`
-(P5) *(assumed in §6)*. A program reads `KURZ_THREADS` only where it has a `spawn`, as it reads
-`KURZ_LOG` (P5), and a value that is not UTF-8 ends its start with `error: threads-variable (not
+(P5) *(assumed in §6)*. A program reads `KURZ_THREADS` only where it has a `spawn` or a form that
+splits its work, the forms that start the worker threads, as it reads `KURZ_LOG` (P5) *(assumed in
+§6: the form that splits its work)*, and a value that is not UTF-8 ends its start with `error: threads-variable (not
 unicode)` (§6, the owner, 2026-11-26, #519, comment 7189038384). A worker thread that the system refuses at its start ends the program with an
 error line and an id of its own and the exit code 1, as tokio's `Builder::build` returns an
 `io::Error` (§6, the owner, 2026-11-17, #572, comment 6961064484, Q2, "Error line + exit 1
@@ -6755,28 +6757,41 @@ owner, 2026-11-26, #519, comment 7198702144, 1); a supervisor that is running ac
 ends or waits (U22) *(assumed in §6)*. In a case marked `// threads: 1` (chapter 0) one thread runs the
 actors that are ready first in, first out, the top-level code's wait running them (§6, the owner,
 2026-11-17, #570, comment 6961064167, Q1, "FIFO, as the build (Recommended)"). A program run with
-`KURZ_THREADS` set to 1 runs so too, and so do the tests of `kurz test` *(assumed in §6)*. Each worker
+`KURZ_THREADS` set to 1 runs so too (§6, the owner, 2026-11-27, #519, comment 7215317481, Q5 of comment
+7207859311), and so do the tests of `kurz test` *(assumed in §6)*. Each worker
 thread has a poller and timers of its own, and a wake of an actor on another thread is a push to that
 thread's queue and one write of its `eventfd` (§6, the owner, 2026-11-26, #519, comment 7189038384,
 T88). A worker whose `eventfd` or record the system refuses ends the start with `thread-refused` too
-*(assumed in §6)*. A message to an actor on another thread is copied into the receiver's heap by the
-receiver at its turn, and a result into the waiter's heap as its wait returns (§6, the owner,
-2026-11-20, #519, comment 7051492844, T17, 1), the message's heap of its own freed when the message
+*(assumed in §6)*. A message to an actor on another thread is built in a heap of its own and copied
+into the receiver's heap by the receiver at its turn, and a result into the waiter's heap as its wait
+returns (§6, the owner, 2026-11-20, #519, comment 7051492844, T17, 1); since a sender cannot know the
+thread that takes its receiver, on worker threads every message the code of an actor or of the top
+level builds has a heap of its own *(assumed in §6)*, where on one thread a message is built in the
+heap of its callee (`compiler/README.md`); the message's heap of its own is freed when the message
 ends (§6, the owner, 2026-11-26, #519, comment 7192965131), and an ended actor's first page is freed once every
 thread has passed a turn since its end (§6, the owner, 2026-11-20, #519, comment 7051492844, T16, 2). A wait of the top-level
-code raises `deadlock` at the line of its call where no worker thread has an actor to run, no timer is
-pending, the timers of the calls that wait counting for nothing and an activation asleep counting, and
-no poller holds a registration, as Go's `checkdead` *(assumed in §6)*. The build starts worker threads
-on Linux alone, where the count is more than 1, and a build for Windows runs every actor on the main
-thread (`compiler/README.md`); a count of 1, which `KURZ_THREADS` sets or a process that may use one core
+code raises `deadlock` at the line of its call where no worker thread has an actor to run or spins, no
+timer is pending, the timers of the calls that wait counting for nothing and an activation asleep
+counting, and no poller holds a registration, a job handed to the pool of threads for blocking calls
+among them, so that a pending job of that pool keeps the `deadlock` from being raised, as Go's
+`checkdead` *(assumed in §6)*. The build starts worker threads on Linux alone, where the count is more
+than 1, and takes the count from `KURZ_THREADS` and the cores alone, since it reads no `project.kz` and
+so no line `threads = N`; a build for Windows runs every actor on the main thread and reads no
+`KURZ_THREADS`, so that no value of it ends a start there (`compiler/README.md`, the build's,
+assumed); a count of 1, which `KURZ_THREADS` sets or a process that may use one core
 gives, runs every actor on the main thread, as a case marked `// threads: 1` runs, with nothing said (§6,
 the owner, 2026-11-27, #519, comment 7215317481, Q5 of comment 7207859311, "Main thread, quietly
 (Recommended)"). A worker thread with nothing to run spins a short while before it parks, so that a wake
 finds it awake, as Go's runtime keeps spinning threads and Tokio a searching worker (§6, the owner,
-2026-11-26, #519, comment 7204486070, Q2, "Spin before park (Recommended)"), for 20 µs, where fewer than
-half of all the workers look for work, as tokio's, and a spinning worker counts as one that has work, so
-that the `deadlock` of a wait of the top-level code is raised once the spins ended (§6, the owner,
-2026-11-27, #519, comment 7215317481, Q3 and Q3b of comment 7210832380 and Q9 of comment 7207859311). A
+2026-11-26, #519, Q2 of comment 7200036109 (comment 7204486070), "Spin before park (Recommended)"), for
+20 µs, and a worker starts to spin only while fewer than half of all the workers look for work, as
+tokio's, and a spinning worker counts as one that has work, so that the `deadlock` of a wait of the
+top-level code is raised once the spins ended (§6, the owner, 2026-11-27, #519, comment 7215317481, Q3
+and Q3b of comment 7210832380 and Q9 of comment 7207859311); the 20 µs run from the first turn that finds
+nothing, a worker starts to spin while twice the count of the workers that look is less than the count
+of all the workers, so that one of two workers spins, two of three and two of four, a worker refused the
+spin parks at once, and a worker that a wake marked as one that looks spins with no such check, as
+tokio's worker woken as a searcher *(assumed in §6)*. A
 worker takes another worker's slot of the actor woken last only 3 µs after it saw an actor there, as Go's
 `runqgrab` waits, and a wake of an actor that a thread holds, or whose constructor runs, puts no entry in
 and leaves it to its holder, as tokio's waker of a running task marks it notified *(assumed in §6)*. A
@@ -6790,10 +6805,13 @@ poller and its `eventfd` (§6, T88), and by the heap of its own that each messag
 *(assumed in §6)*. On worker threads a
 crash, an end, a restart and the decision of a block hold only the actors they touch, and a crash reaches
 its supervisor and its links as a signal, as Erlang's exit signals do, a check of the whole process left for
-the deadlock of the top-level code alone (§6, the owner, 2026-11-26, #519, comment 7194874125, "Per-actor
-holds (Recommended)"); the signal is taken before the supervisor's blocks and messages, and one that reaches
+the deadlock of the top-level code and the confirmation of a loop that the walk of layer 3 finds (T72 2)
+(§6, the owner, 2026-11-26, #519, comment 7194874125, "Per-actor holds (Recommended)", narrowed by comment
+7198702144, 3, "Keep the process lock (Recommended)"); the signal is taken before the supervisor's blocks and messages, and one that reaches
 a supervisor that waits for its restart or for the decision of a block is dropped, its log line written in
-the name of the actor that sent it *(assumed in §6)*.
+the name of the actor that sent it, that actor having fallen at its crash, the call it ran answered
+`callee crashed` (U20), and ending with the other children of that supervisor, whose fall ends them
+(U13), so that a call that waits in its inbox raises `actor-gone` (U6, U20) *(assumed in §6)*.
 
 No case: for the count of the threads, since a case is a single file with no `project.kz` (chapter 0) and
 gives its program no environment, as `log-filter`'s place in chapter 12 says, and cannot make its system
@@ -6817,6 +6835,10 @@ Case: [actors/deadlock.kz](../corpus/actors/deadlock.kz)
 Case: [actors/waitline-text.kz](../corpus/actors/waitline-text.kz)
 
 Case: [actors/restart-reentrant.kz](../corpus/actors/restart-reentrant.kz)
+
+Case: [actors/crash-children-end.kz](../corpus/actors/crash-children-end.kz)
+
+Case: [actors/sleep-chain-crash.kz](../corpus/actors/sleep-chain-crash.kz)
 
 ### U36 (decided, §6) A call that waits has a bound
 

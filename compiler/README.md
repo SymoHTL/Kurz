@@ -2302,7 +2302,7 @@ reads the guarantee in force on Windows and on Linux compiles the program alone.
 
 The worker threads of section 6 (U35) run on Linux, as many as `KURZ_THREADS` sets or, where it is not set, as the cores the
 process may use (section 6, Q4 of comment 6946532526), where that count is more than 1. A program that ran every actor on
-the main thread sees three things change on them, and `KURZ_THREADS=1` runs it so again (the owner, 2026-11-27, issue 519,
+the main thread sees three things change, and `KURZ_THREADS=1` runs it so again (the owner, 2026-11-27, issue 519,
 comment 7216530837): the actors that are ready no longer run first in, first out, a message still running on a worker thread
 when the top-level code ends is cut (U13), and memory grows by each worker's record, poller and `eventfd` and by the heap
 of its own of each message (`MessageHeapNew`). The main thread runs
@@ -2311,8 +2311,8 @@ its thread that nobody steals, which holds the actors whose activation parked on
 last, from its ring of 256 slots, as tokio's `queue::Local`, and from the shared queue, which it reads first at every 61st
 turn, and else steals half of another worker's ring, or its slot 3 µs after it saw an actor there, as Go's `runqgrab` waits
 before it takes the `runnext` of a running P (`WorkerTurn`, `NextActor`, `StealInto`, `Stolen`, `SlotWait`). On worker threads a wake of an actor
-that a thread holds or whose constructor runs marks it NOTIFIED and puts no entry in, as tokio's waker of a running task
-(`Wake`, `LeftToHolder`). A worker with
+that a thread holds or whose constructor runs marks it NOTIFIED and puts no entry in, as tokio's waker of a running task marks it
+notified (`Wake`, `LeftToHolder`). A worker with
 nothing to take spins for 20 µs before it parks, where fewer than half the workers look for work, marked as one that looks,
 so that an actor put where any worker can take it wakes no parked worker meanwhile, each turn of the spin a turn of the worker
 with the hint of a spin to the core, as Go's runtime keeps spinning threads and tokio a searching worker (the owner,
@@ -2329,8 +2329,9 @@ arguments are copied into the receiver's heap at its turn, and a result into the
 freed once every thread passed a turn since (T16 2: `Deferred`, `Reclaimed`, `Reclaims`), a worker storing the epoch at its
 turn with a fence of sequential consistency after it (`WorkerTurn`), as the main thread's pin does, the main thread reading the
 block of its call's message after the push only under the lock of the process, where its wait found nothing left to run (`Answer`),
-and holding its epoch around a `send` or a call of the top-level code (`Pinned`). A message on one thread pays the tests of the worker
-threads alone (the owner, 2026-11-26, issue 519, comment 7204486070, Q1): the main thread takes an actor with `RunOne`, which
+and holding its epoch around a `send` or a call of the top-level code (`Pinned`). A message on one thread pays, at each form on its path
+that only the worker threads go on in, the test of the worker threads, a load and a branch, and no call (the owner, 2026-11-26, issue 519, comment
+7204486070, Q1): the main thread takes an actor with `RunOne`, which
 holds none of them, and a worker with `RunTake`; the emitter marks the forms that only the worker threads reach, which the
 path of one thread calls after a test, `noinline` and `cold` (`Emitter.WorkerForms`), and the helpers of that path that the
 worker threads call too `alwaysinline` (`Emitter.InLine`), as LLVM put each into its callers while the build had no worker
@@ -2363,14 +2364,14 @@ an activation that moved meanwhile from a call's wait to a sleep or a wait in th
 block (`Onward`); and a main thread whose code
 calls nothing of the runtime takes no end a worker handed it. The process ends with every actor's heap held, freeing none, and the end
 of the process gives the memory back (section 6, comment 7194874125, 2: `EndActors`). A build for
-Windows starts no worker thread: its `Cores` gives 1 and its runtime reads no `KURZ_THREADS`. No run on Arm, and no
-ThreadSanitizer job, checks the orders of the atomic operations of the worker threads, and no run under a CPU quota of a
-control group checks their count.
+Windows starts no worker thread: its `Cores` gives 1 and its runtime reads no `KURZ_THREADS`. The `compiler-arm` job runs the
+suites of the actors' stacks on AArch64, and none of its tests checks the orders of the atomic operations of the worker
+threads; no ThreadSanitizer job checks them, and no run under a CPU quota of a control group checks their count.
 
 Of section 6 the emitter builds the actors of one thread, each message run to its end or to a wait that parks it (Q1 (a), the
 answers of 2026-11-14, issue 519, comment 6880404917), and no case shows
-where a program it builds differs from the section: every actor runs on the one thread the runtime
-runs, each message on a stack of its own ("The runtime"), its state word, and the choice of the one owner of
+where a program it builds differs from the section: in a program on one thread every actor runs on the one thread the
+runtime runs, each message on a stack of its own ("The runtime"), its state word, and the choice of the one owner of
 each reply of its calls by a swap, changed by atomic operations that hold on any number of threads ("What the
 emitter emits"), while the lifetimes of the message a crash's swap reads and of the record of the waiter's actor,
 which the owner of a reply reads after its store, hold on one thread alone, with no worker thread and no line `threads`
@@ -2383,8 +2384,8 @@ process that may use one core, and every test of `kurz test`, running every acto
 `// threads: 1` runs; `ActorTests`, whose programs hold the actors of that one thread, runs each with `KURZ_THREADS` set to 1,
 and so does the fenced program of `ListTests` whose expectation follows that thread's order; and a build for Windows reads
 no `KURZ_THREADS`, its runtime giving no variable of the environment (S14); the compiler reads no `project.kz`, so no line
-of one reaches it, and the top-level code's wait runs the scheduler in place on the
-main thread's stack, where U18 has the main thread sleep beside the worker threads, and messages run only while the top-level
+of one reaches it, and in a program on one thread the top-level code's wait runs the scheduler in place on the
+main thread's stack, as U35 has it for a count of 1, where U18 has the main thread sleep beside the worker threads, and messages run only while the top-level
 code waits for a call's result, one message of each actor in turn, so that a `send` made after the
 last call that waits does not run, and a message parked in a wait when the top-level code ends does
 not go on (U13); of section 6's deadlocks the build makes layer 1 (U17) and the `deadlock` of a wait
