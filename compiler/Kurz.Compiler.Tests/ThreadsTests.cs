@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Emit;
@@ -8,8 +10,9 @@ using Xunit;
 namespace Kurz.Compiler.Tests;
 
 /// <summary>
-/// The count of worker threads that the start of a program with a <c>spawn</c> reads from <c>KURZ_THREADS</c> (U35), which no corpus case
-/// can set, its header holding no environment: a value that is no whole number above 0 written in digits alone, or above the greatest
+/// The count of worker threads that the start of a program with a <c>spawn</c> reads from <c>KURZ_THREADS</c> (U35), which a corpus case
+/// sets only to 1, by its <c>// threads: 1</c> line, or takes away, where the runner sets no count of its own (<c>RunTests</c>), so that no
+/// case gives it a refused value: a value that is no whole number above 0 written in digits alone, or above the greatest
 /// <c>int</c>, or not UTF-8, ends the start with <c>threads-variable</c> and the exit code 1. Each program is built for Linux and run with
 /// <c>KURZ_THREADS</c> set or taken away; a build for Windows reads no <c>KURZ_THREADS</c>, its runtime giving no variable of the
 /// environment (S14), so the tests that run a program are skipped on Windows, where <c>Ran</c> gives null and they check nothing, while
@@ -64,7 +67,7 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("")] // not set: the cores are read (`Cores`), and as many worker threads start where they are more than 1 (`workersAsked`)
     public void A_KURZ_THREADS_that_is_a_whole_number_above_0_or_none_starts_the_program(string setup)
     {
-        if (Ran(Spawns, $"threads-ok-{Math.Abs(setup.GetHashCode(StringComparison.Ordinal))}", setup) is { } run)
+        if (Ran(Spawns, Named("threads-ok", setup), setup) is { } run)
         {
             Assert.Equal((0, ""), (run.Code, run.Error));
             Assert.Equal(["1"], run.Output);
@@ -224,7 +227,8 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     /// <summary>
     /// S28, U35: an actor that sleeps on a worker thread parks among that thread's timers, which wake it there, while the others run,
-    /// and the top-level code sleeps on the main thread; the actor's sleep lasts at least its length.
+    /// and the top-level code sleeps on the main thread; the actor's sleep lasts at least its length. The sleep of 500 ms that `Nap`
+    /// prints after is the margin by which `7` comes first, which a wake late by tens of milliseconds on a loaded machine keeps.
     /// </summary>
     [Fact]
     public void An_actor_that_sleeps_on_a_worker_thread_parks_while_the_others_run()
@@ -232,7 +236,7 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
         const string text = """
             actor Napper {
                 pub void Nap() {
-                    Environment.Sleep(50ms)
+                    Environment.Sleep(500ms)
                     print("napped")
                 }
 
@@ -549,6 +553,13 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>
+    /// The name of a build of the kind <paramref name="kind"/> after <paramref name="setup"/>, the same in every run of the tests: the
+    /// first 16 hexadecimal digits of the SHA-256 of the setup's UTF-8 bytes, where <c>string.GetHashCode</c> differs in each process.
+    /// </summary>
+    private static string Named(string kind, string setup) =>
+        $"{kind}-{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(setup)))[..16]}";
+
+    /// <summary>
     /// The lines of <paramref name="error"/>, where the log line of an actor's crash has its time, its level, the span of P8 and its
     /// category taken off, and every other line stays whole.
     /// </summary>
@@ -595,7 +606,8 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>
-    /// U35: the path of a message on one thread pays the tests of the worker threads alone (the owner, 2026-11-26, #519, comment
+    /// U35: the path of a message on one thread pays, at each form on it that only the worker threads go on in, the test of the worker
+    /// threads, a load and a branch, and no call (the owner, 2026-11-26, #519, comment
     /// 7204486070, Q1): the emitter marks the forms only the worker threads reach <c>noinline</c> and <c>cold</c>
     /// (<c>Emitter.WorkerForms</c>), and the helpers of that path that the worker threads call too <c>alwaysinline</c>
     /// (<c>Emitter.InLine</c>). A program of sends and a call to an actor, built for Linux on x86-64 on every machine, since a build
@@ -687,7 +699,7 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     private void Refused(string setup, string error)
     {
         const string text = "print(\"start\")\n" + Spawns;
-        if (Ran(text, $"threads-refused-{Math.Abs(setup.GetHashCode(StringComparison.Ordinal))}", setup) is { } run)
+        if (Ran(text, Named("threads-refused", setup), setup) is { } run)
         {
             Assert.Equal((1, error), (run.Code, run.Error));
             Assert.Empty(run.Output);

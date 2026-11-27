@@ -3171,7 +3171,7 @@ byte LogLower(byte b) {
     return b
 }
 
-// The end of a start whose filter is refused (P4): `error: log-filter (<the entry>)` on standard error and the exit code 1.
+// The end of a start whose filter is refused (P5): `error: log-filter (<the entry>)` on standard error and the exit code 1.
 void LogRefused(byte* entry, long count) {
     StartRefused("error: log-filter (", entry, count)
 }
@@ -3240,7 +3240,7 @@ pub void ThreadsRead(int found, string text) {
     }
 }
 
-// The end of a start whose variable is refused (P4, U35): `head`, the `count` bytes at `entry` and `)` on standard error, and the
+// The end of a start whose variable is refused (P5, U35): `head`, the `count` bytes at `entry` and `)` on standard error, and the
 // exit code 1.
 void StartRefused(string head, byte* entry, long count) {
     WriteError(head)
@@ -4286,8 +4286,8 @@ pub byte* ActorHeap(long index, long number) {
 // heap of an actor that ends (design record, section 6, assumed: the end of the root actor read as the end
 // of every actor it stops), the messages queued in it with it, as tokio drops its tasks when its runtime
 // shuts down, and, after a crash, the first heap, which holds its record, its slot cleared; no message runs
-// after it, and no restart whose pause runs (U22). On worker threads nothing: the actors on them run on to the exit, which
-// frees their heaps with the process (U35).
+// after it, and no restart whose pause runs (U22). On worker threads only the end of the process that a worker handed to the main
+// thread, made where one stands (`RootEnded`): the actors on them run on to the exit, which frees their heaps with the process (U35).
 void EndActors() {
     if Threaded() {
         RootEnded()
@@ -4674,8 +4674,9 @@ int Exchanged(AtomicInt word, int seen, int wanted) {
 // changed first: one atomic `or` marks it QUEUED, and the waker that found the mark clear puts it at the end
 // of the run queue, whether a thread holds it or not, so that an entry of it stands there once; a take that
 // finds it held drops that entry and leaves it to whoever holds it (`Claimed`), which queues it again at the
-// end as it lets go of it (`LetGo`, `ActorBuilt`). On worker threads the waker that found the mark clear on an
-// actor that a thread holds or whose constructor runs leaves it to its holder with no entry (`LeftToHolder`).
+// end as it lets go of it (`LetGo`, `ActorBuilt`). On worker threads the waker that found the mark clear puts it in the queues of
+// its own thread, on a worker in the slot of the actor woken last, which its thread takes first, as Go takes `runnext` (`QueueLocal`),
+// but for an actor that a thread holds or whose constructor runs, which it leaves to its holder with no entry (`LeftToHolder`).
 void Wake(byte* state) {
     mut int before = 0
     raw {
@@ -5115,7 +5116,7 @@ bool Spun(byte* record, long now) {
 
 // The actor the thread of the record `record` takes at its turn, null where none is left: one of its queue of the actors whose activation
 // parked on it, read before the queues others steal from (section 6, Q2 of comment 6946532526, assumed there); where `shared`, at every
-// 61st turn, one of the shared queue, as tokio reads its inject queue every `global_queue_interval` ticks, 61 by default; the slot of
+// 61st turn, one of the shared queue, as Go's scheduler reads its global run queue at every 61st tick (`schedtick%61`); the slot of
 // the actor woken last; the head of its ring; one of the shared queue; and one stolen from another worker (`Stolen`).
 byte* NextActor(byte* record, bool shared) {
     raw {
@@ -5418,7 +5419,7 @@ byte* InjectPop() {
 
 // The actor whose state is `state`, marked QUEUED by the thread that holds it or held it last (`Queue`), in the queue its activations
 // say: where its top activation parked on a thread, the queue of that thread that nobody steals from, and that thread woken
-// (`PinnedPush`; section 6, Q2 of comment 6946532526); else the queues of this thread (`QueueLocal`).
+// (`PinnedPush`; section 6, Q2 of comment 6946532526, the mechanism assumed there); else the queues of this thread (`QueueLocal`).
 void QueueHeld(byte* state) {
     raw {
         byte* top = *Ptr<byte*>(state - 8)
@@ -5464,7 +5465,8 @@ void PinnedPush(byte* home, byte* state) {
 
 // The wake of the actor whose state is `state`, whose top activation parked on the thread of the record `home` (`Replied`, `Signal`,
 // `Fire`, `Ended`): one atomic `or` marks it QUEUED, as `Wake` marks it, and the waker that found the mark clear puts it in that
-// thread's queue that nobody steals from (`PinnedPush`), so that it goes on on that thread (section 6, Q2 of comment 6946532526).
+// thread's queue that nobody steals from (`PinnedPush`), so that it goes on on that thread (section 6, Q2 of comment 6946532526, the
+// mechanism assumed there).
 void WakeHome(byte* state, byte* home) {
     mut int before = 0
     raw {
@@ -8304,8 +8306,9 @@ void RunOne() {
 
 // The take of the actor whose state is `state` off a queue of a worker thread (`WorkerTurn`), as `RunOne` has it on one thread: an
 // actor whose top activation parked on another thread is let go of at once, which puts it in that thread's queue that nobody steals
-// from (`LetGo`, `QueueHeld`; section 6, Q2 of comment 6946532526), and the record of an ended one is freed by the one thread that
-// sets its RECLAIMED bit (`Reclaims`, `RecordFreed`; T16); a signal at the front of its inbox, the crash a child passed up
+// from (`LetGo`, `QueueHeld`; section 6, Q2 of comment 6946532526, the mechanism assumed there), and the record of an ended one is
+// freed by the one thread that sets its RECLAIMED bit (`Reclaims`, `RecordFreed`; T16); a signal at the front of its inbox, the
+// crash a child passed up
 // (`Forwarded`), is taken before anything else, the crash of the actor (`Signaled`), and dropped where the actor waits for its
 // restart or for the decision of its block (`SignalsLeft`); a message starts with its heap of its own adopted (`Adopted`); the queues
 // are moved again once the reply of the top activation reads set, so that a signal pushed before the fall that set it is taken before
