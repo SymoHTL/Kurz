@@ -12,7 +12,9 @@ namespace Kurz.Compiler.Tests;
 /// can set, its header holding no environment: a value that is no whole number above 0 written in digits alone, or above the greatest
 /// <c>int</c>, or not UTF-8, ends the start with <c>threads-variable</c> and the exit code 1. Each program is built for Linux and run with
 /// <c>KURZ_THREADS</c> set or taken away; a build for Windows reads no <c>KURZ_THREADS</c>, its runtime giving no variable of the
-/// environment (S14), and no test runs there.
+/// environment (S14), so the tests that run a program are skipped on Windows, where <c>Ran</c> gives null and they check nothing, while
+/// the test of the marks of the worker threads' forms, which emits a program for Linux on x86-64 and optimises its IR with clang, running
+/// no program, runs on every host.
 /// </summary>
 public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -659,7 +661,10 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// U35: a start of the worker threads that the system refuses a descriptor for, here the <c>eventfd</c> of the second worker under a
     /// limit of six descriptors, ends the process with <c>thread-refused</c> naming the count asked and the exit code 1, after what the
-    /// program printed before its first <c>spawn</c> (section 6, the owner, 2026-11-17, #572, comment 6961064484, Q2).
+    /// program printed before its first <c>spawn</c>: a refused worker ends the start with an error line, an id of its own and the exit
+    /// code 1 (section 6, the owner, 2026-11-20, #519, comment 7051492844, T15 1 of comment 6972618225), the id is <c>thread-refused</c>
+    /// (the owner, 2026-11-26, #519, comment 7204486070, "Keep thread-refused (Recommended)"), and a worker whose <c>eventfd</c> the
+    /// system refuses ends the start so too (assumed in section 6, a part of the worker that its start needs).
     /// </summary>
     [Fact]
     public void A_start_of_the_worker_threads_the_system_refuses_ends_the_process_with_thread_refused()
