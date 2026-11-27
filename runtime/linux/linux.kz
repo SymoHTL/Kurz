@@ -3102,8 +3102,8 @@ pub void ManyWaiter(extern "C" (int*, int, long, byte*) => int wait) {
 // The job of a call on `fd` (-1 for a call on a path) handed to the pool of threads for blocking calls (`BlockingWaiter`), of the
 // kind `kind` (`JobRun`), mapped with `count` bytes of its own at 64: at 0 the next job queued or done, at 8 its kind, at 16 its
 // result, -4102, which no error number is, before a thread of the pool made the call, so that the child of a `fork` tells a job its
-// parent's thread ended from one no thread ends (`PoolLost`), at 24 the block of its wait, which the scheduler writes and drops where the caller's actor fell (`BlockingWaited`), at
-// 32 its size, one page where `count` fits in it, taken from `keptJobs` where one is kept, at 40 the descriptor and at 48 `count`. Null
+// parent's thread ended from one no thread ends (`PoolLost`), at 24 the block of its wait, which the scheduler writes and drops
+// where the caller's actor fell (`BlockingWaited`), at 32 its size, one page where `count` fits in it, taken from `keptJobs` where one is kept, at 40 the descriptor and at 48 `count`. Null
 // where the call is made on the calling thread: a thread whose page holds no waiter of blocking calls, a thread of the pool among
 // them; a socket the runtime made (`Socketed`), whose call that would block waits in the poller; a call the scheduler makes there
 // (`offloads`: the top-level code's, with nothing else left to run); or memory the system refuses, where the call is made as it was.
@@ -3159,8 +3159,8 @@ long Handed(byte* job) {
 // The wait of `Drive` on its four descriptors, the four `struct pollfd`s at `polled`, for `wait` milliseconds, -1 for no bound: in
 // the poller where the thread's page holds its waiter (`ManyWaiter`) and the scheduler hands calls (`BlockingWaiter`'s `offloads`),
 // so that the actor that waits for its child parks while its output, which it reads into its own heap, comes (issue 661, Q14 (a),
-// comment 7189038013), with the room of the call, 64 bytes before `polled` (`RunCommand`), which a fall over the wait gives back (`ChildDropped`); `poll`
-// on this thread otherwise, and for the last look of a bound, 0 milliseconds, which waits for nothing. What `poll` gives, or -1
+// comment 7189038013), with the room of the call, 64 bytes before `polled` (`RunCommand`), which a fall over the wait gives back
+// (`ChildDropped`); `poll` on this thread otherwise, and for the last look of a bound, 0 milliseconds, which waits for nothing. What `poll` gives, or -1
 // with `errno` set to its failure or to the poller's.
 int ChildPolled(int* polled, int wait) {
     raw {
@@ -3229,8 +3229,9 @@ pub void JobDropped(byte* job) {
 // bytes into the mapping `RunCommand` or `WaitSpawned` made: the pipes it holds to the child closed where it owns them (at 36), the
 // input's among them, as `RunCommand` closes them after `Drive`, the descriptor of the child's process (at 40) closed, which the
 // call opened for its bound alone, `RunCommand` for S20's and `WaitSpawned` for each wait of S19 under a deadline, and closes after
-// `Drive`, -1 where it opened none, and no handle holds, and the mapping, of the size at 44, given back, so that a crash over the wait leaves none of them behind; the child is left to run and is
-// not waited for, as Rust's `Child` that is dropped leaves it (section 12 of the record, *(assumed)* there, which S10 cites).
+// `Drive`, -1 where it opened none, and no handle holds, and the mapping, of the size at 44, given back, so that a crash over the
+// wait leaves none of them behind; the child is left to run and is not waited for, as Rust's `Child` that is dropped leaves it
+// (section 12 of the record, *(assumed)* there, which S10 cites).
 pub void ChildDropped(byte* record) {
     raw {
         int* fds = Ptr<int>(record)

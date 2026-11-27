@@ -3069,9 +3069,9 @@ Case: [system/park-file-fork-wait.kz](../corpus/system/park-file-fork-wait.kz)
 // ends with `Other` and the number 125, `ECANCELED`, so that the child's call of `Got`, queued behind it, gets its answer; a child
 // that kept the wait would wait without end, the wait counted among the registrations of the poller, which raises no `deadlock`
 // (U18). The parent waits for the child, then opens the FIFO to write, so that its own opening ends. The case rests on a margin of
-// time that no rule fixes: the top-level code's sleep of 0.1 seconds lets the opening reach the pool before the `fork`, and a `fork`
-// before it would leave the child's opening waiting for a writer to the limit of the run. S10 alone is the subject, the waits on the
-// pool in the child of a `fork`; R7 and U18 it passes through
+// time that no rule fixes: the top-level code's sleep of 0.1 seconds lets the opening reach the pool before the `fork`, and a
+// `fork` before it would leave the child's opening waiting for a writer to the limit of the run. S10 alone is the subject, the
+// waits on the pool in the child of a `fork`; R7 and U18 it passes through
 extern "C" {
     int fork()
     int waitpid(int pid, int* status, int options)
@@ -3266,9 +3266,10 @@ Case: [system/park-file-fork-done.kz](../corpus/system/park-file-fork-done.kz)
 // parent's thread made keeps its descriptor in the child, which then reads the file through a pool of its own; a child that ended
 // that wait with `Other` and the number 125, `ECANCELED`, as a job no thread made, would print `child open Other 125`. The child's
 // descriptor is the parent's, one open file whose offset both move, and the child's read takes the file's two bytes into the buffer
-// of its `File`, so that it gives `f`, and the parent, which waits for the child, reads at the end of the file. The case rests on a margin of time that no rule fixes: a thread of the pool that has not made the opening
-// within the 0.2 seconds leaves the child's wait to end as one whose job no thread made. S10 alone is the subject, the waits on the
-// pool in the child of a `fork` whose jobs the parent's threads ended; R7 and U17 it passes through
+// of its `File`, so that it gives `f`, and the parent, which waits for the child, reads at the end of the file. The case rests on a
+// margin of time that no rule fixes: a thread of the pool that has not made the opening within the 0.2 seconds leaves the child's
+// wait to end as one whose job no thread made. S10 alone is the subject, the waits on the pool in the child of a `fork` whose jobs
+// the parent's threads ended; R7 and U17 it passes through
 extern "C" {
     int fork()
     int waitpid(int pid, int* status, int options)

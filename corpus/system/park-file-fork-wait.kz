@@ -10,9 +10,9 @@
 // ends with `Other` and the number 125, `ECANCELED`, so that the child's call of `Got`, queued behind it, gets its answer; a child
 // that kept the wait would wait without end, the wait counted among the registrations of the poller, which raises no `deadlock`
 // (U18). The parent waits for the child, then opens the FIFO to write, so that its own opening ends. The case rests on a margin of
-// time that no rule fixes: the top-level code's sleep of 0.1 seconds lets the opening reach the pool before the `fork`, and a `fork`
-// before it would leave the child's opening waiting for a writer to the limit of the run. S10 alone is the subject, the waits on the
-// pool in the child of a `fork`; R7 and U18 it passes through
+// time that no rule fixes: the top-level code's sleep of 0.1 seconds lets the opening reach the pool before the `fork`, and a
+// `fork` before it would leave the child's opening waiting for a writer to the limit of the run. S10 alone is the subject, the
+// waits on the pool in the child of a `fork`; R7 and U18 it passes through
 extern "C" {
     int fork()
     int waitpid(int pid, int* status, int options)
