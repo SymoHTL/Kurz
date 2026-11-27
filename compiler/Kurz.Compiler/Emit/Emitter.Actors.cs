@@ -817,6 +817,47 @@ public sealed partial class Emitter
     }
 
     /// <summary>
+    /// U1, U4: a call of the actor's method <paramref name="f"/> as a message, from a slot of the actor's table for an interface
+    /// (<see cref="ActorSlot"/>), whose arguments are values already read, borrowed from the call through the interface, each crossing
+    /// with no word (U12; I3 (a) of #519, comment 7211586386, chosen 2026-11-27, comment 7215317481): the message built in the actor's heap, each argument that holds a
+    /// block a copy of its own there, as <see cref="EmitMessage"/> builds one whose arguments cannot wait, nothing running between the
+    /// read of that heap and the queueing; the bound of the method's declaration (U39), the file <paramref name="file"/> and the line
+    /// <paramref name="line"/> of the call through the interface for its queueing and its wait. The result, in the heap the caller
+    /// allocates in.
+    /// </summary>
+    private string EmitMessageOf(FunctionSymbol f, string actor, List<(string Value, KurzType Type)> arguments, string file, string line)
+    {
+        var heap = fn.Value($"call ptr {RuntimeFunction("ActorHeap")}({ReferenceWords(actor)})");
+        var crossed = arguments.Select(a => $"{Ir(a.Type)} {(Counted(a.Type) ? Crossed(a.Value, a.Type, heap) : a.Value)}").ToList();
+        var message = MessageType(f);
+        var block = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr {heap}, i64 {IrSize(message)})");
+        var run = MessageRun(f);
+        var copy = MessageCopy(f, f.Parameters.Select(_ => (string?)null).ToList());
+        var table = $"@\"message.table.{Number(++actorSites)}\"";
+        module.Global($"{table} = private unnamed_addr constant [3 x ptr] [ptr {run}, ptr {copy}, ptr {MessageDrop(f)}]");
+        fn.Emit($"store ptr {table}, ptr {MessageField(message, block, 1)}");
+        for (var i = 0; i < crossed.Count; i++)
+        {
+            fn.Emit($"store {crossed[i]}, ptr {MessageField(message, block, MessageArguments + i)}");
+        }
+
+        var bound = f.Declaration!.Within is { } declared ? EmitExpression(declared) : null;
+        var result = f.ReturnType;
+        var reply = fn.Alloca(Reply(result), "reply");
+        fn.Emit($"store i32 0, ptr {reply}");
+        if (!Types.IsVoid(result))
+        {
+            fn.Emit($"store ptr {fn.Value($"call ptr {StdFunction("HeapCurrent")}()")}, ptr {fn.Value($"getelementptr {Reply(result)}, ptr {reply}, i32 0, i32 {Number(ReplyHeap)}")}");
+        }
+
+        fn.Emit($"call void {RuntimeFunction("ReplyWaiter")}(ptr {reply})");
+        fn.Emit($"store ptr {reply}, ptr {MessageField(message, block, 2)}");
+        fn.Emit($"call void {RuntimeFunction("Enqueue")}({ReferenceWords(actor)}, ptr {block}, i1 {(bound is null ? "false" : "true")}, i64 {bound ?? "0"}, %kz.str {file}, i32 {line})");
+        fn.Emit($"call void {RuntimeFunction("Wait")}(ptr {reply}, ptr {block}, %kz.str {file}, i32 {line})");
+        return Types.IsVoid(result) ? "void" : fn.Value($"load {Ir(result)}, ptr {fn.Value($"getelementptr {Reply(result)}, ptr {reply}, i32 0, i32 {Number(ReplyHeap + 1)}")}");
+    }
+
+    /// <summary>
     /// U4, U6: the function of the messages of the method <paramref name="f"/>, which the runtime calls with the actor's state and the
     /// message, made at its first use and named outside the program's functions, so that a trace leaves its frame out as it leaves the
     /// runtime's: the method called on the state with the arguments the message holds, which it lets go of after the call, before it

@@ -1,0 +1,41 @@
+// expect: output
+// | cache 3
+// | store 7
+// | int 3
+// | 2
+// | again
+// | second
+// rules: U1
+
+// an actor's arm takes the values that hold its references; `==` and a key are those of the reference
+interface Store {
+    long Get(string key)
+}
+
+actor Cache : Store {
+    pub long Get(string key) => key.Bytes.Count
+}
+
+class Fixed : Store {
+    pub long Get(string key) => 7
+}
+
+string Kind(Store | int s) => match s {
+    Cache c => "cache {c.Get("abc")}"
+    Store o => "store {o.Get("a")}"
+    int n => "int {n}"
+}
+
+a = spawn Cache()
+b = spawn Cache()
+print(Kind(a))
+print(Kind(Fixed()))
+print(Kind(3))
+
+mut Map<Store, string> names = Map<Store, string>()
+names[a] = "first"
+names[b] = "second"
+names[a] = "again"
+print(names.Count)
+print(names[a])
+print(names[b])

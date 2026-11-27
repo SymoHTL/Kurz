@@ -1,0 +1,21 @@
+// expect: throws call-timeout at 17
+// | 1
+// rules: U1, U36
+
+// the bound a method declares holds a call through the interface too
+interface Napping {
+    int Nap(duration d)
+}
+
+actor Napper : Napping {
+    pub int Nap(duration d) within 100ms {
+        Environment.Sleep(d)
+        return 1
+    }
+}
+
+int Use(Napping n, duration d) => n.Nap(d)
+
+a = spawn Napper()
+print(Use(a, 1ms))
+print(Use(a, 1s))
