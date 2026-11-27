@@ -137,8 +137,8 @@ No case: as P4's.
 
 By default each event a call site that is on makes is one text line on standard error, with its
 time, level, category, chain ID, message and fields (§12, the owner, 2026-11-04, Q6 (a)); the chain
-ID and the actor's parts stand in the span of P8, and a line written outside every actor's message
-holds nothing in their place (P8). The
+ID stands only in the span of P8, with the actor's parts, where an actor's message runs, and a line
+written outside every actor's message holds nothing in their place (P8). The
 category of a call is the name of the type whose method holds it, as C#'s `ILogger<T>` names a
 category by its type, taken with no container (§12, the owner, 2026-11-04, Q1 (a)): the name as
 written, `Orders` for a method of `Orders`. A call in a constructor, in a property or in a field's
@@ -171,8 +171,8 @@ type `string` stands in double quotes, with `"` and `\` in it after a `\`. A lin
 message or in a field is written as `\n`. The category of top-level code is the name of its file
 without `.kz`, `main` for `main.kz`. Where lines were dropped (P9), the line
 `<time> Warning Kurz.Log: dropped <n> lines` stands before the next line written (§12, the owner,
-2026-11-05, answers L3, L4 and L8). A line written while an actor's message runs holds its span
-between the level and the category (P8).
+2026-11-05, answers L3, L4 and L8). A line written while an actor's message runs holds the span P8
+gives it, between the level and the category (P8).
 The fields stand in the template's order, a value of any type but `string` is its text (A2 to
 A16), a carriage return is written as `\r` and a `\` in the message as `\\`, as Rust's
 `escape_debug` writes them, so that a `\n` in a line is a line feed; one dropped line is
@@ -186,7 +186,8 @@ No case: as P6's.
 A line written while an actor's message runs holds that actor as a span between the level and the
 category, as Rust's `tracing_subscriber::fmt` writes a span before the target: the name of the
 actor's type, then in braces its key or its name where it has one, the node where the program names
-nodes, and `chain=` with the chain's ID in 32 hexadecimal digits, lowercase (§12, assumed there), then a colon,
+nodes, and `chain=` with the chain's ID in 32 hexadecimal digits, lowercase, the text a block's
+`Crashed.Chain` reads (U30) (§12, assumed there), then a colon,
 `2026-11-05T01:23:45.678Z Information Cache{key="eu" chain=4bf92f35a1b2c3d4e5f60718293a4b5c}: Orders: Paid 17 order.Id=17`,
 so that a call in the actor's own method names its type as the span and as the category (§12, the
 owner, 2026-11-27, #274, comment 7216348897, Q1 "Rust span first (Recommended)" and Q3 "All 32 hex
@@ -203,7 +204,8 @@ whether a message runs or not; a line that a function writes while a
 message runs carries that message's span, its category staying the function's (Q5, "Yes, the message's
 span (Recommended)"); `print` writes no span, the line of an actor's crash takes the span of the
 actor it names (U24), and the line of `Kurz.Log` that names dropped lines takes none (Q7, "print
-plain, crash gets span (Recommended)"). The fields are named `key`, `node` and `chain`, in that order,
+plain, crash gets span (Recommended)"). A build for Windows keeps the `not supported` of a log call
+(S11), the span is read after the level's test (P3), the fields are named `key`, `node` and `chain`, in that order,
 a name written under `key` as a key is, and a test's own actor of `kurz test`, which the program does
 not declare, writes no span, as the top-level code writes none, and the line of a crash that carries
 no chain, the `restart-limit` of a supervisor that runs no message, leaves out the field `chain` alone,

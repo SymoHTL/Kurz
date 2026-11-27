@@ -5498,7 +5498,8 @@ a `string` field is written, and the place, as the error line of a `throw` at th
 `Counter#3 crashed: thrown "no stock" at shop.kz:12`, and for an id with no text below its error line
 the id and the place alone, `Calc#1 crashed: divide-by-zero at calc.kz:2`, a stack overflow's as its
 error line writes them, with the span of P8 before the category, the actor it names with the chain of
-the message whose crash it writes (§12, the owner, 2026-11-27, #274, comment 7216348897, Q7, "print
+the message whose crash it writes, and with no field `chain` where the crash carries none, the
+`restart-limit` of a supervisor that runs no message (P8) (§12, the owner, 2026-11-27, #274, comment 7216348897, Q7, "print
 plain, crash gets span (Recommended)"; §6, the owner, 2026-11-13, #519, comment
 6847932993, Q24; the owner, 2026-11-14, comment 6880404917, Q16; the owner, 2026-11-15, comment
 6902210646, Q8, "With thrown text; points stand") *(assumed: the words of the line, and `KURZ_LOG`

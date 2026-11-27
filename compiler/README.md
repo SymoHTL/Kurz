@@ -2646,10 +2646,10 @@ ask about it.
   refused writes are counted in the next line.
 - P8 with section 12: the build has no actor with a key or a name and no program that names nodes, so
   the span of a line written while an actor's message runs is the actor's type and its chain alone,
-  `Cache{chain=4bf92f35a1b2c3d4e5f60718293a4b5c}: `, read from the activation the thread runs, the
+  `Cache{chain=4bf92f35a1b2c3d4e5f60718293a4b5c}: `, its 32 digits lowercase *(assumed in §12)*, read from the activation the thread runs, the
   type's name from the actor's record and the chain from the activation's header; a line of the
-  top-level code, which runs no activation, and a line of a test's own actor hold none, and so does
-  the line of `Kurz.Log`. The line of a crash names the actor that takes it, with the chain of the
+  top-level code, which runs no activation, and a line of a test's own actor *(assumed in §12)* hold none, and so does
+  the line of `Kurz.Log`. The line of a crash names the actor that crashed, with the chain of the
   message that crashed as the block of `on crash` reads it in `Crashed.Chain` (U30), and a crash
   that carries no chain, the `restart-limit` of a supervisor with no activation, writes the span as
   the type's name alone, `Sup: `, as Rust's `tracing_subscriber::fmt` writes a span with no field
