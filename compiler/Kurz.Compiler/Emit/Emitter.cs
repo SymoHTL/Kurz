@@ -537,8 +537,9 @@ public sealed partial class Emitter
     /// The functions of the runtime that only the worker threads reach (U35) and that a function on the path of a message on one
     /// thread calls after a test of the worker threads, which the emitter marks <c>noinline</c> and <c>cold</c>: LLVM then keeps
     /// each a call, lays the call out past the path of one thread and lets that path fall through the test, as C's
-    /// <c>__builtin_expect</c> and Rust's <c>#[cold]</c> mark a path that is not taken, so that a build of one thread pays the
-    /// test alone (the owner, 2026-11-26, #519, comment 7204486070, Q1); without the mark each message on one thread was 1 to 2 ns
+    /// <c>__builtin_expect</c> and Rust's <c>#[cold]</c> mark a path that is not taken, so that a build of one thread pays, at each
+    /// such call on its path, the test of the worker threads, a load and a branch, and no call (the owner, 2026-11-26, #519, comment
+    /// 7204486070, Q1); without the mark each message on one thread was 1 to 2 ns
     /// dearer. No program sees the mark: it names no function of a program.
     /// </summary>
     private static readonly HashSet<string> WorkerForms = new(StringComparer.Ordinal)

@@ -5969,7 +5969,11 @@ bool RootPending() {
 // Whether the thread that frees the first page of the ended actor whose state is `state` is the one that frees it (`RunTake`,
 // `EndActor`): always on one thread; on worker threads where no thread holds the actor and, unless the caller took its entry off a
 // queue (`entry`), none stands there, the RECLAIMED bit, 64, set by a compare-exchange that clears QUEUED, so that a wake after it
-// queues the actor no more (`Wake`, `WakeHome`) and no second thread frees the page (T16).
+// queues the actor no more (`Wake`, `WakeHome`) and no second thread frees the page (T16). BUILDING, 8, keeps no free back: an actor
+// whose constructor runs is ended only by the thread of its spawner, which runs that constructor, at the crash of the spawner's message
+// (`Fall`, `EndChildren`), since another thread that ends the spawner waits for its message first (section 6, comment 7198702144, 2),
+// and a take on another thread drops its entry while the constructor runs (`ActorBuilt`), so that a word that holds BUILDING here is
+// the calling thread's own.
 bool Reclaims(byte* state, bool entry) {
     if !Threaded() {
         return true
@@ -8685,6 +8689,8 @@ void FellHeld(byte* state, byte* header, bool hasText, byte* id, long idCount, b
             return
         }
 
+        // The child of an `attempt` (`AttemptNew`), whose one message is queued at its build and which ends after it, so that a
+        // crash it takes, its own or a signal of a child its message spawned, finds that message's activation at the top, never none.
         if side == state {
             byte* heap = OwnHeapNew()
             byte* message = Pending(state, heap, null, header, hasText, id, idCount, file, fileCount, line, from, count, number, slot, copy)
@@ -8970,46 +8976,58 @@ void Ends(bool hasText, byte* id, long idCount, byte* file, long fileCount, long
 static mut byte* rootEnd = null
 
 // The end of the process that the top-level code takes from the crash path of a worker (`Ends`), handed to the main thread, whose
-// stack holds the calls of the top-level code that waits, which the trace names: the words of the end stored and marked with
-// release, the worker's word of the world cleared, so that a walk under the world waits for no worker that waits for the end, the main
-// thread woken, in its poller and in its wait for the world, and the worker waiting on the mark to the exit, which
-// the main thread makes at its turn in its wait, at its following read of a record or at its end (`RootEnded`); nothing on the main thread
-// and on one thread.
+// stack holds the calls of the top-level code that waits, which the trace names: the mark at 92 taken from 0 to 2 by one
+// compare-exchange, so that of two workers that end the process at once one alone stores its words, the words of the end stored and
+// the mark set to 1 with release, the worker's word of the world cleared, so that a walk under the world waits for no worker that
+// waits for the end, the main thread woken, in its poller and in its wait for the world, and the worker waiting on the mark to the
+// exit, which the main thread makes at its turn in its wait, at its following read of a record or at its end (`RootEnded`); a worker
+// whose compare-exchange found the mark taken stores nothing and waits so too; nothing on the main thread and on one thread.
 void EndHanded(bool hasText, byte* id, long idCount, byte* file, long fileCount, long line, byte* text, long count) {
     raw {
         if scheduler == null || threadRecord == null || *Ptr<long>(threadRecord + 96) < 0 {
             return
         }
 
-        byte* end = AllocateOwn(64)
-        *Ptr<long>(end) = 0
-        if hasText {
-            *Ptr<long>(end) = 1
+        AtomicInt mark = AtomicInt.FromPtr(Ptr<int>(scheduler + 92))
+        mut int found = 0
+        match mark.CompareExchange(0, 2, MemoryOrder.Acquire, MemoryOrder.Relaxed) {
+            int stored => found = stored
+            NotExchanged<int> missed => found = missed.Value
         }
 
-        *Ptr<byte*>(end + 8) = id
-        *Ptr<long>(end + 16) = idCount
-        *Ptr<byte*>(end + 24) = file
-        *Ptr<long>(end + 32) = fileCount
-        *Ptr<long>(end + 40) = line
-        *Ptr<byte*>(end + 48) = text
-        *Ptr<long>(end + 56) = count
-        rootEnd = end
-        AtomicInt.FromPtr(Ptr<int>(scheduler + 92)).Store(1, MemoryOrder.Release)
+        if found == 0 {
+            byte* end = AllocateOwn(64)
+            *Ptr<long>(end) = 0
+            if hasText {
+                *Ptr<long>(end) = 1
+            }
+
+            *Ptr<byte*>(end + 8) = id
+            *Ptr<long>(end + 16) = idCount
+            *Ptr<byte*>(end + 24) = file
+            *Ptr<long>(end + 32) = fileCount
+            *Ptr<long>(end + 40) = line
+            *Ptr<byte*>(end + 48) = text
+            *Ptr<long>(end + 56) = count
+            rootEnd = end
+            mark.Store(1, MemoryOrder.Release)
+        }
+
         WorldOut(threadRecord)
         MainWoken()
         sys.LockWake(Ptr<int>(scheduler + 88))
         mut bool endless = true
         while endless {
-            sys.LockWait(Ptr<int>(scheduler + 92), 1)
+            sys.LockWait(Ptr<int>(scheduler + 92), mark.Load(MemoryOrder.Relaxed))
         }
     }
 }
 
-// The end of the process that a worker handed to the main thread (`EndHanded`) made by it, where one stands.
+// The end of the process that a worker handed to the main thread (`EndHanded`) made by it, where one stands: the mark at 92 set to 1,
+// and not 2, which a worker holds while it stores the words.
 void RootEnded() {
     raw {
-        if scheduler == null || AtomicInt.FromPtr(Ptr<int>(scheduler + 92)).Load(MemoryOrder.Acquire) == 0 {
+        if scheduler == null || AtomicInt.FromPtr(Ptr<int>(scheduler + 92)).Load(MemoryOrder.Acquire) != 1 {
             return
         }
 

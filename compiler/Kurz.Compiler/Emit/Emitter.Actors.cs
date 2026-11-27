@@ -730,7 +730,7 @@ public sealed partial class Emitter
         var adopt = MessageCopy(f, copiesInto, inPlace: true);
         module.Global($"{table} = private unnamed_addr constant [4 x ptr] [ptr {run}, ptr {copy}, ptr {MessageDrop(f)}, ptr {adopt}]");
         fn.Emit($"store ptr {table}, ptr {MessageField(message, block, 1)}");
-        fn.Emit($"store ptr {own ?? heap}, ptr {MessageField(message, block, 6)}"); // U35: the heap it is built in, which it names while queued on worker threads (the runtime's `Enqueue`; T17)
+        fn.Emit($"store ptr {own ?? heap}, ptr {MessageField(message, block, 6)}"); // U35: the heap it is built in, a heap of its own on worker threads, the one `ActorHeap` makes there too, which the runtime's `Enqueue` reads there alone and clears on every thread before any read, so that on one thread, where `heap` is the actor's, no read follows (T17)
         for (var i = 0; i < arguments.Count; i++)
         {
             fn.Emit($"store {arguments[i]}, ptr {MessageField(message, block, MessageArguments + i)}");
@@ -948,7 +948,10 @@ public sealed partial class Emitter
     /// value by the environment of its lambda (<paramref name="copiesInto"/>); the message's own block goes with the crashed heap, or with
     /// the message's own heap. Where <paramref name="inPlace"/> holds, the fourth function of the table, which the runtime calls at the
     /// turn of a message queued with its heap of its own on worker threads (the runtime's <c>Adopted</c>; U35, T17): each argument's copy
-    /// stored in the message's own block, in the place the method reads, and nothing given.
+    /// stored in the message's own block, in the place the method reads, and nothing given. The word of the heap of its own (field 6)
+    /// is copied as it stands: 0 on one thread, which the runtime's <c>Enqueue</c> left there; on worker threads the heap of its own
+    /// of the message copied after a crash, which the copy's activation then frees at its end (the runtime's <c>Adopted</c>,
+    /// <c>OwnLeft</c>), so that the one word names that heap from the copy as it did from the message.
     /// </summary>
     private string MessageCopy(FunctionSymbol f, List<string?> copiesInto, bool inPlace = false) => Helper($"message.{(inPlace ? "adopt" : "copy")}.{f.Owner!.Name}.{f.Name}.{Number(++actorSites)}", inPlace ? "void" : "ptr", ["ptr", "ptr"], () =>
     {

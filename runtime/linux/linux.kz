@@ -3571,8 +3571,10 @@ pub long Submit(byte* job) {
 
 // A thread of the pool started for the job `job` (`Submit`), detached (1), with 2 MiB of stack, Tokio's default (issue 661, the
 // product pass, comment 7182792402, Q9, a default the pass took and listed there, on which no question was put to the owner
-// *(assumed)*), and a page of its own (`PoolThread`), which holds at 64 the attributes of its start and at 256 its identity, so
-// that two threads that start one each write no word in common (U35): 0. Where the system refuses the page or the thread, the
+// *(assumed)*), and a page of its own (`PoolThread`), the attributes of its start and its identity standing in a second page, at 0
+// and at 256, which this call gives back once `pthread_create` returned, so that two threads that start one each write no word in
+// common (U35) and no word of the start is read or written in the thread's page, which the thread gives back where it ends: 0.
+// Where the system refuses a page or the thread, the
 // count of threads is lowered again: 0 where another thread of the pool runs, which takes the job from the queue (issue 661, the
 // product pass, comment 7182792402, Q2, (c), kept as built, comment 7189038013), else -4101 with the job taken out of the queue,
 // where the scheduler ends the process (the same comment's Q2, (a)).
@@ -3582,12 +3584,18 @@ long Started(byte* job) {
         byte* own = Memory(4096)
         if own != null {
             *Ptr<byte*>(own) = at
-            void* attributes = Ptr<void>(own + 64)
-            pthread_attr_init(attributes)
-            pthread_attr_setstacksize(attributes, 2097152)
-            pthread_attr_setdetachstate(attributes, 1)
-            int refused = pthread_create(Ptr<long>(own + 256), attributes, PoolThread, own)
-            pthread_attr_destroy(attributes)
+            byte* start = Memory(4096)
+            mut int refused = 1
+            if start != null {
+                void* attributes = Ptr<void>(start)
+                pthread_attr_init(attributes)
+                pthread_attr_setstacksize(attributes, 2097152)
+                pthread_attr_setdetachstate(attributes, 1)
+                refused = pthread_create(Ptr<long>(start + 256), attributes, PoolThread, own)
+                pthread_attr_destroy(attributes)
+                Release(start, 4096)
+            }
+
             if refused == 0 {
                 return 0
             }

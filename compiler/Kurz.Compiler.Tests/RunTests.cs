@@ -78,11 +78,12 @@ public sealed class Toolchain : IDisposable
 
     /// <summary>
     /// Runs a built program as <see cref="Run(string)"/> does, with <c>KURZ_TRACE</c> set to <paramref name="trace"/>, or taken away where
-    /// it is null, and <c>KURZ_LOG</c> taken away, so that a case with a log call runs at the default level (P3) wherever the suite runs.
+    /// it is null, and <c>KURZ_LOG</c> and <c>KURZ_THREADS</c> taken away, so that a case with a log call runs at the default level (P3)
+    /// and a program on the count of threads its build gives (U35) wherever the suite runs.
     /// </summary>
     public static (int Code, IReadOnlyList<string> Output, string Error) Run(string executable, string? trace)
     {
-        var (code, output, error) = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = trace, ["KURZ_LOG"] = null });
+        var (code, output, error) = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = trace, ["KURZ_LOG"] = null, ["KURZ_THREADS"] = null });
         return (code, Lines(output), error);
     }
 
@@ -404,11 +405,13 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
 
     /// <summary>
     /// U35, section 6: the cases of a crash and its log line, its escalation, its restart after its pause, the end of a supervisor's
-    /// children, the blocks of <c>on crash</c>, <c>attempt</c>, <c>per node</c> and the walk for the places of a <c>deadlock</c>, run on
-    /// four worker threads, where a crash, an end, a restart and a block's decision hold only the actors they touch and a crash that passes
-    /// up reaches its supervisor as a signal (the runtime's <c>HeldAlone</c>, <c>Signaled</c>), and held to their headers as on one thread;
-    /// a case marked <c>// threads: 1</c> among them
-    /// holds one order of its lines that four threads keep, its actors running one at a time.
+    /// children and the blocks of <c>on crash</c>, <c>attempt</c> and <c>per node</c>, run on four worker threads, where a crash, an end,
+    /// a restart and a block's decision hold only the actors they touch and a crash that passes up reaches its supervisor as a signal (the
+    /// runtime's <c>HeldAlone</c>, <c>Signaled</c>), and held to their headers as on one thread; a case marked <c>// threads: 1</c> among
+    /// them holds one order of its lines that four threads keep, its actors running one at a time, so that the four threads this run sets
+    /// win over its header. The <c>deadlock</c> of the top-level code and of a loop on worker threads is <see cref="ThreadsTests"/>'s. A
+    /// build for Windows reads no <c>KURZ_THREADS</c> and starts no worker thread (U35), so that on Windows this run is one of one thread
+    /// again, and Linux alone runs these cases on four threads.
     /// </summary>
     public static TheoryData<string> CrashPathCases => new(
         "actors/crash-log-line.kz", "actors/crash-restarts-fresh.kz", "actors/crash-restart-limit.kz",
@@ -458,7 +461,8 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
 
         // the trace on, as a program runs where nobody set KURZ_TRACE; the log line of a crash left out in a case of a crash (E3); a case's
         // `threads: 1` line (chapter 0) asks for one thread, first in, first out, which `KURZ_THREADS` set to 1 gives (U35; section 6, the
-        // owner, 2026-11-17, #570, comment 6961064167), and every other case runs with no `KURZ_THREADS`, on the count the build gives
+        // owner, 2026-11-17, #570, comment 6961064167), but where the run sets a count of its own (`CrashPathCases`), and every other case
+        // runs with `KURZ_THREADS` taken away, the runner's own among them, on the count the build gives
         threads ??= header.OneThread ? "1" : null;
         var (code, output, written) = threads is null ? Toolchain.Run(executable, null) : Toolchain.Run(executable, null, threads);
         var all = LeftOut(written, header.Rules);
