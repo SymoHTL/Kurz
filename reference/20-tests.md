@@ -892,24 +892,28 @@ test "counts" ... FAILED (seed 1234)
 2 tests: 1 passed, 1 failed
 ```
 
-`--seed` stands before the file, once, as the other options do (Y2), and its value is a `ulong` written in
-digits alone; any other value, an empty one among them, ends the command before its build with
-`error: seed (<the value>)` on standard error and the exit code 1, and a second `--seed`, or none after
-the flag, is an error of its usage (§2, assumed there). Both generators are xoshiro256++, started by
-SplitMix64 from the seed, the draws by its first four words and the order by the four after them, so that
-a draw a test adds moves no order; the actors ready at a turn are those queued when the scheduler takes
+The seed is written in decimal digits alone; any other value, an empty one among them, ends the command
+with `error: seed (<the value>)` on standard error and the exit code 1, and a run whose tests all passed
+names no seed (§2, the owner, 2026-11-27, issue 657, comment 7215317771, Q1, Q2 and Q3 of comment
+7205593463). `--seed` stands before the file, once, as the other options do (Y2), a value it refuses
+ends the command before its build, and a second `--seed`, or none after the flag, is an error of its
+usage (§2, assumed there). The draws and the order come from two generators apart, so that a draw a test
+adds moves no order (§2, the owner, 2026-11-27, comment 7215317771, Q8). Both are xoshiro256++, started
+by SplitMix64 from the seed, the draws by its first four words and the order by the four after them;
+the actors ready at a turn are those queued when the scheduler takes
 the first of them, the actors they wake queued behind them, and each take is one of those left, at the
 index the next word gives modulo their count, a turn ending before the test's actor that an `advance`
 parked where an actor stands before it, so that the actors the moved clock woke run before the test goes
 on (Y10) (§2, assumed there). A test build asks the system for no
 randomness, so that it never ends with `random-failed` (M9), and its keys and chain IDs follow from the
-seed its failed lines show. A seed replays the draws and the order alone, on the build that printed it,
-with no promise across versions of the compiler: a test that reads the system's clock without `advance`,
-or waits on a file, a socket or a child process, can run otherwise under the same seed (§2, assumed
-there). A case marked `// threads: 1`, and a program run with `KURZ_THREADS` set to 1, runs its ready
-actors first in, first out under any seed (U35; §2, assumed there), and a case of the corpus that runs its
-tests runs with the seed 0, the runner building a marked one with that order, since a build for Windows
-reads no `KURZ_THREADS` (chapter 0).
+seed its failed lines show (§2, assumed there). A seed replays the draws and the order alone, on the
+build that printed it, with no promise across versions of the compiler (§2, the owner, 2026-11-27,
+comment 7215317771, Q8): a test that reads the system's clock without `advance`, or waits on a file, a
+socket or a child process, can run otherwise under the same seed (§2, assumed there). A case marked
+`// threads: 1` runs its ready actors first in, first out under any seed (U35; §2, the owner,
+2026-11-27, comment 7215317771, Q4), and so does a program run with `KURZ_THREADS` set to 1, and a case of
+the corpus that runs its tests runs with the seed 0, the runner building a marked one with that order,
+since a build for Windows reads no `KURZ_THREADS` (chapter 0; §2, assumed there).
 
 Case: [tests/seed-orders-ready-actors.kz](../corpus/tests/seed-orders-ready-actors.kz)
 ```kurz
