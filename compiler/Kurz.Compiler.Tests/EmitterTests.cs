@@ -1988,4 +1988,21 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Matches(stores, test);
         }
     }
+
+    [Fact]
+    public void The_word_of_a_message_s_heap_of_its_own_is_stored_through_its_one_definition()
+    {
+        // U35, T17: the word at 48 of a message (field 6) has one meaning, which `Emitter.OwnHeapStored` states, so that no site stores
+        // there a heap that the runtime's `Enqueue` and `Adopted` would take off the list of the heaps being built and free on worker
+        // threads: the one line of the emitter's sources that names field 6 of a message is that helper's, and the three sites that build
+        // a message (`EmitMessage`, `EmitMessageOf` and the `attempt`'s) call it; a store written in another form is not seen here
+        var sources = Path.Combine(CorpusTests.Root, "compiler", "Kurz.Compiler", "Emit");
+        var lines = Directory.EnumerateFiles(sources, "*.cs", SearchOption.AllDirectories)
+            .SelectMany(f => File.ReadLines(f).Select(line => (File: Path.GetFileName(f), Line: line)))
+            .ToList();
+        var store = Assert.Single(lines, x => Regex.IsMatch(x.Line, @"MessageField\([^()]*, 6\)"));
+        Assert.Equal("Emitter.Actors.cs", store.File);
+        Assert.Contains("private void OwnHeapStored(", store.Line, StringComparison.Ordinal);
+        Assert.Equal(3, lines.Count(x => x.Line.Contains("OwnHeapStored(message, ", StringComparison.Ordinal)));
+    }
 }
