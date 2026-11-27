@@ -5347,7 +5347,9 @@ its number of U2, the error's id, the text below the error line, a thrown value'
 a `string` field is written, and the place, as the error line of a `throw` at the root carries them,
 `Counter#3 crashed: thrown "no stock" at shop.kz:12`, and for an id with no text below its error line
 the id and the place alone, `Calc#1 crashed: divide-by-zero at calc.kz:2`, a stack overflow's as its
-error line writes them, and no chain ID while P8 is open (§6, the owner, 2026-11-13, #519, comment
+error line writes them, with the span of P8 before the category, the actor it names with the chain of
+the message whose crash it writes (§12, the owner, 2026-11-27, #274, comment 7216348897, Q7, "print
+plain, crash gets span (Recommended)"; §6, the owner, 2026-11-13, #519, comment
 6847932993, Q24; the owner, 2026-11-14, comment 6880404917, Q16; the owner, 2026-11-15, comment
 6902210646, Q8, "With thrown text; points stand") *(assumed: the words of the line, and `KURZ_LOG`
 read at the start of a program that spawns, so that its filter holds for the line (P4))*. The
@@ -9043,8 +9045,8 @@ as a block's `Crashed.Chain` reads one (U30), for a call the chain of the activa
 the message whose crash its block decides on (the owner, 2026-11-21, #519, comment 7060155980, T84 1); a child's line whose
 block's message stands neither on its supervisor's queue of blocks, nor in its inbox, nor under one of its activations ends
 with no chain ID *(assumed: a reading of the build of T68 3 and T84 1, comment 7058660596)*. The crash's log line
-holds the text in double quotes (U24), the IDs inside it while P8, the place of a chain ID among the line's own fields, stays
-open *(assumed: T68 3 read with option 1's cost, comment 7058660596)*, and a block of `on crash` reads it as the `Detail` of
+holds the text in double quotes (U24) and the IDs inside it *(assumed: T68 3 read with option 1's cost, comment
+7058660596)*, its span the actor it names with the chain of the message whose crash it writes (P8), and a block of `on crash` reads it as the `Detail` of
 the `RuntimeError` in its `Reason`, whose `Kind` is `RuntimeKind.Deadlock` (U30); where a policy escalates the crash to the
 top-level code (U25), the process ends with that error line and the text under it.
 
