@@ -4,7 +4,8 @@ A program logs through `Log`, which every file sees, with C#'s six levels as the
 functions and Kurz's interpolated string as the template, as `ILogger`'s surface reads, and each
 call is a call site with a static record, as Rust's `tracing` gives each of its macros a
 `Callsite` (§12, the owner, 2026-11-04, Q1 (a) and Q2 (a)). Spans, sinks, the inspector's levels,
-a `deploy` block's ceiling, `secret-logged` and the instruments of §12 have no rule here.
+a `deploy` block's ceiling, `secret-logged` but for an actor's key in a span, which P8 names, and the
+instruments of §12 have no rule here.
 
 ### P1 (decided, §12) `Log` and its functions
 
