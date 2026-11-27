@@ -397,7 +397,7 @@ public sealed partial class Emitter
     /// U1: the reference of an actor, held by a value of an interface the actor implements: a block of the heap the code allocates in,
     /// counted as an instance's is (section 3), that holds the reference's two words, paired with the actor's table for the interface,
     /// whose slots build a message to the actor (<see cref="ActorSlot"/>), as Rust boxes an actor's handle behind <c>dyn Trait</c>
-    /// (I1 (a) of #519, comment 7211586386, assumed).
+    /// (I1 (a) of #519, comment 7211586386, chosen 2026-11-27, comment 7215317481; the box a reading of the build).
     /// </summary>
     private string ActorAsInterface(string reference, ClassSymbol actor, InterfaceSymbol face)
     {
@@ -479,7 +479,7 @@ public sealed partial class Emitter
         fn.Return(null);
     });
 
-    /// <summary>U1, U2: two actors' blocks for an interface are equal where their references name one actor, the slot and the number (I4 (a) of #519, comment 7211586386, assumed; Q10 of 2026-11-14).</summary>
+    /// <summary>U1, U2: two actors' blocks for an interface are equal where their references name one actor, the slot and the number (I4 (a) of #519, comment 7211586386, chosen 2026-11-27, comment 7215317481; Q10 of 2026-11-14).</summary>
     private string ActorBoxEqual() => Helper("equal.actor.box", "i1", ["ptr", "ptr"], () =>
     {
         var a = BoxedReference("%a0");
@@ -500,7 +500,7 @@ public sealed partial class Emitter
     /// U1, U4: what the slot of the interface's method holds in an actor's table for it: a function that takes the actor's block, reads
     /// its reference and sends the actor's method that implements the interface's as a message, which waits for its reply, with the
     /// place of the call through the interface the thread's site holds (<see cref="CallThrough"/>; I1 (a) of #519, comment 7211586386,
-    /// assumed), as a Rust trait implemented for an actor's handle sends in each method.
+    /// chosen 2026-11-27, comment 7215317481), as a Rust trait implemented for an actor's handle sends in each method.
     /// </summary>
     private string ActorSlot(ClassSymbol actor, InterfaceSymbol face, FunctionSymbol method)
     {
@@ -607,7 +607,7 @@ public sealed partial class Emitter
     /// <summary>
     /// C4 with U1: branches to <paramref name="take"/> with the reference stored in <paramref name="slot"/> where the value of the interface
     /// <paramref name="from"/> holds a reference to the actor <paramref name="arm"/>, else to <paramref name="other"/> (#519, comment
-    /// 7211586386, I4 (a), assumed). The actor's table for the interface is its own, so the test is one comparison, and the reference is read
+    /// 7211586386, I4 (a), chosen 2026-11-27, comment 7215317481). The actor's table for the interface is its own, so the test is one comparison, and the reference is read
     /// from the box only once the test held, since a class instance has no such field (<see cref="ActorAsInterface"/>).
     /// </summary>
     private void ActorArm(string value, InterfaceSymbol from, ClassSymbol arm, string slot, string take, string other)

@@ -99,7 +99,7 @@ public sealed partial class Checker
     /// <summary>
     /// U1: whether the type after an actor's name names an interface without type arguments, and nothing after it, which the file or
     /// the prelude declares (<see cref="fileInterfaces"/>), whose table the actor takes as a class does (K7; Q26 of issue 519, comment
-    /// 6882624606; I1 of comment 7211586386, assumed). The declarations of the file are read in their order, so that an interface
+    /// 6882624606; I1 of comment 7211586386, chosen 2026-11-27, comment 7215317481). The declarations of the file are read in their order, so that an interface
     /// written after the actor is known by its name alone here.
     /// </summary>
     private bool NamesReadInterface(BaseSpecifier b) =>
@@ -212,7 +212,7 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// U1, U12 (I3 (a) of issue 519, comment 7211586386, assumed): a call through an interface that the actor implements is a message
+    /// U1, U12 (I3 (a) of issue 519, comment 7211586386, chosen 2026-11-27, comment 7215317481): a call through an interface that the actor implements is a message
     /// to it (I1 (a)), with no word at its arguments, since the caller sees an interface and not an actor, so each method of each such
     /// interface takes parameters and gives a result that cross with no word by their written types (<see cref="CrossingOf"/>), as a
     /// Rust trait implemented for an actor's handle takes and gives <c>Send</c> values. The first that does not is reported at the
@@ -1016,7 +1016,7 @@ public sealed partial class Checker
 
         if (call.Kind != CallKind.ActorSend)
         {
-            // U1: a call through an interface waits whatever the value holds (#519, comment 7211586386, I2 (a), assumed), and the text names it
+            // U1: a call through an interface waits whatever the value holds (#519, comment 7211586386, I2 (a), chosen 2026-11-27, comment 7215317481), and the text names it
             Report(ErrorIds.Syntax, s.Line, call.Function?.Interface is { } face
                 ? $"`send` stands before a call of an actor's method, `send c.Add(1)`, and `{face.Name}.{call.Function.Name}` is a call through an interface, which waits whatever the value holds (U1, U6, U14)"
                 : "`send` stands before a call of an actor's method, `send c.Add(1)` (U6, U14)");

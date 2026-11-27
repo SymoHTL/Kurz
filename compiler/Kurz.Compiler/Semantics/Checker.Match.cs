@@ -329,7 +329,7 @@ public sealed partial class Checker
     /// </summary>
     private static bool BelowArm(KurzType type, KurzType arm) => (type is ClassType k
         && ((arm is InterfaceType i && k.Symbol.Implements(i.Symbol)) || (arm is ClassType b && !ReferenceEquals(k.Symbol, b.Symbol) && k.Symbol.HasBaseOrIs(b.Symbol))))
-        || (type is ActorType a && arm is InterfaceType face && a.Symbol.Implements(face.Symbol)) // U1: an actor's arm tests the reference a value of its interface holds (#519, comment 7211586386, I4 (a), assumed)
+        || (type is ActorType a && arm is InterfaceType face && a.Symbol.Implements(face.Symbol)) // U1: an actor's arm tests the reference a value of its interface holds (#519, comment 7211586386, I4 (a), chosen 2026-11-27, comment 7215317481)
         || (type is DataType && arm is DataType && !Types.Same(type, arm) && Types.Assignable(type, arm));
 
     /// <summary>

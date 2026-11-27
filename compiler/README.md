@@ -2624,12 +2624,12 @@ ask about it.
   the slot through a thread's own word that the call through the interface stores before it, so that a
   crash, a deadline and the method's own bound stand at that call; `==` and the hash compare and hash
   the two words of the reference, and an arm of the actor over such a value compares the table with the
-  actor's and loads the reference once that comparison held *(assumed: #519, comment 7211586386, I1 to
-  I4, and its mechanism, which no answer gave)*. The checker holds each method of such an interface to
+  actor's and loads the reference once that comparison held (the owner, 2026-11-27, #519, comment 7215317481,
+  to I1 to I4 of comment 7211586386) *(assumed: the mechanism, which no answer gave)*. The checker holds each method of such an interface to
   what crosses with no word at the line that names it, and the walk of the throw sets gives a call
   through the interface a site that waits on each actor that implements it, a loop's text naming the
   interface's method beside the actor's (U56, T46 (a)), and `send` before such a call is `syntax` (U6). Pinned by
-  `CheckerTests` and by the cases `actors/interface-call.kz`, `actors/interface-arm.kz`,
+  `CheckerTests` and by the cases `actors/interface-call.kz`, `actors/interface-arm.kz`, `actors/interface-arm-face.kz`,
   `actors/interface-crash.kz`, `actors/interface-within.kz`, `actors/interface-crossing.kz`,
   `actors/interface-mut-parameter.kz`, `actors/interface-missing-method.kz`, `actors/interface-send.kz` and
   `actors/interface-call-loop.kz`.

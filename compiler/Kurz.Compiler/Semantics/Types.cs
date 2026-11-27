@@ -729,7 +729,7 @@ public static class Types
 
         if (from is ActorType ia && to is InterfaceType actorFace)
         {
-            return ia.Symbol.Implements(actorFace.Symbol); // U1: an actor's reference where an interface it implements is required, whose calls are messages (I1 (a) of #519, comment 7211586386, assumed)
+            return ia.Symbol.Implements(actorFace.Symbol); // U1: an actor's reference where an interface it implements is required, whose calls are messages (I1 (a) of #519, comment 7211586386, chosen 2026-11-27, comment 7215317481)
         }
 
         if (from is TypeParameterType limited && to is InterfaceType limit)

@@ -790,7 +790,7 @@ public sealed partial class Emitter
     /// <summary>
     /// U1, U4: a call of the actor's method <paramref name="f"/> as a message, from a slot of the actor's table for an interface
     /// (<see cref="ActorSlot"/>), whose arguments are values already read, borrowed from the call through the interface, each crossing
-    /// with no word (U12; I3 (a) of #519, comment 7211586386, assumed): the message built in the actor's heap, each argument that holds a
+    /// with no word (U12; I3 (a) of #519, comment 7211586386, chosen 2026-11-27, comment 7215317481): the message built in the actor's heap, each argument that holds a
     /// block a copy of its own there, as <see cref="EmitMessage"/> builds one whose arguments cannot wait, nothing running between the
     /// read of that heap and the queueing; the bound of the method's declaration (U39), the file <paramref name="file"/> and the line
     /// <paramref name="line"/> of the call through the interface for its queueing and its wait. The result, in the heap the caller

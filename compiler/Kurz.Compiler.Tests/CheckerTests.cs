@@ -8352,7 +8352,7 @@ public sealed class CheckerTests
     [Fact]
     public void An_actor_s_reference_is_a_value_of_an_interface_the_actor_implements()
     {
-        // U1 (#519, comment 7211586386, I1 (a), assumed): an actor names an interface after its name, declared before or after it, and
+        // U1 (#519, comment 7211586386, I1 (a), chosen 2026-11-27, comment 7215317481): an actor names an interface after its name, declared before or after it, and
         // implements its methods as a class does (K6); its reference is a value of that interface and of no other
         const string cache = "actor Cache : Store {\n    pub long Get(string key) => 5\n}\n\n";
         Assert.Empty(Errors(StoreFace + cache + "long Read(Store s) => s.Get(\"a\")\n\nc = spawn Cache()\nprint(Read(c))\n"));
@@ -8360,7 +8360,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.MissingMember, 5)], Errors(StoreFace + "actor Cache : Store {\n}\n"));
         Assert.Equal([(ErrorIds.TypeMismatch, 8)], Errors(StoreFace + "actor Other {\n}\n\nStore s = spawn Other()\nprint(s.Get(\"a\"))\n"));
 
-        // I2 (a), assumed: every call through the interface waits, so `send` before one is `syntax`, its text naming the interface's method
+        // I2 (a), chosen 2026-11-27, comment 7215317481: every call through the interface waits, so `send` before one is `syntax`, its text naming the interface's method
         // (comment 7211645920, item 5), while `send` before the actor's own reference stands
         const string sink = "interface Logger {\n    void Note(string s)\n}\n\nactor Sink : Logger {\n    pub void Note(string s) {\n        print(s)\n    }\n}\n\n";
         Assert.Equal([(ErrorIds.Syntax, 12)], Errors(sink + "Logger l = spawn Sink()\nsend l.Note(\"a\")\n"));
@@ -8371,7 +8371,7 @@ public sealed class CheckerTests
     [Fact]
     public void The_methods_of_an_interface_an_actor_implements_take_and_give_what_crosses_into_an_actor()
     {
-        // U1 with U9 and U12 (#519, comment 7211586386, I3 (a), assumed): a call through the interface on an actor is a message with no word
+        // U1 with U9 and U12 (#519, comment 7211586386, I3 (a), chosen 2026-11-27, comment 7215317481): a call through the interface on an actor is a message with no word
         // at its arguments and none at its result, so the interface's methods are held at the actor's interface to what crosses with no
         // word: no `mut` parameter, a parameter and a result that cross, each refused at the line that names the interface
         const string bag = "class Bag(mut int N)\n\n";
@@ -8387,9 +8387,9 @@ public sealed class CheckerTests
     [Fact]
     public void A_call_through_an_interface_an_actor_implements_waits_on_that_actor()
     {
-        // U56 with U1 (T46 (a); #519, comment 7211586386, I1 (a), assumed): a call through an interface reaches every actor that implements
+        // U56 with U1 (T46 (a); #519, comment 7211586386, I1 (a), chosen 2026-11-27, comment 7215317481): a call through an interface reaches every actor that implements
         // it, so an actor's method that calls through it on another of its own actors is a loop, whose text names the interface's method
-        // beside the actor's (comment 7211645920, Q7 (a), assumed), and one whose interface only a class implements is not
+        // beside the actor's (comment 7211645920, Q7 (a), chosen the same day), and one whose interface only a class implements is not
         const string pinger = "interface Pinger {\n    int Ping()\n}\n\n";
         const string loop = pinger + "actor A : Pinger {\n    pub int Ping() => 1\n\n    pub int Go() {\n        Pinger p = spawn A()\n        return p.Ping()\n    }\n}\n";
         Assert.Equal([(ErrorIds.CallLoop, 10)], Errors(loop));
@@ -8400,7 +8400,7 @@ public sealed class CheckerTests
     [Fact]
     public void An_arm_of_an_actor_s_type_tests_the_reference_a_value_of_its_interface_holds()
     {
-        // C4 with U1 (#519, comment 7211586386, I4 (a), assumed): an arm of an actor that implements the subject's interface takes the values
+        // C4 with U1 (#519, comment 7211586386, I4 (a), chosen 2026-11-27, comment 7215317481): an arm of an actor that implements the subject's interface takes the values
         // that hold its references, as a class's arm takes its instances, and covers no case (O8); an actor that does not implement it is no
         // case
         const string cache = "actor Cache : Store {\n    pub long Get(string key) => 5\n}\n\n";

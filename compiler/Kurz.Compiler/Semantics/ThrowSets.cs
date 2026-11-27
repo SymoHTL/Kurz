@@ -928,7 +928,7 @@ public sealed class ThrowSets
     }
 
     // K7: the method of an interface runs the method of that name and arity of each class that implements the interface; an actor
-    // that implements it runs its method in itself, as a message (U1; I1 (a) of #519, comment 7211586386, assumed), which is no code
+    // that implements it runs its method in itself, as a message (U1; I1 (a) of #519, comment 7211586386, chosen 2026-11-27, comment 7215317481), which is no code
     // of the caller's but a site (`ActorImplementers`)
     private IEnumerable<FunctionSymbol> Implementers(FunctionSymbol method) =>
         method.Interface is not { } face
@@ -939,7 +939,7 @@ public sealed class ThrowSets
                 .Where(g => !g.IsStatic && g.Parameters.Count == method.Parameters.Count);
 
     // U1, U56: the actors that implement the interface of the method, each with its method of that name and arity, which a call through
-    // the interface reaches as a message (I1 (a) of #519, comment 7211586386, assumed), an edge to every implementer (T46 (a) of comment
+    // the interface reaches as a message (I1 (a) of #519, comment 7211586386, chosen 2026-11-27, comment 7215317481), an edge to every implementer (T46 (a) of comment
     // 7051071630)
     private IEnumerable<(ClassSymbol Actor, FunctionSymbol Method)> ActorImplementers(FunctionSymbol method) =>
         method.Interface is not { } face

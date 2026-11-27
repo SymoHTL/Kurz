@@ -35,9 +35,13 @@ instance, mutable or not, lives in one actor's heap (K18), and an immutable
 `static` field of another type is no `static` state in K18's sense and stands as a class's does
 *(assumed: K18's reading of `static` state, which the answer did not name; a class's immutable
 `static` field of such a type is reached from every actor, so that one of an actor shares nothing
-more, as a Rust `static` that is `Sync` stands)*. How a generic
-actor's messages are built, a value of a type parameter's type among a message's arguments and its
-result included, stands open (§14).
+more, as a Rust `static` that is `Sync` stands)*. A value of a type
+parameter's type crosses in a generic actor's message, among its arguments and as its result, only
+where the parameter's limits name `Crosses`, a limit of the prelude, checked once at the
+definition, as Rust's `T: Send`, and a `spawn` whose type argument does not cross is
+`type-mismatch` there (T19) (§6, the owner, 2026-11-27, #519, comment 7215317481, I5) *(assumed:
+`Crosses` met by a type's structure, as §6 marks it)*; the build says `not supported` to a generic
+actor.
 
 An actor's reference is a value of every interface the actor names, declared before or after it,
 and a call through the interface on such a value is a message the actor runs in turn, a call that
@@ -50,8 +54,8 @@ such a value are those of the reference, which equals no class instance, and an 
 type in a `match` over the interface takes the values that hold its references, as a class's arm
 takes its instances (C4); a call through the interface is an edge to every actor that implements it
 (U56); arguments after the interface are `not supported`, since an actor has no base constructor to
-take them (§6) *(assumed: #519, comment 7211586386, I1 to I4, the leans of a round put to the owner
-and not answered when this was written)*.
+take them (§6, the owner, 2026-11-27, #519, comment 7215317481, I1 to I4, and Q6 to Q8 of the
+product pass, comment 7211645920, for the texts) *(assumed: the arguments after the interface, a reading of the build)*.
 
 The stack's clause is `stack` and a literal of bytes, `kb`, `mb` or `gb` (L14), `actor Parser stack 8mb
 { ... }`: it sets the size of the stack each message of the actor runs on, which is 2 MiB without it,
@@ -254,6 +258,36 @@ names[a] = "again"
 print(names.Count)
 print(names[a])
 print(names[b])
+```
+
+Case: [actors/interface-arm-face.kz](../corpus/actors/interface-arm-face.kz)
+```kurz
+// an arm of a second interface the actor names takes the value, and its call is a message too
+interface Store {
+    long Get(string key)
+}
+
+interface Named {
+    string Text()
+}
+
+actor Cache : Store, Named {
+    pub long Get(string key) => 5
+
+    pub string Text() => "cache"
+}
+
+class Fixed : Store {
+    pub long Get(string key) => 7
+}
+
+string Kind(Store s) => match s {
+    Named n => "named {n.Text()}"
+    else => "plain {s.Get("a")}"
+}
+
+print(Kind(spawn Cache()))
+print(Kind(Fixed()))
 ```
 
 Case: [actors/interface-crash.kz](../corpus/actors/interface-crash.kz)
