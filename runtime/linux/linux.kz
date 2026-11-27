@@ -2974,8 +2974,9 @@ long QuotaV1(byte* group, long count, byte* path) {
 // `/proc/self/mountinfo`, as Rust's `find_mountpoint` reads it: the first line whose type, the third field from its end, is
 // `cgroup` and whose options, its last field, list `cpu`, and whose root, its fourth field after its leading `/`, is the group
 // or a directory the group stands in; its mount point, its fifth field, put at the start of `path`, and the rest of the group
-// after that root put in `within`. The count of the mount point's bytes, or 0 where no line is such or a line has fewer than
-// seven fields, which ends the search as Rust's `?` ends it.
+// after that root put in `within`. The count of the mount point's bytes, or 0 where no line is such, or where a line has fewer
+// than eight fields, the four `nth(3)` takes, the mount point, the options and the two of `nth_back(1)`, or is such a line whose
+// root is empty or does not start with `/`, each of which ends the search as Rust's `?` ends it.
 long Mounted(byte* group, long count, byte* path, mut byte* within, mut long withinCount) {
     mut long found = 0
     raw {
@@ -3395,7 +3396,8 @@ thread static mut int poller = -1
 // The poller of the thread, made where it has none (`poller`): its descriptor, or the failure of `epoll_create1` or of
 // `pthread_atfork`, which gives a child of a `fork` its own (`Forked`). The opening of a socket makes it first (`Attempt`), so
 // that it takes the descriptor before the first socket's in every run, as Go's `netpollGenericInit` makes its poller at the
-// first descriptor it polls, and a program with no socket opens none.
+// first descriptor it polls, and on one thread a program with no socket opens none; a worker thread of the scheduler makes its
+// own at its start (U35), whether or not the program opens a socket.
 long Poller() {
     raw {
         if poller < 0 {
@@ -3637,7 +3639,8 @@ long Started(byte* job) {
 }
 
 // A thread of the pool of threads for blocking calls (`Started`), its page at `own`: the pool at 0, at 16 the deadline of its idle
-// wait, at 32 the 8 bytes it adds to the pool's `eventfd`. It takes the queue's jobs first in, first out, makes each call outside
+// wait, at 32 the 8 bytes it adds to the pool's `eventfd`, or to the `eventfd` of the worker thread that handed the job (U35), a
+// count of 1 it stores there at its start. It takes the queue's jobs first in, first out, makes each call outside
 // the pool's mutex (`JobRun`), puts the job among the jobs done and signals the `eventfd`; with none queued it waits idle for 10
 // seconds, Tokio's default keep-alive, with no setting (issue 661, the product pass, comment 7182792402, Q1, kept as built, comment
 // 7189038013), on the clock `pthread_cond_timedwait` reads by default,

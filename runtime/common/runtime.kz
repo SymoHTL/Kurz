@@ -4651,8 +4651,9 @@ bool Claimed(byte* state) {
 // worker schedules a task again whose word it finds notified after its poll (not checked at source). A
 // compare-exchange that finds the word changed, by a wake or a take after `ready` was read, is made again on
 // what it found, so that no wake is lost. An actor that ended while the thread held it (`EndActor`) is never
-// queued again, and has the first page of its heap, which holds its record, freed here where no entry of it
-// stands in the run queue, NOTIFIED set or not, and else when the scheduler takes it off (`RunOne`) (design
+// queued again, and on one thread has the first page of its heap, which holds its record, freed here where no entry of it
+// stands in the run queue, NOTIFIED set or not, and else when the scheduler takes it off (`RunOne`), while on worker
+// threads that page is given to its free here or at the take (`RunTake`), freed once every thread passed a turn since (`Deferred`) (design
 // record, section 6, assumed there); an ended actor let go of with NOTIFIED set is a shape the build's one
 // thread does not reach, since a take sets NOTIFIED only on an actor that another thread holds or whose
 // constructor runs, which no thread holds. On worker threads a hold of an actor that ended and whose record was given to its free
@@ -4732,8 +4733,8 @@ void Queue(byte* state) {
 // may still read, and the heap of its own of a message, which the actor that waits on its reply may read, are freed once every
 // thread passed a turn since (`Deferred`, `Reclaimed`; T16).
 
-// The block of the scheduler of a program whose actors run on worker threads, a page of the system the first `spawn` maps
-// (`WorkersStart`), null while every actor runs on the main thread: at 0 the epoch of the frees (`Deferred`), at 8 the lock of
+// The block of the scheduler of a program whose actors run on worker threads, a mapping of the system the first `spawn` makes,
+// 128 bytes and 8 for each worker, one page or more (`WorkersStart`), null while every actor runs on the main thread: at 0 the epoch of the frees (`Deferred`), at 8 the lock of
 // the parked threads (`IdleLock`), at 12 the lock of the shared queue (`InjectLock`), at 16 the count of the workers parked with
 // nothing pending, no activation asleep among their timers, no registration of their poller and no restart's pause, at 20 whether
 // the top-level code waits, both
@@ -5177,7 +5178,8 @@ byte* StealInto(byte* from, byte* into) {
 
 // The actors of the slots of the ring of the record `record` from `first` on, `count` of them, which its own thread claimed, and the
 // actor whose state is `state` after them, at the end of the shared queue, under its lock, linked at 16 in front of each state, as
-// tokio's `push_overflow` moves half of a full queue to its inject queue in one batch; the workers that park woken for them.
+// tokio's `push_overflow` moves half of a full queue to its inject queue in one batch. It wakes no worker: its caller wakes one
+// parked worker (`QueueLocal`).
 void InjectBatch(byte* record, long first, long count, byte* state) {
     raw {
         Lock(InjectLock())
@@ -5517,10 +5519,11 @@ void DoneDrain() {
     }
 }
 
-// The first pages of the ended actors and the heaps of their own of the messages that this thread let go of while another thread may
-// still read them, from the first deferred on (T16; section 6, the owner, 2026-11-20, #519, comment 7051492844, T16 2): each the 16
+// The first pages of the ended actors, the heaps of their own of the messages and the stacks past the pool that this thread let go of
+// while another thread may still read them, from the first deferred on (T16; section 6, the owner, 2026-11-20, #519, comment 7051492844, T16 2): each the 16
 // bytes of its link, the epoch at its free and its kind, then the link of the one after it; a record's link at 56 and 48 in front of its state, words its
-// end leaves to nobody, a message's heap's in its first block, whose list of the heaps being built it left at its queueing.
+// end leaves to nobody, a message's heap's in its first block, whose list of the heaps being built it left at its queueing, and a
+// stack's at 424 of its header (kind 2, `Give`).
 thread static mut byte* deferredFirst = null
 thread static mut byte* deferredLast = null
 
@@ -5791,11 +5794,13 @@ bool WorldTried() {
     return true
 }
 
-// The wait of the world's owner for the word of every other thread to clear: the main thread's, then each worker's.
+// The wait of the world's owner for the word of every other thread to clear: the main thread's, then each worker's, none of whose
+// records is null, since the start stores every one of them before the block of the scheduler (`WorkersStart`), as `Reclaimed` reads
+// them.
 void WorldGathered() {
     raw {
         byte* main = *Ptr<byte*>(scheduler + 64)
-        if main != null && main != threadRecord {
+        if main != threadRecord {
             WorldQuiet(main)
         }
 
@@ -5803,7 +5808,7 @@ void WorldGathered() {
         mut long index = 0
         while index < count {
             byte* record = *Ptr<byte*>(scheduler + 128 + index * 8)
-            if record != null && record != threadRecord {
+            if record != threadRecord {
                 WorldQuiet(record)
             }
 
@@ -5826,7 +5831,9 @@ void WorldQuiet(byte* record) {
 
 // The world held by the main thread at its walk of a `deadlock` (`Answer`) and by the code of an activation at the confirmation of a
 // loop (`LoopHeld`): the thread's word cleared while it waits for another owner to let go of it, then set again, so that the owner,
-// which waits for that word, never waits on a thread that waits for it; nothing on one thread.
+// which waits for that word, never waits on a thread that waits for it; nothing on one thread. A thread that holds the world takes
+// it no second time, which would wait on its own mark for good: `Answer` takes it once and ends the process with it held
+// (`Stuck`), and `LoopHeld` lets go of it before it returns, calling nothing in between that takes it.
 void WorldTaken() {
     if !Threaded() {
         return
@@ -5872,8 +5879,10 @@ void WorldYielded() {
     }
 }
 
-// The world let go of by its owner: no owner stored with release, and every thread that waits on its word woken; nothing on one
-// thread.
+// The world let go of by its owner: no owner stored with release, and the threads that wait on its word woken one at a time while
+// no new owner took it, so that a waiter that took up the wait on the new owner's mark is not woken again and again; a waiter the
+// loop left asleep goes on only once the word is 0 again (`WorldWaited`), which the new owner's release stores, and that release
+// wakes it. Nothing on one thread.
 void WorldLeft() {
     if !Threaded() {
         return
@@ -5882,7 +5891,7 @@ void WorldLeft() {
     raw {
         WorldOwner().Store(0, MemoryOrder.Release)
         mut long woken = sys.LockWake(Ptr<int>(scheduler + 88))
-        while woken > 0 {
+        while woken > 0 && WorldOwner().Load(MemoryOrder.Relaxed) == 0 {
             woken = sys.LockWake(Ptr<int>(scheduler + 88))
         }
     }
@@ -5904,7 +5913,7 @@ void PauseNoted() {
 }
 
 // The wait of the top-level code on worker threads for the reply `reply` to the deadline `deadline`, or, where `reply` is null, its
-// sleep to that deadline (`RootLoop`; section 6, Q3 of comment 6946532526, "tokio block_on"): at each turn the block of a child the
+// sleep to that deadline (`RootLoop`; section 6, the owner, comment 6946657505, Q3 of comment 6946532526, "tokio block_on"): at each turn the block of a child the
 // top-level code spawned run (`RootBlock`; U33), else, under the lock of the parked threads, the mark that it waits set and whether
 // anything is left read: a worker that is not parked with nothing pending, an actor in the shared queue, a restart's pause, a
 // registration of its own poller or a block to run; where nothing is, `false`, so that `Answer` raises `deadlock`, as on one thread;
@@ -6130,7 +6139,8 @@ int ReplyState(byte* reply) {
 }
 
 // The reply `reply` of a call set, once the message's function took it (`ReplyTaken`) and stored its result
-// beside it, and the actor of the activation that waits on it woken where that activation is its top, as
+// beside it, and the actor of the activation that waits on it woken, on one thread where that activation is its top, on
+// worker threads always, a take that finds nothing to go on with letting go of it (`Answered`, `RunTake`), as
 // tokio's `oneshot::Sender::send` stores the value and wakes the receiver's task; it never switches. The waiter
 // and its actor are read before the word's release store, since after it the waiter may go on and its frame
 // and its stack be gone, while the actor's record stays, which holds on one thread, where nothing runs between
@@ -6166,7 +6176,8 @@ pub void Replied(byte* reply) {
 // actor `state` null (`MainWoken`), else that actor in the queue of the thread its activation parked on, `home` (`WakeHome`), both
 // read before the reply's word was stored, whether that activation is its actor's top or not and whatever its actor's life, since a
 // waker reads no field of another thread's actor but its state word: a take that finds nothing to go on with lets go of it, and one
-// that finds it ended frees it (`RunTake`).
+// that finds it ended gives its first page to the free that waits for every thread to pass a turn (`RunTake`, `Deferred`; T16 2),
+// so that the waker's read of that word comes before the free.
 void Answered(byte* state, byte* home) {
     if state == null {
         MainWoken()
@@ -6181,8 +6192,9 @@ void Answered(byte* state, byte* home) {
 // deadline (`Dropped`; U37); the waiter and its actor read before the
 // word's release store, and the clock at the set stored in the reply at 40 before it too, the time that `Wait`
 // holds a crash or an end to the call's deadline by, not the time the waiter reads the word (U43; assumed: T7 of
-// comment 6967625156, "the earlier of the two"); and the activation that waits on it woken as `Replied` wakes it, where its actor
-// neither waits for its restart or for the decision of its block nor ended, as C#'s `TaskCompletionSource` is
+// comment 6967625156, "the earlier of the two"); and the activation that waits on it woken as `Replied` wakes it, on one thread
+// where its actor neither waits for its restart or for the decision of its block nor ended, on worker threads always, the take
+// filtering it (`Answered`, `RunTake`), as C#'s `TaskCompletionSource` is
 // set faulted; its reads of that actor's record after the store hold on one thread alone, and on worker threads
 // it reads none but the state word (`Answered`), as `Replied` does.
 void Signal(byte* reply, int kind) {
@@ -7424,7 +7436,7 @@ void RunTurn() {
 // the starts the top-level code runs, then the actors by the index of their slots, each actor's restart before the starts its
 // activations run, from its top activation down. None is added where none waits, a loop of chains that passes no start among them.
 // The lists are read with plain loads: nothing runs while the top-level code's wait finds nothing left to run, and on worker threads
-// the walk holds the world (`Answer`, `WorldTried`).
+// the walk holds the world (`Answer`, `WorldTaken`).
 void Kept(long high, long low, mut List<long> found) {
     raw {
         KeptBuilt(rootBuilding, high, low, mut found)
@@ -9630,9 +9642,10 @@ long PauseClock() {
 // `instant.Now` and `timestamp.Now` and the time stamp of a crash's log line read it in the build `kurz test` makes, and only that
 // build writes it, through `Advance` and at each test's end (`TestEnded`; F6 of issue 586, comment 6993110710), so that in every
 // other build nothing writes it and it stays 0, and the program's own reads of the clock read the system's alone (D8 of comment
-// 6992687784). A build runs the actors on one thread where `KURZ_THREADS` asks for no more than one (U35, compiler/README.md),
-// so that no read of it races the write of `Advance` and a plain word holds it; on worker threads another worker reads it with no
-// order against that write, which the README names among what is not built on worker threads.
+// 6992687784). The build `kurz test` makes runs every actor on the main thread, since its runner sets the count of the workers to 0
+// before the first test (`RunTests`, U35), so that no read of it races the write of `Advance` and a plain word holds it; a runner that
+// started worker threads would have another worker read it with no order against that write, which the README names among what is
+// not built on worker threads.
 static mut long ahead = 0
 
 // `advance d` (Y10, section 11): the runtime's clock moved by `nanoseconds`, zero or more, which the emitted code checked; false where
@@ -10325,7 +10338,10 @@ byte* Held(long asked) {
 
 // The stack whose header is `header` back in the thread's pool, trimmed by the target, or given back to
 // the system where the pool holds 64 stacks already, on worker threads once every thread passed a turn since (`Deferred`), since the
-// walk of layer 3 on another thread may read its header with no lock (`Looped`).
+// walk of layer 3 on another thread may read its header with no lock (`Looped`). A stack the pool takes back is handed on at once:
+// the trim keeps the 64 KiB at its top, its header among them, mapped (`sys.StackTrim`), so that such a walk reads mapped words of
+// whichever activation holds the stack then, and a loop it finds from them is confirmed under the lock of the process, which reads
+// them again while no other thread runs (`LoopHeld`), as the two words of a wait read one after the other are (`Onward`).
 void Give(byte* header) {
     raw {
         long size = *Ptr<long>(header + 400)
