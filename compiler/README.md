@@ -2625,12 +2625,19 @@ ask about it.
   in one write call as a `print` is (above), and not by a writer on a pool of threads, which the
   record names; a slow standard error slows the program that logs. Pinned by `LogTests`, whose
   refused writes are counted in the next line.
-- P8: a log call inside an actor is `not supported`, and a line holds no chain ID and none of the
-  actor's parts, nothing standing in their place, also one a function writes while an actor's
-  message runs: P7's layout as it reads.
-  Pinned by `CheckerTests.A_log_call_inside_an_actor_is_not_supported` for the refusal, and by
-  `LogTests`, whose lines are held whole, for the layout, a line written while a message runs
-  among them.
+- P8 with section 12: the build has no actor with a key or a name and no program that names nodes, so
+  the span of a line written while an actor's message runs is the actor's type and its chain alone,
+  `Cache{chain=4bf92f35a1b2c3d4e5f60718293a4b5c}: `, read from the activation the thread runs, the
+  type's name from the actor's record and the chain from the activation's header; a line of the
+  top-level code, which runs no activation, and a line of a test's own actor hold none, and so does
+  the line of `Kurz.Log`. The line of a crash names the actor that takes it, with the chain of the
+  message that crashed as the block of `on crash` reads it in `Crashed.Chain` (U30), and a crash
+  that carries no chain, the `restart-limit` of a supervisor with no activation, writes the span as
+  the type's name alone, `Sup: `, as Rust's `tracing_subscriber::fmt` writes a span with no field
+  *(assumed in §12)*. Pinned by `LogTests`, whose lines are held whole, for a line of an actor's
+  method, of a function its message calls, of the top-level code, of a test's own actor and of a
+  crash, by `CheckerTests.A_log_call_inside_an_actor_is_checked_as_one_outside_it` for the call, and
+  by `ActorTests`, `RunTests` and `ThreadsTests` for the crash lines they read.
 - K2 with section 3: a read of a counted value from a field of an instance takes a count of its own,
   and the work lists of a release are linked through the strong count of the instances on them (above).
   Pinned by the classes' program of `ListTests`.
@@ -3321,8 +3328,7 @@ U12), an argument written `move` only where it
 reaches a handle, a hasher, a command or a child process, whose copy would share the sender's block by its count, by any
 path the copy follows, a lambda's capture and a field of any class among them, or a value of a type parameter, since the
 copy of its function for a type argument that is one of them would share that block (U12); `copy` at a call that is no message before a value that
-reaches a function value or an interface's value, which no word makes cross (U12); a log call
-inside an actor (P8); the cluster test of section 13, `test cluster N seed S { ... }`, whose words and
+reaches a function value or an interface's value, which no word makes cross (U12); the cluster test of section 13, `test cluster N seed S { ... }`, whose words and
 block the parser passes over (Y8); and `mock X with Y`, whose answers of 2026-11-20 it
 does not build (Y9). The refusal of
 the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered

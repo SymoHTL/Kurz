@@ -143,8 +143,11 @@ public sealed class Toolchain : IDisposable
 /// </summary>
 public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
-    /// <summary>E3, U24: the log line of an actor's crash on standard error, a line in P7's layout at <c>Error</c> with the category <c>Kurz.Actor</c>.</summary>
-    [GeneratedRegex(@"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z Error Kurz\.Actor: [^\n]*\n", RegexOptions.Multiline)]
+    /// <summary>
+    /// E3, U24: the log line of an actor's crash on standard error, a line in P7's layout at <c>Error</c> with the span of P8, the actor's
+    /// type and, where the crash carries one, its chain, before the category <c>Kurz.Actor</c>.
+    /// </summary>
+    [GeneratedRegex(@"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z Error [^{:\s]+(?:\{chain=[0-9a-f]{32}\})?: Kurz\.Actor: [^\n]*\n", RegexOptions.Multiline)]
     private static partial Regex CrashLine();
 
     /// <summary>U63: the chain ID that ends a line of the text of layer 3's <c>deadlock</c>, <c> in chain </c> and 32 lowercase hexadecimal digits.</summary>
@@ -620,11 +623,14 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     public void The_runner_leaves_out_the_log_line_of_a_crash_alone_and_in_a_case_of_a_crash_alone()
     {
         // E3: a case that names a rule of a crash, U19 to U34 or U46 to U50, shows its output without the line of each crash; a line of another category
-        // or level stays, and so does the line of a crash in a case that names none of those rules, so that each turns its case red
-        const string crash = "2026-11-16T10:00:00.000Z Error Kurz.Actor: Shop#1 crashed: thrown \"no stock\" at shop.kz:3\n";
+        // or level stays, and so does the line of a crash in a case that names none of those rules, so that each turns its case red; the
+        // crash's span of P8 holds its chain, or the type alone where the crash carries none, and a line an actor writes stays
+        const string crash = "2026-11-16T10:00:00.000Z Error Shop{chain=4bf92f35a1b2c3d4e5f60718293a4b5c}: Kurz.Actor: Shop#1 crashed: thrown \"no stock\" at shop.kz:3\n";
+        const string limit = "2026-11-16T10:00:00.000Z Error Boss: Kurz.Actor: Boss#1 crashed: restart-limit at shop.kz:9\n";
         const string other = "2026-11-16T10:00:00.000Z Error shop: paid order.Id=17\n";
-        const string warning = "2026-11-16T10:00:00.000Z Warning Kurz.Actor: Shop#1 crashed: thrown \"no stock\" at shop.kz:3\n";
-        Assert.Equal(other + warning, LeftOut(crash + other + crash + warning, ["U24"]));
+        const string actor = "2026-11-16T10:00:00.000Z Error Shop{chain=4bf92f35a1b2c3d4e5f60718293a4b5c}: Shop: paid order.Id=17\n";
+        const string warning = "2026-11-16T10:00:00.000Z Warning Shop{chain=4bf92f35a1b2c3d4e5f60718293a4b5c}: Kurz.Actor: Shop#1 crashed: thrown \"no stock\" at shop.kz:3\n";
+        Assert.Equal(other + actor + warning, LeftOut(crash + other + limit + actor + crash + warning, ["U24"]));
         Assert.Equal(string.Empty, LeftOut(crash, ["V1", "U19"]));
         Assert.Equal(string.Empty, LeftOut(crash, ["U34"]));
         Assert.Equal(crash, LeftOut(crash, ["U18"]));

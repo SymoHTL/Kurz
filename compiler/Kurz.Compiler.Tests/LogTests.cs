@@ -100,17 +100,43 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
         }
     }
 
+    /// <summary>P8: the chain ID in the span of a line, which the test names by a letter of its own for each chain, in the order they appear.</summary>
+    [GeneratedRegex(@"\{chain=([0-9a-f]{32})\}")]
+    private static partial Regex SpanChain();
+
     [Fact]
-    public void A_line_written_while_a_message_runs_holds_none_of_the_actors_parts()
+    public void A_line_written_while_a_message_runs_holds_the_actors_span_with_the_chain_of_that_message()
     {
-        // P8: a line a function writes while an actor's message runs is P7's layout, with no chain ID and none of the actor's parts, and
-        // nothing stands in their place
-        const string text = "void Note(int n) {\n    Log.Information(\"noted {n}\")\n}\n\nactor Keeper {\n    mut int total = 0\n\n    pub int Add(int n) {\n        total = total + n\n        Note(total)\n        return total\n    }\n}\n\nk = spawn Keeper()\nprint(k.Add(2))\n";
+        // P8: a line of an actor's method and a line a function writes while the message runs hold the actor's type and the message's
+        // chain between the level and the category, the category staying the function's; the line of the crash takes the span of the
+        // actor it names with the chain of the message that crashed (Q7); each call of the top-level code starts a chain of its own, and
+        // a line of the top-level code holds no span, before the actor and after it (Q2)
+        const string text = "void Note(int n) {\n    Log.Information(\"noted {n}\")\n}\n\nactor Keeper {\n    mut int total = 0\n\n    pub int Add(int n) {\n        total = total + n\n        Note(total)\n        Log.Information(\"added {n}\")\n        return total\n    }\n\n    pub void Fail() {\n        Log.Warning(\"failing\")\n        throw \"down\"\n    }\n}\n\nLog.Information(\"at the top\")\nk = spawn Keeper()\nprint(k.Add(2))\nsend k.Fail()\nprint(k.Add(3))\nNote(0)\n";
         if (Logged(text, "log-in-message") is { } run)
         {
             Assert.Equal(0, run.Code);
-            Assert.Equal(["2"], run.Output);
-            Assert.Equal(["Information program: noted 2 n=2"], run.Lines);
+            Assert.Equal(["2", "3"], run.Output);
+            var chains = new List<string>();
+            var named = run.Lines.Select(line => SpanChain().Replace(line, chain =>
+            {
+                if (!chains.Contains(chain.Groups[1].Value))
+                {
+                    chains.Add(chain.Groups[1].Value);
+                }
+
+                return $"{{chain={(char)('A' + chains.IndexOf(chain.Groups[1].Value))}}}";
+            })).ToList();
+            Assert.Equal(
+            [
+                "Information program: at the top",
+                "Information Keeper{chain=A}: program: noted 2 n=2",
+                "Information Keeper{chain=A}: Keeper: added 2 n=2",
+                "Warning Keeper{chain=B}: Keeper: failing",
+                "Error Keeper{chain=B}: Kurz.Actor: Keeper#1 crashed: thrown \"down\" at program.kz:17",
+                "Information Keeper{chain=C}: program: noted 3 n=3",
+                "Information Keeper{chain=C}: Keeper: added 3 n=3",
+                "Information program: noted 0 n=0",
+            ], named);
         }
     }
 
@@ -400,7 +426,9 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
         Assert.Equal((0, "test \"ten days on\" ... ok\ntest \"back\" ... ok\n2 tests: 2 passed, 0 failed\n"), (code, output));
         var lines = Toolchain.Lines(error);
         Assert.Equal(3, lines.Count);
-        Assert.Equal(["Information program: later", "Error Kurz.Actor: Crasher#2 crashed: thrown \"down\" at program.kz:3"], Unstamped($"{lines[0]}\n{lines[1]}\n", before.AddDays(10), after.AddDays(10)));
+        // a line of the test's own actor holds no span (P8, assumed in section 12), the crash of the actor it spawned holds that actor's
+        Assert.Equal(["Information program: later", "Error Crasher{chain=A}: Kurz.Actor: Crasher#2 crashed: thrown \"down\" at program.kz:3"],
+            Unstamped($"{lines[0]}\n{lines[1]}\n", before.AddDays(10), after.AddDays(10)).Select(line => SpanChain().Replace(line, "{chain=A}")).ToList());
         Assert.Equal(["Information program: now"], Unstamped($"{lines[2]}\n", before, after));
     }
 

@@ -2401,19 +2401,25 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // ---- crashes (U19 to U24; the answers of 2026-11-15, issue 519, comment 6902210646) -------------------------------------------
 
     /// <summary>
+    /// U24 with P8: after the time, <c>Error</c>, the span of the actor the line names, its type and, where the crash carries one, its
+    /// chain, then the category <c>Kurz.Actor</c>, and the text <c>&lt;Type&gt;#&lt;n&gt; crashed: ...</c> of the same type.
+    /// </summary>
+    private static readonly Regex CrashLogged = new(@"^Error (?<type>[^{:#\s]+)(?:\{chain=[0-9a-f]{32}\})?: Kurz\.Actor: (?<crash>\k<type>#[0-9]+ crashed: .*)$");
+
+    /// <summary>
     /// U24: the text after the category of each log line of an actor's crash on standard error, <c>&lt;Type&gt;#&lt;n&gt; crashed: ...</c>,
-    /// each line in P7's layout, and the rest of standard error.
+    /// each line in P7's layout with the span of P8 that names the same type (<see cref="CrashLogged"/>), and the rest of standard error.
     /// </summary>
     internal static (List<string> Crashes, string Others) Logged(string error)
     {
-        const string category = "Error Kurz.Actor: ";
         var crashes = new List<string>();
         var rest = new StringBuilder();
         foreach (var line in Toolchain.Lines(error))
         {
-            if (line.Length > 25 && line[4] == '-' && line[10] == 'T' && line[23] == 'Z' && line[24] == ' ' && line[25..].StartsWith(category, StringComparison.Ordinal))
+            var logged = line.Length > 25 && line[4] == '-' && line[10] == 'T' && line[23] == 'Z' && line[24] == ' ' ? CrashLogged.Match(line[25..]) : Match.Empty;
+            if (logged.Success)
             {
-                crashes.Add(line[(25 + category.Length)..]);
+                crashes.Add(logged.Groups["crash"].Value);
             }
             else
             {
@@ -2969,8 +2975,9 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void The_log_line_carries_the_actor_the_id_the_place_and_the_thrown_text()
     {
-        // U24: one line at `Error` per crash in P7's layout, the thrown text in double quotes as a `string` field is written, its `"`
-        // after a `\`; `KURZ_LOG` turns it off as any line of the category `Kurz.Actor` (P4)
+        // U24: one line at `Error` per crash in P7's layout, with the span of the crashed actor and its chain (P8), the thrown text in
+        // double quotes as a `string` field is written, its `"` after a `\`; `KURZ_LOG` turns it off as any line of the category
+        // `Kurz.Actor` (P4)
         const string text = """
             actor Shop {
                 pub void Buy(string item) {
@@ -2992,7 +2999,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal(0, on.Code);
         Assert.Equal(["1"], on.Output);
         var line = Assert.Single(Toolchain.Lines(on.Error));
-        Assert.Matches("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z Error Kurz\\.Actor: Shop#1 crashed: thrown \"no \\\\\"stock\\\\\"\" at program\\.kz:3$", line);
+        Assert.Matches("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z Error Shop\\{chain=[0-9a-f]{32}\\}: Kurz\\.Actor: Shop#1 crashed: thrown \"no \\\\\"stock\\\\\"\" at program\\.kz:3$", line);
         if (!OperatingSystem.IsLinux())
         {
             return; // the filter is read on Linux alone (P4)

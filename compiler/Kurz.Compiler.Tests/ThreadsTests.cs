@@ -546,9 +546,9 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
     }
 
-    /// <summary>The lines of <paramref name="error"/>, each with the time of its log line taken off.</summary>
+    /// <summary>The lines of <paramref name="error"/>, each with the time, the level, the span of P8 and the category of its log line taken off.</summary>
     private static List<string> Logged(string error) =>
-        [.. error.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => Regex.Replace(line, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z Error Kurz\\.Actor: ", ""))];
+        [.. error.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => Regex.Replace(line, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z Error [^{:\\s]+(?:\\{chain=[0-9a-f]{32}\\})?: Kurz\\.Actor: ", ""))];
 
     /// <summary>
     /// U35: with <c>KURZ_THREADS</c> set to 1 every actor runs on the main thread in the top-level code's waits, first in, first out, as a
