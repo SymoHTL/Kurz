@@ -1,5 +1,5 @@
 // expect: throws call-timeout at 21
-// | test "a bound of an hour passes at once" ... FAILED
+// | test "a bound of an hour passes at once" ... FAILED (seed 0)
 // |     call-timeout at tests/advance-call-timeout.kz:21
 // | 1 test: 0 passed, 1 failed
 // command: test

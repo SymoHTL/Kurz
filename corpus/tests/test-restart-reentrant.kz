@@ -1,6 +1,6 @@
 // expect: throws deadlock at 23
 // | 0
-// | test "restarts into a call it keeps out" ... FAILED
+// | test "restarts into a call it keeps out" ... FAILED (seed 0)
 // |     deadlock at tests/test-restart-reentrant.kz:23
 // | 1 test: 0 passed, 1 failed
 // command: test

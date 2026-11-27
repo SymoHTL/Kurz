@@ -56,6 +56,12 @@ public sealed partial class Emitter
 
     private readonly bool test;
     private readonly bool runsTests;
+
+    /// <summary>The seed of the build of <c>kurz test</c>, which its runner starts its generators with (Y11).</summary>
+    private readonly ulong seed;
+
+    /// <summary>Whether the ready actors of the build of <c>kurz test</c> run first in, first out under its seed, as the corpus runner builds a case marked <c>// threads: 1</c> (Y11, chapter 0).</summary>
+    private readonly bool ordered;
     private readonly bool lines;
     private readonly IrModule module;
     private readonly Unit program;
@@ -100,9 +106,11 @@ public sealed partial class Emitter
     /// </summary>
     private sealed record Unit(string Prefix, string File, ProgramSyntax Tree, SemanticModel Model, bool Runtime);
 
-    private Emitter(Unit program, Unit common, Unit sys, Unit arch, Unit std, bool test, bool lines, Target target, Cpu cpu, bool runsTests)
+    private Emitter(Unit program, Unit common, Unit sys, Unit arch, Unit std, bool test, bool lines, Target target, Cpu cpu, bool runsTests, ulong seed, bool ordered)
     {
         this.runsTests = runsTests;
+        this.seed = seed;
+        this.ordered = ordered;
         this.cpu = cpu;
         this.program = program;
         this.common = common;
@@ -131,9 +139,10 @@ public sealed partial class Emitter
     /// file as a compile error names it (design record, section 2), which the error line of an exception names (section 6);
     /// <paramref name="lines"/> keeps the line tables in a release build (<c>--lines</c>), which a test build carries in any case;
     /// <paramref name="cpu"/> is the CPU the build names (section 2), the target's baseline where it names none; <paramref name="tests"/>
-    /// builds the program's tests in place of its top-level code, the build of <c>kurz test</c> (Y2).
+    /// builds the program's tests in place of its top-level code, the build of <c>kurz test</c> (Y2), under the seed <paramref name="seed"/>,
+    /// its ready actors first in, first out where <paramref name="ordered"/> holds (Y11).
     /// </summary>
-    public static EmittedProgram? Emit(ProgramSyntax tree, Checker checker, CheckedRuntime runtime, string file, bool testBuild, DiagnosticBag diagnostics, bool lines = false, Cpu? cpu = null, bool tests = false)
+    public static EmittedProgram? Emit(ProgramSyntax tree, Checker checker, CheckedRuntime runtime, string file, bool testBuild, DiagnosticBag diagnostics, bool lines = false, Cpu? cpu = null, bool tests = false, ulong seed = 0, bool ordered = false)
     {
         ArgumentNullException.ThrowIfNull(tree);
         ArgumentNullException.ThrowIfNull(checker);
@@ -159,7 +168,9 @@ public sealed partial class Emitter
             lines,
             runtime.Target,
             cpu ?? Cpu.Baseline,
-            tests);
+            tests,
+            seed,
+            ordered);
         try
         {
             return emitter.Run();

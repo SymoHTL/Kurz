@@ -83,7 +83,9 @@ line where it has one and before its `// rules:` line, names the one system it r
 the fix of T10 of the reading of issue 39, comment 6926929175)*.
 A case that runs its program's tests under `kurz test` in place of the program carries the line `// command: test`, after
 its `// build:` line where it has one and before its `// allow:` line, and takes no other command (Y2; §2, assumed there: the
-corpus line of issue 586, comment 6993110710).
+corpus line of issue 586, comment 6993110710); the runner runs it with the seed 0, so that its lines are the same on every run,
+and builds it, where it is marked `// threads: 1`, with its ready actors first in, first out under that seed, which a build for
+Windows, reading no `KURZ_THREADS`, gets from the build alone (Y11; §2, assumed there).
 A case whose output follows one thread's order carries the line `// threads: 1`, with which the runner
 runs it on one thread (U35; §6, the owner, 2026-11-17, #519, comment 6946657505, Q5, "// threads: 1
 header (Recommended)"), and `compiler/README.md` says whether a runner reads it. The line stands after its `// system:`

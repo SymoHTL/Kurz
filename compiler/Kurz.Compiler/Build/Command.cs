@@ -1,5 +1,7 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Reflection;
+using System.Security.Cryptography;
 using Kurz.Compiler.Emit;
 using Kurz.Compiler.Text;
 
@@ -26,8 +28,9 @@ namespace Kurz.Compiler.Build;
 /// and runs it, and <c>kurz exec [--release] [--lines] [--cpu name] "program text"</c> builds its argument, whose lines are named <c>exec</c>, and runs
 /// it, each in a place of its own (<see cref="Place"/>), which it removes after the run, with the places a run cut short left removed at its
 /// start; the program takes the words after <c>--</c> and the command's streams (<see cref="Processes.Run"/>), and the command ends with the
-/// program's exit code. <c>kurz test [--release] [--lines] [--cpu name] file.kz</c> builds the file's tests in place of its top-level code
-/// and runs them as <c>run</c> runs a program, with no words for it, and ends with the exit code of the run (chapter 20, Y2 to Y5). A
+/// program's exit code. <c>kurz test [--release] [--lines] [--cpu name] [--seed N] file.kz</c> builds the file's tests in place of its
+/// top-level code and runs them as <c>run</c> runs a program, with no words for it, under the seed <c>N</c> or a new one (Y11), and ends
+/// with the exit code of the run (chapter 20, Y2 to Y5, Y11). A
 /// command line it cannot read gets the usage on standard error and the exit code 1.
 /// </summary>
 public static class Command
@@ -35,7 +38,7 @@ public static class Command
     /// <summary>What the command prints for a command line it cannot read.</summary>
     public const string Usage = "usage: kurz --version [--verbose]\n       kurz build [--release] [--lines] [--cpu <name>] <file.kz> [-o <output>]\n"
         + "       kurz run [--release] [--lines] [--cpu <name>] <file.kz> [-- <argument>...]\n       kurz exec [--release] [--lines] [--cpu <name>] \"<program text>\" [-- <argument>...]\n"
-        + "       kurz test [--release] [--lines] [--cpu <name>] <file.kz>\n"
+        + "       kurz test [--release] [--lines] [--cpu <name>] [--seed <N>] <file.kz>\n"
         + "       run and exec pass the words after -- to the program\n";
 
     private const string OnThePath = " on the path";
@@ -225,13 +228,17 @@ public static class Command
     /// <summary>
     /// <c>test</c>'s options, each once, and its file, as <c>run</c> takes them, with no word for the program: a test reads no <c>args</c>, so
     /// <c>--</c> and an argument after the file are the usage's (Y2, F17). The build runs the program's tests and the command ends with its
-    /// exit code, 0 where every test passed, else 1 (Y3, Q4).
+    /// exit code, 0 where every test passed, else 1 (Y3, Q4). <c>--seed</c> takes a <c>ulong</c> in digits alone, any other value ending
+    /// the command before its build with <c>error: seed (&lt;the value&gt;)</c> and the exit code 1, and where it is not given the run takes
+    /// a new seed from the system's randomness, which the line of a failed test names (Y11; section 2, the owner, 2026-11-26, issue 657,
+    /// comment 7189038775, Q2 a and Q3 a, the rest assumed there).
     /// </summary>
     private static int TestFile(List<string> arguments, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
     {
         var release = false;
         var lines = false;
         string? cpu = null;
+        ulong? seed = null;
         string? sourcePath = null;
         for (var i = 0; i < arguments.Count; i++)
         {
@@ -246,6 +253,16 @@ public static class Command
                 case "--cpu" when cpu is null && i + 1 < arguments.Count:
                     cpu = arguments[++i];
                     break;
+                case "--seed" when seed is null && i + 1 < arguments.Count:
+                    var written = arguments[++i];
+                    if (!ulong.TryParse(written, NumberStyles.None, CultureInfo.InvariantCulture, out var value))
+                    {
+                        error.Write($"error: seed ({written})\n");
+                        return 1;
+                    }
+
+                    seed = value;
+                    break;
                 case var p when sourcePath is null && !p.StartsWith('-'):
                     sourcePath = p;
                     break;
@@ -254,8 +271,13 @@ public static class Command
             }
         }
 
-        return sourcePath is null ? Usage1(error) : BuildAndRun(() => Read(sourcePath, error), [], release, lines, cpu, error, find, host, places, tests: true);
+        return sourcePath is null
+            ? Usage1(error)
+            : BuildAndRun(() => Read(sourcePath, error), [], release, lines, cpu, error, find, host, places, tests: true, seed ?? NewSeed());
     }
+
+    /// <summary>A new seed for a run of <c>kurz test</c> that names none, 8 bytes of the system's randomness (Y11).</summary>
+    private static ulong NewSeed() => BitConverter.ToUInt64(RandomNumberGenerator.GetBytes(8));
 
     /// <summary><c>exec</c>'s options, each once, before its text, which is the last argument before <c>--</c> and no option.</summary>
     private static int Exec(List<string> arguments, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
@@ -298,9 +320,9 @@ public static class Command
     /// Builds the program <paramref name="read"/> reads, a file or <c>exec</c>'s text, into a place of its own and runs it with
     /// <paramref name="program"/> as its arguments; the program's exit code, or 1 where it was refused or the command failed. The
     /// places a run cut short left are removed at the start, before the build. Where <paramref name="tests"/> holds, the build runs the
-    /// program's tests (<c>kurz test</c>).
+    /// program's tests (<c>kurz test</c>) under the seed <paramref name="seed"/> (Y11).
     /// </summary>
-    private static int BuildAndRun(Func<SourceText?> read, IReadOnlyList<string> program, bool release, bool lines, string? cpu, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places, bool tests = false)
+    private static int BuildAndRun(Func<SourceText?> read, IReadOnlyList<string> program, bool release, bool lines, string? cpu, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places, bool tests = false, ulong seed = 0)
     {
         if (host is not { } target)
         {
@@ -317,7 +339,7 @@ public static class Command
         }
 
         Place.RemoveLeft(root);
-        if (read() is not { } source || Compile(source, target, release, lines, CpuOf(cpu, find, error), error, tests) is not { } emitted)
+        if (read() is not { } source || Compile(source, target, release, lines, CpuOf(cpu, find, error), error, tests, seed) is not { } emitted)
         {
             return 1;
         }
@@ -417,9 +439,9 @@ public static class Command
     /// written, named by the source's name, or where the CPU failed; in the build of <c>kurz test</c> (<paramref name="tests"/>), null for a
     /// program with no test too, with the command's failure written, so that a run that checked nothing does not look like a pass (Y4, Q6).
     /// </summary>
-    private static EmittedProgram? Compile(SourceText source, Target target, bool release, bool lines, Func<Cpu?> cpu, TextWriter error, bool tests = false)
+    private static EmittedProgram? Compile(SourceText source, Target target, bool release, bool lines, Func<Cpu?> cpu, TextWriter error, bool tests = false, ulong seed = 0)
     {
-        var compilation = Builder.Compile(source, [], Builder.CheckRuntime(target), testBuild: !release, lines, cpu, tests);
+        var compilation = Builder.Compile(source, [], Builder.CheckRuntime(target), testBuild: !release, lines, cpu, tests, seed);
         foreach (var d in compilation.Diagnostics.Sorted)
         {
             error.Write(d.At(source.Name) + "\n");

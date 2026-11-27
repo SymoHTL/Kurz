@@ -7629,7 +7629,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal(["Crasher#2 crashed: thrown \"down\" at program.kz:9"], crashes); // the test's actor is #1, and the block of `d` never ran
         // the loop of the second test's wait under its `FAILED` line (Y5, U64; the owner, 2026-11-23, #622, comment 7095825069, 1), each chain's ID as `<chain>`
         Ran((run.Code, run.Output.Select(l => RunTests.Chains(l)).ToList(), rest), 1, ["7", "first", "test \"leaves actors behind\" ... ok", "timers 0 paused false queued false heaps false pooled 4",
-            "test \"deadlocks while it builds a message\" ... FAILED", "    deadlock at program.kz:42", "    test#7 waits at program.kz:49 on Crasher#8 in chain <chain>",
+            "test \"deadlocks while it builds a message\" ... FAILED (seed 0)", "    deadlock at program.kz:42", "    test#7 waits at program.kz:49 on Crasher#8 in chain <chain>",
             "    Crasher#8 waits for the decision of test#7 on its crash in chain <chain>", "timers 0 paused false queued false heaps false pooled 4", "second",
             "test \"starts with none\" ... ok", "timers 0 paused false queued false heaps false pooled 4", "3 tests: 2 passed, 1 failed"], "");
     }
@@ -7689,7 +7689,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: true, tests: true);
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, "test-words-log-off");
-        string[] lines = ["1", "test \"spawns\" ... ok", "test \"throws\" ... FAILED", "    thrown \"down\" at program.kz:11", "2 tests: 1 passed, 1 failed"];
+        string[] lines = ["1", "test \"spawns\" ... ok", "test \"throws\" ... FAILED (seed 0)", "    thrown \"down\" at program.kz:11", "2 tests: 1 passed, 1 failed"];
         Ran(Toolchain.Run(executable, "0", "1"), 1, lines, "");
         if (!OperatingSystem.IsLinux())
         {

@@ -1,5 +1,5 @@
 // expect: throws deadlock at 22
-// | test "waits on its own block" ... FAILED
+// | test "waits on its own block" ... FAILED (seed 0)
 // |     deadlock at tests/test-deadlock.kz:22
 // |     test#1 waits at tests/test-deadlock.kz:28 on Worker#2 in chain <chain>
 // |     Worker#2 waits for the decision of test#1 on its crash in chain <chain>
