@@ -2681,18 +2681,21 @@ ask about it.
   reference }`, which holds the actor's reference, and the actor's table for the interface, as Rust's
   `Rc<dyn Trait>` pairs a counted block with a table of methods; each slot of that table loads the
   reference from the box and sends the method's message as a call through the reference does, its
-  arguments written into the actor's heap, and waits for the reply, and the call's file and line reach
+  arguments written into the actor's heap and an argument of a parameter written `move` let go of once it crossed, and waits for the reply, and the call's file and line reach
   the slot through a thread's own word that the call through the interface stores before it, so that a
   crash, a deadline and the method's own bound stand at that call; `==` and the hash compare and hash
   the two words of the reference, and an arm of the actor over such a value compares the table with the
   actor's and loads the reference once that comparison held (the owner, 2026-11-27, #519, comment 7215317481,
   to I1 to I4 of comment 7211586386) *(assumed: the mechanism, which no answer gave)*. The checker holds each method of such an interface to
-  what crosses with no word at the line that names it, and the walk of the throw sets gives a call
+  what crosses with no word but the `move` of a parameter written `move` at the line that names it, each parameter and
+  each result that does not cross its own error there, and an arm of another interface the actor names, or of an interface
+  over a case of the actor's type, reads the actor as C4 reads a class (the owner, 2026-11-27, #39, comment 7220200988), and the walk of the throw sets gives a call
   through the interface a site that waits on each actor that implements it, a loop's text naming the
-  interface's method beside the actor's (U56, T46 (a)), and `send` before such a call is `syntax` (U6); the text of
+  interface's method beside the actor's (U56, T46 (a)), `vouch` before such a call takes those sites out (U58), and `send` before such a call is `syntax` (U6); the text of
   `send-needs-word` there is the product pass's, comment 7211645920, item 5, which the owner kept (Q8). `print` of such a
   value calls the interface's `Text()` through the table, a message as any call through it is (A10). Pinned by
-  `CheckerTests` and by the cases `actors/interface-call.kz`, `actors/interface-arm.kz`, `actors/interface-arm-face.kz`,
+  `CheckerTests`, `CallLoopTests` and by the cases `actors/interface-call.kz`, `actors/interface-arm.kz`, `actors/interface-arm-face.kz`,
+  `actors/interface-key.kz`, `actors/interface-arm-other.kz`, `actors/interface-move.kz`,
   `actors/interface-text.kz`, `actors/interface-method-private.kz`,
   `actors/interface-crash.kz`, `actors/interface-within.kz`, `actors/interface-crossing.kz`,
   `actors/interface-mut-parameter.kz`, `actors/interface-missing-method.kz`, `actors/interface-send.kz` and
@@ -3206,8 +3209,8 @@ parameters of its own (K7, section 4) and a property that is `static`, `virtual`
 leaves open (K7), each of which leaves the class, every class derived from it and every value of them unread, and of a
 class it reads, a field in its body or a `static` member where the class has a base or classes derived from it
 (K6, K7, K18), a type after `:` that is neither a class nor an interface, or a class of `std/` the prelude brings (W1), a
-second base class, a base class after an interface, an interface named twice or with arguments, and a base that closes a cycle of
-bases (K6, K7, K10), arguments after the name of the base of a class without a primary constructor, whose constructors pass
+second base class, a base class after an interface, an interface named twice, and a base that closes a cycle of
+bases (K6, K7, K10; arguments after an interface are the checker's `syntax`, K10), arguments after the name of the base of a class without a primary constructor, whose constructors pass
 them with `: base(...)` (K10, K14), in a constructor of the body a use of the instance,
 `this`, a method of it or a lambda that reaches it, before every field is assigned, as Swift refuses it, `this` and a method of the
 instance in a constructor of a class with derived classes, where an override could read a field of the derived class while the
@@ -3322,11 +3325,11 @@ rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none o
 type or a time type (T10, T29);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); of an actor, a clause after its name but `stack` and the words of a policy (U1, U27), the block of `on crash` after a `per` actor's name among them, a modifier but `pub`, type parameters, which
-an actor may declare (U1), arguments after an interface after its name, which an actor has no constructor to take (U1, K10), a generic interface after its name (U1, T19), a `static` method and an immutable `static` field of a type that holds no class,
+an actor may declare (U1), a generic interface after its name (U1, T19), a `static` method and an immutable `static` field of a type that holds no class,
 or of a type not written (U1), and a modifier of a method but `pub`, which a method
 may take as a class's does (U1, U9), each of which leaves the
 actor and every use of its name unread, besides what a class's body does not read, as the checker's `syntax` for a base after
-an actor's name, `equal by` and a constructor in its body (U1, U2), and its `static-state` for a `static mut` field and one
+an actor's name, arguments after an interface there (U1, K10), `equal by` and a constructor in its body (U1, U2), and its `static-state` for a `static mut` field and one
 whose type is or holds a class (U1), leave it too, while an actor after a class's `:` is `syntax` and the class is read without
 that base (U1); `retry { ... }` (section 6, U28), and of `attempt { ... }` what the build does not bring into its child or
 out of it, one in a file read without `std/` and one whose `Reason` still grows at the fifth reading (U46, U47); a block of `on crash` whose child can throw a type the

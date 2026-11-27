@@ -294,7 +294,7 @@ public sealed partial class Emitter
                     foreach (var c in cases)
                     {
                         var takes = TakesCase(c, armType);
-                        if (!takes && !(armType is DataType or ClassType && c is DataType or ClassType or InterfaceType && Types.Assignable(armType, c)) && !(armType is InterfaceType or ActorType && c is InterfaceType))
+                        if (!takes && !(armType is DataType or ClassType && c is DataType or ClassType or InterfaceType && Types.Assignable(armType, c)) && !(armType is InterfaceType && c is InterfaceType) && !(armType is ActorType && c is InterfaceType && Types.Assignable(armType, c))) // U1: an actor's arm tests a case of an interface the actor implements, as a class's does
                         {
                             continue;
                         }

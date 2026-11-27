@@ -1,0 +1,24 @@
+// expect: output
+// | 2
+// | again
+// | second
+// rules: U1
+
+// `==` and a key of the interface's type over values that hold actors' references are those of the references
+interface Store {
+    long Get(string key)
+}
+
+actor Cache : Store {
+    pub long Get(string key) => key.Bytes.Count
+}
+
+a = spawn Cache()
+b = spawn Cache()
+mut Map<Store, string> names = Map<Store, string>()
+names[a] = "first"
+names[b] = "second"
+names[a] = "again"
+print(names.Count)
+print(names[a])
+print(names[b])

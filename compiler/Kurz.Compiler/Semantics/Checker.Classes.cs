@@ -644,7 +644,8 @@ public sealed partial class Checker
     /// K6, K10: the base class a class names after <c>:</c>, resolved before the class, with the part of the declaration that names
     /// it; null where it names none; and the interfaces it names there, in their order (K6, K7). What the checker does not read there
     /// is <c>not supported</c>: a type that is neither a class nor an interface, a second class, a class that is its own base, a class
-    /// after an interface, where K7 names the base class first, an interface named twice, and arguments after an interface.
+    /// after an interface, where K7 names the base class first, and an interface named twice; arguments after an interface are <c>syntax</c>,
+    /// as after an actor's name (the owner, 2026-11-27, #39, comment 7220200988, "syntax, a language error (Recommended)").
     /// </summary>
     private BaseSpecifier? ResolveClassBase(ClassSymbol symbol)
     {
@@ -655,7 +656,7 @@ public sealed partial class Checker
             {
                 if (b.Arguments is not null)
                 {
-                    NotSupported(b.Line, $"arguments after the interface `{face.Name}`, which has no constructor (K6, K10)");
+                    Report(ErrorIds.Syntax, b.Line, $"arguments after the interface `{face.Name}`, which has no constructor to take them, are text no rule gives a meaning (K10, E4)");
                 }
                 else if (symbol.Interfaces.Contains(face))
                 {

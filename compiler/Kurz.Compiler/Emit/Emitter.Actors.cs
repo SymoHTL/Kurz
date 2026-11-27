@@ -818,24 +818,38 @@ public sealed partial class Emitter
 
     /// <summary>
     /// U1, U4: a call of the actor's method <paramref name="f"/> as a message, from a slot of the actor's table for an interface
-    /// (<see cref="ActorSlot"/>), whose arguments are values already read, borrowed from the call through the interface, each crossing
-    /// with no word (U12; I3 (a) of #519, comment 7211586386, chosen 2026-11-27, comment 7215317481): the message built in the actor's heap, each argument that holds a
-    /// block a copy of its own there, as <see cref="EmitMessage"/> builds one whose arguments cannot wait, nothing running between the
-    /// read of that heap and the queueing; the bound of the method's declaration (U39), the file <paramref name="file"/> and the line
-    /// <paramref name="line"/> of the call through the interface for its queueing and its wait. The result, in the heap the caller
-    /// allocates in.
+    /// (<see cref="ActorSlot"/>), whose arguments are values already read, each crossing with no word or, for a parameter that the
+    /// interface's method <paramref name="through"/> writes <c>move</c>, with the <c>move</c> at the call (U12; I3 (a) of #519, comment
+    /// 7211586386, chosen 2026-11-27, comment 7215317481; the owner, 2026-11-27, #39, comment 7220200988, "Yes, it crosses
+    /// (Recommended)"): the message built in the actor's heap, each argument that holds a block a copy of its own there, as
+    /// <see cref="EmitMessage"/> builds one whose arguments cannot wait, with its table of four functions and the heap it is built in,
+    /// which on worker threads is a heap of its own that the receiver copies the arguments out of (the runtime's <c>ActorHeap</c> and
+    /// <c>Adopted</c>; U35, T17); an argument the slot borrows from the call through the interface stays the caller's, and one of a
+    /// parameter written <c>move</c>, which the slot owns, is let go of once every argument crossed, which frees it, as a message with
+    /// <c>move</c> lets go of the moved value (<see cref="Arguments"/>); nothing runs between the read of that heap and the queueing,
+    /// the bound of the method's declaration (U39) being a literal (U41), which runs no code and raises nothing, as
+    /// <see cref="EmitMessage"/> says of a constant bound; the file <paramref name="file"/> and the line <paramref name="line"/> of the
+    /// call through the interface for its queueing and its wait. The result, in the heap the caller allocates in.
     /// </summary>
-    private string EmitMessageOf(FunctionSymbol f, string actor, List<(string Value, KurzType Type)> arguments, string file, string line)
+    private string EmitMessageOf(FunctionSymbol f, FunctionSymbol through, string actor, List<(string Value, KurzType Type)> arguments, string file, string line)
     {
         var heap = fn.Value($"call ptr {RuntimeFunction("ActorHeap")}({ReferenceWords(actor)})");
         var crossed = arguments.Select(a => $"{Ir(a.Type)} {(Counted(a.Type) ? Crossed(a.Value, a.Type, heap) : a.Value)}").ToList();
+        foreach (var (value, type) in arguments.Where((a, i) => through.Parameters[i].Move && Counted(a.Type)))
+        {
+            Release(value, type); // U12: the moved value, whose copy the actor's heap holds
+        }
+
         var message = MessageType(f);
         var block = fn.Value($"call ptr {RuntimeFunction("AllocateIn")}(ptr {heap}, i64 {IrSize(message)})");
         var run = MessageRun(f);
-        var copy = MessageCopy(f, f.Parameters.Select(_ => (string?)null).ToList());
+        var copiesInto = f.Parameters.Select(_ => (string?)null).ToList();
+        var copy = MessageCopy(f, copiesInto);
         var table = $"@\"message.table.{Number(++actorSites)}\"";
-        module.Global($"{table} = private unnamed_addr constant [3 x ptr] [ptr {run}, ptr {copy}, ptr {MessageDrop(f)}]");
+        var adopt = MessageCopy(f, copiesInto, inPlace: true);
+        module.Global($"{table} = private unnamed_addr constant [4 x ptr] [ptr {run}, ptr {copy}, ptr {MessageDrop(f)}, ptr {adopt}]");
         fn.Emit($"store ptr {table}, ptr {MessageField(message, block, 1)}");
+        fn.Emit($"store ptr {heap}, ptr {MessageField(message, block, 6)}"); // U35: the heap it is built in, which it names while queued on worker threads (the runtime's `Enqueue`; T17)
         for (var i = 0; i < crossed.Count; i++)
         {
             fn.Emit($"store {crossed[i]}, ptr {MessageField(message, block, MessageArguments + i)}");

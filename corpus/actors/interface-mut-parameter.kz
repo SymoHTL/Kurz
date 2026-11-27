@@ -6,6 +6,7 @@ interface Taker {
 }
 
 actor T : Taker {
+    // the method's `mut` parameter raises nothing at its declaration (U9), and the interface's is refused at the line that names it (U1)
     pub void Take(mut int n) {
         n = 1
     }
