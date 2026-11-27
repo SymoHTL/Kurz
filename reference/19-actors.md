@@ -39,7 +39,8 @@ more, as a Rust `static` that is `Sync` stands)*. A value of a type
 parameter's type crosses in a generic actor's message, among its arguments and as its result, only
 where the parameter's limits name `Crosses`, a limit of the prelude, checked once at the
 definition, as Rust's `T: Send` (§6, the owner, 2026-11-27, #519, comment 7215317481, I5)
-*(assumed, as §6 marks them: `Crosses` met by a type's structure, and a `spawn` whose type argument
+*(assumed, as §6 marks them: `Crosses` met by a type's structure, a value of a type parameter
+without it in a message `send-needs-word` at the definition (U12), and a `spawn` whose type argument
 does not cross `type-mismatch` there, as an argument that does not meet its limit is (T19))*; the
 build says `not supported` to a generic actor.
 
@@ -48,7 +49,8 @@ interface on such a value is a message the actor runs in turn, a call that waits
 its method declares (U36) and its crash and deadline at the line of that call (U20), and `send`
 before it is `syntax`, its text naming the interface's method (U6); a parameter or a result of a
 method of such an interface that does not cross into an actor with no word is `send-needs-word`
-(U12) at the line that names the interface, since no word stands at a call through it; `==` and a
+(U12) at the line that names the interface, since no word stands at a call through it but the
+`move` of a parameter written `move`; `==` and a
 key of the interface's type over such a value are those of the reference, which equals no class
 instance, and an arm of the actor's type in a `match` over the interface takes the values that hold
 its references, as a class's arm takes its instances (C4); a call through the interface is an edge
@@ -59,7 +61,19 @@ them: the interface declared before or after the actor, and a method of it the a
 (K7); a `mut` parameter of such a method `mut-in-message` (U9) and a parameter or a result that
 reaches a pointer or a view `pointer-crosses` (R19), at the same line, a reading of I3; `print` of
 such a value through the interface's `Text()` (A10), a message too, Q9 of the product pass taken at
-its default; and the arguments after the interface `not supported`, a reading of the build)*.
+its default)*. A parameter written `move` of such a method crosses, the call through the interface
+carrying `move` at its argument, as `move-at-call` asks of every call (U12) (§6, the owner,
+2026-11-27, #39, comment 7220200988, "Yes, it crosses (Recommended)"); each parameter and each
+result that does not cross gets its own error at that line, on one parameter `send-needs-word`
+before `mut-in-message` and `pointer-crosses` before both, as U16 orders an argument's (the same
+comment, "Each parameter, U16's order (Recommended)"); an arm of another interface the actor names
+takes such a value, tested at run time as C4 tests a class that implements both (the same comment,
+"Yes, run-time test (Recommended)"), and an actor that names the interface counts where C4 counts the
+classes of the program, for the cases an arm of the interface covers and for `unreachable-arm` (the
+same comment, "Yes, as a class (Recommended)"); `vouch` before a call through the interface stands
+where an actor of the program implements it (U58; the same comment, "Where an actor implements
+(Recommended)"); and arguments after the interface, `actor A : Store(1)`, are `syntax`, as after a
+class's name (K10; the same comment, "syntax, a language error (Recommended)").
 
 The stack's clause is `stack` and a literal of bytes, `kb`, `mb` or `gb` (L14), `actor Parser stack 8mb
 { ... }`: it sets the size of the stack each message of the actor runs on, which is 2 MiB without it,
@@ -230,7 +244,7 @@ print(Read(Fixed()))
 
 Case: [actors/interface-arm.kz](../corpus/actors/interface-arm.kz)
 ```kurz
-// an actor's arm takes the values that hold its references; `==` and a key are those of the reference
+// an arm of the actor's type in a `match` over the interface takes the values that hold its references, as a class's arm takes its instances
 interface Store {
     long Get(string key)
 }
@@ -250,11 +264,24 @@ string Kind(Store | int s) => match s {
 }
 
 a = spawn Cache()
-b = spawn Cache()
 print(Kind(a))
 print(Kind(Fixed()))
 print(Kind(3))
+```
 
+Case: [actors/interface-key.kz](../corpus/actors/interface-key.kz)
+```kurz
+// `==` and a key of the interface's type over values that hold actors' references are those of the references
+interface Store {
+    long Get(string key)
+}
+
+actor Cache : Store {
+    pub long Get(string key) => key.Bytes.Count
+}
+
+a = spawn Cache()
+b = spawn Cache()
 mut Map<Store, string> names = Map<Store, string>()
 names[a] = "first"
 names[b] = "second"
@@ -262,6 +289,60 @@ names[a] = "again"
 print(names.Count)
 print(names[a])
 print(names[b])
+```
+
+Case: [actors/interface-arm-other.kz](../corpus/actors/interface-arm-other.kz)
+```kurz
+// an arm of the actor's type over a union tests the case of the interface the actor implements, and passes over the case of one it does not
+interface Pinger {
+    int Ping()
+}
+
+interface Logger {
+    int Note(string s)
+}
+
+actor Cache : Pinger {
+    pub int Ping() => 5
+}
+
+class Echo : Pinger {
+    pub int Ping() => 3
+}
+
+class Book : Logger {
+    pub int Note(string s) => s.Bytes.Count
+}
+
+string Kind(Pinger | Logger v) => match v {
+    Cache c => "cache {c.Ping()}"
+    Pinger p => "pinger {p.Ping()}"
+    Logger l => "logger {l.Note("ab")}"
+}
+
+print(Kind(spawn Cache()))
+print(Kind(Echo()))
+print(Kind(Book()))
+```
+
+Case: [actors/interface-arm-covered.kz](../corpus/actors/interface-arm-covered.kz)
+```kurz
+interface Store {
+    long Get(string key)
+}
+
+actor Cache : Store {
+    pub long Get(string key) => key.Bytes.Count
+}
+
+// the actor counts among what implements the interface, as a class does, so the arm of the interface after the actor's own arm takes no case
+string Kind(Cache | int s) => match s {
+    Cache c => "cache {c.Get("abc")}"
+    Store o => "store {o.Get("a")}"
+    int n => "int {n}"
+}
+
+print(Kind(3))
 ```
 
 Case: [actors/interface-arm-face.kz](../corpus/actors/interface-arm-face.kz)
@@ -367,8 +448,42 @@ actor Napper : Napping {
 int Use(Napping n, duration d) => n.Nap(d)
 
 a = spawn Napper()
-print(Use(a, 1ms))
 print(Use(a, 1s))
+```
+
+Case: [actors/interface-move.kz](../corpus/actors/interface-move.kz)
+```kurz
+// a parameter written `move` of a method of the interface crosses into the actor, the call through the interface carrying `move` at
+// its argument, as it does through a class's instance
+class Cart(mut int Items)
+
+interface Till {
+    void Add(move Cart c)
+}
+
+actor Shop : Till {
+    pub void Add(move Cart c) {
+        c.Items = c.Items + 1
+        print("in the shop: {c.Items}")
+    }
+}
+
+class Desk : Till {
+    pub void Add(move Cart c) {
+        c.Items = c.Items + 1
+        print("in the till: {c.Items}")
+    }
+}
+
+void Ring(Till t, move Cart c) {
+    t.Add(move c)
+}
+
+cart = Cart(1)
+Ring(spawn Shop(), move cart)
+other = Cart(3)
+Ring(Desk(), copy other)
+print("kept {other.Items}")
 ```
 
 Case: [actors/interface-crossing.kz](../corpus/actors/interface-crossing.kz)
@@ -393,9 +508,36 @@ interface Taker {
 }
 
 actor T : Taker {
+    // the method's `mut` parameter raises nothing at its declaration (U9), and the interface's is refused at the line that names it (U1)
     pub void Take(mut int n) {
         n = 1
     }
+}
+```
+
+Case: [actors/interface-pointer.kz](../corpus/actors/interface-pointer.kz)
+```kurz
+interface Holder {
+    void Hold(long* p)
+}
+
+// a call through the interface would carry the pointer into the actor, so the line that names the interface refuses it
+actor Keeper : Holder {
+    pub void Hold(long* p) {
+        print(1)
+    }
+}
+```
+
+Case: [actors/interface-arguments.kz](../corpus/actors/interface-arguments.kz)
+```kurz
+interface Store {
+    int Get()
+}
+
+// arguments after an interface after an actor's name are text no rule gives a meaning, as after a class's name
+actor Cache : Store(1) {
+    pub int Get() => 1
 }
 ```
 
@@ -8482,7 +8624,7 @@ enters, a recursion through two actor types that hands the reference back and fo
 inside `A.Save` (§6, "Deadlocks", layer 2, "Exempt without override: a callback through a reference the caller passed in
 that same call"). So is a call through the name of a `per node` actor in the code of its own messages, inside its own
 method and in a function or a lambda that runs there, which U55 reads as a call through `this` (the owner, 2026-11-21, #519, comment 7069702044), and a call in the block of an `attempt` through a local of the method that runs it that holds `this`, a call
-back into the actor that waits on the block (U49) (the owner, 2026-11-21, #519, comment 7068198309, per node 1, attempt 1).
+back into the actor that waits on the block (U49) (the owner, 2026-11-21, #519, comment 7068198309, per node 1, attempt 1). A call through a value of an interface the actor names is none of them, though the value can only hold the actor's own reference, a local of the interface's type without `mut` set from `this`: it is an edge to every actor that implements the interface, as any call through the interface is (U1) (§6, the owner, 2026-11-27, #39, comment 7220200988, "An edge like any (Recommended)").
 
 A field set from a parameter that is a callback is one, and so is a list of them (the owner, 2026-11-20, #519, comment 7051071630, T49 (c)); a field
 outlives the message that set it, so that another message's call through it can reach an actor the caller's chain does not
@@ -8768,7 +8910,10 @@ direct call of the actor's own method (U10), `vouch this.Size()` among them, sin
 before a call through the name of a `per node` actor, `vouch Cache.Get()`, which always reaches its one actor (U51)
 (the owner, 2026-11-21, #519, comment 7068198309, per node 1); a call
 through a local that holds `this` is a call through a reference, which U57 takes out, so that `vouch` before it is U59's
-warning *(assumed: a reading of the build, proposed with this record and not put to the owner)*. `vouch` is a word only
+warning *(assumed: a reading of the build, proposed with this record and not put to the owner)*. Before a call through an
+interface that an actor of the program implements (U1) it stands, and takes the call's edges to every implementer out of U56's
+graph, and before one through an interface that only classes implement it is `syntax`, as before a class's method (§6, the
+owner, 2026-11-27, #39, comment 7220200988, "Where an actor implements (Recommended)"). `vouch` is a word only
 where it stands, before a name, `this` or `spawn` on its line (§6, the owner, 2026-11-13, #519, comment 6847932993, Q10), so
 that `vouch` names a variable and `vouch(3)` calls a function (the owner, 2026-11-20, #519, comment 7051071630, T50 (a)). A statement is read as a declaration first, and `vouch` is the word only where none
 parses, so that `vouch c = vouch(2)` declares `c` of a type named `vouch` *(assumed: a reading of the build, proposed with

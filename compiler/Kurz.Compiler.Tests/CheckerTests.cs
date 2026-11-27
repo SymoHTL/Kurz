@@ -5954,7 +5954,6 @@ public sealed class CheckerTests
     [InlineData("interface Shape {\n    int N\n}\n\nprint(1)", "2: a member of an interface other than a method (K7)")]
     [InlineData("interface Shape {\n    data D(int X)\n}\n\nprint(1)", "2: a member of an interface other than a method (K7)")]
     [InlineData("interface Shape {\n    int Area()\n}\nclass C(weak Shape? S)\n\nprint(1)", "4: `weak` before the interface `Shape`, which R3 and R5 do not name (K6)")]
-    [InlineData("interface Shape {\n    int Area()\n}\nclass Dot : Shape() {\n    pub int Area() => 1\n}\n\nprint(1)", "4: arguments after the interface `Shape`, which has no constructor (K6, K10)")]
     [InlineData("interface Shape {\n    int Area()\n}\nclass Dot : Shape, Shape {\n    pub int Area() => 1\n}\n\nprint(1)", "4: the interface `Shape` named twice after `:` (K6)")]
     [InlineData("interface Shape {\n    int Area()\n}\nclass A\nclass Dot : Shape, A {\n    pub int Area() => 1\n}\n\nprint(1)", "5: the base class `A` after an interface, where a class names its base class first (K7)")]
     [InlineData("interface Shape {\n    int Area()\n}\n\nprint(Shape)", "5: the interface `Shape` named where a value stands (K6)")]
@@ -8330,7 +8329,6 @@ public sealed class CheckerTests
     [InlineData(1, "U1, T19", "actor A<T> per node {\n}\n")]
     [InlineData(1, "U1, T19", "actor A<T> {\n}\n")]
     [InlineData(1, "U1, T19", "actor Pair<T>(T First) {\n}\n\np = spawn Pair<int>(1)\nprint(p)\n")]
-    [InlineData(4, "U1, K10", "interface I {\n}\n\nactor A : I(1) {\n}\n")]
     [InlineData(2, "U1", "actor A {\n    static int X = 1\n}\n")]
     [InlineData(2, "U1", "actor A {\n    pub static int Get() => 1\n}\n")]
     [InlineData(2, "U9", "actor A {\n    prot void Go() {\n    }\n}\n")]
@@ -8339,8 +8337,7 @@ public sealed class CheckerTests
     {
         // U1: the clauses after the name (section 6, Q1 of issue 519, comment 6866132292), but `stack` and the words of a policy (U27), so the
         // block of `on crash` and a `per` actor's policy among them (Q15 of 2026-11-13), a modifier of the actor, type parameters, which
-        // Q26 of comment 6881678834 lets an actor declare and the build does not read, and arguments after an interface, which an actor's
-        // constructor-less clause cannot take (K10); `static` members, which U1 reads
+        // Q26 of comment 6881678834 lets an actor declare and the build does not read; `static` members, which U1 reads
         // as K18 reads a class's and the build does not read; U9: a modifier of a method but `pub`, which Q26 lets a method take as a class's
         // does and the build does not read; `spawn` of an actor with type parameters, with its type arguments (U2, U14), its arguments read
         // loosely (E1)
@@ -8373,7 +8370,8 @@ public sealed class CheckerTests
     {
         // U1 with U9 and U12 (#519, comment 7211586386, I3 (a), chosen 2026-11-27, comment 7215317481): a call through the interface on an actor is a message with no word
         // at its arguments and none at its result, so the interface's methods are held at the actor's interface to what crosses with no
-        // word: no `mut` parameter, a parameter and a result that cross, each refused at the line that names the interface
+        // word: a parameter and a result that cross (I3 (a)), and no `mut` parameter (assumed: a reading of I3), each refused at the
+        // line that names the interface
         const string bag = "class Bag(mut int N)\n\n";
         Assert.Equal([(ErrorIds.SendNeedsWord, 7)], Errors(bag + "interface Filler {\n    void Fill(Bag b)\n}\n\nactor Worker : Filler {\n    pub void Fill(Bag b) {\n        print(b.N)\n    }\n}\n"));
         Assert.Equal([(ErrorIds.SendNeedsWord, 7)], Errors(bag + "interface Maker {\n    Bag Make()\n}\n\nactor Worker : Maker {\n    pub Bag Make() => Bag(1)\n}\n"));
@@ -8382,9 +8380,9 @@ public sealed class CheckerTests
 
         // the texts: item 5 of the product pass (comment 7211645920), kept by the owner (Q8, comment 7215317481), for a parameter and,
         // with "gives", for a result; a type that never crosses keeps the same head with its reason (assumed)
-        Assert.Equal("`Worker` implements `Filler`, whose method `Fill` takes `Bag`, which crosses into an actor only with `copy` or `move` (U1, U12)",
+        Assert.Equal("`Worker` implements `Filler`, whose method `Fill` takes `Bag`, which crosses into an actor only with `copy` or `move` (U12)",
             ErrorText(bag + "interface Filler {\n    void Fill(Bag b)\n}\n\nactor Worker : Filler {\n    pub void Fill(Bag b) {\n        print(b.N)\n    }\n}\n"));
-        Assert.Equal("`Worker` implements `Maker`, whose method `Make` gives `Bag`, which crosses into an actor only with `copy` or `move` (U1, U12)",
+        Assert.Equal("`Worker` implements `Maker`, whose method `Make` gives `Bag`, which crosses into an actor only with `copy` or `move` (U12)",
             ErrorText(bag + "interface Maker {\n    Bag Make()\n}\n\nactor Worker : Maker {\n    pub Bag Make() => Bag(1)\n}\n"));
         Assert.StartsWith("`Worker` implements `Caller`, whose method `Call` takes `(int) => int`, which never crosses into an actor: it reaches a function value",
             ErrorText("interface Caller {\n    void Call((int) => int f)\n}\n\nactor Worker : Caller {\n    pub void Call((int) => int f) {\n        print(f(1))\n    }\n}\n"));
@@ -8393,6 +8391,43 @@ public sealed class CheckerTests
 
         // the same interface on a class alone holds nothing to the crossing (K6)
         Assert.Empty(Errors(bag + "interface Filler {\n    void Fill(Bag b)\n}\n\nclass Worker : Filler {\n    pub void Fill(Bag b) {\n        print(b.N)\n    }\n}\n"));
+    }
+
+    [Fact]
+    public void Each_parameter_and_result_of_an_interface_an_actor_implements_that_does_not_cross_gets_its_error()
+    {
+        // U1 with U16 (the owner, 2026-11-27, #39, comment 7220200988, "Each parameter, U16's order (Recommended)"): at the line that
+        // names the interfaces, each parameter and each result that does not cross gets its one error, a second method's and a second
+        // interface's too; on one parameter `send-needs-word` comes before `mut-in-message`, as on a call's argument, and
+        // `pointer-crosses` before both
+        const string worker = "class Bag(mut int N)\n\ninterface Filler {\n    void Fill(Bag b, mut int n)\n    Bag Make()\n}\n\ninterface Taker {\n    void Take(mut int n)\n}\n\n"
+            + "actor Worker : Filler, Taker {\n    pub void Fill(Bag b, mut int n) {\n        n = b.N\n    }\n\n    pub Bag Make() => Bag(1)\n\n    pub void Take(mut int n) {\n        n = 1\n    }\n}\n";
+        Assert.Equal([(ErrorIds.SendNeedsWord, 12), (ErrorIds.MutInMessage, 12), (ErrorIds.SendNeedsWord, 12), (ErrorIds.MutInMessage, 12)], Errors(worker));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 7)], Errors("class Bag(mut int N)\n\ninterface Filler {\n    void Fill(mut Bag b)\n}\n\nactor Worker : Filler {\n    pub void Fill(mut Bag b) {\n        b = Bag(1)\n    }\n}\n"));
+        Assert.Equal([(ErrorIds.PointerCrosses, 5)], Errors("interface Keeper {\n    void Keep(mut long* q)\n}\n\nactor K : Keeper {\n    pub void Keep(mut long* q) {\n        print(1)\n    }\n}\n", "raw"));
+    }
+
+    [Fact]
+    public void A_parameter_written_move_of_an_interface_an_actor_implements_crosses_with_the_move_at_the_call()
+    {
+        // U1 with U12 (the owner, 2026-11-27, #39, comment 7220200988, "Yes, it crosses (Recommended)"): a parameter written `move` of
+        // the interface's method crosses, the call through the interface carrying `move` at its argument, as `move-at-call` asks; a
+        // value that no word makes cross stays `send-needs-word` at the line that names the interface
+        const string till = "class Cart(mut int Items)\n\ninterface Till {\n    void Add(move Cart c)\n}\n\nactor Shop : Till {\n    pub void Add(move Cart c) {\n        print(c.Items)\n    }\n}\n\nTill t = spawn Shop()\nk = Cart(1)\n";
+        Assert.Empty(Errors(till + "t.Add(move k)\n"));
+        Assert.Equal([(ErrorIds.MoveAtCall, 15)], Errors(till + "t.Add(k)\nprint(k.Items)\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 5)], Errors("interface Caller {\n    void Call(move (int) => int f)\n}\n\nactor W : Caller {\n    pub void Call(move (int) => int f) {\n        print(f(1))\n    }\n}\n"));
+    }
+
+    [Fact]
+    public void Arguments_after_an_interface_after_a_class_s_or_an_actor_s_name_are_syntax()
+    {
+        // K10 and U1 (the owner, 2026-11-27, #39, comment 7220200988, "syntax, a language error (Recommended)"): an interface has no
+        // constructor to take arguments, after a class's name and after an actor's alike; the same lists without them stand
+        Assert.Equal([(ErrorIds.Syntax, 4)], Errors("interface Shape {\n    int Area()\n}\nclass Dot : Shape() {\n    pub int Area() => 1\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.Syntax, 4)], Errors("interface I {\n}\n\nactor A : I(1) {\n}\n"));
+        Assert.Empty(Errors("interface Shape {\n    int Area()\n}\nclass Dot : Shape {\n    pub int Area() => 1\n}\n\nprint(Dot().Area())"));
+        Assert.Empty(Errors("interface I {\n}\n\nactor A : I {\n}\n"));
     }
 
     [Fact]

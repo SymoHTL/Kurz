@@ -907,6 +907,50 @@ public sealed partial class CallLoopTests(Toolchain toolchain) : IClassFixture<T
     }
 
     [Fact]
+    public void A_vouch_before_a_call_through_an_interface_an_actor_implements_takes_its_edges_out()
+    {
+        // U58 with U1 (the owner, 2026-11-27, #39, comment 7220200988, "Where an actor implements (Recommended)"): `vouch` stands before a
+        // call through an interface that an actor of the program implements and takes the call's edge to every implementer out of U56's
+        // graph, so that the loop of the call at line 10 is gone; before a call through an interface that only classes implement it is `syntax` at
+        // the word, as before a plain call
+        const string program = """
+            interface Pinger {
+                int Ping()
+            }
+
+            actor A : Pinger {
+                pub int Ping() => 1
+
+                pub int Go() {
+                    Pinger p = spawn A()
+                    return p.Ping()
+                }
+            }
+
+            """;
+        Assert.Equal([(ErrorIds.CallLoop, 10)], Diagnostics(program));
+        Assert.Empty(Diagnostics(program.Replace("return p.Ping()", "return vouch p.Ping()", StringComparison.Ordinal)));
+        const string classes = """
+            interface Pinger {
+                int Ping()
+            }
+
+            class B : Pinger {
+                pub int Ping() => 1
+            }
+
+            actor A {
+                pub int Go() {
+                    Pinger p = B()
+                    return vouch p.Ping()
+                }
+            }
+
+            """;
+        Assert.Equal([(ErrorIds.Syntax, 12)], Diagnostics(classes));
+    }
+
+    [Fact]
     public void A_message_to_the_name_of_a_per_node_actor_is_an_edge_into_its_construction_as_a_spawn_is()
     {
         // U52, U56: `A.M` can start `P`, whose construction, `P`'s code and not `A.M`'s, waits on `A.V` at line 8: a loop of two hops

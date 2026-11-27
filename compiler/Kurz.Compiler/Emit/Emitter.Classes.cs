@@ -498,7 +498,8 @@ public sealed partial class Emitter
 
     /// <summary>
     /// U1, U4: what the slot of the interface's method holds in an actor's table for it: a function that takes the actor's block, reads
-    /// its reference and sends the actor's method that implements the interface's as a message, which waits for its reply, with the
+    /// its reference and sends the actor's method that implements the interface's as a message, which waits for its reply, an argument
+    /// of a parameter the interface's method writes <c>move</c> the slot's own (<see cref="EmitMessageOf"/>), with the
     /// place of the call through the interface the thread's site holds (<see cref="CallThrough"/>; I1 (a) of #519, comment 7211586386,
     /// chosen 2026-11-27, comment 7215317481), as a Rust trait implemented for an actor's handle sends in each method.
     /// </summary>
@@ -514,7 +515,7 @@ public sealed partial class Emitter
             var file = fn.Value($"extractvalue {{ %kz.str, i32 }} {site}, 0");
             var line = fn.Value($"extractvalue {{ %kz.str, i32 }} {site}, 1");
             var arguments = implementation.Parameters.Select((p, i) => ($"%a{Number(i + 1)}", p.Type)).ToList();
-            var answer = EmitMessageOf(implementation, reference, arguments, file, line);
+            var answer = EmitMessageOf(implementation, method, reference, arguments, file, line);
             fn.Return(Types.IsVoid(method.ReturnType) ? null : $"{result} {answer}");
         });
     }
@@ -1230,13 +1231,18 @@ public sealed partial class Emitter
     {
         if (symbol.IsActor)
         {
-            // U1: an actor's block for the interface, and a message for each method (`ActorAsInterface`, `ActorSlot`)
+            // U1: an actor's block for the interface, and a message for each method (`ActorAsInterface`, `ActorSlot`), built at the line
+            // that names the interface after the actor's name, the line the checker reports the crossing at, which the functions the
+            // slots queue carry, as a queued function carries the line that queued it (`Emitter.cs`)
+            var outer = origin;
+            origin = symbol.Declaration.Bases.FirstOrDefault(b => b.Type is NamedType n && n.Name == face.Name)?.Line ?? symbol.Line;
             ReleaseActorBox();
             foreach (var method in face.Methods)
             {
                 ActorSlot(symbol, face, method);
             }
 
+            origin = outer;
             return;
         }
 
@@ -1352,8 +1358,10 @@ public sealed partial class Emitter
             if (symbol.IsActor)
             {
                 // U1: an actor's table for the interface: its block's release and weak release, the equality and the hash of its reference
-                // (I4 (a), assumed), no class's table, since no class test reaches an actor's (C4), no copy (U12), then a message for each
-                // method (`ActorSlot`)
+                // (I4 (a), assumed), null for the link a class's arm reads, which so answers false for an actor's table (`ClassArm`,
+                // `Descends`), an arm of another interface finding the actor's table by `FaceArm`'s search of the implementers, and null
+                // for the copy, since `CrossingOf` refuses every value of an interface, which no word makes cross, so that no copy reads
+                // it, as a class's table for an interface holds null there, then a message for each method (`ActorSlot`)
                 List<string> actorEntries =
                 [
                     ReleaseActorBox(),

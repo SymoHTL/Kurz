@@ -1,0 +1,37 @@
+// expect: output
+// | in the shop: 2
+// | in the till: 4
+// | kept 3
+// rules: U1
+
+// a parameter written `move` of a method of the interface crosses into the actor, the call through the interface carrying `move` at
+// its argument, as it does through a class's instance
+class Cart(mut int Items)
+
+interface Till {
+    void Add(move Cart c)
+}
+
+actor Shop : Till {
+    pub void Add(move Cart c) {
+        c.Items = c.Items + 1
+        print("in the shop: {c.Items}")
+    }
+}
+
+class Desk : Till {
+    pub void Add(move Cart c) {
+        c.Items = c.Items + 1
+        print("in the till: {c.Items}")
+    }
+}
+
+void Ring(Till t, move Cart c) {
+    t.Add(move c)
+}
+
+cart = Cart(1)
+Ring(spawn Shop(), move cart)
+other = Cart(3)
+Ring(Desk(), copy other)
+print("kept {other.Items}")

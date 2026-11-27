@@ -1294,6 +1294,26 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_slot_of_an_actor_s_table_for_an_interface_lets_go_of_an_argument_written_move_once_it_crossed()
+    {
+        // U1 with U12 (the owner, 2026-11-27, #39, comment 7220200988, "Yes, it crosses (Recommended)"): the call through the interface
+        // gives the slot an argument of a parameter written `move`, whose copy crosses into the actor's heap, and the slot lets go of the
+        // moved value, as a message with `move` does (`Emitter.Arguments`), while one of a parameter with no word stays the caller's; the
+        // IR is read, since nothing a run prints shows the release, which no reference of the program reaches
+        var ir = Emit("class Tag(string Name)\n\ninterface Shelf {\n    void Look(Tag t)\n    void Keep(move Tag t)\n}\n\n"
+            + "actor Store : Shelf {\n    pub void Look(Tag t) {\n        print(t.Name)\n    }\n\n    pub void Keep(move Tag t) {\n        print(t.Name)\n    }\n}\n\n"
+            + "Shelf s = spawn Store()\ns.Look(Tag(\"a\"))\nb = Tag(\"b\")\ns.Keep(move b)\n").Ir;
+        string Slot(int index) => Assert.Single(ir.Split("\ndefine "), f => f.StartsWith($"internal void @\"face.actor.Store.Shelf.{index}\"(", StringComparison.Ordinal));
+        const string release = "call void @\"release.class.Tag\"(ptr %a1)";
+        Assert.Contains(release, Slot(1), StringComparison.Ordinal);
+        Assert.DoesNotContain(release, Slot(0), StringComparison.Ordinal);
+
+        // U35: the table of the slot's message holds a fourth function, which copies the message's arguments out of a heap of its
+        // own on worker threads (the runtime's `Adopted`), as a message through the actor's reference does
+        Assert.Equal(2, Regex.Count(ir, @"@""message\.table\.[0-9]+"" = private unnamed_addr constant \[4 x ptr\] \[[^\n]*@""message\.adopt\.Store\."));
+    }
+
+    [Fact]
     public void A_message_whose_argument_is_the_name_of_a_property_is_built_in_a_heap_of_its_own()
     {
         // U39, U12, K7: a name that reads a property inside its class, `Items`, is the call of its getter, which can raise, an index

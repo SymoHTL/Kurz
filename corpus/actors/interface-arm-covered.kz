@@ -1,0 +1,19 @@
+// expect: error unreachable-arm at 15
+// rules: U1
+
+interface Store {
+    long Get(string key)
+}
+
+actor Cache : Store {
+    pub long Get(string key) => key.Bytes.Count
+}
+
+// the actor counts among what implements the interface, as a class does, so the arm of the interface after the actor's own arm takes no case
+string Kind(Cache | int s) => match s {
+    Cache c => "cache {c.Get("abc")}"
+    Store o => "store {o.Get("a")}"
+    int n => "int {n}"
+}
+
+print(Kind(3))
