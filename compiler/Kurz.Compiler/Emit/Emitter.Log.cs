@@ -30,14 +30,24 @@ public sealed partial class Emitter
         }
 
         module.Global($"{LogLowest} = internal global i32 6");
-        var name = StringValue("KURZ_LOG");
+        var (found, value) = EmitVariable("KURZ_LOG", "filter");
+        var lowest = fn.Value($"call i32 {RuntimeFunction("LogFilter")}(i32 {found}, %kz.str {value})");
+        fn.Emit($"store i32 {lowest}, ptr {LogLowest}");
+    }
+
+    /// <summary>
+    /// The read of the environment's variable <c>key</c> at the start (P4, U35): what the target's <c>Variable</c> gave, 0 where the
+    /// variable is set, 1 where it is not and 2 where its value is not UTF-8, and its value, empty where it gave none.
+    /// </summary>
+    private (string Found, string Value) EmitVariable(string key, string label)
+    {
+        var name = StringValue(key);
         var copy = fn.Value($"call ptr {RuntimeFunction("CPath")}(%kz.str {name})");
-        var value = fn.Alloca("%kz.str", "filter");
+        var value = fn.Alloca("%kz.str", label);
         fn.Emit($"store %kz.str {StringValue(string.Empty)}, ptr {value}");
         var found = fn.Value($"call i32 {SysFunction("Variable")}(ptr {copy}, ptr {value})");
         FreePath(copy, name);
-        var lowest = fn.Value($"call i32 {RuntimeFunction("LogFilter")}(i32 {found}, %kz.str {fn.Value($"load %kz.str, ptr {value}")})");
-        fn.Emit($"store i32 {lowest}, ptr {LogLowest}");
+        return (found, fn.Value($"load %kz.str, ptr {value}"));
     }
 
     /// <summary>
