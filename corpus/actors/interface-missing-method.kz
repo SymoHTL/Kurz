@@ -1,0 +1,10 @@
+// expect: error missing-member at 8
+// rules: U1
+
+interface Store {
+    long Get(string key)
+}
+
+actor Cache : Store {
+    pub long Count() => 0
+}

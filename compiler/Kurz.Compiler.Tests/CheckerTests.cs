@@ -8330,7 +8330,7 @@ public sealed class CheckerTests
     [InlineData(1, "U1, T19", "actor A<T> per node {\n}\n")]
     [InlineData(1, "U1, T19", "actor A<T> {\n}\n")]
     [InlineData(1, "U1, T19", "actor Pair<T>(T First) {\n}\n\np = spawn Pair<int>(1)\nprint(p)\n")]
-    [InlineData(4, "U1", "interface I {\n}\n\nactor A : I {\n}\n")]
+    [InlineData(4, "U1, K10", "interface I {\n}\n\nactor A : I(1) {\n}\n")]
     [InlineData(2, "U1", "actor A {\n    static int X = 1\n}\n")]
     [InlineData(2, "U1", "actor A {\n    pub static int Get() => 1\n}\n")]
     [InlineData(2, "U9", "actor A {\n    prot void Go() {\n    }\n}\n")]
@@ -8338,12 +8338,75 @@ public sealed class CheckerTests
     public void What_an_actor_declares_beyond_its_rules_is_not_supported(int line, string rule, string program)
     {
         // U1: the clauses after the name (section 6, Q1 of issue 519, comment 6866132292), but `stack` and the words of a policy (U27), so the
-        // block of `on crash` and a `per` actor's policy among them (Q15 of 2026-11-13), a modifier of the actor, and type parameters and
-        // an interface, which Q26 of comment 6881678834 lets an actor declare and the build does not read; `static` members, which U1 reads
+        // block of `on crash` and a `per` actor's policy among them (Q15 of 2026-11-13), a modifier of the actor, type parameters, which
+        // Q26 of comment 6881678834 lets an actor declare and the build does not read, and arguments after an interface, which an actor's
+        // constructor-less clause cannot take (K10); `static` members, which U1 reads
         // as K18 reads a class's and the build does not read; U9: a modifier of a method but `pub`, which Q26 lets a method take as a class's
         // does and the build does not read; `spawn` of an actor with type parameters, with its type arguments (U2, U14), its arguments read
         // loosely (E1)
         NotSupportedAt(line, rule, program);
+    }
+
+    private const string StoreFace = "interface Store {\n    long Get(string key)\n}\n\n";
+
+    [Fact]
+    public void An_actor_s_reference_is_a_value_of_an_interface_the_actor_implements()
+    {
+        // U1 (#519, comment 7211586386, I1 (a), assumed): an actor names an interface after its name, declared before or after it, and
+        // implements its methods as a class does (K6); its reference is a value of that interface and of no other
+        const string cache = "actor Cache : Store {\n    pub long Get(string key) => 5\n}\n\n";
+        Assert.Empty(Errors(StoreFace + cache + "long Read(Store s) => s.Get(\"a\")\n\nc = spawn Cache()\nprint(Read(c))\n"));
+        Assert.Empty(Errors(cache + StoreFace + "Store s = spawn Cache()\nprint(s.Get(\"a\"))\n"));
+        Assert.Equal([(ErrorIds.MissingMember, 5)], Errors(StoreFace + "actor Cache : Store {\n}\n"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 8)], Errors(StoreFace + "actor Other {\n}\n\nStore s = spawn Other()\nprint(s.Get(\"a\"))\n"));
+
+        // I2 (a), assumed: every call through the interface waits, so `send` before one is `syntax`, its text naming the interface's method
+        // (comment 7211645920, item 5), while `send` before the actor's own reference stands
+        const string sink = "interface Logger {\n    void Note(string s)\n}\n\nactor Sink : Logger {\n    pub void Note(string s) {\n        print(s)\n    }\n}\n\n";
+        Assert.Equal([(ErrorIds.Syntax, 12)], Errors(sink + "Logger l = spawn Sink()\nsend l.Note(\"a\")\n"));
+        Assert.Contains("`Logger.Note` is a call through an interface", ErrorText(sink + "Logger l = spawn Sink()\nsend l.Note(\"a\")\n"));
+        Assert.Empty(Errors(sink + "k = spawn Sink()\nsend k.Note(\"a\")\n"));
+    }
+
+    [Fact]
+    public void The_methods_of_an_interface_an_actor_implements_take_and_give_what_crosses_into_an_actor()
+    {
+        // U1 with U9 and U12 (#519, comment 7211586386, I3 (a), assumed): a call through the interface on an actor is a message with no word
+        // at its arguments and none at its result, so the interface's methods are held at the actor's interface to what crosses with no
+        // word: no `mut` parameter, a parameter and a result that cross, each refused at the line that names the interface
+        const string bag = "class Bag(mut int N)\n\n";
+        Assert.Equal([(ErrorIds.SendNeedsWord, 7)], Errors(bag + "interface Filler {\n    void Fill(Bag b)\n}\n\nactor Worker : Filler {\n    pub void Fill(Bag b) {\n        print(b.N)\n    }\n}\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 7)], Errors(bag + "interface Maker {\n    Bag Make()\n}\n\nactor Worker : Maker {\n    pub Bag Make() => Bag(1)\n}\n"));
+        Assert.Equal([(ErrorIds.MutInMessage, 5)], Errors("interface Taker {\n    void Take(mut int n)\n}\n\nactor T : Taker {\n    pub void Take(mut int n) {\n        n = 1\n    }\n}\n"));
+        Assert.Empty(Errors("interface Namer {\n    string Name(string prefix)\n}\n\nactor P : Namer {\n    pub string Name(string prefix) => prefix\n}\n"));
+
+        // the same interface on a class alone holds nothing to the crossing (K6)
+        Assert.Empty(Errors(bag + "interface Filler {\n    void Fill(Bag b)\n}\n\nclass Worker : Filler {\n    pub void Fill(Bag b) {\n        print(b.N)\n    }\n}\n"));
+    }
+
+    [Fact]
+    public void A_call_through_an_interface_an_actor_implements_waits_on_that_actor()
+    {
+        // U56 with U1 (T46 (a); #519, comment 7211586386, I1 (a), assumed): a call through an interface reaches every actor that implements
+        // it, so an actor's method that calls through it on another of its own actors is a loop, whose text names the interface's method
+        // beside the actor's (comment 7211645920, Q7 (a), assumed), and one whose interface only a class implements is not
+        const string pinger = "interface Pinger {\n    int Ping()\n}\n\n";
+        const string loop = pinger + "actor A : Pinger {\n    pub int Ping() => 1\n\n    pub int Go() {\n        Pinger p = spawn A()\n        return p.Ping()\n    }\n}\n";
+        Assert.Equal([(ErrorIds.CallLoop, 10)], Errors(loop));
+        Assert.StartsWith("`A.Go` waits on `A.Ping` through `Pinger.Ping` (line 10), a call of another `A`", ErrorText(loop));
+        Assert.Empty(Errors(pinger + "class B : Pinger {\n    pub int Ping() => 1\n}\n\nactor A {\n    pub int Go() {\n        Pinger p = B()\n        return p.Ping()\n    }\n}\n"));
+    }
+
+    [Fact]
+    public void An_arm_of_an_actor_s_type_tests_the_reference_a_value_of_its_interface_holds()
+    {
+        // C4 with U1 (#519, comment 7211586386, I4 (a), assumed): an arm of an actor that implements the subject's interface takes the values
+        // that hold its references, as a class's arm takes its instances, and covers no case (O8); an actor that does not implement it is no
+        // case
+        const string cache = "actor Cache : Store {\n    pub long Get(string key) => 5\n}\n\n";
+        Assert.Empty(Errors(StoreFace + cache + "long Kind(Store s) => match s {\n    Cache c => c.Get(\"a\")\n    else => 0\n}\n\nprint(Kind(spawn Cache()))\n"));
+        Assert.Empty(Errors(StoreFace + cache + "long Kind(Store | int s) => match s {\n    Cache c => c.Get(\"a\")\n    Store o => 1\n    int n => n\n}\n\nprint(Kind(3))\n"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 9)], Errors(StoreFace + "actor Other {\n}\n\nlong Kind(Store s) => match s {\n    Other o => 1\n    else => 0\n}\n"));
     }
 
     [Fact]

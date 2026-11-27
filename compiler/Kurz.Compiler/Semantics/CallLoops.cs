@@ -589,7 +589,8 @@ public sealed class CallLoops
 
         public string Said(ClassSymbol to) => Reached.Site.Kind switch
         {
-            SiteKind.Wait => $"{Entry.Name} waits on `{to.Name}.{Reached.Site.Method!.Name}`",
+            // U1: a hop through an interface names the interface's method beside the actor's (#519, comment 7211645920, Q7 (a), assumed)
+            SiteKind.Wait => $"{Entry.Name} waits on `{to.Name}.{Reached.Site.Method!.Name}`{(Reached.Site.Face is { Interface: { } face } m ? $" through `{face.Name}.{m.Name}`" : "")}",
             SiteKind.Start => $"{Entry.Name} starts `{to.Name}` by a message to its name",
             _ => $"{Entry.Name} spawns `{to.Name}`",
         }

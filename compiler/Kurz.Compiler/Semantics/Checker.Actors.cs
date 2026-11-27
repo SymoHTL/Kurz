@@ -29,6 +29,9 @@ public sealed partial class Checker
     /// <summary>U1: the name of each actor the file declares, read or not, which no type after an actor's name may name.</summary>
     private readonly HashSet<string> actorNames = new(StringComparer.Ordinal);
 
+    /// <summary>U1: the names of the interfaces the file declares, gathered before its declarations are read (<see cref="NamesReadInterface"/>).</summary>
+    private readonly HashSet<string> fileInterfaces = new(StringComparer.Ordinal);
+
     /// <summary>U28, U30: each block of <c>on crash</c> the checker read, with the actor whose crash it decides and the <c>Reason</c> it read of it.</summary>
     private readonly List<(CrashPolicy Policy, ClassSymbol Child, IReadOnlyList<KurzType> Read)> crashBlocks = [];
 
@@ -94,6 +97,15 @@ public sealed partial class Checker
     }
 
     /// <summary>
+    /// U1: whether the type after an actor's name names an interface without type arguments, and nothing after it, which the file or
+    /// the prelude declares (<see cref="fileInterfaces"/>), whose table the actor takes as a class does (K7; Q26 of issue 519, comment
+    /// 6882624606; I1 of comment 7211586386, assumed). The declarations of the file are read in their order, so that an interface
+    /// written after the actor is known by its name alone here.
+    /// </summary>
+    private bool NamesReadInterface(BaseSpecifier b) =>
+        b.Arguments is null && b.Type is NamedType { TypeArguments.Count: 0 } n && (interfaces.ContainsKey(n.Name) || fileInterfaces.Contains(n.Name));
+
+    /// <summary>
     /// U1: the literal of bytes of the <c>stack</c> clause, read as a <c>long</c> (L14), whose error, <c>inexact-literal</c> or a size
     /// past a <c>long</c>, it reports; whether it reported one. The size is a lower bound the runtime rounds up to its page and raises to
     /// its floor with no message (section 6, the owner, 2026-11-15, #519, comment 6892835500, Q7, "Rust/C#: round up silently"), so no
@@ -121,12 +133,13 @@ public sealed partial class Checker
     /// <summary>
     /// The first part of an actor's declaration that the build does not read beyond a class's, with its line and what it is; null where
     /// there is none: a clause but <c>stack</c>, a policy and the <c>per node</c> of an actor that writes it once (U51), <c>per cluster</c>
-    /// with a text of its own, a modifier, type parameters, a type after its name and a <c>static</c> member (U1), and a modifier of a
-    /// method but <c>pub</c> (U9). A type after the name is named here as an interface, since <see cref="RefuseUnreadActors"/>
-    /// reads every such type once the types are resolved and leaves an actor to this part only where each is one; <c>equal by</c> and a
-    /// constructor in the body are no part of it, being <c>syntax</c> (U2; Q26 of issue 519, comment 6882624606).
+    /// with a text of its own, a modifier, type parameters, a type after its name that names no interface the build reads
+    /// (<see cref="NamesReadInterface"/>) and a <c>static</c> member (U1), and a modifier of a method but <c>pub</c> (U9). Such a type
+    /// after the name is named here as an interface, since <see cref="RefuseUnreadActors"/> reads every such type once the types are
+    /// resolved and leaves an actor to this part only where each is one; <c>equal by</c> and a constructor in the body are no part of
+    /// it, being <c>syntax</c> (U2; Q26 of issue 519, comment 6882624606).
     /// </summary>
-    private static (int Line, string Construct)? UnreadActorPart(TypeDeclaration d)
+    private (int Line, string Construct)? UnreadActorPart(TypeDeclaration d)
     {
         if ((d.Clauses ?? []).Any(c => c.Word == "per") && (d.Clauses ?? []).FirstOrDefault(c => c.Policy is { Block: not null }) is { } block)
         {
@@ -151,9 +164,11 @@ public sealed partial class Checker
             return (d.Line, "a generic actor (U1, T19)");
         }
 
-        if (d.Bases.Count > 0)
+        if (d.Bases.FirstOrDefault(b => !NamesReadInterface(b)) is { } unread)
         {
-            return (d.Bases[0].Line, "an interface after an actor's name (U1)");
+            return unread.Arguments is not null
+                ? (unread.Line, "arguments after an interface after an actor's name, which has no constructor (U1, K10)")
+                : (unread.Line, "a generic interface after an actor's name (U1, T19)");
         }
 
         foreach (var member in d.Members ?? [])
@@ -192,6 +207,79 @@ public sealed partial class Checker
             if (!error && UnreadActorPart(d) is { } part)
             {
                 NotSupported(part.Line, part.Construct);
+            }
+        }
+    }
+
+    /// <summary>
+    /// U1, U12 (I3 (a) of issue 519, comment 7211586386, assumed): a call through an interface that the actor implements is a message
+    /// to it (I1 (a)), with no word at its arguments, since the caller sees an interface and not an actor, so each method of each such
+    /// interface takes parameters and gives a result that cross with no word by their written types (<see cref="CrossingOf"/>), as a
+    /// Rust trait implemented for an actor's handle takes and gives <c>Send</c> values. The first that does not is reported at the
+    /// interface after the actor's name, and the actor's other methods stand: a <c>mut</c> parameter is <c>mut-in-message</c> (U9), a
+    /// value that needs a word or never crosses is <c>send-needs-word</c>, a pointer or a view is <c>pointer-crosses</c> (R19), and the
+    /// build's limit is <c>not supported</c>.
+    /// </summary>
+    private void CheckActorInterfaces(ClassSymbol actor)
+    {
+        foreach (var face in actor.Interfaces)
+        {
+            face.ByActor = true;
+            var line = actor.Declaration.Bases.FirstOrDefault(b => b.Type is NamedType n && n.Name == face.Name)?.Line ?? actor.Line;
+            foreach (var m in face.Methods)
+            {
+                if (Types.IsError(m.ReturnType) || m.Parameters.Any(p => Types.IsError(p.Type)))
+                {
+                    continue; // the signature carries its own error (E1)
+                }
+
+                var method = $"`{face.Name}.{m.Name}`";
+                foreach (var p in m.Parameters)
+                {
+                    if (p.Mut)
+                    {
+                        Report(ErrorIds.MutInMessage, line, $"`{p.Name}` of {method} is a `mut` parameter, and a call through `{face.Name}` on the actor `{actor.Name}` is a message, which holds no place of its caller's (U1, U9)");
+                        return;
+                    }
+
+                    var (kind, why, limit, raw) = CrossingOf(p.Type);
+                    if (raw is not null)
+                    {
+                        Report(ErrorIds.PointerCrosses, line, $"`{actor.Name}` implements `{face.Name}`, whose method `{m.Name}` takes {Types.A(p.Type)} at `{p.Name}`, which reaches {raw}, and no pointer or view crosses into an actor (U1, U12, R19)");
+                        return;
+                    }
+
+                    if (kind != ActorCrossing.Crosses)
+                    {
+                        Report(ErrorIds.SendNeedsWord, line, $"`{actor.Name}` implements `{face.Name}`, whose method `{m.Name}` takes {Types.A(p.Type)} at `{p.Name}`, which reaches {why}, and a call through the interface is a message with no word at its arguments: give the method a value, a `data` value or an immutable class instance (U1, U12)");
+                        return;
+                    }
+
+                    if (limit is not null)
+                    {
+                        NotSupported(line, $"{limit}, crossing into the actor `{actor.Name}` through {method} (U1, U12)");
+                        return;
+                    }
+                }
+
+                var result = CrossingOf(m.ReturnType);
+                if (result.Raw is not null)
+                {
+                    Report(ErrorIds.PointerCrosses, line, $"`{actor.Name}` implements `{face.Name}`, whose method `{m.Name}` gives {Types.A(m.ReturnType)}, which reaches {result.Raw}, and no pointer or view crosses back to the caller (U1, U12, R19)");
+                    return;
+                }
+
+                if (result.Kind != ActorCrossing.Crosses)
+                {
+                    Report(ErrorIds.SendNeedsWord, line, $"`{actor.Name}` implements `{face.Name}`, whose method `{m.Name}` gives {Types.A(m.ReturnType)}, which reaches {result.Why}, and no word can stand at a result to make it cross back to the caller: give a value, a `data` value or an immutable class instance (U1, U12)");
+                    return;
+                }
+
+                if (result.Limit is not null)
+                {
+                    NotSupported(line, $"{result.Limit}, crossing out of the actor `{actor.Name}` as the result of {method} (U1, U12)");
+                    return;
+                }
             }
         }
     }
@@ -928,7 +1016,10 @@ public sealed partial class Checker
 
         if (call.Kind != CallKind.ActorSend)
         {
-            Report(ErrorIds.Syntax, s.Line, "`send` stands before a call of an actor's method, `send c.Add(1)` (U6, U14)");
+            // U1: a call through an interface waits whatever the value holds (#519, comment 7211586386, I2 (a), assumed), and the text names it
+            Report(ErrorIds.Syntax, s.Line, call.Function?.Interface is { } face
+                ? $"`send` stands before a call of an actor's method, `send c.Add(1)`, and `{face.Name}.{call.Function.Name}` is a call through an interface, which waits whatever the value holds (U1, U6, U14)"
+                : "`send` stands before a call of an actor's method, `send c.Add(1)` (U6, U14)");
             return;
         }
 

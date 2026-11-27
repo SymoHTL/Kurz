@@ -727,6 +727,11 @@ public static class Types
             return ic.Symbol.Implements(face.Symbol); // K6: an instance of a class that implements the interface where it is required
         }
 
+        if (from is ActorType ia && to is InterfaceType actorFace)
+        {
+            return ia.Symbol.Implements(actorFace.Symbol); // U1: an actor's reference where an interface it implements is required, whose calls are messages (I1 (a) of #519, comment 7211586386, assumed)
+        }
+
         if (from is TypeParameterType limited && to is InterfaceType limit)
         {
             // T19: a value of a type parameter where an interface among its limits is required, as C# converts it; not one that a type

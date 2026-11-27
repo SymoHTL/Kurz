@@ -37,7 +37,21 @@ instance, mutable or not, lives in one actor's heap (K18), and an immutable
 `static` field of such a type is reached from every actor, so that one of an actor shares nothing
 more, as a Rust `static` that is `Sync` stands)*. How a generic
 actor's messages are built, a value of a type parameter's type among a message's arguments and its
-result included, and a call through an interface as a message stand open (§14).
+result included, stands open (§14).
+
+An actor's reference is a value of every interface the actor names, declared before or after it,
+and a call through the interface on such a value is a message the actor runs in turn, a call that
+waits, with the bound its method declares (U36) and its crash and deadline at the line of that call
+(U20), and `send` before it is `syntax`, its text naming the interface's method (U6); a method of such an interface takes no `mut` parameter, `mut-in-message`, and a parameter or
+a result that does not cross into an actor with no word is `send-needs-word` (U9, U12), each at the
+line that names the interface, since no word stands at a call through it, and a method of it the
+actor lacks is `missing-member`, as a class's is (K7); `==` and a key of the interface's type over
+such a value are those of the reference, which equals no class instance, and an arm of the actor's
+type in a `match` over the interface takes the values that hold its references, as a class's arm
+takes its instances (C4); a call through the interface is an edge to every actor that implements it
+(U56); arguments after the interface are `not supported`, since an actor has no base constructor to
+take them (§6) *(assumed: #519, comment 7211586386, I1 to I4, the leans of a round put to the owner
+and not answered when this was written)*.
 
 The stack's clause is `stack` and a literal of bytes, `kb`, `mb` or `gb` (L14), `actor Parser stack 8mb
 { ... }`: it sets the size of the stack each message of the actor runs on, which is 2 MiB without it,
@@ -176,6 +190,181 @@ actor Store : Box {
 
 s = spawn Store()
 print(s.Get())
+```
+
+Case: [actors/interface-call.kz](../corpus/actors/interface-call.kz)
+```kurz
+// a call through the interface on an actor is a message the actor runs in turn; on a class it is a call
+interface Store {
+    long Get(string key)
+}
+
+actor Cache : Store {
+    mut long reads = 0
+
+    pub long Get(string key) {
+        reads = reads + key.Bytes.Count
+        return reads
+    }
+}
+
+class Fixed : Store {
+    pub long Get(string key) => 7
+}
+
+long Read(Store s) => s.Get("ab")
+
+c = spawn Cache()
+print(Read(c))
+print(Read(c))
+print(Read(Fixed()))
+```
+
+Case: [actors/interface-arm.kz](../corpus/actors/interface-arm.kz)
+```kurz
+// an actor's arm takes the values that hold its references; `==` and a key are those of the reference
+interface Store {
+    long Get(string key)
+}
+
+actor Cache : Store {
+    pub long Get(string key) => key.Bytes.Count
+}
+
+class Fixed : Store {
+    pub long Get(string key) => 7
+}
+
+string Kind(Store | int s) => match s {
+    Cache c => "cache {c.Get("abc")}"
+    Store o => "store {o.Get("a")}"
+    int n => "int {n}"
+}
+
+a = spawn Cache()
+b = spawn Cache()
+print(Kind(a))
+print(Kind(Fixed()))
+print(Kind(3))
+
+mut Map<Store, string> names = Map<Store, string>()
+names[a] = "first"
+names[b] = "second"
+names[a] = "again"
+print(names.Count)
+print(names[a])
+print(names[b])
+```
+
+Case: [actors/interface-crash.kz](../corpus/actors/interface-crash.kz)
+```kurz
+interface Divider {
+    int Div(int a, int b)
+}
+
+actor Calc : Divider {
+    pub int Div(int a, int b) => a / b
+}
+
+int Use(Divider d, int b) => d.Div(10, b)
+
+c = spawn Calc() on crash stop
+print(Use(c, 2))
+print(Use(c, 0))
+```
+
+Case: [actors/interface-within.kz](../corpus/actors/interface-within.kz)
+```kurz
+// the bound a method declares holds a call through the interface too
+interface Napping {
+    int Nap(duration d)
+}
+
+actor Napper : Napping {
+    pub int Nap(duration d) within 100ms {
+        Environment.Sleep(d)
+        return 1
+    }
+}
+
+int Use(Napping n, duration d) => n.Nap(d)
+
+a = spawn Napper()
+print(Use(a, 1ms))
+print(Use(a, 1s))
+```
+
+Case: [actors/interface-crossing.kz](../corpus/actors/interface-crossing.kz)
+```kurz
+class Bag(mut int N)
+
+interface Filler {
+    void Fill(Bag b)
+}
+
+actor Worker : Filler {
+    pub void Fill(Bag b) {
+        print(b.N)
+    }
+}
+```
+
+Case: [actors/interface-mut-parameter.kz](../corpus/actors/interface-mut-parameter.kz)
+```kurz
+interface Taker {
+    void Take(mut int n)
+}
+
+actor T : Taker {
+    pub void Take(mut int n) {
+        n = 1
+    }
+}
+```
+
+Case: [actors/interface-missing-method.kz](../corpus/actors/interface-missing-method.kz)
+```kurz
+interface Store {
+    long Get(string key)
+}
+
+actor Cache : Store {
+    pub long Count() => 0
+}
+```
+
+Case: [actors/interface-send.kz](../corpus/actors/interface-send.kz)
+```kurz
+// every call through an interface waits, so `send` stands before none
+interface Logger {
+    void Note(string s)
+}
+
+actor Sink : Logger {
+    pub void Note(string s) {
+        print(s)
+    }
+}
+
+Logger l = spawn Sink()
+send l.Note("a")
+```
+
+Case: [actors/interface-call-loop.kz](../corpus/actors/interface-call-loop.kz)
+```kurz
+// a call through an interface waits on every actor that implements it
+interface Pinger {
+    int Ping()
+}
+
+actor A : Pinger {
+    pub int Ping() => 1
+
+    pub int Go() {
+        Pinger p = spawn A()
+        return p.Ping()
+    }
+}
 ```
 
 ### U2 (decided, §6) `spawn`
@@ -3813,6 +4002,8 @@ Main() else {
 }
 ```
 
+Case: [actors/interface-crash.kz](../corpus/actors/interface-crash.kz)
+
 ### U21 (decided, §6) The inbox is kept, and the crashed instance's heap goes
 
 A crashed actor's inbox is kept and its new instance serves it, in its order, the crashing message
@@ -6429,6 +6620,8 @@ within 100ms {
 print(t.Ticks())
 ```
 
+Case: [actors/interface-within.kz](../corpus/actors/interface-within.kz)
+
 ### U37 (decided, §6) The deadline of the chain
 
 The chain ID carries a deadline, the one of the call at the chain's root: a call made inside the chain gets the time left, a call
@@ -8155,6 +8348,8 @@ Case: [actors/per-node-reentrant.kz](../corpus/actors/per-node-reentrant.kz)
 Case: [actors/per-node-reentrant-in-message.kz](../corpus/actors/per-node-reentrant-in-message.kz)
 
 Case: [actors/per-node-reentrant-nested.kz](../corpus/actors/per-node-reentrant-nested.kz)
+
+Case: [actors/interface-call-loop.kz](../corpus/actors/interface-call-loop.kz)
 
 ### U57 (decided, §6) A call back to the caller that waits
 

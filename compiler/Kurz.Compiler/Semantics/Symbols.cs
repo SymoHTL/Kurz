@@ -373,6 +373,9 @@ public sealed class InterfaceSymbol(string name, TypeDeclaration declaration)
 
     /// <summary>A10: the interface's only member is <c>string Text()</c>, so that as a limit (T19) every type that has a text meets it, without naming it.</summary>
     public bool TextOnly => Methods.Count == 1 && TextMethod is not null;
+
+    /// <summary>U1: an actor of the program implements the interface, so that a call through a value of it can be a message, which the emitter gives the call's place (I1 (a) of #519, comment 7211586386, assumed).</summary>
+    public bool ByActor { get; set; }
 }
 
 /// <summary>K10, K11, K16: a parameter of a class's primary constructor: the field it gives, own or the base's, the class whose declaration writes it, and that parameter.</summary>
