@@ -2314,7 +2314,12 @@ restart's pause, wakes the main thread, whose wait then raises `deadlock` (`Work
 arguments are copied into the receiver's heap at its turn, and a result into the waiter's heap as its wait returns (T17 1:
 `MessageQueued`, `Adopted`, `ResultHeap`, `ResultOwn`); an ended actor's first page, and a message's heap of its own, are
 freed once every thread passed a turn since (T16 2: `Deferred`, `Reclaimed`, `Reclaims`), the main thread holding its
-epoch around a `send` or a call of the top-level code (`Pinned`). `ThreadsTests` runs these on four worker threads: calls
+epoch around a `send` or a call of the top-level code (`Pinned`). A message on one thread pays the tests of the worker
+threads alone (the owner, 2026-11-26, issue 519, comment 7204486070, Q1): the main thread takes an actor with `RunOne`, which
+holds none of them, and a worker with `RunTake`; the emitter marks the forms that only the worker threads reach, which the
+path of one thread calls after a test, `noinline` and `cold` (`Emitter.WorkerForms`), and the helpers of that path that the
+worker threads call too `alwaysinline` (`Emitter.InLine`), as LLVM put each into its callers while the build had no worker
+threads, which `ThreadsTests` reads in the IR of a release build. `ThreadsTests` runs these on four worker threads: calls
 and sends that cross strings and lists between heaps, the order of one sender's messages, a sleep, a `deadlock` and a
 start whose `eventfd` the system refuses. A crash, its escalation and its restart, the end of an actor and of its children
 and the decision of a block of `on crash` hold only the actors they touch (section 6, comment 7194874125, 1): the thread

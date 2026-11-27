@@ -57,7 +57,7 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("export KURZ_THREADS=1; ")]
     [InlineData("export KURZ_THREADS=4; ")]
     [InlineData("export KURZ_THREADS=007; ")] // digits alone, zeros in front among them
-    [InlineData("")] // not set: the cores the process may use
+    [InlineData("")] // not set: the cores are read (`Cores`), and every actor runs on the main thread (`workersAsked`)
     public void A_KURZ_THREADS_that_is_a_whole_number_above_0_or_none_starts_the_program(string setup)
     {
         if (Ran(Spawns, $"threads-ok-{Math.Abs(setup.GetHashCode(StringComparison.Ordinal))}", setup) is { } run)
@@ -550,6 +550,72 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Equal((0, ""), (run.Code, run.Error));
             Assert.Equal(["a", "b", "2"], run.Output);
         }
+    }
+
+    /// <summary>
+    /// U35: the path of a message on one thread pays the tests of the worker threads alone (the owner, 2026-11-26, #519, comment
+    /// 7204486070, Q1): the emitter marks the forms only the worker threads reach <c>noinline</c> and <c>cold</c>
+    /// (<c>Emitter.WorkerForms</c>), and the helpers of that path that the worker threads call too <c>alwaysinline</c>
+    /// (<c>Emitter.InLine</c>). A program of sends and a call to an actor, its IR optimised as a release build optimises it, calls
+    /// none of the helpers, which stayed calls without the mark, and still calls <c>RootSlept</c>, which its one caller took in
+    /// without its mark (LLVM writes a name without its quotes where it needs none).
+    /// </summary>
+    [Fact]
+    public void A_build_of_one_thread_takes_the_helpers_of_a_message_into_their_callers_and_keeps_the_forms_of_the_worker_threads_calls()
+    {
+        const string text = """
+            actor Counter {
+                mut long n = 0
+
+                pub void Add(long x) {
+                    n = n + x
+                }
+
+                pub long Get() => n
+            }
+
+            c = spawn Counter()
+            mut long i = 0
+            while i < 1000 {
+                send c.Add(1)
+                i = i + 1
+            }
+
+            print(c.Get())
+
+            """;
+        var program = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: false).Program!;
+        var defines = program.Ir.Split('\n').Where(l => l.StartsWith("define internal ", StringComparison.Ordinal)).ToList();
+        foreach (var form in new[] { "RootSlept", "QueueLocal", "QueueHeld", "Answered", "Deferred", "PinnedHeld" })
+        {
+            var define = defines.Single(l => l.Contains($"@\"rt.common.{form}.", StringComparison.Ordinal));
+            Assert.Contains(" noinline", define, StringComparison.Ordinal);
+            Assert.Contains(" cold", define, StringComparison.Ordinal);
+        }
+
+        var directory = Path.Combine(toolchain.Directory, "threads-one-path");
+        Directory.CreateDirectory(directory);
+        var input = Path.Combine(directory, "program.ll");
+        var output = Path.Combine(directory, "optimised.ll");
+        File.WriteAllText(input, program.Ir);
+        List<string> arguments = ["-O2", "-S", "-emit-llvm", input, "-o", output];
+        if (program.CpuFlag is { } cpu)
+        {
+            arguments.Add(cpu);
+        }
+
+        var (code, _, error) = Processes.Capture(toolchain.Clang.Path, arguments, null, TimeSpan.FromMinutes(2));
+        Assert.True(code == 0, error);
+        var optimised = File.ReadAllLines(output);
+        static int Calls(IEnumerable<string> lines, string name) =>
+            lines.Count(l => l.Contains("call ", StringComparison.Ordinal)
+                && (l.Contains($"@\"rt.common.{name}.", StringComparison.Ordinal) || l.Contains($"@rt.common.{name}.", StringComparison.Ordinal)));
+        foreach (var helper in new[] { "Fire", "RootTaken", "Give", "Replied" })
+        {
+            Assert.True(Calls(optimised, helper) == 0, $"`{helper}` is a call");
+        }
+
+        Assert.True(Calls(optimised, "RootSlept") >= 1, "`RootSlept` is put into its caller");
     }
 
     /// <summary>

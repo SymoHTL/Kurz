@@ -319,7 +319,7 @@ pub void EventDrain(long fd) {
 pub void BlockingWaiter(extern "C" (byte*) => long wait, extern "C" () => int offloads) {
 }
 
-pub void ManyWaiter(extern "C" (int*, int, long) => int wait) {
+pub void ManyWaiter(extern "C" (int*, int, long, byte*) => int wait) {
 }
 
 pub long PoolEvent() => -4099
@@ -333,6 +333,9 @@ pub byte* PoolDone() => null
 pub long PoolHeld() => -1
 
 pub void JobDropped(byte* job) {
+}
+
+pub void ChildDropped(byte* record) {
 }
 
 // The bound of a call that waits where no `within` names another, 5 seconds in nanoseconds (U36), the value

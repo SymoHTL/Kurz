@@ -5666,11 +5666,19 @@ void Pinned() {
     raw {
         byte* record = threadRecord
         if record != null && *Ptr<long>(record + 96) < 0 {
-            AtomicLong.FromPtr(Ptr<long>(record + 88)).Store(AtomicLong.FromPtr(Ptr<long>(scheduler)).Load(MemoryOrder.Acquire), MemoryOrder.SeqCst)
-            Fence(MemoryOrder.SeqCst)
-            WorldEntered(record)
-            RootEnded()
+            PinnedHeld(record)
         }
+    }
+}
+
+// The pin of `Pinned` on the main thread with worker threads, whose record is `record`, a call of its own, so that `Pinned` stays a
+// test where a build of one thread reaches it (`Emitter.WorkerForms`).
+void PinnedHeld(byte* record) {
+    raw {
+        AtomicLong.FromPtr(Ptr<long>(record + 88)).Store(AtomicLong.FromPtr(Ptr<long>(scheduler)).Load(MemoryOrder.Acquire), MemoryOrder.SeqCst)
+        Fence(MemoryOrder.SeqCst)
+        WorldEntered(record)
+        RootEnded()
     }
 }
 
@@ -6919,14 +6927,15 @@ extern "C" int SocketWaited(int fd, int events, long nanoseconds) {
 // `count` `struct pollfd`s of `poll` at `pollfds` whose descriptor is not below 0 registered for its events with a block shaped as
 // `SocketWaited`'s, whose word its event sets (`Polled`), at 16 the block `holder` that holds the waits, at 24 the descriptor and at
 // 40 the mark -3, so that its event sets the word of `holder` too (`Ended`); `holder` shaped as `SocketWaited`'s block, with the
-// deadline `nanoseconds` from now, at 40 the mark -2, so that a fall takes each wait out (`Fall`, `ManyUnwait`), at 48 the waits and
-// at 56 their count. Inside a message the activation parks until the first event or the deadline, as a call on a socket does, and the
+// deadline `nanoseconds` from now, at 40 the mark -2, so that a fall takes each wait out (`Fall`, `ManyUnwait`), at 48 the waits, at
+// 56 their count and at 64 `dropped`, the room of the call of `Drive`, which a fall gives back (`sys.ChildDropped`). Inside a
+// message the activation parks until the first event or the deadline, as a call on a socket does, and the
 // calls of its chain are let in above it (U17); the top-level code runs what its wait on a call runs (`RootLoop`). Each wait whose
 // event came gives back at 6 of its `struct pollfd` the events it waited for, and the others are taken out of their lists
 // (`Unwait`), so that no thread of the pool waits for a child, as Go's `os/exec` reads a child's pipes through its netpoller: the count
 // of descriptors whose event came, 0 where the deadline passed first, or the failure of the poller, each wait registered before it
 // taken out again where the poller refuses one.
-extern "C" int ManyWaited(int* pollfds, int count, long nanoseconds) {
+extern "C" int ManyWaited(int* pollfds, int count, long nanoseconds, byte* dropped) {
     long now = PauseClock()
     mut long deadline = Never()
     if nanoseconds < Never() - now {
@@ -6937,7 +6946,7 @@ extern "C" int ManyWaited(int* pollfds, int count, long nanoseconds) {
     sys.Entered()
     raw {
         byte* header = running
-        byte* holder = Allocate(64)
+        byte* holder = Allocate(72)
         byte* each = Allocate(long(count) * 64)
         *Ptr<long>(holder) = 0
         *Ptr<byte*>(holder + 8) = header
@@ -6947,6 +6956,7 @@ extern "C" int ManyWaited(int* pollfds, int count, long nanoseconds) {
         *Ptr<long>(holder + 40) = -2
         *Ptr<byte*>(holder + 48) = each
         *Ptr<long>(holder + 56) = long(count)
+        *Ptr<byte*>(holder + 64) = dropped
         byte* at = Ptr<byte>(pollfds)
         mut long i = 0
         while i < long(count) {
@@ -7021,7 +7031,7 @@ extern "C" int ManyWaited(int* pollfds, int count, long nanoseconds) {
 
         ManyUnwait(holder)
         std.Free(each, long(count) * 64)
-        std.Free(holder, 64)
+        std.Free(holder, 72)
     }
 
     sys.Left()
@@ -7054,17 +7064,79 @@ thread static mut long handed = 0
 // before the first job.
 thread static mut long poolEvent = -1
 
+// The waits on the pool of threads for blocking calls whose call has not read its end (`BlockingWaited`), linked through their
+// blocks, at 64 the one before and at 72 the one after, so that the child of a `fork`, which has no thread of the pool, ends them
+// (`PoolLost`); a wait leaves them where its call goes on and where its actor falls (`Fall`).
+thread static mut byte* handedWaits = null
+
+// The wait `block` taken out of `handedWaits`, where it stands among them.
+void HandedOut(byte* block) {
+    raw {
+        byte* before = *Ptr<byte*>(block + 64)
+        byte* after = *Ptr<byte*>(block + 72)
+        if before == null && handedWaits != block {
+            return
+        }
+
+        if before != null {
+            *Ptr<byte*>(before + 72) = after
+        } else {
+            handedWaits = after
+        }
+
+        if after != null {
+            *Ptr<byte*>(after + 64) = before
+        }
+
+        *Ptr<byte*>(block + 64) = null
+        *Ptr<byte*>(block + 72) = null
+    }
+}
+
+// The waits on the pool of threads for blocking calls in the child of a `fork`, which drops the pool and has none of its threads
+// (`sys.Forked`), found where jobs are handed while the pool's `eventfd` is not the one the scheduler armed: each wait whose end the
+// scheduler had not taken ended with -125, `ECANCELED`, put as its job's result too, so that its call gets `Other` with the number
+// 125 (S1) and gives its job back, and no wait waits without end for a job no thread makes *(assumed: the number, which no answer
+// names)*; the count of jobs handed set to 0 and the `eventfd` to none, so that the child's
+// first call makes a pool of its own (`sys.PoolEvent`). A job the parent's pool ended before the `fork` whose end the scheduler had
+// not taken is ended so too, and a descriptor its opening gave stays open in the child (inferred).
+void PoolLost() {
+    raw {
+        if handed == 0 || poolEvent == sys.PoolHeld() {
+            return
+        }
+
+        mut byte* at = handedWaits
+        while at != null {
+            byte* next = *Ptr<byte*>(at + 72)
+            *Ptr<byte*>(at + 64) = null
+            *Ptr<byte*>(at + 72) = null
+            if *Ptr<long>(at) == 0 {
+                *Ptr<long>(*Ptr<byte*>(at + 48) + 16) = -125
+                Ended(at, -125)
+            }
+
+            at = next
+        }
+
+        handedWaits = null
+        handed = 0
+        poolEvent = -1
+    }
+}
+
 // The wait of a call on a file or a pipe handed to the pool of threads for blocking calls (`sys.BlockingWaiter`; issue 661; section
 // 12, the owner, 2026-10-30, "Readiness I/O, as Tokio"; S10): the pool's `eventfd` armed in the poller (`PoolArm`), and the
 // job queued (`sys.Submit`) with a block shaped as `SocketWaited`'s, with no deadline, at 40 the mark -1, so that a fall drops the
-// job (`Fall`), and at 48 the job, whose block at 24 it is. Inside a message the activation parks until the job is done, and the
+// job (`Fall`), at 48 the job, whose block at 24 it is, and at 64 and 72 its links among the waits on the pool (`handedWaits`),
+// whose jobs the child of a `fork` drops first (`PoolLost`). Inside a message the activation parks until the job is done, and the
 // calls of its chain are let in above it (U17); the top-level code runs what its wait on a call runs (`RootLoop`); and the wait
 // counts among the registrations of the poller (`polled`), so that it raises no `deadlock` (U18). On worker threads the job names the
 // box of the thread's record at 56, which the pool's thread pushes it to and wakes the thread through (`sys.PoolThread`, `DoneDrain`),
-// and no `eventfd` of the pool is armed (section 6, T88). The job's result, or the failure
-// of the pool or of the poller; a thread the system refuses while no thread of the pool runs ends the process with
-// `error: thread-refused (1)` on standard error and the exit code 1, as U35 ends it at a worker thread the system refuses (issue
-// 661, Q2, *(assumed)*).
+// and no `eventfd` of the pool is armed, nor are the waits on the pool ended by `PoolLost` (section 6, T88). The job's result, or the
+// failure of the pool or of the poller, or the failure that ended the wait (`PoolLost`); a thread the system refuses while no thread
+// of the pool runs ends the process with `error: thread-refused (1)` on standard error and the exit code 1, as U35 ends it at a
+// worker thread the system refuses (issue 661, the product pass, comment 7182792402, Q2, kept as built, comment 7189038013).
 extern "C" long BlockingWaited(byte* job) {
     mut long result = 0
     sys.Entered()
@@ -7072,6 +7144,7 @@ extern "C" long BlockingWaited(byte* job) {
         if threadRecord != null {
             *Ptr<byte*>(job + 56) = threadRecord + 48
         } else {
+            PoolLost()
             long event = sys.PoolEvent()
             if event < 0 {
                 sys.Left()
@@ -7087,7 +7160,7 @@ extern "C" long BlockingWaited(byte* job) {
             poolEvent = event
         }
 
-        byte* block = Allocate(64)
+        byte* block = Allocate(80)
         byte* header = running
         *Ptr<long>(block) = 0
         *Ptr<byte*>(block + 8) = header
@@ -7097,10 +7170,12 @@ extern "C" long BlockingWaited(byte* job) {
         *Ptr<long>(block + 40) = -1
         *Ptr<byte*>(block + 48) = job
         *Ptr<long>(block + 56) = 0
+        *Ptr<byte*>(block + 64) = null
+        *Ptr<byte*>(block + 72) = null
         *Ptr<byte*>(job + 24) = block
         long submitted = sys.Submit(job)
         if submitted < 0 {
-            std.Free(block, 64)
+            std.Free(block, 80)
             sys.Left()
             if submitted == -4101 {
                 WriteError("error: thread-refused (1)\n")
@@ -7110,6 +7185,12 @@ extern "C" long BlockingWaited(byte* job) {
             return submitted
         }
 
+        if handedWaits != null {
+            *Ptr<byte*>(block + 72) = handedWaits
+            *Ptr<byte*>(handedWaits + 64) = block
+        }
+
+        handedWaits = block
         handed = handed + 1
         polled = polled + 1
         if header == null {
@@ -7129,8 +7210,9 @@ extern "C" long BlockingWaited(byte* job) {
         }
 
         polled = polled - 1
+        HandedOut(block)
         result = *Ptr<long>(job + 16)
-        std.Free(block, 64)
+        std.Free(block, 80)
     }
 
     sys.Left()
@@ -7160,7 +7242,8 @@ extern "C" int BlockingOffloads() {
 // The jobs of the pool of threads for blocking calls done since the last look (`sys.PoolDone`), at the event of the pool's
 // `eventfd` (`Polled`): each job's wait ended with 1 (`Ended`), whose call reads the job's result (`BlockingWaited`), or the job
 // given back where its actor fell while it ran (`Fall`); the `eventfd`'s registration is armed again while a job is handed
-// (`PoolArm`), since `EPOLLONESHOT` disarms it at each event.
+// (`PoolArm`), since `EPOLLONESHOT` disarms it at each event, and an arming the poller refuses leaves the jobs to the next look
+// (`Polled`).
 void PoolDrain() {
     raw {
         mut byte* done = sys.PoolDone()
@@ -7208,11 +7291,30 @@ long PoolArm(long event) {
 // `ScheduledIo` wakes the readers at a read's readiness and the writers at a write's; where the poller fails, every wait of every
 // descriptor ended with the failure (`Fail`), as each call's `IoError` of the system's kind and number (S1). The event of the pool's
 // `eventfd` takes the jobs done (`PoolDrain`) where that descriptor is the pool's still (`sys.PoolHeld`): the child of a `fork`
-// drops the pool, and a descriptor that takes its number there reaches its own waits. On worker threads the event of the thread's
-// own `eventfd` ends its wait, drains it, takes the jobs done that it handed (`DoneDrain`) and arms its registration again
-// (`WakeArmed`).
+// drops the pool, and a descriptor that takes its number there reaches its own waits, while the waits on the pool end first
+// (`PoolLost`). Where the registration of that `eventfd` could not be armed again while jobs are handed (`PoolDrain`), each look
+// takes the jobs done and tries the arming again, and the wait is held to 1 millisecond while it fails, so that no wait on the pool
+// waits without end and no call that ran loses its result; a look that took a job or ended a wait returns at once, so that what
+// it woke runs. On worker threads the event of the thread's own `eventfd` ends its wait, drains it, takes the jobs done that it
+// handed (`DoneDrain`) and arms its registration again (`WakeArmed`), and neither `PoolLost` nor the pool's `eventfd` is read.
 void Polled(long nanoseconds) {
+    mut long bound = nanoseconds
     raw {
+        if handed > 0 && threadRecord == null {
+            long before = handed
+            PoolLost()
+            if handed > 0 && *sys.PoolFlag() == 0 {
+                PoolDrain()
+                if *sys.PoolFlag() == 0 && bound > 1000000 {
+                    bound = 1000000
+                }
+            }
+
+            if handed != before {
+                return
+            }
+        }
+
         if readied == null {
             readied = AllocateOwn(1024)
         }
@@ -7222,7 +7324,7 @@ void Polled(long nanoseconds) {
             WorldOut(threadRecord)
         }
 
-        long count = sys.PollWait(nanoseconds, readied, 64, sys.EpollDataAt())
+        long count = sys.PollWait(bound, readied, 64, sys.EpollDataAt())
         if sleeps {
             WorldEntered(threadRecord)
         }
@@ -7644,9 +7746,10 @@ bool Runs(byte* state, byte* message) {
 // a child whose block of `on crash` waits, whose block runs after the supervisor's current message (U28), and the actor that the
 // reply of the top activation reaches, which `Enqueue` stored in it; null where the line ends: at a child whose block the
 // top-level code runs (U33), at a top activation that runs, whose reply is set or whose deadline passed, and at one that waits on
-// no call, a sleep (`Park`) or a wait in the poller (`SocketWaited`), whose block of 48 bytes at 360 is no reply, read only after
-// the word at 432, which names the message of a call's wait (`Answer`) and no message of those (U60; assumed: a sleep and a wait in
-// the poller wait on no actor, so that the line ends there). Each word is read once, the actor the reply reaches before the reply's
+// no call, a sleep (`Park`) or a wait in the poller (`SocketWaited`), whose block at 360 is no reply, the sleep's of 48 bytes and
+// the poller wait's of 64 (its link to the next wait of its descriptor at 48, its events at 56), read only after the word at
+// 432, which names the message of a call's wait (`Answer`) and no message of those (U60; assumed: a sleep and a wait in the
+// poller wait on no actor, so that the line ends there). Each word is read once, the actor the reply reaches before the reply's
 // word, so that on worker threads a reply its waiter's answer let go of meanwhile is read as set (`Looped`).
 byte* Onward(byte* callee) {
     raw {
@@ -7928,22 +8031,75 @@ void Deadlocked(string text, string file, int line) {
 // its turn (`LetGo`, in `Run` where it runs); a passed-over actor is let go at once and not queued again for
 // its own inbox. A message whose deadline passed at the scheduler's turn is dropped at its take, from the inbox
 // and from the side list, before the next is taken (`Dropped`; U37), and a top activation whose deadline
-// passed goes on (`Waited`).
+// passed goes on (`Waited`). This take is the one thread's, of the actor the seed draws in a run of `kurz test` that `shuffled`
+// marks (`DrawnTake`); the worker threads take an actor with `RunTake`, and no test of the worker threads stands on this path (the
+// owner, 2026-11-26, #519, comment 7204486070, Q1).
 void RunOne() {
     raw {
+        mut byte* state = null
         if shuffled {
-            RunTake(DrawnTake())
+            state = DrawnTake()
+        } else {
+            state = runFirst
+            runFirst = *Ptr<byte*>(state - 16)
+            if runFirst == null {
+                runLast = null
+            }
+
+            *Ptr<byte*>(state - 16) = null
+        }
+
+        if (StateWord(state).Load(MemoryOrder.Acquire) & 1) == 0 && *Ptr<int>(state - 88) == 3 {
+            std.HeapFree(state - 192)
             return
         }
 
-        byte* state = runFirst
-        runFirst = *Ptr<byte*>(state - 16)
-        if runFirst == null {
-            runLast = null
+        if !Claimed(state) {
+            return
         }
 
-        *Ptr<byte*>(state - 16) = null
-        RunTake(state)
+        int life = *Ptr<int>(state - 88)
+        if life == 3 {
+            LetGo(state, false)
+            return
+        }
+
+        Moved(state)
+        if life == 1 || life == 5 {
+            LetGo(state, false)
+            return
+        }
+
+        byte* top = *Ptr<byte*>(state - 8)
+        if top == null {
+            while *Ptr<byte*>(state - 32) != null {
+                byte* message = Taken(state - 32)
+                if *Ptr<long>(message + 40) > tick {
+                    Start(state, message, null, null)
+                    return
+                }
+
+                Dropped(message)
+            }
+        } else {
+            byte* reply = *Ptr<byte*>(top + 360)
+            while *Ptr<byte*>(top + 376) != null {
+                byte* message = Taken(top + 376)
+                if *Ptr<long>(message + 40) > tick {
+                    Start(state, message, top, null)
+                    return
+                }
+
+                Dropped(message)
+            }
+
+            if reply != null && (ReplyState(reply) != 0 || Waited(reply)) {
+                Run(state, top)
+                return
+            }
+        }
+
+        LetGo(state, false)
     }
 }
 
@@ -7992,13 +8148,14 @@ byte* DrawnTake() {
     }
 }
 
-// The take of the actor whose state is `state`, off the run queue (`RunOne`) or off a queue of a worker thread (`WorkerTurn`), as
-// `RunOne` has it; on worker threads an actor whose top activation parked on another thread is let go of at once, which puts it in
-// that thread's queue that nobody steals from (`LetGo`, `QueueHeld`; section 6, Q2 of comment 6946532526), and the record of an
-// ended one is freed by the one thread that sets its RECLAIMED bit (`Reclaims`, `RecordFreed`; T16); a signal at the front of its
-// inbox, the crash a child passed up (`Forwarded`), is taken before anything else, the crash of the actor (`Signaled`), and
-// dropped where the actor waits for its restart or for the decision of its block (`SignalsLeft`); the queues are moved again once the
-// reply of the top activation reads set, so that a signal pushed before the fall that set it is taken before that activation goes on.
+// The take of the actor whose state is `state` off a queue of a worker thread (`WorkerTurn`), as `RunOne` has it on one thread: an
+// actor whose top activation parked on another thread is let go of at once, which puts it in that thread's queue that nobody steals
+// from (`LetGo`, `QueueHeld`; section 6, Q2 of comment 6946532526), and the record of an ended one is freed by the one thread that
+// sets its RECLAIMED bit (`Reclaims`, `RecordFreed`; T16); a signal at the front of its inbox, the crash a child passed up
+// (`Forwarded`), is taken before anything else, the crash of the actor (`Signaled`), and dropped where the actor waits for its
+// restart or for the decision of its block (`SignalsLeft`); a message starts with its heap of its own adopted (`Adopted`); the queues
+// are moved again once the reply of the top activation reads set, so that a signal pushed before the fall that set it is taken before
+// that activation goes on.
 void RunTake(byte* state) {
     raw {
         if (StateWord(state).Load(MemoryOrder.Acquire) & 1) == 0 && *Ptr<int>(state - 88) == 3 && Reclaims(state, true) {
@@ -8017,7 +8174,7 @@ void RunTake(byte* state) {
         }
 
         byte* parked = *Ptr<byte*>(state - 8)
-        if parked != null && Threaded() && *Ptr<byte*>(parked + 272) != threadRecord {
+        if parked != null && *Ptr<byte*>(parked + 272) != threadRecord {
             LetGo(state, true)
             return
         }
@@ -8041,7 +8198,7 @@ void RunTake(byte* state) {
             while *Ptr<byte*>(state - 32) != null {
                 byte* message = Taken(state - 32)
                 if *Ptr<long>(message + 40) > tick {
-                    Start(state, message, null)
+                    Start(state, message, null, Adopted(state, message))
                     return
                 }
 
@@ -8052,7 +8209,7 @@ void RunTake(byte* state) {
             while *Ptr<byte*>(top + 376) != null {
                 byte* message = Taken(top + 376)
                 if *Ptr<long>(message + 40) > tick {
-                    Start(state, message, top)
+                    Start(state, message, top, Adopted(state, message))
                     return
                 }
 
@@ -8060,14 +8217,12 @@ void RunTake(byte* state) {
             }
 
             if reply != null && (ReplyState(reply) != 0 || Waited(reply)) {
-                if Threaded() {
-                    Moved(state)
-                    byte* first = *Ptr<byte*>(state - 32)
-                    if first != null && *Ptr<byte*>(first + 8) == SignalTable() {
-                        Taken(state - 32)
-                        Signaled(state, first)
-                        return
-                    }
+                Moved(state)
+                byte* first = *Ptr<byte*>(state - 32)
+                if first != null && *Ptr<byte*>(first + 8) == SignalTable() {
+                    Taken(state - 32)
+                    Signaled(state, first)
+                    return
                 }
 
                 Run(state, top)
@@ -8081,8 +8236,10 @@ void RunTake(byte* state) {
 
 // A new activation of the actor whose state is `state` for `message`, on a stack of the size the
 // actor asked for, above the activation `below`, null where the actor is idle, whose chain it takes and
-// whose side list it takes over, and its run from its first frame, `ActorStart`.
-void Start(byte* state, byte* message, byte* below) {
+// whose side list it takes over, and its run from its first frame, `ActorStart`; its header names the
+// message's heap of its own `own`, which `Run` lets go of at the activation's end, null on one thread and
+// for none, and the thread it runs on, null on one thread (`threadRecord`).
+void Start(byte* state, byte* message, byte* below, byte* own) {
     raw {
         byte* header = Held(*Ptr<long>(state - 48))
         *Ptr<byte*>(header + 320) = state
@@ -8107,11 +8264,8 @@ void Start(byte* state, byte* message, byte* below) {
         }
 
         *Ptr<byte*>(state - 8) = header
-        if Threaded() {
-            *Ptr<byte*>(header + 272) = threadRecord
-            *Ptr<byte*>(header + 264) = Adopted(state, message)
-        }
-
+        *Ptr<byte*>(header + 272) = threadRecord
+        *Ptr<byte*>(header + 264) = own
         sys.Enter(header, header, ActorStart)
         Run(state, header)
     }
@@ -8152,10 +8306,7 @@ void Run(byte* state, byte* header) {
                 *Ptr<byte*>(below + 384) = *Ptr<byte*>(header + 384)
             }
 
-            if Threaded() {
-                OwnLeft(*Ptr<byte*>(header + 264))
-            }
-
+            OwnLeft(*Ptr<byte*>(header + 264))
             Give(header)
             if below == null && Ending(state) {
                 EndActor(state)
@@ -8938,17 +9089,28 @@ void Fall(byte* state, byte* header, byte* kept) {
                 polled = polled - 1
             }
 
-            // a call handed to the pool of threads for blocking calls (`BlockingWaited`): its job dropped, which the pool's thread
-            // makes to its end in the job's own bytes and the scheduler gives back once it is done (`PoolDrain`)
+            // a call handed to the pool of threads for blocking calls (`BlockingWaited`): its wait taken out of `handedWaits` and its
+            // job dropped, which the pool's thread makes to its end in the job's own bytes and the scheduler gives back once it is
+            // done (`PoolDrain`), or given back here where the wait's word is set, the job's end taken before the fall
+            // (`PoolDrain`, `PoolLost`)
             if waited != null && *Ptr<byte*>(at + 432) == null && *Ptr<long>(waited + 40) == -1 {
-                *Ptr<byte*>(*Ptr<byte*>(waited + 48) + 24) = null
+                HandedOut(waited)
+                byte* job = *Ptr<byte*>(waited + 48)
+                if *Ptr<long>(waited) == 0 {
+                    *Ptr<byte*>(job + 24) = null
+                } else {
+                    sys.JobDropped(job)
+                }
+
                 polled = polled - 1
             }
 
             // the wait of `Drive` for its child (`ManyWaited`): each of its waits whose event did not come taken out of its
-            // descriptor's list (`ManyUnwait`), so that no event writes a block the fall frees with the heap
+            // descriptor's list (`ManyUnwait`), so that no event writes a block the fall frees with the heap, and then the call's
+            // pipes to the child, the descriptor of its process and its memory given back (`sys.ChildDropped`)
             if waited != null && *Ptr<byte*>(at + 432) == null && *Ptr<long>(waited + 40) == -2 {
                 ManyUnwait(waited)
+                sys.ChildDropped(*Ptr<byte*>(waited + 64))
                 polled = polled - 1
             }
 
@@ -9437,7 +9599,7 @@ void Restart(byte* state) {
         NewChain(message + 24)
         *Ptr<long>(message + 40) = Never()
         *Ptr<long>(message + 48) = 0
-        Start(state, message, null)
+        Start(state, message, null, null)
     }
 }
 

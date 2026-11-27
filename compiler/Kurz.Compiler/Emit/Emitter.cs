@@ -544,6 +544,31 @@ public sealed partial class Emitter
     /// </summary>
     private static readonly HashSet<string> OutOfLine = new(StringComparer.Ordinal) { "rt.common.SameBytes", "std.Allocate" };
 
+    /// <summary>
+    /// The functions of the runtime that only the worker threads reach (U35) and that a function on the path of a message on one
+    /// thread calls after a test of the worker threads, which the emitter marks <c>noinline</c> and <c>cold</c>: LLVM then keeps
+    /// each a call, lays the call out past the path of one thread and lets that path fall through the test, as C's
+    /// <c>__builtin_expect</c> and Rust's <c>#[cold]</c> mark a path that is not taken, so that a build of one thread pays the
+    /// test alone (the owner, 2026-11-26, #519, comment 7204486070, Q1); without the mark each message on one thread was 1 to 2 ns
+    /// dearer. No program sees the mark: it names no function of a program.
+    /// </summary>
+    private static readonly HashSet<string> WorkerForms = new(StringComparer.Ordinal)
+    {
+        "rt.common.RootSlept", "rt.common.QueueLocal", "rt.common.QueueHeld", "rt.common.Answered", "rt.common.Deferred", "rt.common.PinnedHeld",
+    };
+
+    /// <summary>
+    /// The functions of the runtime on the path of a message on one thread that the emitter marks <c>alwaysinline</c>, which LLVM
+    /// put into their callers on that path while the build had no worker threads (U35): <c>rt.common.Fire</c> and
+    /// <c>rt.common.RootTaken</c>, called at every turn of the top-level code's wait, whose one caller that wait was, LLVM inlining a
+    /// function into its one caller, and which the worker threads call too (<c>WorkerTurn</c>, <c>RootSlept</c>); <c>rt.common.Give</c>
+    /// at the end of each activation and <c>rt.common.Replied</c> at each answer, which the forms of the worker threads in them, and
+    /// a call more of <c>Give</c> (<c>Signaled</c>), made too big to be inlined. Kept calls, they made each message on one thread
+    /// 2 to 3 ns dearer (the owner, 2026-11-26, #519, comment 7204486070, Q1). No program sees the mark: it names no function of a
+    /// program.
+    /// </summary>
+    private static readonly HashSet<string> InLine = new(StringComparer.Ordinal) { "rt.common.Fire", "rt.common.RootTaken", "rt.common.Give", "rt.common.Replied" };
+
     private void EmitFunctionCore(FunctionSymbol f, FunctionDeclaration d, IReadOnlyDictionary<TypeParameterSymbol, KurzType> instanceMap, string name)
     {
         if ((d.Modifiers & Modifiers.Naked) != 0)
@@ -568,7 +593,12 @@ public sealed partial class Emitter
             parameters.Add(p.Mut ? $"ptr %p{i}" : $"{ParameterType(f, type)} %p{i}");
         }
 
-        string[] attributes = unit.Runtime && OutOfLine.Contains($"{unit.Prefix}.{f.Name}") ? [.. FeatureAttributes(features), "noinline"] : FeatureAttributes(features);
+        var qualified = $"{unit.Prefix}.{f.Name}";
+        string[] attributes = !unit.Runtime ? FeatureAttributes(features)
+            : WorkerForms.Contains(qualified) ? [.. FeatureAttributes(features), "noinline", "cold"]
+            : OutOfLine.Contains(qualified) ? [.. FeatureAttributes(features), "noinline"]
+            : InLine.Contains(qualified) ? [.. FeatureAttributes(features), "alwaysinline"]
+            : FeatureAttributes(features);
         Begin(new IrFunction($"internal {ParameterType(f, result)} {name}({string.Join(", ", parameters)})", attributes), instanceMap, result);
         Trace(unit.Prefix.StartsWith("rt.", StringComparison.Ordinal) ? Symbol(name) : TraceName(f, instanceMap), Symbol(name), d.Line);
         if (f.Owner is { } of && !f.IsStatic)

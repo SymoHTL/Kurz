@@ -657,9 +657,11 @@ and an offset, which each `advance` adds to and which is 0 at each test's start;
 passed fire at the scheduler's turn after the `advance`, in the order of their deadlines, and the test's
 actor waits at the statement for that turn, so that the actors they woke run before it goes on, each to
 the wait that parks it again, and timers of one deadline fire in the order they were set; an `advance`
-that would move the wall clock or the monotonic clock to within a year of the end of a `long`'s range is
-`overflow` at the statement, the offset left as it was and nothing parked (§11, assumed there). The build of `advance` is Linux's, `not supported` elsewhere, as
-`instant.Now` is (§11, assumed there).
+that would move the wall clock or the monotonic clock past the greatest `long` less a year of 365 days,
+31536000000000000 nanoseconds, landing on that point allowed, is `overflow` at the statement, the offset
+left as it was and nothing parked, while a negative `advance` is `advance-negative` on its own, so that
+no lower end is kept (§11, assumed there). The build of `advance` is Linux's, `not supported` elsewhere,
+as `instant.Now` is (§11, assumed there).
 
 Case: [tests/advance-sleep.kz](../corpus/tests/advance-sleep.kz)
 ```kurz
@@ -795,7 +797,7 @@ test "a lambda waits an hour" {
 Case: [tests/advance-within.kz](../corpus/tests/advance-within.kz)
 ```kurz
 // a block of `within` is a block nested in the test, so that `advance` stands among the test's own statements there, and the clock
-// an actor reads after it is an hour on
+// an actor reads after it is an hour on; the block's bound of two hours is longer than the `advance`, which passes no deadline of it
 actor Clock {
     pub instant Now() => instant.Now
 }
@@ -803,7 +805,7 @@ actor Clock {
 test "an advance inside within" {
     c = spawn Clock()
     before = c.Now()
-    within 1s {
+    within 2h {
         advance 1h
     }
 
