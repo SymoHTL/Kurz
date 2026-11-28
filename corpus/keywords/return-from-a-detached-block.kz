@@ -1,0 +1,23 @@
+// expect: error keyword-jump at 17
+// allow: keywords
+// rules: J6
+
+void Run(() => void f) {
+    f()
+}
+
+keyword apart <detached block job> {
+    Run(() => {
+        job
+    })
+}
+
+int F() {
+    apart {
+        return 1
+    }
+
+    return 0
+}
+
+print(F())

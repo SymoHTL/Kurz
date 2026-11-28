@@ -8869,12 +8869,13 @@ public sealed class CheckerTests
 
     [Theory]
     [InlineData(13, "U46", "x = attempt {\n    print(1)\n}\n")]
-    [InlineData(13, "section 6, U28", "x = retry {\n    print(1)\n}\n")]
+    [InlineData(13, "section 9, J14", "x = retry {\n    print(1)\n}\n")]
+    [InlineData(13, "section 9, J14", "retry 3 as n {\n    print(n)\n} else {\n    print(0)\n}\n")]
     [InlineData(13, "U30", "c = spawn Counter() on crash (c) {\n    stop\n}\nprint(c.Get())\n")]
     [InlineData(14, "U4, F11", "c = spawn Counter()\nf = c.Get\nprint(f())\n")]
     public void A_message_or_a_spawn_where_the_build_makes_none_is_not_supported(int line, string rule, string program)
     {
-        // U46: `attempt { ... }` in a file read without `std/`, which declares `Crashed`; section 6: `retry { ... }`, which U28 leaves out;
+        // U46: `attempt { ... }` in a file read without `std/`, which declares `Crashed`; section 9: `std/`'s `retry`, with no count and with one, which this build's `std/` does not declare (J14; Q19 (a) of comment 7229762585);
         // U30: the block of `on crash` in a file read without `std/`, which declares `Crashed`; U4 with F11: a method of an actor named without a call
         NotSupportedAt(line, rule, ActorCounter + program);
     }
@@ -9347,13 +9348,13 @@ public sealed class CheckerTests
     public void What_this_build_does_not_bring_into_or_out_of_the_child_of_an_attempt_is_not_supported()
     {
         // U47: `this`, a method or a property of the class whose method runs the `attempt`, and a `move` of what it takes; U46: a block whose
-        // value is a union; section 6: `retry { ... }`, whose call's id is open (section 14), as on a file read without std
+        // value is a union; section 9: `std/`'s `retry`, whose attempts' call id is open (section 14), as on a file read without std
         const string actor = "actor A {\n    pub int Get() => 1\n\n    pub int Go() {\n        v = attempt { @ } else {\n            Crashed c => 0\n        }\n\n        return v\n    }\n}\n\na = spawn A()\nprint(a.Go())\n";
         NotSupportedSeeingStdAt(5, "U47", actor.Replace("@", "this.Get()", StringComparison.Ordinal));
         NotSupportedSeeingStdAt(5, "U47", actor.Replace("@", "Get()", StringComparison.Ordinal));
         NotSupportedSeeingStdAt(6, "U47", "class Box(mut int N)\n\nint Take(move Box x) => x.N\n\nb = Box(1)\nv = attempt { Take(move b) } else {\n    Crashed c => 0\n}\nprint(v)\n");
         NotSupportedSeeingStdAt(3, "U46", "int? Maybe() => null\n\nv = attempt { Maybe() } else {\n    Crashed c => 0\n}\nprint(v)\n");
-        NotSupportedSeeingStdAt(1, "section 6, U28", "v = retry { 1 }\n");
+        NotSupportedSeeingStdAt(1, "section 9, J14", "v = retry { 1 }\n");
 
         // the positive control: the same actor whose block names a value of its own
         Assert.Empty(ErrorsSeeingStd(actor.Replace("@", "1", StringComparison.Ordinal)));

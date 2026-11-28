@@ -1,0 +1,23 @@
+// expect: output
+// | 0
+// | 1
+// | x
+// | x
+// allow: keywords
+// rules: J7
+
+keyword each <int count> [as <name index>] <block body> {
+    mut index = 0
+    while index < count {
+        body
+        index = index + 1
+    }
+}
+
+each 2 as n {
+    print(n)
+}
+
+each 2 {
+    print("x")
+}

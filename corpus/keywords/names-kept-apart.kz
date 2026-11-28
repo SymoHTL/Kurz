@@ -1,0 +1,32 @@
+// expect: output
+// | 102
+// | size 2 2
+// | 7
+// allow: keywords
+// rules: J7
+
+keyword repeat <int times> <block body> {
+    mut i = 0
+    while i < times {
+        body
+        i = i + 1
+    }
+}
+
+data P(int size)
+
+keyword show <P p> {
+    size = p.size + 1
+    q = p with { size = size }
+    print("size {size} {q.size}")
+}
+
+mut i = 100
+repeat 2 {
+    i = i + 1
+}
+print(i)
+
+size = 7
+show P(1)
+print(size)

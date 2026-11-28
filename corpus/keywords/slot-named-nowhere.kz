@@ -1,0 +1,8 @@
+// expect: error syntax at 5
+// allow: keywords
+// rules: J2
+
+keyword twice <block body> <int times> {
+    body
+    body
+}

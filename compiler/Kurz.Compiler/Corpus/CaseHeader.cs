@@ -26,7 +26,7 @@ public enum BuildKind
 /// <c>// expect: throws &lt;id&gt; at &lt;line&gt;</c>; then <c>// | </c> lines with what the program
 /// prints (not for an error); then an optional <c>// build: test</c> or <c>// build: release</c>;
 /// then an optional <c>// command: test</c>, a case that runs its program's tests under <c>kurz test</c> (Y2) in place of the program;
-/// then an optional <c>// allow: raw</c>, <c>// allow: native</c> or <c>// allow: raw native</c>, the
+/// then an optional <c>// allow: raw</c>, <c>// allow: native</c> or <c>// allow: raw native</c>, with <c>keywords</c> after them or alone (J10), the
 /// grants of a <c>project.kz</c> that the case's file takes; then an optional <c>// system: linux</c> or
 /// <c>// system: windows</c>, the one system the case runs on; then an optional <c>// threads: 1</c>, a case whose output follows one
 /// thread's order (U35), which the build gives every program, since it runs every actor on its one thread (compiler/README.md); then
@@ -63,7 +63,7 @@ public sealed partial record CaseHeader(
     [GeneratedRegex(@"^// build: (test|release)$")]
     private static partial Regex BuildLine();
 
-    [GeneratedRegex(@"^// allow: (raw(?: native)?|native)$")]
+    [GeneratedRegex(@"^// allow: (raw(?: native)?(?: keywords)?|native(?: keywords)?|keywords)$")]
     private static partial Regex AllowLine();
 
     [GeneratedRegex(@"^// system: (linux|windows)$")]
@@ -137,7 +137,7 @@ public sealed partial record CaseHeader(
             var allowMatch = AllowLine().Match(lines[i]);
             if (!allowMatch.Success)
             {
-                problem = "the `// allow:` line is not `// allow: raw`, `// allow: native` or `// allow: raw native`";
+                problem = "the `// allow:` line is not `// allow:` and one or more of `raw`, `native` and `keywords`, in that order";
                 return null;
             }
 
