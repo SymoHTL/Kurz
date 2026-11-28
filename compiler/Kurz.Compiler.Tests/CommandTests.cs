@@ -488,6 +488,7 @@ public sealed class CommandTests : IDisposable
     [InlineData("test", "--release", "--release", "a.kz")]
     [InlineData("test", "a.kz", "--cpu")]
     [InlineData("test", "--seed", "1", "--seed", "1", "a.kz")] // Y11: `--seed` once, and a value after it
+    [InlineData("test", "--seed", "1", "--seed", "x", "a.kz")] // Y11: the words read left to right, the second `--seed` the usage's before its value
     [InlineData("test", "a.kz", "--seed")]
     [InlineData("test", "--seed")] // Y11: a `--seed` that is the last word, before any file
     [InlineData("test", "a.kz", "--seed", "1")] // Y2, Y11: an option after the file is the usage's
@@ -517,6 +518,29 @@ public sealed class CommandTests : IDisposable
         // Y11: the value of `--seed` in digits alone, 0 to the greatest `ulong`; any other ends the command with its line, before the
         // file is read, so that a file that is not there is not named
         Assert.Equal((1, "", $"error: seed ({value})\n"), Kurz("test", "--seed", value, "missing.kz"));
+
+    [Fact]
+    public void A_command_line_ends_at_the_first_word_that_breaks_a_rule() =>
+        // Y11: the words are read left to right, and the first that breaks a rule ends the command with that rule's error, so that a
+        // refused seed before an option after the file is the seed's error, where a second `--seed` before a refused value is the usage's
+        Assert.Equal((1, "", "error: seed (x)\n"), Kurz("test", "--seed", "x", "missing.kz", "--release"));
+
+    [Fact]
+    public void A_refused_draw_of_a_new_seed_ends_the_command_before_its_build_with_its_own_line()
+    {
+        // Y11, Q4 (a) of comment 7228411861: where the system's generator refuses the new seed, the command ends with its own line and the
+        // exit code 1 before its build, so that a file that is not there is not named; a seed given draws none, so that the same command
+        // line with `--seed` reaches the read of the file
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        var missing = Path.Combine(root, "missing.kz");
+        var places = Path.Combine(root, "cache", "kurz");
+        var code = Command.Run(["test", missing], output, error, Clang.Find, Builder.HostTarget, () => places, () => null);
+        Assert.Equal((1, "", "error: seed (the system gave no random number)\n"), (code, output.ToString(), error.ToString()));
+        using var given = new StringWriter();
+        Assert.Equal(1, Command.Run(["test", "--seed", "1", missing], output, given, Clang.Find, Builder.HostTarget, () => places, () => throw new InvalidOperationException("a seed given draws none")));
+        Assert.Matches(@"^error: the source cannot be read\n  note: .+\n  help: name a Kurz source file that can be read\n$", given.ToString());
+    }
 
     [Fact]
     public void A_seed_with_leading_zeros_names_its_number()
@@ -636,6 +660,12 @@ public sealed class CommandTests : IDisposable
         var one = Processes.Capture(Host, [Dll, "test", "--seed", drawn.ToString(System.Globalization.CultureInfo.InvariantCulture), source], null, TimeSpan.FromMinutes(2),
             new Dictionary<string, string?> { ["XDG_CACHE_HOME"] = Path.Combine(root, "cache"), ["KURZ_TRACE"] = "0", ["KURZ_THREADS"] = "1" });
         Assert.Equal((0, "a\nb\nc\nd\ntest \"speaks\" ... ok\n1 test: 1 passed, 0 failed\n", ""), one);
+
+        // Y11, U35, Q5 (b) of comment 7228411861: a process that may use one core and no `KURZ_THREADS` is a count of 1 too, first in, first
+        // out under the same seed
+        var core = Processes.Capture("taskset", ["-c", "0", Host, Dll, "test", "--seed", drawn.ToString(System.Globalization.CultureInfo.InvariantCulture), source], null, TimeSpan.FromMinutes(2),
+            new Dictionary<string, string?> { ["XDG_CACHE_HOME"] = Path.Combine(root, "cache"), ["KURZ_TRACE"] = "0", ["KURZ_THREADS"] = null });
+        Assert.Equal((0, "a\nb\nc\nd\ntest \"speaks\" ... ok\n1 test: 1 passed, 0 failed\n", ""), core);
 
         // U35, Q5 (c) of comment 7205593463: `KURZ_THREADS` set to more than 1 leaves a test's actors on one thread, so the seed's order
         // holds there too

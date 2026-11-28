@@ -25,7 +25,7 @@
 extern "C" {
     int fork()
     int kill(int pid, int signal)
-    int waitpid(int pid, long status, int options)
+    int waitpid(int pid, int* status, int options)
     int usleep(int microseconds)
     void _exit(int code)
 }
@@ -167,7 +167,7 @@ void Against(int most, (int) => void | IoError | HttpError | InvalidUtf8 part) {
 
     raw {
         kill(child, 9)
-        waitpid(child, 0, 0)
+        waitpid(child, null, 0)
     }
 }
 

@@ -1,0 +1,11 @@
+// expect: error syntax at 8
+// rules: E4
+
+// no rule of the reference reads a contract, so `invariant` in a class's body reads as the type of a field `N`, and `>=` stands where
+// the field's `=` stands
+class Counter {
+    mut int N = 0
+    invariant N >= 0
+}
+
+print(Counter().N)

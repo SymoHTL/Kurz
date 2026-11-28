@@ -390,4 +390,69 @@ public sealed class CorpusTests
         Assert.Null(CaseHeader.Parse(text, out var problem));
         Assert.Equal("the `// allow:` line is not `// allow:` and one or more of `raw`, `native` and `keywords`, in that order", problem);
     }
+
+    /// <summary>
+    /// A case that declares a C function the runtime or the standard library declares gives it the types one of their declarations
+    /// gives it (knowledge/a-c-function-is-declared-as-the-runtime-declares-it.md): the emitter keeps one declaration for each text,
+    /// so that another type of a parameter is a second declaration of one name, which clang refuses where the program reaches both
+    /// calls and which builds unseen where it reaches the case's call alone.
+    /// </summary>
+    [Fact]
+    public void A_case_declares_a_c_function_as_the_runtime_and_the_standard_library_declare_it()
+    {
+        var declared = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
+        var files = Directory.EnumerateFiles(Path.Combine(Root, "runtime"), "*.kz", SearchOption.AllDirectories)
+            .Concat(Directory.EnumerateFiles(Path.Combine(Root, "std"), "*.kz", SearchOption.AllDirectories));
+        foreach (var file in files)
+        {
+            foreach (var function in CFunctions(file))
+            {
+                if (!declared.TryGetValue(function.Name, out var shapes))
+                {
+                    shapes = new SortedSet<string>(StringComparer.Ordinal);
+                    declared[function.Name] = shapes;
+                }
+
+                shapes.Add(Shape(function));
+            }
+        }
+
+        var held = 0;
+        var wrong = new List<string>();
+        foreach (var relativePath in CaseFiles())
+        {
+            var (header, tree, _) = ReadCase(relativePath);
+            if (header.Expectation == Expectation.Error)
+            {
+                continue; // a case that does not compile is never emitted, and no declaration of it meets the runtime's
+            }
+
+            foreach (var function in tree.Statements.OfType<ExternBlock>().SelectMany(b => b.Functions))
+            {
+                if (declared.TryGetValue(function.Name, out var shapes))
+                {
+                    held++;
+                    if (!shapes.Contains(Shape(function)))
+                    {
+                        wrong.Add($"{relativePath}:{function.Line}: {Shape(function)}, where the runtime or the standard library has {string.Join(" or ", shapes)}");
+                    }
+                }
+            }
+        }
+
+        Assert.True(wrong.Count == 0, string.Join("\n", wrong));
+        Assert.True(held >= 10, $"only {held} declarations of the corpus name a C function the runtime or the standard library declares");
+    }
+
+    /// <summary>The C functions the <c>extern "C"</c> blocks of the file at <paramref name="path"/> declare.</summary>
+    private static IEnumerable<ExternFunction> CFunctions(string path)
+    {
+        var source = SourceText.FromBytes(path, File.ReadAllBytes(path), out var invalid);
+        Assert.True(source is not null, $"{path}: {invalid}");
+        return Parser.Parse(source!, new DiagnosticBag()).Statements.OfType<ExternBlock>().SelectMany(b => b.Functions);
+    }
+
+    /// <summary>A C function's declaration as the types make it: the result, the name, each parameter's type and a variadic end.</summary>
+    private static string Shape(ExternFunction function) =>
+        $"{SyntaxPrinter.Type(function.ReturnType)}{function.Name}({string.Join(", ", function.Parameters.Select(p => (p.Mut ? "mut " : "") + SyntaxPrinter.Type(p.Type).TrimEnd()))}{(function.Variadic ? (function.Parameters.Count == 0 ? "..." : ", ...") : "")})";
 }

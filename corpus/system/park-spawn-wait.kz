@@ -1,0 +1,52 @@
+// expect: output
+// | tick
+// | ended
+// threads: 1
+// rules: S10
+
+// `Runner` spawns a child that takes the program's three streams, so that no pipe of the child waits, `sh` reading a FIFO, which
+// ends only once a writer opens the FIFO and closes it, and its wait for the child with no bound parks `Runner` in the poller on
+// the descriptor of the child's process (S10), so that the one thread runs `Ticker` meanwhile and the top-level code goes on to
+// write the FIFO. A runtime that waited for such a child in `waitpid` on the thread that runs every actor would wait without end,
+// since nothing could open the FIFO to write. S10 alone is the subject, the wait for a spawned child with no pipe and no bound in
+// the poller; S19 and U18 it passes through
+void | IoError | ExitError Reads() {
+    child = Command.New("sh").Arg("-c").Arg("cat park-spawn-wait > /dev/null").Spawn()
+    child.Wait()
+}
+
+actor Ticker {
+    pub string Tick() => "tick"
+}
+
+actor Runner {
+    mut string got = ""
+
+    pub void Run() {
+        got = "ended"
+        Reads() else {
+            IoError e => got = "run {e.Kind}"
+            ExitError e => got = "exit {e}"
+        }
+    }
+
+    pub string Got() => got
+}
+
+void | IoError | ExitError Main() {
+    Command.New("mkfifo").Arg("park-spawn-wait").Status()
+    r = spawn Runner()
+    t = spawn Ticker()
+    send r.Run()
+    print(t.Tick())
+    w = File.Create("park-spawn-wait")
+    w.Write("x".Bytes)
+    w.Close()
+    print(r.Got())
+    File.Delete("park-spawn-wait")
+}
+
+Main() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}

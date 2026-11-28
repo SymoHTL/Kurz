@@ -9,14 +9,35 @@
 // forks while it waits. The child of a `fork` drops the pool, whose threads it has none of, and the opening's wait in the child
 // ends with `Other` and the number 125, `ECANCELED`, so that the child's call of `Got`, queued behind it, gets its answer; a child
 // that kept the wait would wait without end, the wait counted among the registrations of the poller, which raises no `deadlock`
-// (U18). The parent waits for the child, then opens the FIFO to write, so that its own opening ends. The case rests on a margin of
-// time that no rule fixes: the top-level code's sleep of 0.1 seconds lets the opening reach the pool before the `fork`, and a
-// `fork` before it would leave the child's opening waiting for a writer to the limit of the run. S10 alone is the subject, the
-// waits on the pool in the child of a `fork`; R7 and U18 it passes through
+// (U18). The parent waits for the child, then opens the FIFO to write, so that its own opening ends. The top-level code forks once
+// the opening has reached the pool, which it reads and does not wait for: it sleeps 1 ms at a time, each sleep a wait that runs
+// `Opener` on the one thread the header's `// threads: 1` gives, until the process holds more descriptors past the three standard
+// ones than before the `send`. The opening's hand makes them, the pool's `eventfd` and the poller it is armed in, and queues the
+// job before `Opener` parks, and only then does the top-level code run again; a `fork` before the hand would leave the child's
+// opening waiting for a writer to the limit of the run. S10 alone is the subject, the waits on the pool in the child of a `fork`; R7
+// and U18 it passes through
 extern "C" {
     int fork()
     int waitpid(int pid, int* status, int options)
+    int fcntl(int fd, int cmd, ...)
     void _exit(int code)
+}
+
+// The descriptors from 3 to 63 that `fcntl` finds open.
+int Held() {
+    mut int held = 0
+    raw {
+        mut int fd = 3
+        while fd < 64 {
+            if fcntl(fd, 1) >= 0 {
+                held = held + 1
+            }
+
+            fd = fd + 1
+        }
+    }
+
+    return held
 }
 
 actor Opener {
@@ -42,8 +63,20 @@ actor Opener {
 void | IoError | ExitError Main() {
     Command.New("mkfifo").Arg("park-file-fork-wait").Status()
     o = spawn Opener()
+    before = Held()
     send o.Open()
-    Environment.Sleep(100ms)
+    // to a bound of 10 seconds that no run meets
+    mut int sleeps = 0
+    while Held() == before && sleeps < 10000 {
+        Environment.Sleep(1ms)
+        sleeps = sleeps + 1
+    }
+
+    if Held() == before {
+        print("no hand of the opening")
+        return
+    }
+
     mut int child = 0
     raw {
         child = fork()

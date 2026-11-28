@@ -40,14 +40,17 @@ parameter's type crosses in a generic actor's message, among its arguments and a
 where the parameter's limits name `Crosses`, a limit of the prelude, checked once at the
 definition, as Rust's `T: Send` (§6, the owner, 2026-11-27, #519, comment 7215317481, I5)
 *(assumed, as §6 marks them: `Crosses` met by a type's structure, a value of a type parameter
-without it in a message `send-needs-word` at the definition (U12), and a `spawn` whose type argument
+without it in a message `send-needs-word` at the definition, at the line of the method's parameter or
+result whose type is that parameter, with a word or none, since such a parameter may stand for a type
+that never crosses, as Rust sends no `T` without `Send`, moved or not (U12), and a `spawn` whose type argument
 does not cross `type-mismatch` there, as an argument that does not meet its limit is (T19))*; the
 build says `not supported` to a generic actor.
 
 An actor's reference is a value of every interface the actor names, and a call through the
 interface on such a value is a message the actor runs in turn, a call that waits, with the bound
 the actor's method declares, as a call through the actor's own reference has it, an interface's
-method taking no `within` (U36, U41), and its crash and deadline at the line of that call (U20);
+method taking no `within` (U36, U41), a `within` at such a call and on the interface's method being `syntax` at its
+line, as at any call that is no call through an actor's reference (U41), and its crash and deadline at the line of that call (U20);
 `send` before any call through the interface is `syntax`, whatever the value holds, since `send`
 stands before a call through an actor's reference by its written type, its text naming the
 interface's method (U6); a parameter or a result of a
@@ -56,7 +59,9 @@ method of such an interface that does not cross into an actor with no word is `s
 `move` of a parameter written `move`; `==` and a
 key of the interface's type over such a value are those of the reference, which equals no class
 instance, and an arm of the actor's type in a `match` over the interface takes the values that hold
-its references, as a class's arm takes its instances (C4); a call through the interface is an edge
+its references, as a class's arm takes its instances (C4), and over a union that holds the interface, `Pinger | Logger`, it
+takes them and passes over the values of the union's other cases, as C4 tests a class's arm there *(assumed in §6: a reading of
+I4 over a union)*; a call through the interface is an edge
 to every actor that implements it (U56; §6, 2026-11-20, #519, comment 7051071630, T46 (a)) (§6, the owner, 2026-11-27, #519, comment 7215317481, I1 to
 I4, and Q6 to Q8 of the product pass, comment 7211645920, for the texts) *(assumed, as §6 marks
 them: the interface declared before or after the actor, and a method of it the actor lacks
@@ -67,15 +72,17 @@ such a value through the interface's `Text()` (A10), a message too, Q9 of the pr
 its default)*. A parameter written `move` of such a method crosses, the call through the interface
 carrying `move` at its argument, as `move-at-call` asks of every call (U12) (§6, the owner,
 2026-11-27, #39, comment 7220200988, "Yes, it crosses (Recommended)"); each parameter and each
-result that does not cross gets its own error at that line, on one parameter `send-needs-word`
-before `mut-in-message` and `pointer-crosses` before both, as U16 orders an argument's (the same
-comment, "Each parameter, U16's order (Recommended)"); an arm of another interface the actor names
+result that does not cross gets one error at that line, the first of `pointer-crosses`,
+`send-needs-word` and `mut-in-message` that applies to it, as U16 orders an argument's (the same
+comment, "Each parameter, U16's order (Recommended)") *(assumed, as §6 marks it: the errors of that
+line in the order of the interfaces after the actor's name, of each interface's methods as its source
+writes them, and of each method's parameters, then its result, as U16 orders a call's arguments)*; an arm of another interface the actor names
 takes such a value, tested at run time as C4 tests a class that implements both (the same comment,
 "Yes, run-time test (Recommended)"), and an actor that names the interface counts where C4 counts the
 classes of the program, for the cases an arm of the interface covers and for `unreachable-arm` (the
 same comment, "Yes, as a class (Recommended)"); `vouch` before a call through the interface stands
-where an actor of the program implements it (U58; the same comment, "Where an actor implements
-(Recommended)"); and arguments after the interface, `actor A : Store(1)`, are `syntax`, as after a
+where an actor of the program implements it, and is `syntax` where no actor does (U58; the same comment, "Where an actor
+implements (Recommended)"); and arguments after the interface, `actor A : Store(1)`, are `syntax`, as after a
 class's name (K10; the same comment, "syntax, a language error (Recommended)").
 
 The stack's clause is `stack` and a literal of bytes, `kb`, `mb` or `gb` (L14), `actor Parser stack 8mb
@@ -247,7 +254,7 @@ print(Read(Fixed()))
 
 Case: [actors/interface-arm.kz](../corpus/actors/interface-arm.kz)
 ```kurz
-// an arm of the actor's type in a `match` over the interface takes the values that hold its references, as a class's arm takes its instances
+// an arm of the actor's type in a `match` over a union that holds the interface takes the values that hold its references, as a class's arm takes its instances
 interface Store {
     long Get(string key)
 }
@@ -338,7 +345,8 @@ actor Cache : Store {
     pub long Get(string key) => key.Bytes.Count
 }
 
-// the actor counts among what implements the interface, as a class does, so the arm of the interface after the actor's own arm takes no case
+// the actor counts among what implements the interface, as a class does, so the arm of the interface after the actor's own arm takes no case;
+// that count alone makes the arm of `Store` cover `Cache`: without it the arm would name no case and cover none, `type-mismatch` (C4)
 string Kind(Cache | int s) => match s {
     Cache c => "cache {c.Get("abc")}"
     Store o => "store {o.Get("a")}"
@@ -524,7 +532,8 @@ interface Holder {
     void Hold(long* p)
 }
 
-// a call through the interface would carry the pointer into the actor, so the line that names the interface refuses it
+// a call through the interface would carry the pointer into the actor, so the line that names the interface refuses it; the
+// method's own pointer parameter raises nothing at its declaration, `pointer-crosses` standing at a message's argument (U12)
 actor Keeper : Holder {
     pub void Hold(long* p) {
         print(1)
@@ -2544,10 +2553,11 @@ print(Rethrown(1, false))
 ### U13 (decided, §6) The end of the program drops what is queued
 
 When the top-level code ends, the messages still queued in an actor it spawned are dropped, since
-the end of the root actor stops its children
-after their current message (§6, the owner, 2026-11-13, #519, comment 6847932993, Q16, and the owner, 2026-11-14, #519, comment 6880404917,
-Q8, "All nine leans (Recommended)"). The end of any actor stops the actors it spawned so, after
-their current message, their queued messages dropped, so that the end of the top-level code reaches
+the end of the root actor stops its children (§6, the owner, 2026-11-13, #519, comment 6847932993, Q16, and the owner,
+2026-11-14, #519, comment 6880404917, Q8, "All nine leans (Recommended)"), and, narrowing Q16's "after their current message" for
+that end, it waits for no current message of theirs, a message still running on another worker being cut at the end of the process (§6, the
+owner, 2026-11-26, #519, comment 7198702144, 1, "Cut it, as Rust and Go (Recommended)"). The end of any other actor stops the
+actors it spawned after their current message, their queued messages dropped, so that the end of the top-level code reaches
 every actor of the machine (§6, the owner, 2026-10-30, "With its supervisor", and the owner,
 2026-11-13, #519, comment 6847932993, Q16). An end stops them from the last slot of the table down
 (U2), so that the callers that wait on them wake with `actor-gone` in that order *(assumed: §6, as the
@@ -2562,12 +2572,28 @@ other threads with no join (§6, the owner, 2026-11-26, #519, comment 7194874125
 that none runs when it ends, and with worker threads a message still running on another worker then
 is cut at the end of the process, which follows the top-level code's last statement, its lines after
 that moment never running, what it printed before it standing in the output and a line whose write the
-system took in part standing there in part *(assumed: the build's `print`, A1)*, as a Rust or Go program's other threads end when `main` returns (§6, the owner,
+system took in part standing there in part *(assumed in §6: the build's `print`, A1, the record's line cut short where the process ends between two of the system's write calls)*, as a Rust or Go program's other threads end when `main` returns (§6, the owner,
 2026-11-26, #519, comment 7198702144, 1, "Cut it, as Rust and Go (Recommended)").
 
-No case: for the end of the top-level code, since which message runs when it ends is the scheduler's to
-say where actors run on more than one thread, so that a case's output would hang on it; the end of a
-crashed supervisor's children has the case below.
+No case: for the end of the top-level code where actors run on worker threads, since which message runs
+when it ends is the scheduler's to say there, so that a case's output would hang on it; the end of
+the top-level code on one thread and the end of a crashed supervisor's children have their cases.
+
+Case: [actors/end-drops-queued.kz](../corpus/actors/end-drops-queued.kz)
+```kurz
+// on one thread, the header's `// threads: 1`, a message runs only while the top-level code waits, so
+// that the message the `send` queues is still queued when the top-level code ends, and the end drops it
+actor Logger {
+    pub void Say(string s) {
+        print(s)
+    }
+}
+
+l = spawn Logger()
+l.Say("first")
+send l.Say("dropped")
+print("end")
+```
 
 Case: [actors/crash-children-end.kz](../corpus/actors/crash-children-end.kz)
 ```kurz
@@ -4145,10 +4171,11 @@ Case: [system/park-file-drained.kz](../corpus/system/park-file-drained.kz)
 // its end before the crash: the fall gives that job back and closes the descriptor the opening gave, as it closes one whose job
 // ends after the fall (issue 661, the product pass, comment 7182792402, Q3), so that the count of the process's open descriptors,
 // which the system lists in `/proc/self/fd`, is the same once the crash is over as before it. A fall that left the job would leave
-// one more. `Reader`'s read of a file makes the pool before the first count. The case rests on a margin of time that no rule fixes:
-// an opening that ended after the fall, its descriptor closed as that one's is, would give the same count, so that the case holds
-// the fall over a job whose end was taken only where the opening ends within `Boom`'s 0.4 seconds. S10 alone is the subject, the
-// fall over a job whose end the scheduler took; U17, U20 and U25 it passes through
+// one more. `Reader`'s read of a file makes the pool before the first count. An opening that ended after the fall, its descriptor
+// closed as that one's is, would give the same count, and the test of the suite
+// `FileTests.A_fall_over_a_job_whose_end_the_scheduler_took_gives_the_job_back_at_the_fall` runs this file on a runtime whose fall
+// over a job whose end it did not take ends the program, so that the output stands only where the fall met a taken end. S10 alone is
+// the subject, the fall over a job whose end the scheduler took; U17, U20 and U25 it passes through
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
@@ -6743,8 +6770,8 @@ reads `TOKIO_WORKER_THREADS` as a whole number and refuses an empty one; a conta
 its whole cores, rounded down and at least 1, as Rust's `available_parallelism` counts it; and a bad
 `KURZ_THREADS` ends the process before its first statement with the line `error: threads-variable
 (<the value>)` on standard error and the exit code 1, as a bad `KURZ_LOG` ends it with `log-filter`
-(P5) *(assumed in §6)*. A program reads `KURZ_THREADS` only where it has a `spawn` or a form that
-splits its work, the forms that start the worker threads, as it reads `KURZ_LOG` (P5) *(assumed in
+(P5) *(assumed in §6)*. A program built for Linux reads `KURZ_THREADS` only where it has a `spawn` or a form that
+splits its work, a build for Windows reading it nowhere, so that no value of it ends a start there (§2), the forms that start the worker threads, as it reads `KURZ_LOG` (P5) *(assumed in
 §6: the form that splits its work)*, and a value that is not UTF-8 ends its start with `error: threads-variable (not
 unicode)` (§6, the owner, 2026-11-26, #519, comment 7189038384). A worker thread that the system refuses at its start ends the program with an
 error line and an id of its own and the exit code 1, as tokio's `Builder::build` returns an
@@ -6755,12 +6782,14 @@ have run on fewer (§6, the cost of that answer). The id is `thread-refused` (§
 the scheduler starts its worker threads, at the program's first `spawn` or first form that splits its
 work, the threads that did start ending with the process, and its line is `error: thread-refused
 (<the count of worker threads asked>)` on standard error, and `error: thread-refused (1)` for a thread of the
-pool of blocking calls that the system refuses while no thread of that pool runs, with no place and no trace
+pool of blocking calls that the system refuses while no thread of that pool runs, with no place and no trace,
+where another thread of that pool runs the refusal raising nothing and that thread taking the job from the queue
 *(assumed in §6)*. The main thread runs the top-level code alone, and
 sleeps while it waits (U18; §6, Q3), except in a case marked `// threads: 1`, in a program whose count is 1,
 in the tests of `kurz test` and in a program built for Windows, where its wait runs the ready actors and
 no worker thread runs (§6, the owner, 2026-11-17, #570, comment 6961064167, Q1; for a count of 1, Q5 of
-comment 7207859311; the tests of `kurz test` and the build for Windows as this rule says of each). A message parked in a wait goes on on the thread that parked it,
+comment 7207859311; the tests of `kurz test`, the owner, 2026-11-27, issue 657, comment 7215317771, Q5; the build for
+Windows, §2 and §6, assumed in both). A message parked in a wait goes on on the thread that parked it,
 and an actor between messages moves to any thread (§6, the owner, 2026-11-17, #519, comment
 6946657505, Q2, "Stays on its thread (Recommended)"). A message that runs on another thread when the
 top-level code ends is cut at the end of the process, its lines after that moment never running (U13; §6, the
@@ -6768,22 +6797,28 @@ owner, 2026-11-26, #519, comment 7198702144, 1); a supervisor that is running ac
 ends or waits (U22) *(assumed in §6)*. In a case marked `// threads: 1` (chapter 0) one thread runs the
 actors that are ready first in, first out, the top-level code's wait running them (§6, the owner,
 2026-11-17, #570, comment 6961064167, Q1, "FIFO, as the build (Recommended)"), under any seed of
-`kurz test` (Y11; §2, the owner, 2026-11-27, issue 657, comment 7215317771, Q4). A program built for
-Linux and run with `KURZ_THREADS` set to 1 runs so too (§6, the owner, 2026-11-27, #519, comment
-7215317481, Q5 of comment 7207859311), and so does a build of `kurz test` under any seed (Y11; §2,
-assumed there), a build for Windows reading no `KURZ_THREADS`; the tests of `kurz test` run every actor
-on one thread, with `KURZ_THREADS` set to more than 1 too (§6, the owner, 2026-11-27, comment
-7215317771, Q5), the actors ready at a turn in the order their seed draws where `KURZ_THREADS` is not 1
-or the build is for Windows (Y11; §2, that exception assumed there). Each worker
+`kurz test` (Y11; §2, the owner, 2026-11-27, issue 657, comment 7215317771, Q4), the mark being the
+corpus runner's, as `// expect:` is, so that the same file run with `kurz test` by hand takes the order
+its seed draws where its count of threads is more than 1 (Y11; §2, the owner, 2026-11-28, issue 39,
+comment 7236862019, Q1 of comment 7228411861). A program built for
+Linux and run with `KURZ_THREADS` set to 1 runs so too, every actor on the main thread (§6, the owner,
+2026-11-27, #519, comment 7215317481, Q5 of comment 7207859311) and first in, first out, as the one thread runs them (§6, the owner,
+2026-11-17, #570, comment 6961064167, Q1), and so does a build of `kurz test` for Linux whose count is
+1, `KURZ_THREADS` set to 1 or, where it is not set, a process that may use one core, under any seed (Y11;
+§2, the owner, 2026-11-28, issue 39, comment 7236862019, Q5 of comment 7228411861), a build for Windows
+reading no `KURZ_THREADS`; the tests of `kurz test` run every actor on one thread, with a count of more
+than 1 too (§6, the owner, 2026-11-27, issue 657, comment 7215317771, Q5), the actors ready at a turn in
+the order their seed draws where the count is more than 1 or the build is for Windows (Y11; §2, the
+build for Windows assumed there). Each worker
 thread has a poller and timers of its own, and a wake of an actor on another thread is a push to that
-thread's queue and one write of its `eventfd`, the wake of a thread on Linux, the one system the build
-starts worker threads on (§6, the owner, 2026-11-26, #519, comment 7189038384, T88). A worker whose `eventfd` or record the system refuses ends the start with `thread-refused` too
+thread's queue and one write of its `eventfd`, the wake of a thread on Linux (§6, the owner, 2026-11-26, #519, comment
+7189038384, T88), the one system the build starts worker threads on (§6, assumed there). A worker whose `eventfd` or record the system refuses ends the start with `thread-refused` too
 *(assumed in §6)*. A message to an actor on another thread is built in a heap of its own and copied
 into the receiver's heap by the receiver at its turn, and a result into the waiter's heap as its wait
 returns (§6, the owner, 2026-11-20, #519, comment 7051492844, T17, 1); since a sender cannot know the
 thread that takes its receiver, on worker threads every message the code of an actor or of the top
 level builds has a heap of its own *(assumed in §6)*, where on one thread a message is built in the
-heap of its callee (`compiler/README.md`); the message's heap of its own is freed when the message
+heap of its callee *(assumed in §6)*; the message's heap of its own is freed when the message
 ends (§6, the owner, 2026-11-26, #519, comment 7192965131), and an ended actor's first page is freed once every
 thread has passed a turn since its end (§6, the owner, 2026-11-20, #519, comment 7051492844, T16, 2), a parked
 worker and the main thread outside a `send` or a call of the top-level code counting as having passed one
@@ -6795,8 +6830,8 @@ among them, so that a pending job of that pool keeps the `deadlock` from being r
 `checkdead` *(assumed in §6)*. The build starts worker threads on Linux alone, where the count is more
 than 1, and takes the count from `KURZ_THREADS` and the cores alone, since it reads no `project.kz` and
 so no line `threads = N`; a build for Windows runs every actor on the main thread and reads no
-`KURZ_THREADS`, so that no value of it ends a start there (`compiler/README.md`, the build's,
-assumed); a count of 1, which `KURZ_THREADS` sets or a process that may use one core
+`KURZ_THREADS`, so that no value of it ends a start there (§6 for the start on Linux alone and its count,
+§2 for the build for Windows, assumed in both); a count of 1, which `KURZ_THREADS` sets or a process that may use one core
 gives, runs every actor on the main thread, as a case marked `// threads: 1` runs, with nothing said (§6,
 the owner, 2026-11-27, #519, comment 7215317481, Q5 of comment 7207859311, "Main thread, quietly
 (Recommended)"). A worker thread with nothing to run spins a short while before it parks, so that a wake
@@ -6816,7 +6851,8 @@ running worker; and on worker threads, the path of a message on one thread kept 
 2026-11-26, #519, comment 7204486070, Q1 of comment 7200036109), a wake of an actor that a thread holds,
 or whose constructor runs, puts no entry in and leaves it to its holder, as tokio's waker of a running
 task marks it notified *(assumed in §6; both kept by the owner's answer of 2026-11-27, #39, comment
-7221780113, as no row measured slower beyond the noise, §6)*. A
+7221780113, as no row measured slower beyond the noise, the wake alone's gap on the four actors' counts read as noise by the
+owner's answer of the same day, comment 7226765242, "Keep both, it's noise (Recommended)", §6)*. A
 program that ran every actor on the main thread sees three things change on worker threads, and
 `KURZ_THREADS=1` runs it so again (the owner, 2026-11-27, #519, comment 7216530837, Q2 of comment
 7207859311, "The pass's three (Recommended)"): the actors that are ready no longer run first in, first
@@ -6832,9 +6868,10 @@ its supervisor and its links as a signal, as Erlang's exit signals do, a check o
 the deadlock of the top-level code and the confirmation of a loop that the walk of layer 3 finds (T72 2)
 (§6, the owner, 2026-11-26, #519, comment 7194874125, "Per-actor holds (Recommended)", narrowed by comment
 7198702144, 3, "Keep the process lock (Recommended)"); the signal is taken before the supervisor's blocks and messages, and one that reaches
-a supervisor that waits for its restart or for the decision of a block is dropped, its log line written in
+a supervisor that waits for its restart or for its own supervisor's block to decide on its crash, a fallen
+supervisor in both waits, is dropped, its log line written in
 the name of the actor that sent it, that actor having fallen at its crash, the call it ran answered
-`callee crashed` (U20), and ending with the other children of that supervisor, whose fall ends them
+`callee-crashed` (U20), and ending with the other children of that supervisor, whose fall ends them
 (U13), so that a call that waits in its inbox raises `actor-gone` (U6, U20) *(assumed in §6)*.
 
 No case: for the count of the threads, since a case is a single file with no `project.kz` (chapter 0) and
@@ -8692,7 +8729,7 @@ enters, a recursion through two actor types that hands the reference back and fo
 inside `A.Save` (§6, "Deadlocks", layer 2, "Exempt without override: a callback through a reference the caller passed in
 that same call"). So is a call through the name of a `per node` actor in the code of its own messages, inside its own
 method and in a function or a lambda that runs there, which U55 reads as a call through `this` (the owner, 2026-11-21, #519, comment 7069702044), and a call in the block of an `attempt` through a local of the method that runs it that holds `this`, a call
-back into the actor that waits on the block (U49) (the owner, 2026-11-21, #519, comment 7068198309, per node 1, attempt 1). A call through a value of an interface the actor names is none of them, though the value can only hold the actor's own reference, a local of the interface's type without `mut` set from `this`: it is an edge to every actor that implements the interface, as any call through the interface is (U1) (§6, the owner, 2026-11-27, #39, comment 7220200988, "An edge like any (Recommended)").
+back into the actor that waits on the block (U49) (the owner, 2026-11-21, #519, comment 7068198309, per node 1, attempt 1). A call through a value of an interface the actor names is none of them, though the value can only hold the actor's own reference, a local of the interface's type without `mut` set from `this`: it is an edge to every actor that implements the interface, as any call through the interface is (U1) (§6, the owner, 2026-11-27, #39, comment 7220200988, "An edge like any (Recommended)"), in the block of an `attempt` too, whose exception names a local of the actor's own type *(assumed in §6: that reading, which the build does not reach, saying `not supported` to a value of an interface taken into the block (U47))*.
 
 A field set from a parameter that is a callback is one, and so is a list of them (the owner, 2026-11-20, #519, comment 7051071630, T49 (c)); a field
 outlives the message that set it, so that another message's call through it can reach an actor the caller's chain does not
@@ -8959,6 +8996,29 @@ print(a.Save())
 
 Case: [actors/call-loop-unreached.kz](../corpus/actors/call-loop-unreached.kz)
 
+Case: [actors/vouch-interface-this.kz](../corpus/actors/vouch-interface-this.kz)
+```kurz
+// `s` is a local of the interface's type set from `this`, no local of the actor's own type, so the call
+// through it is a call through `Store`, an edge to every actor that implements it, `Cache` among them (U57),
+// which `vouch` takes out of the graph of U56 as before any call through the interface; without the word
+// the build says `call-loop` at that line
+interface Store {
+    long Get()
+}
+
+actor Cache : Store {
+    pub long Get() => 1
+
+    pub long Again() {
+        Store s = this
+        return vouch s.Get() + 1
+    }
+}
+
+c = spawn Cache()
+print(c.Get())
+```
+
 ### U58 (decided, §6) `vouch`
 
 `vouch` before a call that waits on an actor's method through a reference (U4), `vouch c.Size()`, takes that call out of
@@ -8977,10 +9037,13 @@ direct call of the actor's own method (U10), `vouch this.Size()` among them, sin
 `spawn` (U2), what is no call, or inside a `send` (U14), it is `syntax` (E4), as `within` on such a call is (U41), and so it is
 before a call through the name of a `per node` actor, `vouch Cache.Get()`, which always reaches its one actor (U51)
 (the owner, 2026-11-21, #519, comment 7068198309, per node 1); a call
-through a local that holds `this` is a call through a reference, which U57 takes out, so that `vouch` before it is U59's
-warning *(assumed: a reading of the build, proposed with this record and not put to the owner)*. Before a call through an
+through a local of the actor's own type that holds `this` is a call through a reference, which U57 takes out, so that `vouch` before it is U59's
+warning *(assumed: a reading of the build, proposed with this record and not put to the owner)*, while a call through a local of an
+interface's type set from `this` is a call through the interface, which U57 does not take out (§6, the owner, 2026-11-27, #39,
+comment 7220200988, "An edge like any (Recommended)"), so that `vouch` before it stands as before any call through the interface. Before a call through an
 interface that an actor of the program implements (U1) it stands, and takes the call's edges to every implementer out of U56's
-graph, and before one through an interface that only classes implement it is `syntax`, as before a class's method (§6, the
+graph, and before one through an interface that no actor of the program implements, only classes or nothing, it is `syntax`,
+as before a class's method (§6, the
 owner, 2026-11-27, #39, comment 7220200988, "Where an actor implements (Recommended)"). `vouch` is a word only
 where it stands, before a name, `this` or `spawn` on its line (§6, the owner, 2026-11-13, #519, comment 6847932993, Q10), so
 that `vouch` names a variable and `vouch(3)` calls a function (the owner, 2026-11-20, #519, comment 7051071630, T50 (a)). A statement is read as a declaration first, and `vouch` is the word only where none
@@ -9122,6 +9185,8 @@ print(a.M())
 Case: [actors/vouch-same-chain.kz](../corpus/actors/vouch-same-chain.kz)
 
 Case: [actors/vouch-own-method.kz](../corpus/actors/vouch-own-method.kz)
+
+Case: [actors/vouch-interface-this.kz](../corpus/actors/vouch-interface-this.kz)
 
 ### U59 (decided, §6, §12) A `vouch` that covers no loop
 

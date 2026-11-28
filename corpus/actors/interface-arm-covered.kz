@@ -1,4 +1,4 @@
-// expect: error unreachable-arm at 15
+// expect: error unreachable-arm at 16
 // rules: U1
 
 interface Store {
@@ -9,7 +9,8 @@ actor Cache : Store {
     pub long Get(string key) => key.Bytes.Count
 }
 
-// the actor counts among what implements the interface, as a class does, so the arm of the interface after the actor's own arm takes no case
+// the actor counts among what implements the interface, as a class does, so the arm of the interface after the actor's own arm takes no case;
+// that count alone makes the arm of `Store` cover `Cache`: without it the arm would name no case and cover none, `type-mismatch` (C4)
 string Kind(Cache | int s) => match s {
     Cache c => "cache {c.Get("abc")}"
     Store o => "store {o.Get("a")}"

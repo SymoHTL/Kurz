@@ -1,0 +1,18 @@
+// expect: output
+// | first
+// | end
+// threads: 1
+// rules: U13
+
+// on one thread, the header's `// threads: 1`, a message runs only while the top-level code waits, so
+// that the message the `send` queues is still queued when the top-level code ends, and the end drops it
+actor Logger {
+    pub void Say(string s) {
+        print(s)
+    }
+}
+
+l = spawn Logger()
+l.Say("first")
+send l.Say("dropped")
+print("end")
