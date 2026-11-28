@@ -226,12 +226,13 @@ public static class Command
     }
 
     /// <summary>
-    /// <c>test</c>'s options, each once, and its file, as <c>run</c> takes them, with no word for the program: a test reads no <c>args</c>, so
-    /// <c>--</c> and an argument after the file are the usage's (Y2, F17). The build runs the program's tests and the command ends with its
-    /// exit code, 0 where every test passed, else 1 (Y3, Q4). <c>--seed</c> takes a <c>ulong</c> in digits alone, any other value ending
-    /// the command before its build with <c>error: seed (&lt;the value&gt;)</c> and the exit code 1, and where it is not given the run takes
-    /// a new seed from the system's randomness, which the line of a failed test names (Y11; section 2, the owner, 2026-11-26, issue 657,
-    /// comment 7189038775, Q2 a and Q3 a, the rest assumed there).
+    /// <c>test</c>'s options, each once, before its file, as Y2 has them, with no word for the program: a test reads no <c>args</c>, so
+    /// <c>--</c>, an argument and an option after the file are the usage's (Y2, F17, Y11). The build runs the program's tests and the command
+    /// ends with its exit code, 0 where every test passed, else 1 (Y3, Q4). <c>--seed</c> takes the word after it as its value, whatever it
+    /// is, a <c>ulong</c> in digits alone, any other value ending the command before its build with <c>error: seed (&lt;the value&gt;)</c> and
+    /// the exit code 1 (section 2, the owner, 2026-11-27, issue 657, comment 7215317771, Q1 and Q2 of comment 7205593463), and where it is
+    /// not given the run takes a new seed from the system's randomness, which the line of a failed test names (Y11; section 2, the owner,
+    /// 2026-11-26, comment 7189038775, Q2 a and Q3 a; the rest assumed there).
     /// </summary>
     private static int TestFile(List<string> arguments, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
     {
@@ -244,16 +245,16 @@ public static class Command
         {
             switch (arguments[i])
             {
-                case "--release" when !release:
+                case "--release" when !release && sourcePath is null:
                     release = true;
                     break;
-                case "--lines" when !lines:
+                case "--lines" when !lines && sourcePath is null:
                     lines = true;
                     break;
-                case "--cpu" when cpu is null && i + 1 < arguments.Count:
+                case "--cpu" when cpu is null && sourcePath is null && i + 1 < arguments.Count:
                     cpu = arguments[++i];
                     break;
-                case "--seed" when seed is null && i + 1 < arguments.Count:
+                case "--seed" when seed is null && sourcePath is null && i + 1 < arguments.Count:
                     var written = arguments[++i];
                     if (!ulong.TryParse(written, NumberStyles.None, CultureInfo.InvariantCulture, out var value))
                     {
@@ -276,7 +277,10 @@ public static class Command
             : BuildAndRun(() => Read(sourcePath, error), [], release, lines, cpu, error, find, host, places, tests: true, seed ?? NewSeed());
     }
 
-    /// <summary>A new seed for a run of <c>kurz test</c> that names none, 8 bytes of the system's randomness (Y11).</summary>
+    /// <summary>
+    /// A new seed for a run of <c>kurz test</c> that names none, 8 bytes of the system's randomness, drawn before the build: a refusal of
+    /// .NET's generator is an exception no code of the command catches, which ends it as .NET ends such a program (Y11, assumed in section 2).
+    /// </summary>
     private static ulong NewSeed() => BitConverter.ToUInt64(RandomNumberGenerator.GetBytes(8));
 
     /// <summary><c>exec</c>'s options, each once, before its text, which is the last argument before <c>--</c> and no option.</summary>

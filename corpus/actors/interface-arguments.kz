@@ -1,0 +1,11 @@
+// expect: error syntax at 9
+// rules: U1
+
+interface Store {
+    int Get()
+}
+
+// arguments after an interface after an actor's name are text no rule gives a meaning, as after a class's name
+actor Cache : Store(1) {
+    pub int Get() => 1
+}

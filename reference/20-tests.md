@@ -164,7 +164,7 @@ test "second" {
 
 `kurz test` writes a line for each test on standard output, in the order the tests run, unless an error
 ends the process (Y5): `test "name" ... ok`, or `test "name" ... FAILED (seed <N>)`, the seed of the run
-(Y11), with the words that failed it
+(Y11; the parentheses assumed in §2), with the words that failed it
 indented under it, the words of the log line of the crash that failed it (U24), after its `crashed: `, or
 those of Y5's `deadlock`, which is no crash; then a summary, `<n> tests: <p> passed, <f> failed`, each
 count written, a zero among them, and `test` in place of `tests` where the program has one,
@@ -881,8 +881,11 @@ A run of `kurz test` takes a seed, a `ulong`: the keys a map's hash switches to 
 runs a test's actors (U35) run in an order that a second generator the seed starts draws, so that a run
 that failed replays its draws and its order from its seed (§2, the owner, 2026-11-26, issue 657, comment
 7189038775, Q1 b); the variation of a restart's pause (U23) is drawn from the first generator too (§2,
-assumed there). A run where no seed is given takes a new one, 8 bytes of the system's randomness (§2,
-assumed there), and the line of each failed test names it after `FAILED`, in parentheses, so that
+assumed there). A run where no seed is given takes a new one, 8 bytes of the system's randomness, which
+the command draws before the build with .NET's generator of random bytes, so that a refusal of that
+generator ends the command as .NET ends a program on an exception no code catches, with its text on
+standard error and an exit code that is not 0, and never ends the built program with `random-failed`
+(§2, assumed there), and the line of each failed test names it after `FAILED`, in parentheses, so that
 `kurz test --seed 1234 users.kz` runs with it (§2, the owner, 2026-11-26, comment 7189038775, Q2 a and
 Q3 a; the parentheses assumed there):
 
@@ -893,34 +896,48 @@ test "counts" ... FAILED (seed 1234)
 2 tests: 1 passed, 1 failed
 ```
 
-The seed is written in decimal digits alone; any other value, an empty one among them, ends the command
-with `error: seed (<the value>)` on standard error and the exit code 1, and a run whose tests all passed
-names no seed (§2, the owner, 2026-11-27, issue 657, comment 7215317771, Q1, Q2 and Q3 of comment
-7205593463). `--seed` stands before the file, once, as the other options do (Y2), a value it refuses
-ends the command before its build, and so before the start of the built program that reads
-`KURZ_THREADS` (U35), and a second `--seed`, or none after the flag, is an error of its usage, as
-`kurz run`, `kurz build` and `kurz exec` make a `--seed` (§2, assumed there). The draws and the order come from two generators apart, so that a draw a test
+The seed is written in decimal digits alone, from 0 to 18446744073709551615, the greatest `ulong`; any
+other value, an empty one or a greater one among them, ends the command with `error: seed (<the
+value>)` on standard error and the exit code 1, and a run whose tests all passed names no seed (§2, the
+owner, 2026-11-27, issue 657, comment 7215317771, Q1, Q2 and Q3 of comment 7205593463), a value with
+leading zeros naming its number, `007` the seed 7 (§2, assumed there). `--seed` stands before the file,
+once, as the other options do (Y2), and the word after it is its value, whatever it is, so that `kurz
+test --seed --release a.kz` ends with `error: seed (--release)` and `kurz test --seed a.kz` with `error:
+seed (a.kz)`; a value it refuses ends the command before its build, and so before the start of the built
+program that reads `KURZ_THREADS` (U35); and a second `--seed`, a `--seed` that is the last word of the
+command line, and an option after the file are errors of its usage, as a `--seed` given to `kurz run`,
+`kurz build` or `kurz exec`, which take none, is an error of theirs (§2, assumed there). The draws and the order come from two generators apart, so that a draw a test
 adds moves no order (§2, the owner, 2026-11-27, comment 7215317771, Q8). Both are xoshiro256++, started
 by SplitMix64 from the seed, the draws by its first four words and the order by the four after them;
 the actors ready at a turn are those queued when the scheduler takes
 the first of them, the actors they wake queued behind them, and each take is one of those left, at the
-index the next word gives modulo their count, a turn ending before the test's actor that an `advance`
+index the next word gives modulo their count, those left keeping their order in the queue, a word drawn
+at every take, the last one of a turn among them, and a turn ending before the test's actor that an `advance`
 parked where an actor stands before it, so that the actors the moved clock woke run before the test goes
 on (Y10) (§2, assumed there). A build of `kurz test` asks the system for no
 randomness, so that it never ends with `random-failed` (M9), and its keys and chain IDs follow from the
 seed its failed lines show (§2, assumed there). A seed replays the draws and the order alone, on the
 build that printed it, with no promise across versions of the compiler (§2, the owner, 2026-11-27,
 comment 7215317771, Q8): a test that reads the system's clock without `advance`, or waits on a file, a
-socket or a child process, can run otherwise under the same seed (§2, assumed there). A case marked
+socket or a child process, can run otherwise under the same seed (§2, assumed there). A run names its
+seed on the line of a failed test alone, so that a run that an error ends before such a line, the
+checker's refusal or an error outside every test among them, names none (§2, the cost the same answer
+names for Q1 to Q3). A case marked
 `// threads: 1` runs its ready actors first in, first out under any seed (U35; §2, the owner,
-2026-11-27, comment 7215317771, Q4), and so does a program run with `KURZ_THREADS` set to 1, and a case of
-the corpus that runs its tests runs with the seed 0, the runner building a marked one with that order,
-since a build for Windows reads no `KURZ_THREADS` (chapter 0; §2, assumed there).
+2026-11-27, comment 7215317771, Q4): the compiler reads no `// threads: 1`, so the corpus runner builds
+such a case with that order, which a build for Windows, reading no `KURZ_THREADS`, gets from the build
+alone, and the same file run with `kurz test` by hand takes the order its seed draws (chapter 0; §2,
+assumed there). A build for Linux run with `KURZ_THREADS` set to 1 takes its ready actors first in,
+first out under any seed too, and a build for Windows reads no `KURZ_THREADS`, so that a seed replays
+the order of a run on Linux only with `KURZ_THREADS` set to 1, or not, as it was in the run that printed
+the seed (U35; §2, assumed there). A case of the corpus that runs its tests runs with the seed 0
+(chapter 0; §2, assumed there).
 
 Case: [tests/seed-orders-ready-actors.kz](../corpus/tests/seed-orders-ready-actors.kz)
 ```kurz
-// the four speakers are ready at one turn, and run in the order that the seed 0, which the runner gives, draws for them, and not in
-// the order of their sends, first in, first out
+// the four speakers are ready at one turn, and run in the order that the seed 0, which the runner gives, draws for them by Y11's take,
+// each take a word of the order modulo the count of those left, which keep their order in the queue, and not in the order of their
+// sends, first in, first out
 actor Speaker(string Name) {
     pub void Say() {
         print(Name)

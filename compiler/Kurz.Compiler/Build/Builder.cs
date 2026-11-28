@@ -73,9 +73,9 @@ public static partial class Builder
     /// checker refuses, and one that uses what the checker or the emitter does not read, gets no IR, and the diagnostics say why; where
     /// <paramref name="cpu"/> gives null, it wrote why itself, and the program gets no IR either. Where <paramref name="tests"/> holds, the
     /// build is <c>kurz test</c>'s, which runs the program's tests in place of its top-level code (Y2), and a program with no test gets no
-    /// IR (<see cref="Compilation.NoTest"/>; Y4), its draws and the order of its actors following from <paramref name="seed"/>, but for an
-    /// <paramref name="ordered"/> build, the corpus runner's of a case marked <c>// threads: 1</c>, whose ready actors run first in, first
-    /// out (Y11, chapter 0).
+    /// IR (<see cref="Compilation.NoTest"/>; Y4). The draws of that build and the order of its actors follow from <paramref name="seed"/>,
+    /// but for an <paramref name="ordered"/> build, the corpus runner's of a case marked <c>// threads: 1</c>, whose ready actors run first
+    /// in, first out (Y11, chapter 0); in every other build <paramref name="seed"/> and <paramref name="ordered"/> change nothing.
     /// </summary>
     public static Compilation Compile(SourceText source, IReadOnlyCollection<string> grants, CheckedRuntime runtime, bool testBuild, bool lines = false, Func<Cpu?>? cpu = null, bool tests = false, ulong seed = 0, bool ordered = false)
     {

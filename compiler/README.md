@@ -285,15 +285,16 @@ checks either.
 
 `kurz test [--release] [--lines] [--cpu <name>] [--seed <N>] <file.kz>` builds the file's tests in place of its
 top-level code, which does not run, and runs them in a place of its own as `kurz run` runs a program,
-with no word for the program: `--` and an argument after the file are the usage's, since a test reads no
-`args` (Y2, F17). It writes `test "name" ... ok` or `test "name" ... FAILED` for each test, in the order of
+with no word for the program: `--`, an argument and an option after the file are the usage's, since a test reads no
+`args` (Y2, F17, Y11). It writes `test "name" ... ok` or `test "name" ... FAILED (seed 1234)`, the seed of the run, for each test, in the order of
 the file, after the lines the test printed, the words of a failed test's crash indented under its
 `FAILED` line, and then the counts, `2 tests: 1 passed, 1 failed`, `1 test:` for one (Y3), and ends with
 0 where every test passed and 1 where one failed (Q4). A program the checker accepts with no test gets
 `error: no test in <file>` and a `help:` line naming the form, and the exit code 1 (Y4, Q6).
-The run takes the seed `--seed` gives, a `ulong` in digits alone, or a new one from the system's
-randomness, and a failed test's line names it, `test "name" ... FAILED (seed 1234)`; a value that is no
-`ulong` gets `error: seed (<the value>)` and the exit code 1, before the build (Y11).
+The run takes the seed `--seed` gives, a `ulong` in digits alone, the word after the flag whatever it is,
+or a new one that the command draws from the system's randomness with .NET's `RandomNumberGenerator`
+before the build, and a failed test's line names it; a value that is no `ulong` gets `error: seed (<the
+value>)` and the exit code 1, before the build, and a `--seed` that is the last word gets the usage (Y11).
 `CommandTests` holds each of these.
 
 Any other command line gets the usage on standard error and the exit code 1:
@@ -1692,8 +1693,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `kurz test` alone, `--release` among them, while every other build reads the system's clock directly and stores nothing
   to `ahead`, a global the optimiser folds to 0 there (`EmitterTests`); `TestEnded` sets it back to 0. A socket's bound is
   a deadline among the timers, as a sleep's is (`SocketWaited`, in the item of a call on a socket that would block), which
-  `advance` passes; a child process's wait is a wait in
-  the kernel with a timeout of its own, `poll`'s, which `advance` does not reach; a build for Windows says `not supported`,
+  `advance` passes; a child process's wait waits in the poller where the scheduler hands calls (`ManyWaited`), each turn
+  of it under a deadline among the timers, which `advance` passes, and `Drive` reads the bound of the child's run (S20)
+  from the system's monotonic clock after each turn, so that `advance` ends a turn of the wait and does not shorten that
+  bound, and elsewhere in `poll`, whose timeout `advance` does not reach; a build for Windows says `not supported`,
   as for `instant.Now`;
 - a call on a socket that would block (S10), in a build for Linux: every socket is opened with `SOCK_NONBLOCK` and stays so,
   a read, a write, an `Accept` and a connect in progress are tried first, and one that fails with `EAGAIN` on a socket, which
@@ -2303,7 +2306,7 @@ reads the guarantee in force on Windows and on Linux compiles the program alone.
 
 The worker threads of section 6 (U35) run on Linux, as many as `KURZ_THREADS` sets or, where it is not set, as the cores the
 process may use (section 6, Q4 of comment 6946532526), where that count is more than 1. A program that ran every actor on
-the main thread sees three things change on them, and `KURZ_THREADS=1` runs it so again (the owner, 2026-11-27, issue 519,
+the main thread sees three things change, and `KURZ_THREADS=1` runs it so again (the owner, 2026-11-27, issue 519,
 comment 7216530837): the actors that are ready no longer run first in, first out, a message still running on a worker thread
 when the top-level code ends is cut (U13), and memory grows by each worker's record, poller and `eventfd` and by the heap
 of its own of each message (`MessageHeapNew`). The main thread runs
@@ -2312,8 +2315,8 @@ its thread that nobody steals, which holds the actors whose activation parked on
 last, from its ring of 256 slots, as tokio's `queue::Local`, and from the shared queue, which it reads first at every 61st
 turn, and else steals half of another worker's ring, or its slot 3 µs after it saw an actor there, as Go's `runqgrab` waits
 before it takes the `runnext` of a running P (`WorkerTurn`, `NextActor`, `StealInto`, `Stolen`, `SlotWait`). On worker threads a wake of an actor
-that a thread holds or whose constructor runs marks it NOTIFIED and puts no entry in, as tokio's waker of a running task
-(`Wake`, `LeftToHolder`). A worker with
+that a thread holds or whose constructor runs marks it NOTIFIED and puts no entry in, as tokio's waker of a running task marks it
+notified (`Wake`, `LeftToHolder`). A worker with
 nothing to take spins for 20 µs before it parks, where fewer than half the workers look for work, marked as one that looks,
 so that an actor put where any worker can take it wakes no parked worker meanwhile, each turn of the spin a turn of the worker
 with the hint of a spin to the core, as Go's runtime keeps spinning threads and tokio a searching worker (the owner,
@@ -2326,16 +2329,18 @@ pause again, since the decision of a block that the top-level code runs makes it
 restart's pause, wakes the main thread, whose wait then raises `deadlock` (`WorkerPark`, `RootSlept`), a worker counting itself so
 only after its last look at its queues found nothing, so that the main thread counts no worker that goes on with an actor. A message's
 arguments are copied into the receiver's heap at its turn, and a result into the waiter's heap as its wait returns (T17 1:
-`MessageQueued`, `Adopted`, `ResultHeap`, `ResultOwn`); an ended actor's first page, and a message's heap of its own, are
-freed once every thread passed a turn since (T16 2: `Deferred`, `Reclaimed`, `Reclaims`), a worker storing the epoch at its
+`MessageQueued`, `Adopted`, `ResultHeap`, `ResultOwn`); an ended actor's first page is freed once every thread passed a turn since
+(T16 2), and a message's heap of its own when the message ends, its memory taken back the same way, once every thread
+passed a turn since (issue 519, comment 7192965131: `Deferred`, `Reclaimed`, `Reclaims`), a worker storing the epoch at its
 turn with a fence of sequential consistency after it (`WorkerTurn`), as the main thread's pin does, the main thread reading the
 block of its call's message after the push only under the lock of the process, where its wait found nothing left to run (`Answer`),
-and holding its epoch around a `send` or a call of the top-level code (`Pinned`). A message on one thread pays the tests of the worker
-threads alone (the owner, 2026-11-26, issue 519, comment 7204486070, Q1): the main thread takes an actor with `RunOne`, which
+and holding its epoch around a `send` or a call of the top-level code (`Pinned`). A message on one thread pays, at each form on its path
+that only the worker threads go on in, the test of the worker threads, a load and a branch, and no call (the owner, 2026-11-26, issue 519, comment
+7204486070, Q1): the main thread takes an actor with `RunOne`, which
 holds none of them, and a worker with `RunTake`; the emitter marks the forms that only the worker threads reach, which the
 path of one thread calls after a test, `noinline` and `cold` (`Emitter.WorkerForms`), and the helpers of that path that the
 worker threads call too `alwaysinline` (`Emitter.InLine`), as LLVM put each into its callers while the build had no worker
-threads, which `ThreadsTests` reads in the IR of a release build. `ThreadsTests` runs these on four worker threads: calls
+threads, which `ThreadsTests` reads in the IR of one thread that clang optimises with `-O2`, as a release build optimises it. `ThreadsTests` runs these on four worker threads: calls
 and sends that cross strings and lists between heaps, the order of one sender's messages, a sleep, a `deadlock` and a
 start whose `eventfd` the system refuses. A crash, its escalation and its restart, the end of an actor and of its children
 and the decision of a block of `on crash` hold only the actors they touch (section 6, comment 7194874125, 1): the thread
@@ -2364,14 +2369,14 @@ an activation that moved meanwhile from a call's wait to a sleep or a wait in th
 block (`Onward`); and a main thread whose code
 calls nothing of the runtime takes no end a worker handed it. The process ends with every actor's heap held, freeing none, and the end
 of the process gives the memory back (section 6, comment 7194874125, 2: `EndActors`). A build for
-Windows starts no worker thread: its `Cores` gives 1 and its runtime reads no `KURZ_THREADS`. No run on Arm, and no
-ThreadSanitizer job, checks the orders of the atomic operations of the worker threads, and no run under a CPU quota of a
-control group checks their count.
+Windows starts no worker thread: its `Cores` gives 1 and its runtime reads no `KURZ_THREADS`. The `compiler-arm` job runs the
+suites of the actors' stacks on AArch64, and none of its tests checks the orders of the atomic operations of the worker
+threads; no ThreadSanitizer job checks them, and no run under a CPU quota of a control group checks their count.
 
 Of section 6 the emitter builds the actors of one thread, each message run to its end or to a wait that parks it (Q1 (a), the
 answers of 2026-11-14, issue 519, comment 6880404917), and no case shows
-where a program it builds differs from the section: every actor runs on the one thread the runtime
-runs, each message on a stack of its own ("The runtime"), its state word, and the choice of the one owner of
+where a program it builds differs from the section: in a program on one thread every actor runs on the one thread the
+runtime runs, each message on a stack of its own ("The runtime"), its state word, and the choice of the one owner of
 each reply of its calls by a swap, changed by atomic operations that hold on any number of threads ("What the
 emitter emits"), while the lifetimes of the message a crash's swap reads and of the record of the waiter's actor,
 which the owner of a reply reads after its store, hold on one thread alone, with no worker thread and no line `threads`
@@ -2384,8 +2389,8 @@ process that may use one core, and every test of `kurz test`, running every acto
 `// threads: 1` runs; `ActorTests`, whose programs hold the actors of that one thread, runs each with `KURZ_THREADS` set to 1,
 and so does the fenced program of `ListTests` whose expectation follows that thread's order; and a build for Windows reads
 no `KURZ_THREADS`, its runtime giving no variable of the environment (S14); the compiler reads no `project.kz`, so no line
-of one reaches it, and the top-level code's wait runs the scheduler in place on the
-main thread's stack, where U18 has the main thread sleep beside the worker threads, and messages run only while the top-level
+of one reaches it, and in a program on one thread the top-level code's wait runs the scheduler in place on the
+main thread's stack, as U35 has it for a count of 1, where U18 has the main thread sleep beside the worker threads, and messages run only while the top-level
 code waits for a call's result, one message of each actor in turn, so that a `send` made after the
 last call that waits does not run, and a message parked in a wait when the top-level code ends does
 not go on (U13); of section 6's deadlocks the build makes layer 1 (U17) and the `deadlock` of a wait
@@ -2647,10 +2652,10 @@ ask about it.
   refused writes are counted in the next line.
 - P8 with section 12: the build has no actor with a key or a name and no program that names nodes, so
   the span of a line written while an actor's message runs is the actor's type and its chain alone,
-  `Cache{chain=4bf92f35a1b2c3d4e5f60718293a4b5c}: `, read from the activation the thread runs, the
+  `Cache{chain=4bf92f35a1b2c3d4e5f60718293a4b5c}: `, its 32 digits lowercase *(assumed in §12)*, read from the activation the thread runs, the
   type's name from the actor's record and the chain from the activation's header; a line of the
-  top-level code, which runs no activation, and a line of a test's own actor hold none, and so does
-  the line of `Kurz.Log`. The line of a crash names the actor that takes it, with the chain of the
+  top-level code, which runs no activation, and a line of a test's own actor *(assumed in §12)* hold none, and so does
+  the line of `Kurz.Log`. The line of a crash names the actor that crashed, with the chain of the
   message that crashed as the block of `on crash` reads it in `Crashed.Chain` (U30), and a crash
   that carries no chain, the `restart-limit` of a supervisor with no activation, writes the span as
   the type's name alone, `Sup: `, as Rust's `tracing_subscriber::fmt` writes a span with no field
@@ -2706,18 +2711,21 @@ ask about it.
   reference }`, which holds the actor's reference, and the actor's table for the interface, as Rust's
   `Rc<dyn Trait>` pairs a counted block with a table of methods; each slot of that table loads the
   reference from the box and sends the method's message as a call through the reference does, its
-  arguments written into the actor's heap, and waits for the reply, and the call's file and line reach
+  arguments written into the actor's heap and an argument of a parameter written `move` let go of once it crossed, and waits for the reply, and the call's file and line reach
   the slot through a thread's own word that the call through the interface stores before it, so that a
   crash, a deadline and the method's own bound stand at that call; `==` and the hash compare and hash
   the two words of the reference, and an arm of the actor over such a value compares the table with the
   actor's and loads the reference once that comparison held (the owner, 2026-11-27, #519, comment 7215317481,
   to I1 to I4 of comment 7211586386) *(assumed: the mechanism, which no answer gave)*. The checker holds each method of such an interface to
-  what crosses with no word at the line that names it, and the walk of the throw sets gives a call
+  what crosses with no word but the `move` of a parameter written `move` at the line that names it, each parameter and
+  each result that does not cross its own error there, and an arm of another interface the actor names, or of an interface
+  over a case of the actor's type, reads the actor as C4 reads a class (the owner, 2026-11-27, #39, comment 7220200988), and the walk of the throw sets gives a call
   through the interface a site that waits on each actor that implements it, a loop's text naming the
-  interface's method beside the actor's (U56, T46 (a)), and `send` before such a call is `syntax` (U6); the text of
+  interface's method beside the actor's (U56, T46 (a)), `vouch` before such a call takes those sites out (U58), and `send` before such a call is `syntax` (U6); the text of
   `send-needs-word` there is the product pass's, comment 7211645920, item 5, which the owner kept (Q8). `print` of such a
   value calls the interface's `Text()` through the table, a message as any call through it is (A10). Pinned by
-  `CheckerTests` and by the cases `actors/interface-call.kz`, `actors/interface-arm.kz`, `actors/interface-arm-face.kz`,
+  `CheckerTests`, `CallLoopTests` and by the cases `actors/interface-call.kz`, `actors/interface-arm.kz`, `actors/interface-arm-face.kz`,
+  `actors/interface-key.kz`, `actors/interface-arm-other.kz`, `actors/interface-move.kz`,
   `actors/interface-text.kz`, `actors/interface-method-private.kz`,
   `actors/interface-crash.kz`, `actors/interface-within.kz`, `actors/interface-crossing.kz`,
   `actors/interface-mut-parameter.kz`, `actors/interface-missing-method.kz`, `actors/interface-send.kz` and
@@ -3231,8 +3239,8 @@ parameters of its own (K7, section 4) and a property that is `static`, `virtual`
 leaves open (K7), each of which leaves the class, every class derived from it and every value of them unread, and of a
 class it reads, a field in its body or a `static` member where the class has a base or classes derived from it
 (K6, K7, K18), a type after `:` that is neither a class nor an interface, or a class of `std/` the prelude brings (W1), a
-second base class, a base class after an interface, an interface named twice or with arguments, and a base that closes a cycle of
-bases (K6, K7, K10), arguments after the name of the base of a class without a primary constructor, whose constructors pass
+second base class, a base class after an interface, an interface named twice, and a base that closes a cycle of
+bases (K6, K7, K10; arguments after an interface are the checker's `syntax`, K10), arguments after the name of the base of a class without a primary constructor, whose constructors pass
 them with `: base(...)` (K10, K14), in a constructor of the body a use of the instance,
 `this`, a method of it or a lambda that reaches it, before every field is assigned, as Swift refuses it, `this` and a method of the
 instance in a constructor of a class with derived classes, where an override could read a field of the derived class while the
@@ -3347,11 +3355,11 @@ rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none o
 type or a time type (T10, T29);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); of an actor, a clause after its name but `stack` and the words of a policy (U1, U27), the block of `on crash` after a `per` actor's name among them, a modifier but `pub`, type parameters, which
-an actor may declare (U1), arguments after an interface after its name, which an actor has no constructor to take (U1, K10), a generic interface after its name (U1, T19), a `static` method and an immutable `static` field of a type that holds no class,
+an actor may declare (U1), a generic interface after its name (U1, T19), a `static` method and an immutable `static` field of a type that holds no class,
 or of a type not written (U1), and a modifier of a method but `pub`, which a method
 may take as a class's does (U1, U9), each of which leaves the
 actor and every use of its name unread, besides what a class's body does not read, as the checker's `syntax` for a base after
-an actor's name, `equal by` and a constructor in its body (U1, U2), and its `static-state` for a `static mut` field and one
+an actor's name, arguments after an interface there (U1, K10), `equal by` and a constructor in its body (U1, U2), and its `static-state` for a `static mut` field and one
 whose type is or holds a class (U1), leave it too, while an actor after a class's `:` is `syntax` and the class is read without
 that base (U1); `retry { ... }` (section 6, U28), and of `attempt { ... }` what the build does not bring into its child or
 out of it, one in a file read without `std/` and one whose `Reason` still grows at the fifth reading (U46, U47); a block of `on crash` whose child can throw a type the

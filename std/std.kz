@@ -4769,9 +4769,15 @@ pub bool Drawn(byte* at, long count) {
 }
 
 // The next word of the order of the actors ready at a turn of a run of `kurz test` (`seeded`, Y11), which
-// only a run that `Seed` started asks for.
+// the runtime asks for only in a run that `Seed` started (`DrawnTake`); 0 where no run started them, so
+// that a call outside such a run reads and writes no word through a null pointer, as `Drawn` tests
+// `seeded` before it reads one, and gets the index 0, the head of the queue.
 pub ulong OrderWord() {
     raw {
+        if seeded == null {
+            return 0
+        }
+
         return NextWord(seeded + 32)
     }
 }

@@ -1294,6 +1294,26 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_slot_of_an_actor_s_table_for_an_interface_lets_go_of_an_argument_written_move_once_it_crossed()
+    {
+        // U1 with U12 (the owner, 2026-11-27, #39, comment 7220200988, "Yes, it crosses (Recommended)"): the call through the interface
+        // gives the slot an argument of a parameter written `move`, whose copy crosses into the actor's heap, and the slot lets go of the
+        // moved value, as a message with `move` does (`Emitter.Arguments`), while one of a parameter with no word stays the caller's; the
+        // IR is read, since nothing a run prints shows the release, which no reference of the program reaches
+        var ir = Emit("class Tag(string Name)\n\ninterface Shelf {\n    void Look(Tag t)\n    void Keep(move Tag t)\n}\n\n"
+            + "actor Store : Shelf {\n    pub void Look(Tag t) {\n        print(t.Name)\n    }\n\n    pub void Keep(move Tag t) {\n        print(t.Name)\n    }\n}\n\n"
+            + "Shelf s = spawn Store()\ns.Look(Tag(\"a\"))\nb = Tag(\"b\")\ns.Keep(move b)\n").Ir;
+        string Slot(int index) => Assert.Single(ir.Split("\ndefine "), f => f.StartsWith($"internal void @\"face.actor.Store.Shelf.{index}\"(", StringComparison.Ordinal));
+        const string release = "call void @\"release.class.Tag\"(ptr %a1)";
+        Assert.Contains(release, Slot(1), StringComparison.Ordinal);
+        Assert.DoesNotContain(release, Slot(0), StringComparison.Ordinal);
+
+        // U35: the table of the slot's message holds a fourth function, which copies the message's arguments out of a heap of its
+        // own on worker threads (the runtime's `Adopted`), as a message through the actor's reference does
+        Assert.Equal(2, Regex.Count(ir, @"@""message\.table\.[0-9]+"" = private unnamed_addr constant \[4 x ptr\] \[[^\n]*@""message\.adopt\.Store\."));
+    }
+
+    [Fact]
     public void A_message_whose_argument_is_the_name_of_a_property_is_built_in_a_heap_of_its_own()
     {
         // U39, U12, K7: a name that reads a property inside its class, `Items`, is the call of its getter, which can raise, an index
@@ -1967,5 +1987,22 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Equal(4, Regex.Count(test, @"call i64 @""rt\.common\.Ahead\.[^""]*""\(\)"));
             Assert.Matches(stores, test);
         }
+    }
+
+    [Fact]
+    public void The_word_of_a_message_s_heap_of_its_own_is_stored_through_its_one_definition()
+    {
+        // U35, T17: the word at 48 of a message (field 6) has one meaning, which `Emitter.OwnHeapStored` states, so that no site stores
+        // there a heap that the runtime's `Enqueue` and `Adopted` would take off the list of the heaps being built and free on worker
+        // threads: the one line of the emitter's sources that names field 6 of a message is that helper's, and the three sites that build
+        // a message (`EmitMessage`, `EmitMessageOf` and the `attempt`'s) call it; a store written in another form is not seen here
+        var sources = Path.Combine(CorpusTests.Root, "compiler", "Kurz.Compiler", "Emit");
+        var lines = Directory.EnumerateFiles(sources, "*.cs", SearchOption.AllDirectories)
+            .SelectMany(f => File.ReadLines(f).Select(line => (File: Path.GetFileName(f), Line: line)))
+            .ToList();
+        var store = Assert.Single(lines, x => Regex.IsMatch(x.Line, @"MessageField\([^()]*, 6\)"));
+        Assert.Equal("Emitter.Actors.cs", store.File);
+        Assert.Contains("private void OwnHeapStored(", store.Line, StringComparison.Ordinal);
+        Assert.Equal(3, lines.Count(x => x.Line.Contains("OwnHeapStored(message, ", StringComparison.Ordinal)));
     }
 }

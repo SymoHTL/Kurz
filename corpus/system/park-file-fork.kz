@@ -15,7 +15,7 @@
 // descriptor once more, so that the read's end as its byte comes is a bound of time, which `FileTests` holds and this case does not
 extern "C" {
     int fork()
-    int waitpid(int pid, long status, int options)
+    int waitpid(int pid, int* status, int options)
     int usleep(int microseconds)
     void _exit(int code)
 }
@@ -113,7 +113,7 @@ void | IoError Main() {
 
     stream.Write("r".Bytes)
     raw {
-        waitpid(child, 0, 0)
+        waitpid(child, null, 0)
     }
 
     print("parent done")

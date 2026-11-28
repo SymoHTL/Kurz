@@ -1808,13 +1808,19 @@ top-level code as the root actor under the scheduler from its first line (§6, t
 said back on 2026-11-13, under which §12's "Block the thread" of 2026-10-29 describes the language as it stood
 without actors)*. A program without actors serves one connection at a time (§12, the owner,
 2026-10-30, "One at a time"). A wait for a child, `Command`'s run to its end (S18) and a spawned
-child's wait (S19), parks the actor in the same way, the child's pipes and the descriptor of its
-process waiting under `epoll`, with no thread of the pool for each child (§12, the owner, 2026-11-26,
-issue 661, comment 7189038013, Q14 (a)). A crash of the actor over such a wait closes the pipes the
-call holds to the child and the descriptor of its process, and leaves the child to run, not waited
-for, as Rust's `Child` that is dropped leaves it (§12, assumed there). In the child of a `fork`, which
-a program makes in `raw` (R7) and which has no thread of the pool, each call that waited on the pool
-ends with `Other` and the number 125, `ECANCELED` (§12, assumed there).
+child's wait (S19), parks the actor in the same way, the child's pipes waiting under `epoll`, and the
+descriptor of its process too where a bound is set (S20), which the wait opens for that bound alone,
+with no thread of the pool for each child (§12, the owner, 2026-11-26, issue 661, comment 7189038013,
+Q14 (a)). A crash of the actor over such a wait closes what the call holds: for S18 its pipes to the
+child, the input's among them, and for S18 and S19 the descriptor of the child's process where the
+wait opened one, S19's pipes staying the `ChildProcess` value's; it leaves the child to run, not
+waited for, as Rust's `Child` that is dropped leaves it, a child that ends after the crash staying in
+the system's table of processes to the end of the program (§12, assumed there). In the child of a
+`fork`, which a program makes in `raw` (R7) and which has no thread of the pool, the calls that wait
+on the pool end at the child's first look at the poller or at its first call handed to the pool,
+whichever comes first, each with its job's result where a thread of the parent's pool made the call
+before the `fork`, and otherwise with `Other` and the number 125, `ECANCELED`, and the child's first
+call handed after them makes a pool of its own (§12, assumed there).
 
 Case: [system/park-accept-first.kz](../corpus/system/park-accept-first.kz)
 ```kurz
@@ -2097,7 +2103,7 @@ Case: [system/park-crash-deadlock.kz](../corpus/system/park-crash-deadlock.kz)
 // `Go` waits on `Get`, queued behind `Fail` in `Worker`'s inbox, and the block of `Worker`'s policy waits behind `Go`, a loop that a
 // crash closes and that layer 3 does not see (U60): the top-level code's wait on `Go` finds no actor left to run, no timer pending
 // and nothing registered with the poller, so that it is `deadlock` at its line (U18), and not a wait in the poller without end.
-// U18 alone is the subject, the end the top-level code's wait reaches once nothing is registered; S10, U20 and U64 it passes through
+// U18 alone is the subject, the end of the top-level code's wait once nothing is registered; S10, U20, U60 and U64 it passes through
 actor Helper {
     pub void Poke(Napper n) {
         print(n.Boom())
@@ -2641,7 +2647,7 @@ Case: [system/park-file-crash.kz](../corpus/system/park-file-crash.kz)
 // blocking calls for its opening of a FIFO, and its crash drops the job and gives both its callers `callee-crashed` (U20): `Caller`,
 // whose policy prints it, and `Helper`, whose policy stops it (U25). The opening ends once the top-level code opens the FIFO to
 // write, on a thread of the pool, with no wait left to wake, and `Reader`'s read of a file on the pool after it reads its byte.
-// S10 alone is the subject, the job of a call whose actor fell dropped; U20 it passes through
+// S10 alone is the subject, the job of a call whose actor fell dropped; U17, U20 and U25 it passes through
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
@@ -2786,7 +2792,7 @@ Case: [system/park-command-crash.kz](../corpus/system/park-command-crash.kz)
 // `cat` of a FIFO, and its output, and its crash takes those waits out of the poller and gives both its callers `callee-crashed`
 // (U20): `Caller`, whose policy prints it, and `Helper`, whose policy stops it (U25). The child ends once the top-level code opens
 // the FIFO to write, with no wait left to wake, and `Runner`'s wait for a child of its own after it gives that child's output.
-// S10 alone is the subject, the waits for a child taken out of the poller at a fall; S18 and U20 it passes through
+// S10 alone is the subject, the waits for a child taken out of the poller at a fall; S18, U17, U20 and U25 it passes through
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
@@ -2870,8 +2876,8 @@ Case: [system/park-command-pipes.kz](../corpus/system/park-command-pipes.kz)
 // open descriptors, which the system lists in `/proc/self/fd`, is the same once the crash is over as before it. A crash that left the
 // pipes open would leave two more. `Runner`'s wait for a child of its own and its read of a file make the poller and the pool of
 // threads for blocking calls before the first count, so that neither is counted once only, and the top-level code opens the FIFO to
-// write once the crash is over, so that the child ends. S10 alone is the subject, the fall of a wait for a child; S18 and U20 it
-// passes through
+// write once the crash is over, so that the child ends. S10 alone is the subject, the fall of a wait for a child; S18, U17, U20 and
+// U25 it passes through
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
@@ -2966,7 +2972,10 @@ Case: [system/park-file-drained.kz](../corpus/system/park-file-drained.kz)
 // its end before the crash: the fall gives that job back and closes the descriptor the opening gave, as it closes one whose job
 // ends after the fall (issue 661, the product pass, comment 7182792402, Q3), so that the count of the process's open descriptors,
 // which the system lists in `/proc/self/fd`, is the same once the crash is over as before it. A fall that left the job would leave
-// one more. `Reader`'s read of a file makes the pool before the first count. S10 alone is the subject; U20 it passes through
+// one more. `Reader`'s read of a file makes the pool before the first count. The case rests on a margin of time that no rule fixes:
+// an opening that ended after the fall, its descriptor closed as that one's is, would give the same count, so that the case holds
+// the fall over a job whose end was taken only where the opening ends within `Boom`'s 0.4 seconds. S10 alone is the subject, the
+// fall over a job whose end the scheduler took; U17, U20 and U25 it passes through
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
@@ -3059,7 +3068,10 @@ Case: [system/park-file-fork-wait.kz](../corpus/system/park-file-fork-wait.kz)
 // forks while it waits. The child of a `fork` drops the pool, whose threads it has none of, and the opening's wait in the child
 // ends with `Other` and the number 125, `ECANCELED`, so that the child's call of `Got`, queued behind it, gets its answer; a child
 // that kept the wait would wait without end, the wait counted among the registrations of the poller, which raises no `deadlock`
-// (U18). The parent waits for the child, then opens the FIFO to write, so that its own opening ends
+// (U18). The parent waits for the child, then opens the FIFO to write, so that its own opening ends. The case rests on a margin of
+// time that no rule fixes: the top-level code's sleep of 0.1 seconds lets the opening reach the pool before the `fork`, and a
+// `fork` before it would leave the child's opening waiting for a writer to the limit of the run. S10 alone is the subject, the
+// waits on the pool in the child of a `fork`; R7 and U18 it passes through
 extern "C" {
     int fork()
     int waitpid(int pid, int* status, int options)
@@ -3136,7 +3148,7 @@ Case: [system/park-file-fork.kz](../corpus/system/park-file-fork.kz)
 // descriptor once more, so that the read's end as its byte comes is a bound of time, which `FileTests` holds and this case does not
 extern "C" {
     int fork()
-    int waitpid(int pid, long status, int options)
+    int waitpid(int pid, int* status, int options)
     int usleep(int microseconds)
     void _exit(int code)
 }
@@ -3234,11 +3246,110 @@ void | IoError Main() {
 
     stream.Write("r".Bytes)
     raw {
-        waitpid(child, 0, 0)
+        waitpid(child, null, 0)
     }
 
     print("parent done")
     File.Delete("park-file-fork.txt")
+}
+
+Main() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/park-file-fork-done.kz](../corpus/system/park-file-fork-done.kz)
+```kurz
+// `Reader`'s opening of a file runs on the pool of threads for blocking calls (S10), and `Forker`, whose message runs while that
+// opening waits, holds the thread that runs every actor for 0.2 seconds, in which the pool's thread makes the opening, then forks
+// before the scheduler takes the job's end. The child of a `fork` drops the pool and ends the waits on it, and the opening the
+// parent's thread made keeps its descriptor in the child, which then reads the file through a pool of its own; a child that ended
+// that wait with `Other` and the number 125, `ECANCELED`, as a job no thread made, would print `child open Other 125`. The child's
+// descriptor is the parent's, one open file whose offset both move, and the child's read takes the file's two bytes into the buffer
+// of its `File`, so that it gives `f`, and the parent, which waits for the child, reads at the end of the file. The case rests on a
+// margin of time that no rule fixes: a thread of the pool that has not made the opening within the 0.2 seconds leaves the child's
+// wait to end as one whose job no thread made. S10 alone is the subject, the waits on the pool in the child of a `fork` whose jobs
+// the parent's threads ended; R7 and U17 it passes through
+extern "C" {
+    int fork()
+    int waitpid(int pid, int* status, int options)
+    int usleep(int microseconds)
+    void _exit(int code)
+}
+
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+actor Reader {
+    mut string got = "none"
+
+    pub void Read() {
+        f = File.Open("park-file-fork-done.txt") else {
+            IoError e => {
+                got = "open {e.Kind} {e.Code}"
+                return
+            }
+        }
+
+        mut buffer = Bytes()
+        n = f.Read(mut buffer, 1) else {
+            IoError e => {
+                got = "read {e.Kind}"
+                return
+            }
+        }
+
+        got = "read {n}:{Text(buffer)}"
+        f.Close() else {
+            IoError e => got = "close {e.Kind}"
+        }
+    }
+
+    pub string Got() => got
+}
+
+actor Forker {
+    pub string Fork(Reader r) {
+        mut int child = 0
+        raw {
+            usleep(200000)
+            child = fork()
+        }
+
+        // a fork that failed ends the case before the wait, so that no `waitpid` takes a pid less than 0
+        if child < 0 {
+            return "fork failed"
+        }
+
+        if child == 0 {
+            print("child {r.Got()}")
+            raw {
+                _exit(0)
+            }
+        }
+
+        raw {
+            waitpid(child, null, 0)
+        }
+
+        return "parent {r.Got()}"
+    }
+}
+
+void | IoError Main() {
+    k = File.Create("park-file-fork-done.txt")
+    k.Write("fg".Bytes)
+    k.Close()
+    r = spawn Reader()
+    f = spawn Forker()
+    send r.Read()
+    print(f.Fork(r))
+    File.Delete("park-file-fork-done.txt")
 }
 
 Main() else {

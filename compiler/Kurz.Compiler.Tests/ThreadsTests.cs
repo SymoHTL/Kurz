@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Emit;
@@ -8,11 +10,14 @@ using Xunit;
 namespace Kurz.Compiler.Tests;
 
 /// <summary>
-/// The count of worker threads that the start of a program with a <c>spawn</c> reads from <c>KURZ_THREADS</c> (U35), which no corpus case
-/// can set, its header holding no environment: a value that is no whole number above 0 written in digits alone, or above the greatest
+/// The count of worker threads that the start of a program with a <c>spawn</c> reads from <c>KURZ_THREADS</c> (U35), which a corpus case
+/// sets only to 1, by its <c>// threads: 1</c> line, or takes away, where the runner sets no count of its own (<c>RunTests</c>), so that no
+/// case gives it a refused value: a value that is no whole number above 0 written in digits alone, or above the greatest
 /// <c>int</c>, or not UTF-8, ends the start with <c>threads-variable</c> and the exit code 1. Each program is built for Linux and run with
 /// <c>KURZ_THREADS</c> set or taken away; a build for Windows reads no <c>KURZ_THREADS</c>, its runtime giving no variable of the
-/// environment (S14), and no test runs there.
+/// environment (S14), so the tests that run a program are skipped on Windows, where <c>Ran</c> gives null and they check nothing, while
+/// the test of the marks of the worker threads' forms, which emits a program for Linux on x86-64 and optimises its IR with clang, running
+/// no program, runs on every host.
 /// </summary>
 public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -62,7 +67,7 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("")] // not set: the cores are read (`Cores`), and as many worker threads start where they are more than 1 (`workersAsked`)
     public void A_KURZ_THREADS_that_is_a_whole_number_above_0_or_none_starts_the_program(string setup)
     {
-        if (Ran(Spawns, $"threads-ok-{Math.Abs(setup.GetHashCode(StringComparison.Ordinal))}", setup) is { } run)
+        if (Ran(Spawns, Named("threads-ok", setup), setup) is { } run)
         {
             Assert.Equal((0, ""), (run.Code, run.Error));
             Assert.Equal(["1"], run.Output);
@@ -129,6 +134,80 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
         {
             Assert.Equal((0, ""), (run.Code, run.Error));
             Assert.Equal(["true", "1800", "last r299"], run.Output);
+        }
+    }
+
+    /// <summary>
+    /// The program of <see cref="A_call_through_an_interface_on_worker_threads_frees_the_heap_of_its_message"/>: 300000 calls of one
+    /// actor to another through an interface inside one message, then the line <c>VmHWM</c> of the system's <c>/proc/self/status</c>,
+    /// the peak of the process's resident memory.
+    /// </summary>
+    private const string InterfaceCalls = """
+        interface Store {
+            long Get(string key)
+        }
+
+        actor Cache : Store {
+            pub long Get(string key) => long(key.Bytes.Count)
+        }
+
+        actor Driver {
+            pub long Run(int count) {
+                Store c = spawn Cache()
+                mut long total = 0
+                mut int i = 0
+                while i < count {
+                    total = total + c.Get("item number {i}")
+                    i = i + 1
+                }
+
+                return total
+            }
+        }
+
+        string | IoError Peak() {
+            bytes = File.ReadAll("/proc/self/status")
+            text = string.FromUtf8(bytes) else {
+                InvalidUtf8 => ""
+            }
+
+            for line in text.Split('\n') {
+                if line.StartsWith("VmHWM:") {
+                    return line
+                }
+            }
+
+            return "none"
+        }
+
+        void | IoError Show() {
+            print(spawn Driver().Run(300000))
+            print(Peak())
+        }
+
+        Show() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    /// <summary>
+    /// U1, U35, T17: a call through an interface that an actor implements builds its message in a heap of its own on worker threads, which
+    /// the field of the message names (<c>Emitter.OwnHeapStored</c>), so that the receiver copies the arguments out of it and frees it, as
+    /// every other message's: 300000 such calls inside one message on four worker threads keep the peak of the process's resident memory
+    /// under 64 MiB. Built with the slot that left that field unwritten, the program kept every such heap: its peak was 234.8 MB on four
+    /// worker threads, against 9.6 MB with the field written and 8.7 MB for the same calls made directly (2026-11-27, `--release` builds).
+    /// </summary>
+    [Fact]
+    public void A_call_through_an_interface_on_worker_threads_frees_the_heap_of_its_message()
+    {
+        if (Ran(InterfaceCalls, "threads-interface-heap", "export KURZ_THREADS=4; ") is { } run)
+        {
+            Assert.Equal((0, ""), (run.Code, run.Error));
+            Assert.Equal("5288890", run.Output[0]);
+            var peak = Regex.Match(run.Output[1], "^VmHWM:\\s+([0-9]+) kB$");
+            Assert.True(peak.Success, run.Output[1]);
+            Assert.True(long.Parse(peak.Groups[1].Value, CultureInfo.InvariantCulture) < 65536, run.Output[1]);
         }
     }
 
@@ -222,7 +301,8 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     /// <summary>
     /// S28, U35: an actor that sleeps on a worker thread parks among that thread's timers, which wake it there, while the others run,
-    /// and the top-level code sleeps on the main thread; the actor's sleep lasts at least its length.
+    /// and the top-level code sleeps on the main thread; the actor's sleep lasts at least its length. The sleep of 500 ms that `Nap`
+    /// prints after is the margin by which `7` comes first, which a wake late by tens of milliseconds on a loaded machine keeps.
     /// </summary>
     [Fact]
     public void An_actor_that_sleeps_on_a_worker_thread_parks_while_the_others_run()
@@ -230,7 +310,7 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
         const string text = """
             actor Napper {
                 pub void Nap() {
-                    Environment.Sleep(50ms)
+                    Environment.Sleep(500ms)
                     print("napped")
                 }
 
@@ -546,7 +626,17 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
     }
 
-    /// <summary>The lines of <paramref name="error"/>, each with the time, the level, the span of P8 and the category of its log line taken off.</summary>
+    /// <summary>
+    /// The name of a build of the kind <paramref name="kind"/> after <paramref name="setup"/>, the same in every run of the tests: the
+    /// first 16 hexadecimal digits of the SHA-256 of the setup's UTF-8 bytes, where <c>string.GetHashCode</c> differs in each process.
+    /// </summary>
+    private static string Named(string kind, string setup) =>
+        $"{kind}-{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(setup)))[..16]}";
+
+    /// <summary>
+    /// The lines of <paramref name="error"/>, where the log line of an actor's crash has its time, its level, the span of P8 and its
+    /// category taken off, and every other line stays whole.
+    /// </summary>
     private static List<string> Logged(string error) =>
         [.. error.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => Regex.Replace(line, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z Error [^{:\\s]+(?:\\{chain=[0-9a-f]{32}\\})?: Kurz\\.Actor: ", ""))];
 
@@ -590,7 +680,8 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>
-    /// U35: the path of a message on one thread pays the tests of the worker threads alone (the owner, 2026-11-26, #519, comment
+    /// U35: the path of a message on one thread pays, at each form on it that only the worker threads go on in, the test of the worker
+    /// threads, a load and a branch, and no call (the owner, 2026-11-26, #519, comment
     /// 7204486070, Q1): the emitter marks the forms only the worker threads reach <c>noinline</c> and <c>cold</c>
     /// (<c>Emitter.WorkerForms</c>), and the helpers of that path that the worker threads call too <c>alwaysinline</c>
     /// (<c>Emitter.InLine</c>). A program of sends and a call to an actor, built for Linux on x86-64 on every machine, since a build
@@ -659,7 +750,10 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// U35: a start of the worker threads that the system refuses a descriptor for, here the <c>eventfd</c> of the second worker under a
     /// limit of six descriptors, ends the process with <c>thread-refused</c> naming the count asked and the exit code 1, after what the
-    /// program printed before its first <c>spawn</c> (section 6, the owner, 2026-11-17, #572, comment 6961064484, Q2).
+    /// program printed before its first <c>spawn</c>: a refused worker ends the start with an error line, an id of its own and the exit
+    /// code 1 (section 6, the owner, 2026-11-20, #519, comment 7051492844, T15 1 of comment 6972618225), the id is <c>thread-refused</c>
+    /// (the owner, 2026-11-26, #519, comment 7204486070, "Keep thread-refused (Recommended)"), and a worker whose <c>eventfd</c> the
+    /// system refuses ends the start so too (assumed in section 6, a part of the worker that its start needs).
     /// </summary>
     [Fact]
     public void A_start_of_the_worker_threads_the_system_refuses_ends_the_process_with_thread_refused()
@@ -679,7 +773,7 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     private void Refused(string setup, string error)
     {
         const string text = "print(\"start\")\n" + Spawns;
-        if (Ran(text, $"threads-refused-{Math.Abs(setup.GetHashCode(StringComparison.Ordinal))}", setup) is { } run)
+        if (Ran(text, Named("threads-refused", setup), setup) is { } run)
         {
             Assert.Equal((1, error), (run.Code, run.Error));
             Assert.Empty(run.Output);

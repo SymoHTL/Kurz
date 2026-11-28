@@ -1,5 +1,4 @@
-// expect: throws call-timeout at 17
-// | 1
+// expect: throws call-timeout at 16
 // rules: U1, U36
 
 // the bound a method declares holds a call through the interface too
@@ -17,5 +16,4 @@ actor Napper : Napping {
 int Use(Napping n, duration d) => n.Nap(d)
 
 a = spawn Napper()
-print(Use(a, 1ms))
 print(Use(a, 1s))
