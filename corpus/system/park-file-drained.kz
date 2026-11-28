@@ -12,7 +12,10 @@
 // its end before the crash: the fall gives that job back and closes the descriptor the opening gave, as it closes one whose job
 // ends after the fall (issue 661, the product pass, comment 7182792402, Q3), so that the count of the process's open descriptors,
 // which the system lists in `/proc/self/fd`, is the same once the crash is over as before it. A fall that left the job would leave
-// one more. `Reader`'s read of a file makes the pool before the first count. S10 alone is the subject; U20 it passes through
+// one more. `Reader`'s read of a file makes the pool before the first count. The case rests on a margin of time that no rule fixes:
+// an opening that ended after the fall, its descriptor closed as that one's is, would give the same count, so that the case holds
+// the fall over a job whose end was taken only where the opening ends within `Boom`'s 0.4 seconds. S10 alone is the subject, the
+// fall over a job whose end the scheduler took; U17, U20 and U25 it passes through
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"

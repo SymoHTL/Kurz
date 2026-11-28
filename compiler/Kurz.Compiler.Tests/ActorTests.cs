@@ -35,7 +35,10 @@ namespace Kurz.Compiler.Tests;
 /// thrown value's copy, the variables it takes after the spawn's arguments, a thrown <c>null</c>, the runtime's error, an overflow, the
 /// blocks dropped, and memory over 10,000 crashes it restarts. Each program runs with <c>KURZ_THREADS</c> set to 1, which runs that one
 /// thread (U35), since a program where it is not set runs on as many worker threads as the cores (section 6, Q4 of comment 6946532526),
-/// whose order and heaps these expectations do not follow, as a corpus case marked <c>// threads: 1</c> runs on one thread.
+/// whose order and heaps these expectations do not follow, as a corpus case marked <c>// threads: 1</c> runs on one thread. The owner's
+/// answer that a test sets it only where it follows one thread's order or counts heaps (2026-11-27, #519, comment 7215317481, Q1 of
+/// comment 7207859311) holds for the class as a whole while issue 673 reads the run of the class on the cores, in which 47 of its 169
+/// tests failed, among them failures that are neither an order nor a count of heaps.
 /// </summary>
 public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -2418,7 +2421,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var rest = new StringBuilder();
         foreach (var line in Toolchain.Lines(error))
         {
-            var logged = line.Length > 25 && line[4] == '-' && line[10] == 'T' && line[23] == 'Z' && line[24] == ' ' ? CrashLogged.Match(line[25..]) : Match.Empty;
+            var logged = CrashMatch(line);
             if (logged.Success)
             {
                 crashes.Add(logged.Groups["crash"].Value);
@@ -2431,6 +2434,17 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         return (crashes, rest.ToString());
     }
+
+    /// <summary>
+    /// P8: each log line of an actor's crash on standard error after its time, whole, with the 32 digits of its chain written as
+    /// <c>&lt;chain&gt;</c>, so that a test holds the span of a crash that carries a chain and the type's name alone of one that carries none.
+    /// </summary>
+    private static List<string> CrashLines(string error) =>
+        [.. Toolchain.Lines(error).Where(line => CrashMatch(line).Success).Select(line => Regex.Replace(line[25..], "\\{chain=[0-9a-f]{32}\\}", "{chain=<chain>}"))];
+
+    /// <summary>The match of <see cref="CrashLogged"/> on <paramref name="line"/> after its time in P7's layout, else <see cref="Match.Empty"/>.</summary>
+    private static Match CrashMatch(string line) =>
+        line.Length > 25 && line[4] == '-' && line[10] == 'T' && line[23] == 'Z' && line[24] == ' ' ? CrashLogged.Match(line[25..]) : Match.Empty;
 
     /// <summary>
     /// U23: the runtime whose clock of the pauses is a count of its own, 0 at the start, which its sleep moves on by the time asked, with
@@ -3743,7 +3757,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_restart_limit_in_an_actor_is_its_crash_which_its_own_supervisor_handles()
     {
         // U26: `Flaky`'s second crash passes its `max 1 in 1min`, and `Boss` crashes with `restart-limit` at the line of the `spawn`,
-        // after `Flaky`'s two lines; the root restarts `Boss`, and the crash ends `Flaky` with it (U21)
+        // after `Flaky`'s two lines; the root restarts `Boss`, and the crash ends `Flaky` with it (U21). P8: each line carries the chain
+        // of its message, `Boss`'s that of `Break`, which waits in `Ping` while `Flaky` crashes
         const string text = """
             actor Flaky {
                 pub void Fail() {
@@ -3775,6 +3790,13 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var run = BuildAndRun(text, ListTests.Fenced, "actor-policy-limit-in-actor");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Flaky#2 crashed: thrown \"flaky\" at program.kz:3", "Flaky#2 crashed: thrown \"flaky\" at program.kz:3", "Boss#1 crashed: restart-limit at program.kz:14"], crashes);
+        Assert.Equal(
+            [
+                "Error Flaky{chain=<chain>}: Kurz.Actor: Flaky#2 crashed: thrown \"flaky\" at program.kz:3",
+                "Error Flaky{chain=<chain>}: Kurz.Actor: Flaky#2 crashed: thrown \"flaky\" at program.kz:3",
+                "Error Boss{chain=<chain>}: Kurz.Actor: Boss#1 crashed: restart-limit at program.kz:14",
+            ],
+            CrashLines(run.Error));
         Ran((run.Code, run.Output, rest), 0, ["0"], "");
     }
 
@@ -3784,7 +3806,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // U26, U21, U20: `Flaky`'s second crash passes its `max 1 in 1min`, and `Boss` crashes with `restart-limit` at the line of the
         // `spawn`; `Flaky` has no activation, its own fall having cleared it, so that `Boss`'s fall ends it at once (`EndChildren`), and
         // `Ping`, queued to it by the top-level code, another caller than its supervisor, raises `actor-gone` at its line, which ends the
-        // process; under the allocator that makes every freed block inaccessible
+        // process; under the allocator that makes every freed block inaccessible. P8: `Flaky`'s lines carry the chain of their message, and
+        // `Boss`'s crash, which no message of it runs, carries none, so that its span is the type's name alone
         const string text = """
             actor Flaky {
                 pub void Fail() {
@@ -3808,6 +3831,13 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var run = BuildAndRun(text, ListTests.Fenced, "actor-policy-limit-ends");
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Flaky#2 crashed: thrown \"flaky\" at program.kz:3", "Flaky#2 crashed: thrown \"flaky\" at program.kz:3", "Boss#1 crashed: restart-limit at program.kz:10"], crashes);
+        Assert.Equal(
+            [
+                "Error Flaky{chain=<chain>}: Kurz.Actor: Flaky#2 crashed: thrown \"flaky\" at program.kz:3",
+                "Error Flaky{chain=<chain>}: Kurz.Actor: Flaky#2 crashed: thrown \"flaky\" at program.kz:3",
+                "Error Boss: Kurz.Actor: Boss#1 crashed: restart-limit at program.kz:10",
+            ],
+            CrashLines(run.Error));
         Ran((run.Code, run.Output, rest), 1, [], "error: actor-gone at program.kz:17\n");
     }
 

@@ -114,7 +114,12 @@ flowchart TD
         for any target, or on a function common/ or std/ calls that a target's directory gives with other parameters
         or another result;
         and the corpus runner, which builds every case that expects a run and that the compiler emits with the
-        pinned clang and runs it, and again under an allocator that makes every freed block inaccessible, but for
+        pinned clang and runs it with `KURZ_THREADS` taken away, on the threads U35 gives a program where it is not
+        set, a case marked `// threads: 1` on one, a case of `kurz test` with the seed 0 (Y11), one marked
+        `// threads: 1` built with its ready actors first in, first out, which on Windows the build alone gives, the cases of a crash and of the blocks of `on crash`, `attempt` and
+        `per node` that its list `CrashPathCases` names again on four worker threads (U35), which on Windows, where no
+        worker thread starts, is a run of one thread again, and every case again under an allocator that makes every
+        freed block inaccessible, but for
         the cases its list `NotFenced` names, each with why, which that run builds and does not run, red on
         output, an exit code or an error line other than the header's (a warning builds the case and passes, as it
         passes the corpus theory where it is md5-insecure on a line that calls Md5), on a case that expects an id

@@ -9,13 +9,13 @@ interface Store {
 }
 
 interface Named {
-    string Text()
+    string Name()
 }
 
 actor Cache : Store, Named {
     pub long Get(string key) => 5
 
-    pub string Text() => "cache"
+    pub string Name() => "cache"
 }
 
 class Fixed : Store {
@@ -23,7 +23,7 @@ class Fixed : Store {
 }
 
 string Kind(Store s) => match s {
-    Named n => "named {n.Text()}"
+    Named n => "named {n.Name()}"
     else => "plain {s.Get("a")}"
 }
 

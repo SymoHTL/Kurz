@@ -1,6 +1,6 @@
 // expect: throws callee-crashed at 26
 // threads: 1
-// rules: S28, U20
+// rules: S28, U20, U35
 
 // `Boom`, a call of the chain, is let in while `Outer` sleeps, and its crash takes the sleep off the timers and wakes the caller
 actor Helper {

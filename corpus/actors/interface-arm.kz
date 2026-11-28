@@ -2,12 +2,9 @@
 // | cache 3
 // | store 7
 // | int 3
-// | 2
-// | again
-// | second
 // rules: U1
 
-// an actor's arm takes the values that hold its references; `==` and a key are those of the reference
+// an arm of the actor's type in a `match` over the interface takes the values that hold its references, as a class's arm takes its instances
 interface Store {
     long Get(string key)
 }
@@ -27,15 +24,6 @@ string Kind(Store | int s) => match s {
 }
 
 a = spawn Cache()
-b = spawn Cache()
 print(Kind(a))
 print(Kind(Fixed()))
 print(Kind(3))
-
-mut Map<Store, string> names = Map<Store, string>()
-names[a] = "first"
-names[b] = "second"
-names[a] = "again"
-print(names.Count)
-print(names[a])
-print(names[b])

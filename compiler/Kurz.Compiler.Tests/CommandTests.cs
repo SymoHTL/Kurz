@@ -489,6 +489,9 @@ public sealed class CommandTests : IDisposable
     [InlineData("test", "a.kz", "--cpu")]
     [InlineData("test", "--seed", "1", "--seed", "1", "a.kz")] // Y11: `--seed` once, and a value after it
     [InlineData("test", "a.kz", "--seed")]
+    [InlineData("test", "--seed")] // Y11: a `--seed` that is the last word, before any file
+    [InlineData("test", "a.kz", "--seed", "1")] // Y2, Y11: an option after the file is the usage's
+    [InlineData("test", "a.kz", "--release")]
     [InlineData("run", "--seed", "1", "a.kz")] // Y11: the seed is `test`'s alone
     [InlineData("build", "--seed", "1", "a.kz")]
     [InlineData("exec", "--seed", "1", "print(1)")]
@@ -508,21 +511,99 @@ public sealed class CommandTests : IDisposable
     [InlineData(" 1")]
     [InlineData("1.0")]
     [InlineData("18446744073709551616")]
+    [InlineData("--release")] // Y11: the word after the flag is its value, whatever it is, an option or a file
+    [InlineData("a.kz")]
     public void A_seed_that_is_no_ulong_in_digits_ends_the_command_before_its_build(string value) =>
         // Y11: the value of `--seed` in digits alone, 0 to the greatest `ulong`; any other ends the command with its line, before the
         // file is read, so that a file that is not there is not named
         Assert.Equal((1, "", $"error: seed ({value})\n"), Kurz("test", "--seed", value, "missing.kz"));
 
     [Fact]
+    public void A_seed_with_leading_zeros_names_its_number()
+    {
+        // Y11 (§2, assumed there): `007` is the seed 7, which the failed line names as its number
+        var source = Path.Combine(root, "zeros.kz");
+        File.WriteAllText(source, "test \"fails\" {\n    n = 2\n    check n == 3\n}\n");
+        Assert.Equal((1, $"test \"fails\" ... FAILED (seed 7)\n    check-failed \"n == 3 (2 == 3)\" at {source}:3\n1 test: 0 passed, 1 failed\n", ""), KurzWithPlaces("test", "--seed", "007", source));
+    }
+
+    [Fact]
+    public void The_order_a_seed_draws_is_the_one_splitmix64_and_xoshiro256pp_give_by_the_take_of_Y11()
+    {
+        // Y11 (§2, assumed there): the order of the four speakers ready at one turn, worked out here apart from the runtime, from
+        // SplitMix64 and xoshiro256++ as their authors give them; the seed 0's order is the corpus case's, `b c a d`
+        Assert.Equal("bcad", WorkedOrder(0));
+        var source = Path.Combine(root, "worked.kz");
+        File.WriteAllText(source, Speakers + "test \"speaks\" {\n" + Spawned + "}\n");
+        foreach (var seed in new ulong[] { 0, 1, 2, 3, 4, 5, 18446744073709551615 })
+        {
+            var (code, output, error) = KurzWithPlaces("test", "--seed", seed.ToString(System.Globalization.CultureInfo.InvariantCulture), source);
+            Assert.Equal((0, ""), (code, error));
+            Assert.Equal(WorkedOrder(seed), string.Concat(output.Split('\n')[..4]));
+        }
+    }
+
+    /// <summary>
+    /// The order in which the four speakers of <see cref="Spawned"/> print under <paramref name="seed"/>, as Y11 states it: SplitMix64's
+    /// first eight words from the seed, the order's generator the four after the first four, xoshiro256++; the test's own actor, alone in
+    /// its turn, takes the first word of the order, and each take of the speakers' turn is the one of those left at the word drawn for it
+    /// modulo their count, those left keeping their order in the queue.
+    /// </summary>
+    private static string WorkedOrder(ulong seed)
+    {
+        var words = new ulong[8];
+        var x = seed;
+        for (var i = 0; i < 8; i++)
+        {
+            x = unchecked(x + 0x9E3779B97F4A7C15UL);
+            var z = x;
+            z = unchecked((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL);
+            z = unchecked((z ^ (z >> 27)) * 0x94D049BB133111EBUL);
+            words[i] = z ^ (z >> 31);
+        }
+
+        var s = words[4..];
+        ulong Drawn()
+        {
+            var result = unchecked(System.Numerics.BitOperations.RotateLeft(unchecked(s[0] + s[3]), 23) + s[0]);
+            var t = s[1] << 17;
+            s[2] ^= s[0];
+            s[3] ^= s[1];
+            s[1] ^= s[2];
+            s[0] ^= s[3];
+            s[2] ^= t;
+            s[3] = System.Numerics.BitOperations.RotateLeft(s[3], 45);
+            return result;
+        }
+
+        _ = Drawn();
+        var left = new List<char> { 'a', 'b', 'c', 'd' };
+        var order = new System.Text.StringBuilder();
+        while (left.Count > 0)
+        {
+            var index = (int)(Drawn() % (ulong)left.Count);
+            order.Append(left[index]);
+            left.RemoveAt(index);
+        }
+
+        return order.ToString();
+    }
+
+    [Fact]
     public void Test_with_no_seed_takes_a_new_one_which_the_failed_line_names_and_which_replays_the_run()
     {
-        // Y11, Q2 a, Q3 a: with no `--seed` the run takes a new seed, the failed test's line names it in digits, and `--seed` with it
-        // writes the same lines, the order of the ready actors among them
+        // Y11, Q2 a, Q3 a: with no `--seed` each run takes a new seed, two runs two seeds (the same one twice by a chance of one in 2 to
+        // the 64th), the failed test's line names it in digits, and `--seed` with it writes the same lines, the order of the ready actors
+        // among them
         var source = Path.Combine(root, "replays.kz");
         File.WriteAllText(source, Speakers + "test \"speaks\" {\n" + Spawned + "    check false\n}\n");
         var first = KurzWithPlaces("test", source);
         var seed = Regex.Match(first.Output, "^test \"speaks\" \\.\\.\\. FAILED \\(seed ([0-9]+)\\)$", RegexOptions.Multiline);
         Assert.True(seed.Success, first.Output);
+        var second = KurzWithPlaces("test", source);
+        var other = Regex.Match(second.Output, "^test \"speaks\" \\.\\.\\. FAILED \\(seed ([0-9]+)\\)$", RegexOptions.Multiline);
+        Assert.True(other.Success, second.Output);
+        Assert.NotEqual(seed.Groups[1].Value, other.Groups[1].Value);
         Assert.Equal(first, KurzWithPlaces("test", "--seed", seed.Groups[1].Value, source));
     }
 

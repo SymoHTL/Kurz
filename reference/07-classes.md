@@ -1649,7 +1649,10 @@ then its own constructor (§4, the owner, 2026-11-03, #39, comment 6600033456, a
 classes derived from it (K7). Whether a parameter
 can be passed on without becoming a field of the class is K11; the case computes the argument
 from a field. What the short form follows when the base has further constructors or none, and
-what a listed parameter with a base field's name is in that form, K16 says.
+what a listed parameter with a base field's name is in that form, K16 says. Arguments after an
+interface in the `:` list, `class B : Store(1)`, are `syntax`, since an interface has no
+constructor to take them, as after an actor's name (U1) (§4, the owner, 2026-11-27, #39, comment
+7220200988, "syntax, a language error (Recommended)").
 
 Case: [classes/inherit-constructor.kz](../corpus/classes/inherit-constructor.kz)
 ```kurz
@@ -1665,6 +1668,18 @@ print(a.Level)
 g = Guest(7)
 print(g.Name)
 print(g.Number)
+```
+
+Case: [classes/interface-arguments.kz](../corpus/classes/interface-arguments.kz)
+```kurz
+interface Store {
+    int Get()
+}
+
+// an interface has no constructor to take arguments, so arguments after it in the `:` list are text no rule gives a meaning
+class Box : Store(1) {
+    pub int Get() => 1
+}
 ```
 
 ### K16 (decided, §4) The short form against a base with other constructors
