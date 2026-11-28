@@ -1,0 +1,9 @@
+// expect: error braces-required at 5
+// rules: C1
+
+// no rule of the reference reads a contract, so `requires` after the parameters stands where the body's brace stands
+int Half(int n) requires n >= 0 {
+    return n / 2
+}
+
+print(Half(4))

@@ -5,7 +5,7 @@ interface Store {
     int Get()
 }
 
-// an interface has no constructor to take arguments, so arguments after it in the `:` list are text no rule gives a meaning
+// an interface has no constructor to take arguments, so arguments after it in the `:` list are `syntax` (K10)
 class Box : Store(1) {
     pub int Get() => 1
 }

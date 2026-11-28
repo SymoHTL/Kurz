@@ -13,7 +13,12 @@ their forms, answer `not supported` and state what the record decides of them (Y
 and what the build proves, its contracts, laws and tests with parameters (sections 6, 7 and 9 to 13 of the
 record) are outside it. No rule of this reference reads the forms of what the build proves: the build reads
 `requires`, `ensures`, `invariant`, `law` and the parameters of a test as text no rule gives a meaning, and
-refuses them with the error of the first token it cannot read there, `braces-required` or `syntax` (E4).
+refuses each at the first token it cannot read there (E4): `requires` or `ensures` after a function's
+parameters, and the parameters of a test, stand where the block's `{` stands and are `braces-required` at
+the line of the function or the test (C1); `invariant` in a class's body reads as the type of a field and is
+`syntax` at its line, where the field's `=` stands (E4); `law` in an interface reads as a method with a body
+and is `syntax` at its line (K7), with `unknown-name` for the word read as a type (V10) at the same line, two
+errors that no case holds, since a case expects one (E1).
 
 ## The status of a rule
 

@@ -296,7 +296,10 @@ The run takes the seed `--seed` gives, a `ulong` in digits alone, the word after
 or a new one that the command draws from the system's randomness with .NET's `RandomNumberGenerator`
 before the build, and a failed test's line names it; a value that is no `ulong` gets `error: seed (<the
 value>)` and the exit code 1, before the build, and a `--seed` that is the last word gets the usage (Y11).
-`CommandTests` holds each of these.
+A draw the generator refuses gets `error: seed (the system gave no random number)` and the exit code 1,
+before the build (Y11). On Linux a count of threads of 1, `KURZ_THREADS` set to 1 or a process that may
+use one core where it is not set, runs the tests' ready actors first in, first out under any seed (Y11,
+U35); a build for Windows reads no count and takes the seed's order. `CommandTests` holds each of these.
 
 Any other command line gets the usage on standard error and the exit code 1:
 
@@ -1624,9 +1627,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   bounds the whole call and a read through the `File` on another thread waits for the call only while the call holds its lock
   (S19, the owner's "Try the lock inside the poll"). Once the child ended, a lock another holder holds is tried once more at the
   wake that follows and then no more, its pipe left to that holder, so that the call gives the child's status with a bound and
-  without one; under a bound the child's end is polled through a descriptor of its process (`pidfd_open`), and without one
-  the wait looks at the child (`waitid`, which leaves it to be waited for) at each wake while a lock is held elsewhere, so that
-  a wait with no bound opens no descriptor and works where the system refuses one, and a look the system refuses ends the
+  without one; the child's end is polled through a descriptor of its process (`pidfd_open`) with a bound or without one,
+  so that a child with no pipe parks its actor in the poller to its end (S10), and where the system refuses one to a wait with
+  no bound the wait looks at the child (`waitid`, which leaves it to be waited for) at each wake while a lock is held
+  elsewhere and waits for it in `waitpid` after its pipes, so that such a wait works where the system refuses one, and a look
+  the system refuses ends the
   wait with the system's error at once, the child left to a later `Wait()` or `Kill()` and the bytes read given back, as a
   read that failed ends it (S19, the owner's "Child's end decides"; S20). The call is in flight on each pipe's `File` (S5) from before the runtime's call
   until it let go of the lock, so that a `Close` through another holder meanwhile leaves the descriptor open to it. The wake
@@ -2381,13 +2386,13 @@ Windows starts no worker thread: its `Cores` gives 1 and its runtime reads no `K
 suites of the actors' stacks on AArch64, and none of its tests checks the orders of the atomic operations of the worker
 threads; no ThreadSanitizer job checks them, and no run under a CPU quota of a control group checks their count.
 
-Of section 6 the emitter builds the actors of one thread, each message run to its end or to a wait that parks it (Q1 (a), the
+Of section 6 the emitter builds, in a program on one thread, the actors of that thread, each message run to its end or to a wait that parks it (Q1 (a), the
 answers of 2026-11-14, issue 519, comment 6880404917), and no case shows
 where a program it builds differs from the section: in a program on one thread every actor runs on the one thread the
 runtime runs, each message on a stack of its own ("The runtime"), its state word, and the choice of the one owner of
 each reply of its calls by a swap, changed by atomic operations that hold on any number of threads ("What the
 emitter emits"), while the lifetimes of the message a crash's swap reads and of the record of the waiter's actor,
-which the owner of a reply reads after its store, hold on one thread alone, with no worker thread and no line `threads`
+which the owner of a reply reads after its store, hold where no worker thread runs, in a program on one thread with no line `threads`
 (U35): the start of a program built for Linux with a `spawn` reads `KURZ_THREADS` and ends with `threads-variable`
 where U35 refuses its value, `0` among them, and otherwise keeps the count it gives, or the cores the process may use
 where it is not set, counted as Rust 1.90.0's `available_parallelism` counts them, its affinity and the CPU quota of its
@@ -2735,7 +2740,8 @@ ask about it.
   `send-needs-word` there is the product pass's, comment 7211645920, item 5, which the owner kept (Q8). `print` of such a
   value calls the interface's `Text()` through the table, a message as any call through it is (A10). Pinned by
   `CheckerTests`, `CallLoopTests` and by the cases `actors/interface-call.kz`, `actors/interface-arm.kz`, `actors/interface-arm-face.kz`,
-  `actors/interface-key.kz`, `actors/interface-arm-other.kz`, `actors/interface-move.kz`,
+  `actors/interface-key.kz`, `actors/interface-arm-other.kz`, `actors/interface-move.kz`, `actors/interface-arm-covered.kz`,
+  `actors/interface-pointer.kz`, `actors/interface-arguments.kz`, `actors/vouch-interface-this.kz`,
   `actors/interface-text.kz`, `actors/interface-method-private.kz`,
   `actors/interface-crash.kz`, `actors/interface-within.kz`, `actors/interface-crossing.kz`,
   `actors/interface-mut-parameter.kz`, `actors/interface-missing-method.kz`, `actors/interface-send.kz` and

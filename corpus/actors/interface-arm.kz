@@ -4,7 +4,7 @@
 // | int 3
 // rules: U1
 
-// an arm of the actor's type in a `match` over the interface takes the values that hold its references, as a class's arm takes its instances
+// an arm of the actor's type in a `match` over a union that holds the interface takes the values that hold its references, as a class's arm takes its instances
 interface Store {
     long Get(string key)
 }

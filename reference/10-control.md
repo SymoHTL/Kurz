@@ -77,6 +77,34 @@ if x > 5
 }
 ```
 
+Case: [source/proof-requires.kz](../corpus/source/proof-requires.kz)
+```kurz
+// no rule of the reference reads a contract, so `requires` after the parameters stands where the body's brace stands
+int Half(int n) requires n >= 0 {
+    return n / 2
+}
+
+print(Half(4))
+```
+
+Case: [source/proof-ensures.kz](../corpus/source/proof-ensures.kz)
+```kurz
+// no rule of the reference reads a contract, so `ensures` after the parameters stands where the body's brace stands
+int Half(int n) ensures result >= 0 {
+    return n / 2
+}
+
+print(Half(4))
+```
+
+Case: [source/proof-test-parameters.kz](../corpus/source/proof-test-parameters.kz)
+```kurz
+// no rule of the reference reads the parameters of a test, so the parenthesis after its name stands where its block's brace stands
+test "halves" (int n) {
+    check n / 2 <= n
+}
+```
+
 ### C2 (assumed, §8) `else`
 
 `else` and `else if` follow the closing brace on the same line, with the meaning they have in C#.

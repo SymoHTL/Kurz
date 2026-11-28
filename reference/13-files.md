@@ -1808,18 +1808,23 @@ top-level code as the root actor under the scheduler from its first line (§6, t
 said back on 2026-11-13, under which §12's "Block the thread" of 2026-10-29 describes the language as it stood
 without actors)*. A program without actors serves one connection at a time (§12, the owner,
 2026-10-30, "One at a time"). A wait for a child, `Command`'s run to its end (S18) and a spawned
-child's wait (S19), parks the actor in the same way, the child's pipes waiting under `epoll`, and the
-descriptor of its process too where a bound is set (S20), which the wait opens for that bound alone,
-with no thread of the pool for each child (§12, the owner, 2026-11-26, issue 661, comment 7189038013,
-Q14 (a)). A crash of the actor over such a wait closes what the call holds: for S18 its pipes to the
+child's wait (S19), parks the actor in the same way, the child's pipes and the descriptor of its
+process waiting under `epoll`, with a bound (S20) or without one, with no thread of the pool for each
+child (§12, the owner, 2026-11-26, issue 661, comment 7189038013, Q14 (a)), so that a child with no
+pipe, or one whose pipes ended, parks its actor to its end; where the system refuses the descriptor of a
+process to a wait with no bound, the wait looks at the child as S19 says and waits for it in `waitpid`
+on the thread that runs its actor after its pipes (§12, assumed there). Retired by that answer, for a
+wait with no bound: "and the descriptor of its process too where a bound is set (S20), which the wait
+opens for that bound alone", the build's reading, under which a child with no pipe held the thread that
+runs its actor to its end. A crash of the actor over such a wait closes what the call holds: for S18 its pipes to the
 child, the input's among them, and for S18 and S19 the descriptor of the child's process where the
 wait opened one, S19's pipes staying the `ChildProcess` value's; it leaves the child to run, not
 waited for, as Rust's `Child` that is dropped leaves it, a child that ends after the crash staying in
 the system's table of processes to the end of the program (§12, assumed there). In the child of a
 `fork`, which a program makes in `raw` (R7) and which has no thread of the pool, the calls that wait
 on the pool end at the child's first look at the poller or at its first call handed to the pool,
-whichever comes first, each with its job's result where a thread of the parent's pool made the call
-before the `fork`, and otherwise with `Other` and the number 125, `ECANCELED`, and the child's first
+whichever comes first, each with its job's result where a thread of the parent's pool ended the call
+before the `fork`, its result stored, and otherwise, a job still running or not taken by a thread among them, with `Other` and the number 125, `ECANCELED`, and the child's first
 call handed after them makes a pool of its own (§12, assumed there).
 
 Case: [system/park-accept-first.kz](../corpus/system/park-accept-first.kz)
@@ -2799,6 +2804,105 @@ Main() else {
 }
 ```
 
+Case: [system/park-command-status.kz](../corpus/system/park-command-status.kz)
+```kurz
+// `Runner` waits with no bound for a child that takes the program's three streams, so that no pipe of the child waits, `sh`
+// reading a FIFO, which ends only once a writer opens the FIFO and closes it, and the wait parks `Runner` in the poller on the
+// descriptor of the child's process (S10), so that the one thread runs `Ticker` meanwhile and the top-level code goes on to write
+// the FIFO. A runtime that waited for such a child in `waitpid` on the thread that runs every actor would wait without end, since
+// nothing could open the FIFO to write. S10 alone is the subject, the wait for a child with no pipe and no bound in the poller;
+// S18 and U18 it passes through
+void | IoError | ExitError Reads() {
+    Command.New("sh").Arg("-c").Arg("cat park-command-status > /dev/null").Status()
+}
+
+actor Ticker {
+    pub string Tick() => "tick"
+}
+
+actor Runner {
+    mut string got = ""
+
+    pub void Run() {
+        got = "ended"
+        Reads() else {
+            IoError e => got = "run {e.Kind}"
+            ExitError e => got = "exit {e}"
+        }
+    }
+
+    pub string Got() => got
+}
+
+void | IoError | ExitError Main() {
+    Command.New("mkfifo").Arg("park-command-status").Status()
+    r = spawn Runner()
+    t = spawn Ticker()
+    send r.Run()
+    print(t.Tick())
+    w = File.Create("park-command-status")
+    w.Write("x".Bytes)
+    w.Close()
+    print(r.Got())
+    File.Delete("park-command-status")
+}
+
+Main() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}
+```
+
+Case: [system/park-spawn-wait.kz](../corpus/system/park-spawn-wait.kz)
+```kurz
+// `Runner` spawns a child that takes the program's three streams, so that no pipe of the child waits, `sh` reading a FIFO, which
+// ends only once a writer opens the FIFO and closes it, and its wait for the child with no bound parks `Runner` in the poller on
+// the descriptor of the child's process (S10), so that the one thread runs `Ticker` meanwhile and the top-level code goes on to
+// write the FIFO. A runtime that waited for such a child in `waitpid` on the thread that runs every actor would wait without end,
+// since nothing could open the FIFO to write. S10 alone is the subject, the wait for a spawned child with no pipe and no bound in
+// the poller; S19 and U18 it passes through
+void | IoError | ExitError Reads() {
+    child = Command.New("sh").Arg("-c").Arg("cat park-spawn-wait > /dev/null").Spawn()
+    child.Wait()
+}
+
+actor Ticker {
+    pub string Tick() => "tick"
+}
+
+actor Runner {
+    mut string got = ""
+
+    pub void Run() {
+        got = "ended"
+        Reads() else {
+            IoError e => got = "run {e.Kind}"
+            ExitError e => got = "exit {e}"
+        }
+    }
+
+    pub string Got() => got
+}
+
+void | IoError | ExitError Main() {
+    Command.New("mkfifo").Arg("park-spawn-wait").Status()
+    r = spawn Runner()
+    t = spawn Ticker()
+    send r.Run()
+    print(t.Tick())
+    w = File.Create("park-spawn-wait")
+    w.Write("x".Bytes)
+    w.Close()
+    print(r.Got())
+    File.Delete("park-spawn-wait")
+}
+
+Main() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}
+```
+
 Case: [system/park-command-crash.kz](../corpus/system/park-command-crash.kz)
 ```kurz
 // `Boom`, a call `Helper` makes in the chain of `Outer`'s message (U17), is let in while `Outer` waits in the poller for a child,
@@ -2985,10 +3089,11 @@ Case: [system/park-file-drained.kz](../corpus/system/park-file-drained.kz)
 // its end before the crash: the fall gives that job back and closes the descriptor the opening gave, as it closes one whose job
 // ends after the fall (issue 661, the product pass, comment 7182792402, Q3), so that the count of the process's open descriptors,
 // which the system lists in `/proc/self/fd`, is the same once the crash is over as before it. A fall that left the job would leave
-// one more. `Reader`'s read of a file makes the pool before the first count. The case rests on a margin of time that no rule fixes:
-// an opening that ended after the fall, its descriptor closed as that one's is, would give the same count, so that the case holds
-// the fall over a job whose end was taken only where the opening ends within `Boom`'s 0.4 seconds. S10 alone is the subject, the
-// fall over a job whose end the scheduler took; U17, U20 and U25 it passes through
+// one more. `Reader`'s read of a file makes the pool before the first count. An opening that ended after the fall, its descriptor
+// closed as that one's is, would give the same count, and the test of the suite
+// `FileTests.A_fall_over_a_job_whose_end_the_scheduler_took_gives_the_job_back_at_the_fall` runs this file on a runtime whose fall
+// over a job whose end it did not take ends the program, so that the output stands only where the fall met a taken end. S10 alone is
+// the subject, the fall over a job whose end the scheduler took; U17, U20 and U25 it passes through
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
         InvalidUtf8 => "?"
@@ -3081,14 +3186,35 @@ Case: [system/park-file-fork-wait.kz](../corpus/system/park-file-fork-wait.kz)
 // forks while it waits. The child of a `fork` drops the pool, whose threads it has none of, and the opening's wait in the child
 // ends with `Other` and the number 125, `ECANCELED`, so that the child's call of `Got`, queued behind it, gets its answer; a child
 // that kept the wait would wait without end, the wait counted among the registrations of the poller, which raises no `deadlock`
-// (U18). The parent waits for the child, then opens the FIFO to write, so that its own opening ends. The case rests on a margin of
-// time that no rule fixes: the top-level code's sleep of 0.1 seconds lets the opening reach the pool before the `fork`, and a
-// `fork` before it would leave the child's opening waiting for a writer to the limit of the run. S10 alone is the subject, the
-// waits on the pool in the child of a `fork`; R7 and U18 it passes through
+// (U18). The parent waits for the child, then opens the FIFO to write, so that its own opening ends. The top-level code forks once
+// the opening has reached the pool, which it reads and does not wait for: it sleeps 1 ms at a time, each sleep a wait that runs
+// `Opener` on the one thread the header's `// threads: 1` gives, until the process holds more descriptors past the three standard
+// ones than before the `send`. The opening's hand makes them, the pool's `eventfd` and the poller it is armed in, and queues the
+// job before `Opener` parks, and only then does the top-level code run again; a `fork` before the hand would leave the child's
+// opening waiting for a writer to the limit of the run. S10 alone is the subject, the waits on the pool in the child of a `fork`; R7
+// and U18 it passes through
 extern "C" {
     int fork()
     int waitpid(int pid, int* status, int options)
+    int fcntl(int fd, int cmd, ...)
     void _exit(int code)
+}
+
+// The descriptors from 3 to 63 that `fcntl` finds open.
+int Held() {
+    mut int held = 0
+    raw {
+        mut int fd = 3
+        while fd < 64 {
+            if fcntl(fd, 1) >= 0 {
+                held = held + 1
+            }
+
+            fd = fd + 1
+        }
+    }
+
+    return held
 }
 
 actor Opener {
@@ -3114,8 +3240,20 @@ actor Opener {
 void | IoError | ExitError Main() {
     Command.New("mkfifo").Arg("park-file-fork-wait").Status()
     o = spawn Opener()
+    before = Held()
     send o.Open()
-    Environment.Sleep(100ms)
+    // to a bound of 10 seconds that no run meets
+    mut int sleeps = 0
+    while Held() == before && sleeps < 10000 {
+        Environment.Sleep(1ms)
+        sleeps = sleeps + 1
+    }
+
+    if Held() == before {
+        print("no hand of the opening")
+        return
+    }
+
     mut int child = 0
     raw {
         child = fork()
@@ -3274,18 +3412,24 @@ Main() else {
 Case: [system/park-file-fork-done.kz](../corpus/system/park-file-fork-done.kz)
 ```kurz
 // `Reader`'s opening of a file runs on the pool of threads for blocking calls (S10), and `Forker`, whose message runs while that
-// opening waits, holds the thread that runs every actor for 0.2 seconds, in which the pool's thread makes the opening, then forks
-// before the scheduler takes the job's end. The child of a `fork` drops the pool and ends the waits on it, and the opening the
-// parent's thread made keeps its descriptor in the child, which then reads the file through a pool of its own; a child that ended
-// that wait with `Other` and the number 125, `ECANCELED`, as a job no thread made, would print `child open Other 125`. The child's
-// descriptor is the parent's, one open file whose offset both move, and the child's read takes the file's two bytes into the buffer
-// of its `File`, so that it gives `f`, and the parent, which waits for the child, reads at the end of the file. The case rests on a
-// margin of time that no rule fixes: a thread of the pool that has not made the opening within the 0.2 seconds leaves the child's
-// wait to end as one whose job no thread made. S10 alone is the subject, the waits on the pool in the child of a `fork` whose jobs
-// the parent's threads ended; R7 and U17 it passes through
+// opening waits, holds the thread that runs every actor, which the header's `// threads: 1` makes one, until the pool's thread has
+// ended the job, then forks before the scheduler takes the job's end. It reads the end from the descriptors the process holds past
+// the three standard ones: the hand of the job made the poller and the pool's `eventfd`, whose registration it armed, and the
+// opening makes the file's. The pool's thread signals the `eventfd` once it has put the opening's result in the job and the job
+// among the jobs done, so that the `eventfd` and the poller turn readable then and stay so while no turn of the scheduler reads
+// them, and a file is readable once open; every descriptor past the three readable is the job's end, read and not waited for. The
+// child of a `fork` drops the pool and ends the waits on it, and the opening the parent's thread ended keeps its descriptor in the
+// child, which then reads the file through a pool of its own; a child that ended that wait with `Other` and the number 125,
+// `ECANCELED`, as a job no thread made, would print `child open Other 125`. The child's descriptor is the parent's, one open file
+// whose offset both move, and the child's read of one byte fills the read buffer of its `File` with one read of the system, which
+// takes the file's two bytes (S3), so that it gives `f`, and the parent, which waits for the child, reads at the end of the file.
+// S10 alone is the subject, the waits on the pool in the child of a `fork` whose jobs the parent's threads ended; R7, S3 and U17 it
+// passes through
 extern "C" {
     int fork()
     int waitpid(int pid, int* status, int options)
+    int fcntl(int fd, int cmd, ...)
+    int poll(void* fds, ulong count, int timeout)
     int usleep(int microseconds)
     void _exit(int code)
 }
@@ -3329,8 +3473,42 @@ actor Reader {
 actor Forker {
     pub string Fork(Reader r) {
         mut int child = 0
+        mut int ended = 0
         raw {
-            usleep(200000)
+            // each descriptor from 3 to 63 that `fcntl` finds open asked whether it is readable (`POLLIN`, at once), every 1 ms,
+            // to a bound of 10 seconds that no run meets
+            p = List<byte>.Allocate(8)
+            mut int tries = 0
+            while ended == 0 && tries < 10000 {
+                mut int opened = 0
+                mut int ready = 0
+                mut int fd = 3
+                while fd < 64 {
+                    if fcntl(fd, 1) >= 0 {
+                        opened = opened + 1
+                        *Ptr<int>(p) = fd
+                        *Ptr<int>(p + 4) = 1
+                        ready = ready + poll(Ptr<void>(p), 1, 0)
+                    }
+
+                    fd = fd + 1
+                }
+
+                if opened > 0 && ready == opened {
+                    ended = 1
+                } else {
+                    usleep(1000)
+                    tries = tries + 1
+                }
+            }
+        }
+
+        // an opening whose job did not end within the bound ends the case before the `fork`
+        if ended == 0 {
+            return "no end of the opening"
+        }
+
+        raw {
             child = fork()
         }
 
@@ -4256,7 +4434,7 @@ the results of `Wait()`, `WaitWithOutput()` and `Kill()`, the signal, the later 
 end, the child let go of, `Id`'s type, a pipe's `File` after the child, `Id` after the wait, `Kill()`'s
 error, no text and no `==`, the wait after a bound, `Status()` writing the input under `poll`, an empty input closed
 at once, a NUL byte in an input, the bound over the writing, a write that fails, a write that gets `EPIPE`, the input held as a `string`
-and its buffer, the order of the bytes a failed `WaitWithOutput()` gives back, the build's costs of the give-back, which a wait that succeeds pays too (every `File` handle 8 bytes wider, 64 bytes, for the room of its reader's buffer, and the whole output a failed call gathered, of any size, held in the `File`'s buffer until the program reads it, where the build before freed it), the build's readings of the answer of comment 6821985043 (the next wake within 4 ms while another holder holds a lock; each lock the call took held from its read of the bytes the `File` read ahead until they are taken or given back, so that a read through that `File` on another thread waits for the call, its thread held as behind a fill's lock (S16), the cost that stays; the bytes read ahead read once the lock is taken, before what the pipe still gives; the lock tried by a helper of the compiler's that the runtime calls as a C function (R17), the runtime's code reaching it through none of R19's types; and each wake trying the output's lock before the error's), the build's reading of item 6 of the round of pull request 509 (the call in flight on each pipe's `File` from before its poll until it let go of the lock, as a read is (S5), so that a `Close` through another holder meanwhile marks the `File` and leaves its descriptor open to the call), the build's readings of the answer "Child's end decides" of 2026-11-12, issue 174, comment 6825493833 (the child's end seen, under a bound, through the descriptor of its process the call opens for the bound, and without one by a look at the child at each wake while a lock is held elsewhere (`waitid`, which leaves the child to be waited for), so that a call with no bound opens no descriptor and works where the system refuses one, as before that answer; a look a signal interrupts (`EINTR`) tried again at the next wake, as a look that finds the child running is, and a look the system refuses with any other error ending the call with the system's error at once, with the program as its path, the child left to a later `Wait()` or `Kill()` and the bytes read given back, as for a read that failed; and a lock still held elsewhere tried once more at the wake that follows the child's end, and then no more, while a call that a refused look ended tries no lock again, since it has ended), the later read of a pipe whose read failed, the path and
+and its buffer, the order of the bytes a failed `WaitWithOutput()` gives back, the build's costs of the give-back, which a wait that succeeds pays too (every `File` handle 8 bytes wider, 64 bytes, for the room of its reader's buffer, and the whole output a failed call gathered, of any size, held in the `File`'s buffer until the program reads it, where the build before freed it), the build's readings of the answer of comment 6821985043 (the next wake within 4 ms while another holder holds a lock; each lock the call took held from its read of the bytes the `File` read ahead until they are taken or given back, so that a read through that `File` on another thread waits for the call, its thread held as behind a fill's lock (S16), the cost that stays; the bytes read ahead read once the lock is taken, before what the pipe still gives; the lock tried by a helper of the compiler's that the runtime calls as a C function (R17), the runtime's code reaching it through none of R19's types; and each wake trying the output's lock before the error's), the build's reading of item 6 of the round of pull request 509 (the call in flight on each pipe's `File` from before its poll until it let go of the lock, as a read is (S5), so that a `Close` through another holder meanwhile marks the `File` and leaves its descriptor open to the call), the build's readings of the answer "Child's end decides" of 2026-11-12, issue 174, comment 6825493833 (the child's end seen through the descriptor of its process the call opens with a bound or without one (S10, §12, issue 661, Q14 (a)), and, where the system refuses that descriptor to a call with no bound, by a look at the child at each wake while a lock is held elsewhere (`waitid`, which leaves the child to be waited for), so that such a call works where the system refuses one, as before that answer, Q14 (a) retiring "a call with no bound opens no descriptor"; a look a signal interrupts (`EINTR`) tried again at the next wake, as a look that finds the child running is, and a look the system refuses with any other error ending the call with the system's error at once, with the program as its path, the child left to a later `Wait()` or `Kill()` and the bytes read given back, as for a read that failed; and a lock still held elsewhere tried once more at the wake that follows the child's end, and then no more, while a call that a refused look ended tries no lock again, since it has ended), the later read of a pipe whose read failed, the path and
 the number of the `InvalidInput` of an `Input` beside `Spawn()` or a `Stdin`, and a piped `Stderr` under `Status()` closed as a piped `Stdout` is)*
 
 Case: [system/spawn-pipes.kz](../corpus/system/spawn-pipes.kz)
@@ -4391,9 +4569,9 @@ of are not bounded. Under `Output()` and `Status()`, after a read of the output 
 S19), the wait is held to the bound, and when it passes the child is killed and that `IoError` stays the
 call's error; a `WaitWithOutput()` whose read fails waits for no child (S19) and kills none at the bound, as
 before it. Where the system refuses
-`pidfd_open`, through which a call whose command has a bound waits for the child's end, `Output()` and
+`pidfd_open`, through which a call waits for the child's end, a call whose command has a bound fails: `Output()` and
 `Status()` kill the child, wait for its end and give the system's error at once, with the program as its path (S1 gives its
-kind and number). A wait on a spawned child, which opens it under a bound only (S19), kills no child: it gives that error at once and leaves the child to a later `Wait()` or `Kill()`, as a read that failed leaves it. *(assumed, §12: the bound under `Spawn()`, the bound after a failed
+kind and number). A wait on a spawned child under a bound kills no child: it gives that error at once and leaves the child to a later `Wait()` or `Kill()`, as a read that failed leaves it. *(assumed, §12: the bound under `Spawn()`, the bound after a failed
 read or write, no kill at the bound after a `WaitWithOutput()` whose read failed, and a refused `pidfd_open`)*
 
 Case: [system/command-timeout.kz](../corpus/system/command-timeout.kz)
