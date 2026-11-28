@@ -36,10 +36,11 @@ namespace Kurz.Compiler.Tests;
 /// blocks dropped, and memory over 10,000 crashes it restarts. Each program runs with <c>KURZ_THREADS</c> set to 1, which runs that one
 /// thread (U35), since a program built for Linux where it is not set runs on as many worker threads as the cores (section 6, Q4 of
 /// comment 6946532526), a build for Windows running every actor on the main thread (U35),
-/// whose order and heaps these expectations do not follow, as a corpus case marked <c>// threads: 1</c> runs on one thread. The owner's
-/// answer that a test sets it only where it follows one thread's order or counts heaps (2026-11-27, #519, comment 7215317481, Q1 of
-/// comment 7207859311) holds for the class as a whole while issue 673 reads the run of the class on the cores, in which 47 of its 169
-/// tests failed, among them failures that are neither an order nor a count of heaps.
+/// whose order and heaps these expectations do not follow, as a corpus case marked <c>// threads: 1</c> runs on one thread. The class
+/// departs from the owner's answer that a test sets it only where it follows one thread's order or counts heaps (2026-11-27, #519,
+/// comment 7215317481, Q1 of comment 7207859311) and sets it on every program, since issue 673 holds the run of the class on the cores,
+/// in which 47 of its 169 tests failed, among them failures that are neither an order nor a count of heaps (the owner, 2026-11-28,
+/// issue 39, comment 7236862019, "Keep the pin, cite #673 (Recommended)", to question 3 of comment 7228411861).
 /// </summary>
 public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {

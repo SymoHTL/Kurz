@@ -60,13 +60,18 @@ public static class Command
         Run(arguments, output, error, find, host, Place.Root);
 
     /// <summary>As above, with the directory of the places <paramref name="places"/> gives, null where there is none.</summary>
-    internal static int Run(IReadOnlyList<string> arguments, TextWriter output, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
+    internal static int Run(IReadOnlyList<string> arguments, TextWriter output, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places) =>
+        Run(arguments, output, error, find, host, places, NewSeed);
+
+    /// <summary>As above, with the new seed of <c>test</c> that <paramref name="draw"/> draws, null where the system's generator refused it.</summary>
+    internal static int Run(IReadOnlyList<string> arguments, TextWriter output, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places, Func<ulong?> draw)
     {
         ArgumentNullException.ThrowIfNull(arguments);
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(error);
         ArgumentNullException.ThrowIfNull(find);
         ArgumentNullException.ThrowIfNull(places);
+        ArgumentNullException.ThrowIfNull(draw);
         switch (arguments)
         {
             case ["build", ..]:
@@ -76,7 +81,7 @@ public static class Command
             case ["exec", ..]:
                 return Exec(arguments.Skip(1).ToList(), error, find, host, places);
             case ["test", ..]:
-                return TestFile(arguments.Skip(1).ToList(), error, find, host, places);
+                return TestFile(arguments.Skip(1).ToList(), error, find, host, places, draw);
         }
 
         bool verbose;
@@ -233,9 +238,11 @@ public static class Command
     /// 2026-11-27, issue 657, comment 7215317771, Q1 and Q2 of comment 7205593463), its value the word after it, whatever it is (section 2,
     /// assumed there), and where it is
     /// not given the run takes a new seed from the system's randomness, which the line of a failed test names (Y11; section 2, the owner,
-    /// 2026-11-26, comment 7189038775, Q2 a and Q3 a; the rest assumed there).
+    /// 2026-11-26, comment 7189038775, Q2 a and Q3 a; the rest assumed there), a refusal of that draw ending the command before its build
+    /// with <c>error: seed (the system gave no random number)</c> and the exit code 1 (section 2, the owner, 2026-11-28, issue 39, comment
+    /// 7236862019, Q4 of comment 7228411861).
     /// </summary>
-    private static int TestFile(List<string> arguments, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
+    private static int TestFile(List<string> arguments, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places, Func<ulong?> draw)
     {
         var release = false;
         var lines = false;
@@ -273,16 +280,36 @@ public static class Command
             }
         }
 
-        return sourcePath is null
-            ? Usage1(error)
-            : BuildAndRun(() => Read(sourcePath, error), [], release, lines, cpu, error, find, host, places, tests: true, seed ?? NewSeed());
+        if (sourcePath is null)
+        {
+            return Usage1(error);
+        }
+
+        if ((seed ?? draw()) is not { } drawn)
+        {
+            error.Write("error: seed (the system gave no random number)\n");
+            return 1;
+        }
+
+        return BuildAndRun(() => Read(sourcePath, error), [], release, lines, cpu, error, find, host, places, tests: true, drawn);
     }
 
     /// <summary>
-    /// A new seed for a run of <c>kurz test</c> that names none, 8 bytes of the system's randomness, drawn before the build: a refusal of
-    /// .NET's generator is an exception no code of the command catches, which ends it as .NET ends such a program (Y11, assumed in section 2).
+    /// A new seed for a run of <c>kurz test</c> that names none, 8 bytes of the system's randomness, drawn before the build (Y11, assumed
+    /// in section 2), null where .NET's generator refuses them, which <c>test</c> ends with its own line (Y11; section 2, the owner,
+    /// 2026-11-28, issue 39, comment 7236862019, Q4 of comment 7228411861).
     /// </summary>
-    private static ulong NewSeed() => BitConverter.ToUInt64(RandomNumberGenerator.GetBytes(8));
+    private static ulong? NewSeed()
+    {
+        try
+        {
+            return BitConverter.ToUInt64(RandomNumberGenerator.GetBytes(8));
+        }
+        catch (CryptographicException)
+        {
+            return null;
+        }
+    }
 
     /// <summary><c>exec</c>'s options, each once, before its text, which is the last argument before <c>--</c> and no option.</summary>
     private static int Exec(List<string> arguments, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)

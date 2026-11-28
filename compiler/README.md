@@ -295,7 +295,10 @@ The run takes the seed `--seed` gives, a `ulong` in digits alone, the word after
 or a new one that the command draws from the system's randomness with .NET's `RandomNumberGenerator`
 before the build, and a failed test's line names it; a value that is no `ulong` gets `error: seed (<the
 value>)` and the exit code 1, before the build, and a `--seed` that is the last word gets the usage (Y11).
-`CommandTests` holds each of these.
+A draw the generator refuses gets `error: seed (the system gave no random number)` and the exit code 1,
+before the build (Y11). On Linux a count of threads of 1, `KURZ_THREADS` set to 1 or a process that may
+use one core where it is not set, runs the tests' ready actors first in, first out under any seed (Y11,
+U35); a build for Windows reads no count and takes the seed's order. `CommandTests` holds each of these.
 
 Any other command line gets the usage on standard error and the exit code 1:
 

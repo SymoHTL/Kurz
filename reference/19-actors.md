@@ -6796,14 +6796,19 @@ owner, 2026-11-26, #519, comment 7198702144, 1); a supervisor that is running ac
 ends or waits (U22) *(assumed in §6)*. In a case marked `// threads: 1` (chapter 0) one thread runs the
 actors that are ready first in, first out, the top-level code's wait running them (§6, the owner,
 2026-11-17, #570, comment 6961064167, Q1, "FIFO, as the build (Recommended)"), under any seed of
-`kurz test` (Y11; §2, the owner, 2026-11-27, issue 657, comment 7215317771, Q4). A program built for
+`kurz test` (Y11; §2, the owner, 2026-11-27, issue 657, comment 7215317771, Q4), the mark being the
+corpus runner's, as `// expect:` is, so that the same file run with `kurz test` by hand takes the order
+its seed draws where its count of threads is more than 1 (Y11; §2, the owner, 2026-11-28, issue 39,
+comment 7236862019, Q1 of comment 7228411861). A program built for
 Linux and run with `KURZ_THREADS` set to 1 runs so too, every actor on the main thread (§6, the owner,
 2026-11-27, #519, comment 7215317481, Q5 of comment 7207859311) and first in, first out, as the one thread runs them (§6, the owner,
-2026-11-17, #570, comment 6961064167, Q1), and so does a build of `kurz test` run with `KURZ_THREADS` set to 1 on Linux, under any seed (Y11; §2,
-assumed there), a build for Windows reading no `KURZ_THREADS`; the tests of `kurz test` run every actor
-on one thread, with `KURZ_THREADS` set to more than 1 too (§6, the owner, 2026-11-27, issue 657, comment
-7215317771, Q5), the actors ready at a turn in the order their seed draws where `KURZ_THREADS` is not 1
-or the build is for Windows (Y11; §2, that exception assumed there). Each worker
+2026-11-17, #570, comment 6961064167, Q1), and so does a build of `kurz test` for Linux whose count is
+1, `KURZ_THREADS` set to 1 or, where it is not set, a process that may use one core, under any seed (Y11;
+§2, the owner, 2026-11-28, issue 39, comment 7236862019, Q5 of comment 7228411861), a build for Windows
+reading no `KURZ_THREADS`; the tests of `kurz test` run every actor on one thread, with a count of more
+than 1 too (§6, the owner, 2026-11-27, issue 657, comment 7215317771, Q5), the actors ready at a turn in
+the order their seed draws where the count is more than 1 or the build is for Windows (Y11; §2, the
+build for Windows assumed there). Each worker
 thread has a poller and timers of its own, and a wake of an actor on another thread is a push to that
 thread's queue and one write of its `eventfd`, the wake of a thread on Linux (§6, the owner, 2026-11-26, #519, comment
 7189038384, T88), the one system the build starts worker threads on (§6, assumed there). A worker whose `eventfd` or record the system refuses ends the start with `thread-refused` too

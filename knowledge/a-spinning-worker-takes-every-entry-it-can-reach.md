@@ -37,7 +37,9 @@ with no defect behind it: issue 673 holds the run of `ActorTests` on the cores, 
 run of 2026-11-27, among them orders and counts of crash lines and of printed lines and counts of heaps, beside
 failures that need a reading each. A test that follows one thread's order or counts heaps sets
 `KURZ_THREADS=1` itself (the owner, 2026-11-27, #519, comment 7215317481, Q1 of comment 7207859311,
-"Only the ones that need it"), and says why.
+"Only the ones that need it"), and says why. `ActorTests` departs from that answer and sets it on every program, since
+issue 673 holds the class's run on the cores (the owner, 2026-11-28, issue 39, comment 7236862019, "Keep
+the pin, cite #673 (Recommended)", to question 3 of comment 7228411861).
 
 Before an entry of an actor goes where every worker takes from, or a worker takes from another
 worker's slot, read what a worker that spins does with it at each of its turns; a race of the

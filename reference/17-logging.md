@@ -196,9 +196,13 @@ owner, 2026-11-27, #274, comment 7216348897, Q1 "Rust span first (Recommended)" 
 digits (Recommended)"). A key or a name is written as a `string` field's value is (P7; Q4, "As is
 (Recommended)"), and the node stands there only in a program that names nodes (Q6, "Only where nodes
 are named (Recommended)"), written as a `string` field's value is *(assumed in §12)*. A key that is a
-`secret`, or holds a secret field, is the compile error `secret-logged` at each log call that would
-write its actor's span (§12, the owner, 2026-11-27, #39, comment 7223019465, "Compile error
-(Recommended)"), and the line of such an actor's crash writes the key as `[secret]` (§12, the owner,
+`secret`, or holds a secret field, is the compile error `secret-logged` at each log call written in
+a method of such an actor, at the call's line, whatever its level, which P3 reads when the program
+runs (§12, the owner, 2026-11-27, #39, comment 7223019465, "Compile error (Recommended)"; the calls
+and their line, the owner, 2026-11-28, issue 39, comment 7236862019, "Calls in its methods
+(Recommended)", to question 2 of comment 7228411861), a line that a function writes while such an
+actor's message runs writes the key as `[secret]` (§12, the owner, 2026-11-28, issue 39, comment
+7236862019, question 2 of comment 7228411861), and the line of such an actor's crash writes the key as `[secret]` (§12, the owner,
 2026-11-27, #39, comment 7223109037, "Key as [secret] (Recommended)"). A line written outside every
 actor's message, the top-level code's among them, holds nothing in their place (Q2, "Nothing
 (Recommended)"), the line of an actor's crash aside, which Q7 gives the span of the actor it names
