@@ -5617,6 +5617,7 @@ void Woken(byte* record) {
 // `eventfd` ending the wait, and is taken off the parked ones (`Woken`).
 void WorkerPark(byte* record, long now) {
     raw {
+        std.Given()
         long pause = AtomicLong.FromPtr(Ptr<long>(scheduler + 72)).Load(MemoryOrder.Acquire)
         long due = Earliest(Next(), pause)
         bool empty = pause == Never() && polled == 0 && !Sleeping()

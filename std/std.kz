@@ -105,6 +105,88 @@ void Pooled(byte* page, long size) {
     }
 }
 
+// A page of a heap freed whole back where it came from: in the thread's pools where the thread carved it,
+// else on the list of frees from other threads of the thread that carved it, which the word at 512 of the
+// page's piece names by its pools and which stands at 96 of those pools, as mimalloc's page takes a free
+// from another thread on a list of its own (`xthread_free`, not checked at source), so that the thread
+// that makes heaps another thread frees takes its pages back (`Returned`; issue 673).
+void Freed(byte* page, long size) {
+    raw {
+        long owner = *Ptr<long>((long(page) & -1048576) + 512)
+        if owner == long(pools) {
+            Pooled(page, size)
+            return
+        }
+
+        if owner != stashOwner {
+            Given()
+            stashOwner = owner
+            stashLast = long(page)
+        }
+
+        *Ptr<long>(page) = stashFirst
+        stashFirst = long(page)
+        stashCount = stashCount + 1
+        if stashCount == 32 {
+            Given()
+        }
+    }
+}
+
+// The pages this thread freed of another thread's pieces and holds, at most 32 of one owner, pushed onto
+// that owner's list by one exchange (`Given`): the owner's pools, the first and the last page, the count.
+thread static mut long stashOwner = 0
+thread static mut long stashFirst = 0
+thread static mut long stashLast = 0
+thread static mut long stashCount = 0
+
+// The thread's held pages on their owner's list at 96 of its pools, by one exchange (`Freed`).
+pub void Given() {
+    raw {
+        if stashCount == 0 {
+            return
+        }
+
+        AtomicLong head = AtomicLong.FromPtr(Ptr<long>(stashOwner + 96))
+        mut long first = head.Load(MemoryOrder.Relaxed)
+        mut bool pushed = false
+        while !pushed {
+            *Ptr<long>(Ptr<byte>(stashLast)) = first
+            match head.CompareExchange(first, stashFirst, MemoryOrder.Release, MemoryOrder.Relaxed) {
+                long stored => pushed = true
+                NotExchanged<long> missed => first = missed.Value
+            }
+        }
+
+        stashOwner = 0
+        stashFirst = 0
+        stashLast = 0
+        stashCount = 0
+    }
+}
+
+// The pages other threads freed of the thread's pieces taken off its list at 96 of its pools and put in
+// its pools (`Freed`), where an allocation found its pool of a size empty.
+void Returned() {
+    raw {
+        if pools == null {
+            return
+        }
+
+        AtomicLong head = AtomicLong.FromPtr(Ptr<long>(long(pools) + 96))
+        if head.Load(MemoryOrder.Relaxed) == 0 {
+            return
+        }
+
+        mut long at = head.Swap(0, MemoryOrder.Acquire)
+        while at != 0 {
+            byte* page = Ptr<byte>(at)
+            at = *Ptr<long>(page)
+            Pooled(page, *Ptr<long>(page + 8))
+        }
+    }
+}
+
 // A page of `size` bytes carved from the thread's piece, which takes a new piece from the system where
 // the rest of the piece is too small, the rest then kept in the pools as pages of the largest sizes it
 // holds; null where the system refuses.
@@ -121,6 +203,8 @@ byte* Carved(long size) {
             if pools == null {
                 pools = Ptr<long>(piece)
             }
+
+            *Ptr<long>(piece + 512) = long(pools)
 
             while left >= 256 {
                 mut long rest = 256
@@ -152,6 +236,10 @@ byte* PageFor(byte* heap, long size) {
     raw {
         if pools != null {
             long i = PoolOf(size)
+            if pools[i] == 0 {
+                Returned()
+            }
+
             if pools[i] != 0 {
                 page = Ptr<byte>(pools[i])
                 pools[i] = *Ptr<long>(page)
@@ -205,6 +293,10 @@ pub byte* HeapNew(long first) {
     raw {
         if pools != null {
             long i = PoolOf(size)
+            if pools[i] == 0 {
+                Returned()
+            }
+
             if pools[i] != 0 {
                 page = Ptr<byte>(pools[i])
                 pools[i] = *Ptr<long>(page)
@@ -314,7 +406,7 @@ pub void HeapFree(byte* heap) {
         mut byte* page = *Ptr<byte*>(heap + 16)
         while page != null {
             byte* before = *Ptr<byte*>(page)
-            Pooled(page, *Ptr<long>(page + 8))
+            Freed(page, *Ptr<long>(page + 8))
             page = before
         }
     }
@@ -339,7 +431,7 @@ pub void HeapReset(byte* heap) {
         mut byte* page = *Ptr<byte*>(heap + 16)
         while page != first {
             byte* before = *Ptr<byte*>(page)
-            Pooled(page, *Ptr<long>(page + 8))
+            Freed(page, *Ptr<long>(page + 8))
             page = before
         }
 
