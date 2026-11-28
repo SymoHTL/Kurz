@@ -319,6 +319,208 @@ keyword forever <block body> {
 }
 ```
 
+Case: [keywords/depth-chain.kz](../corpus/keywords/depth-chain.kz)
+```kurz
+// a chain of 65 keywords, each template using the one after it: the template of `k0` holds `k1` to `k64` inside each other, a
+// depth of 65 with the template itself, past 64, and the error stands at the line of the use that starts it, `k1`; the template
+// of `k1` holds a depth of 64 and raises nothing
+keyword k0 {
+    k1
+}
+keyword k1 {
+    k2
+}
+keyword k2 {
+    k3
+}
+keyword k3 {
+    k4
+}
+keyword k4 {
+    k5
+}
+keyword k5 {
+    k6
+}
+keyword k6 {
+    k7
+}
+keyword k7 {
+    k8
+}
+keyword k8 {
+    k9
+}
+keyword k9 {
+    k10
+}
+keyword k10 {
+    k11
+}
+keyword k11 {
+    k12
+}
+keyword k12 {
+    k13
+}
+keyword k13 {
+    k14
+}
+keyword k14 {
+    k15
+}
+keyword k15 {
+    k16
+}
+keyword k16 {
+    k17
+}
+keyword k17 {
+    k18
+}
+keyword k18 {
+    k19
+}
+keyword k19 {
+    k20
+}
+keyword k20 {
+    k21
+}
+keyword k21 {
+    k22
+}
+keyword k22 {
+    k23
+}
+keyword k23 {
+    k24
+}
+keyword k24 {
+    k25
+}
+keyword k25 {
+    k26
+}
+keyword k26 {
+    k27
+}
+keyword k27 {
+    k28
+}
+keyword k28 {
+    k29
+}
+keyword k29 {
+    k30
+}
+keyword k30 {
+    k31
+}
+keyword k31 {
+    k32
+}
+keyword k32 {
+    k33
+}
+keyword k33 {
+    k34
+}
+keyword k34 {
+    k35
+}
+keyword k35 {
+    k36
+}
+keyword k36 {
+    k37
+}
+keyword k37 {
+    k38
+}
+keyword k38 {
+    k39
+}
+keyword k39 {
+    k40
+}
+keyword k40 {
+    k41
+}
+keyword k41 {
+    k42
+}
+keyword k42 {
+    k43
+}
+keyword k43 {
+    k44
+}
+keyword k44 {
+    k45
+}
+keyword k45 {
+    k46
+}
+keyword k46 {
+    k47
+}
+keyword k47 {
+    k48
+}
+keyword k48 {
+    k49
+}
+keyword k49 {
+    k50
+}
+keyword k50 {
+    k51
+}
+keyword k51 {
+    k52
+}
+keyword k52 {
+    k53
+}
+keyword k53 {
+    k54
+}
+keyword k54 {
+    k55
+}
+keyword k55 {
+    k56
+}
+keyword k56 {
+    k57
+}
+keyword k57 {
+    k58
+}
+keyword k58 {
+    k59
+}
+keyword k59 {
+    k60
+}
+keyword k60 {
+    k61
+}
+keyword k61 {
+    k62
+}
+keyword k62 {
+    k63
+}
+keyword k63 {
+    k64
+}
+keyword k64 {
+    print(1)
+}
+```
+
 Case: [keywords/nested-and-before.kz](../corpus/keywords/nested-and-before.kz)
 
 ### J9 (decided, §9) No redefinition
