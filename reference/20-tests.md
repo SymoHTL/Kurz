@@ -906,12 +906,16 @@ test --seed --release a.kz` ends with `error: seed (--release)` and `kurz test -
 seed (a.kz)`; a value it refuses ends the command before its build, and so before the start of the built
 program that reads `KURZ_THREADS` (U35); and a second `--seed`, a `--seed` that is the last word of the
 command line, and an option after the file are errors of its usage, as a `--seed` given to `kurz run`,
-`kurz build` or `kurz exec`, which take none, is an error of theirs (§2, assumed there). The draws and the order come from two generators apart, so that a draw a test
+`kurz build` or `kurz exec`, which take none, is an error of theirs (§2, assumed there); the command reads its
+words from left to right and ends at the first that breaks a rule, with that rule's error, so that `kurz test
+--seed x a.kz --release` ends with `error: seed (x)` and `kurz test --seed 1 --seed x a.kz` with the usage
+(§2, assumed there). The draws and the order come from two generators apart, so that a draw a test
 adds moves no order (§2, the owner, 2026-11-27, comment 7215317771, Q8). Both are xoshiro256++, started
 by SplitMix64 from the seed, the draws by its first four words and the order by the four after them;
 the actors ready at a turn are those queued when the scheduler takes
 the first of them, the actors they wake queued behind them, and each take is one of those left, at the
-index the next word gives modulo their count, those left keeping their order in the queue, a word drawn
+index the word drawn for it gives, read as unsigned, modulo their count, counted from 0 at the head of
+the queue, those left keeping their order in the queue, a word drawn
 at every take, the last one of a turn among them, and a turn ending before the test's actor that an `advance`
 parked where an actor stands before it, so that the actors the moved clock woke run before the test goes
 on (Y10) (§2, assumed there). A build of `kurz test` asks the system for no

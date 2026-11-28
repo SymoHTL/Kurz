@@ -1651,7 +1651,7 @@ can be passed on without becoming a field of the class is K11; the case computes
 from a field. What the short form follows when the base has further constructors or none, and
 what a listed parameter with a base field's name is in that form, K16 says. Arguments after an
 interface in the `:` list, `class B : Store(1)`, are `syntax`, since an interface has no
-constructor to take them, as after an actor's name (U1) (§4, the owner, 2026-11-27, #39, comment
+constructor to take them, as in an actor's `:` list, `actor A : Store(1)` (U1) (§4, the owner, 2026-11-27, #39, comment
 7220200988, "syntax, a language error (Recommended)").
 
 Case: [classes/inherit-constructor.kz](../corpus/classes/inherit-constructor.kz)
@@ -1676,7 +1676,7 @@ interface Store {
     int Get()
 }
 
-// an interface has no constructor to take arguments, so arguments after it in the `:` list are text no rule gives a meaning
+// an interface has no constructor to take arguments, so arguments after it in the `:` list are `syntax` (K10)
 class Box : Store(1) {
     pub int Get() => 1
 }

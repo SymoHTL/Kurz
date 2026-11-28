@@ -22,12 +22,18 @@ the runtime's wait for the child: a run of the whole suite on the tree of pull r
 (the description of pull request 665). The same line in `park-file-fork.kz`, which calls no
 `Command` and no `Spawn`, built and ran, where nothing showed the difference, and the review of
 pull request 665 found it there. Both cases declare `waitpid` as the runtime does since the batch
-of that round's leftovers.
+of that round's leftovers. The test that holds the corpus to the rule found eight more, each a case
+of `corpus/http/` that forks its server, `client-get.kz` among them: each declared `waitpid` with a
+`long` and called it with `0`, reaching no call of the runtime's, and each declares it with the
+`int*` and calls it with `null` since the batch of pull request 674's leftovers.
 
 A program, a case among them, declares a C function that the runtime declares with the types the
 runtime gives it: its declarations stand in the `extern "C"` blocks of `runtime/linux/linux.kz` and
 of each architecture's file (`runtime/linux/x86-64/x86-64.kz`, `runtime/linux/arm64/arm64.kz`).
 
-Gate: `compiler-tests` for a case that reaches the runtime's call too, since clang refuses the
-module; a declaration that differs from the runtime's in a case that reaches no call of it builds,
-and is read by the review rule "corpus": `judgment step`.
+Gate: `compiler-tests`
+(`CorpusTests.A_case_declares_a_c_function_as_the_runtime_and_the_standard_library_declare_it`, which
+holds every declaration in a case's `extern "C"` blocks of a function that `runtime/` or `std/`
+declares to one of their declarations of it, with a floor of ten such declarations, and leaves out a
+case that expects a compile error, which is never emitted); a program outside the corpus builds where
+it reaches no call of the runtime's, and clang refuses it where it does: `judgment step`.

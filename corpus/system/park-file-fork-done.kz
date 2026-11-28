@@ -6,18 +6,24 @@
 // rules: S10
 
 // `Reader`'s opening of a file runs on the pool of threads for blocking calls (S10), and `Forker`, whose message runs while that
-// opening waits, holds the thread that runs every actor for 0.2 seconds, in which the pool's thread makes the opening, then forks
-// before the scheduler takes the job's end. The child of a `fork` drops the pool and ends the waits on it, and the opening the
-// parent's thread made keeps its descriptor in the child, which then reads the file through a pool of its own; a child that ended
-// that wait with `Other` and the number 125, `ECANCELED`, as a job no thread made, would print `child open Other 125`. The child's
-// descriptor is the parent's, one open file whose offset both move, and the child's read takes the file's two bytes into the buffer
-// of its `File`, so that it gives `f`, and the parent, which waits for the child, reads at the end of the file. The case rests on a
-// margin of time that no rule fixes: a thread of the pool that has not made the opening within the 0.2 seconds leaves the child's
-// wait to end as one whose job no thread made. S10 alone is the subject, the waits on the pool in the child of a `fork` whose jobs
-// the parent's threads ended; R7 and U17 it passes through
+// opening waits, holds the thread that runs every actor, which the header's `// threads: 1` makes one, until the pool's thread has
+// ended the job, then forks before the scheduler takes the job's end. It reads the end from the descriptors the process holds past
+// the three standard ones: the hand of the job made the poller and the pool's `eventfd`, whose registration it armed, and the
+// opening makes the file's. The pool's thread signals the `eventfd` once it has put the opening's result in the job and the job
+// among the jobs done, so that the `eventfd` and the poller turn readable then and stay so while no turn of the scheduler reads
+// them, and a file is readable once open; every descriptor past the three readable is the job's end, read and not waited for. The
+// child of a `fork` drops the pool and ends the waits on it, and the opening the parent's thread ended keeps its descriptor in the
+// child, which then reads the file through a pool of its own; a child that ended that wait with `Other` and the number 125,
+// `ECANCELED`, as a job no thread made, would print `child open Other 125`. The child's descriptor is the parent's, one open file
+// whose offset both move, and the child's read of one byte fills the read buffer of its `File` with one read of the system, which
+// takes the file's two bytes (S3), so that it gives `f`, and the parent, which waits for the child, reads at the end of the file.
+// S10 alone is the subject, the waits on the pool in the child of a `fork` whose jobs the parent's threads ended; R7, S3 and U17 it
+// passes through
 extern "C" {
     int fork()
     int waitpid(int pid, int* status, int options)
+    int fcntl(int fd, int cmd, ...)
+    int poll(void* fds, ulong count, int timeout)
     int usleep(int microseconds)
     void _exit(int code)
 }
@@ -61,8 +67,42 @@ actor Reader {
 actor Forker {
     pub string Fork(Reader r) {
         mut int child = 0
+        mut int ended = 0
         raw {
-            usleep(200000)
+            // each descriptor from 3 to 63 that `fcntl` finds open asked whether it is readable (`POLLIN`, at once), every 1 ms,
+            // to a bound of 10 seconds that no run meets
+            p = List<byte>.Allocate(8)
+            mut int tries = 0
+            while ended == 0 && tries < 10000 {
+                mut int opened = 0
+                mut int ready = 0
+                mut int fd = 3
+                while fd < 64 {
+                    if fcntl(fd, 1) >= 0 {
+                        opened = opened + 1
+                        *Ptr<int>(p) = fd
+                        *Ptr<int>(p + 4) = 1
+                        ready = ready + poll(Ptr<void>(p), 1, 0)
+                    }
+
+                    fd = fd + 1
+                }
+
+                if opened > 0 && ready == opened {
+                    ended = 1
+                } else {
+                    usleep(1000)
+                    tries = tries + 1
+                }
+            }
+        }
+
+        // an opening whose job did not end within the bound ends the case before the `fork`
+        if ended == 0 {
+            return "no end of the opening"
+        }
+
+        raw {
             child = fork()
         }
 

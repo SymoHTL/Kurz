@@ -1,4 +1,4 @@
-// expect: error pointer-crosses at 10
+// expect: error pointer-crosses at 11
 // allow: raw
 // rules: U1
 
@@ -6,7 +6,8 @@ interface Holder {
     void Hold(long* p)
 }
 
-// a call through the interface would carry the pointer into the actor, so the line that names the interface refuses it
+// a call through the interface would carry the pointer into the actor, so the line that names the interface refuses it; the
+// method's own pointer parameter raises nothing at its declaration, `pointer-crosses` standing at a message's argument (U12)
 actor Keeper : Holder {
     pub void Hold(long* p) {
         print(1)

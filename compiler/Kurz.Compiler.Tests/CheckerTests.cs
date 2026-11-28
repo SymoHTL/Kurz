@@ -8370,9 +8370,11 @@ public sealed class CheckerTests
     public void The_methods_of_an_interface_an_actor_implements_take_and_give_what_crosses_into_an_actor()
     {
         // U1 with U9 and U12 (#519, comment 7211586386, I3 (a), chosen 2026-11-27, comment 7215317481): a call through the interface on an actor is a message with no word
-        // at its arguments and none at its result, so the interface's methods are held at the actor's interface to what crosses with no
-        // word: a parameter and a result that cross (I3 (a)), and no `mut` parameter (assumed: a reading of I3), each refused at the
-        // line that names the interface
+        // at its arguments but `move` where the parameter is written `move` (U12; #39, comment 7220200988, "Yes, it crosses"), and none
+        // at its result, so the interface's methods are held at the actor's interface to what crosses with no word: a parameter not
+        // written `move` and a result that cross (I3 (a)), a parameter whose type crosses only with `copy` or `move` and is not written
+        // `move` being `send-needs-word`, and no `mut` parameter (assumed: a reading of I3), each refused at the line that names the
+        // interface
         const string bag = "class Bag(mut int N)\n\n";
         Assert.Equal([(ErrorIds.SendNeedsWord, 7)], Errors(bag + "interface Filler {\n    void Fill(Bag b)\n}\n\nactor Worker : Filler {\n    pub void Fill(Bag b) {\n        print(b.N)\n    }\n}\n"));
         Assert.Equal([(ErrorIds.SendNeedsWord, 7)], Errors(bag + "interface Maker {\n    Bag Make()\n}\n\nactor Worker : Maker {\n    pub Bag Make() => Bag(1)\n}\n"));

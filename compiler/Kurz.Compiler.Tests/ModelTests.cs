@@ -243,7 +243,9 @@ public sealed class ModelTests
     /// in the inbox that the end of the restart's hold reads (<c>Ready</c>), and which decides nothing on threads (<paramref name="workers"/>),
     /// where the sender wakes the actor whatever its life, since a restart's plain write of the life and its read of the queue are a store
     /// and a load that no fence orders, which a sender's read can see in either order; then the wake in the form <paramref name="workers"/>
-    /// names (<see cref="Woken"/>), whose entry a take that finds the actor waiting for its restart lets go of (<c>RunTake</c>).
+    /// names (<see cref="Woken"/>), whose entry a take that finds the actor waiting for its restart lets go of (<c>RunTake</c>). The life
+    /// 5, an actor that waits for the decision of its supervisor's block of <c>on crash</c>, over which the runtime passes the wake too, is
+    /// a life no step of the model sets, so that the step reads the life 1 alone.
     /// </summary>
     private static Strand Sender(string name, int at, bool workers, Break broken) => new(name, at,
     [

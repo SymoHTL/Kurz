@@ -1,0 +1,23 @@
+// expect: output
+// | 1
+// rules: U58, U57
+
+// `s` is a local of the interface's type set from `this`, no local of the actor's own type, so the call
+// through it is a call through `Store`, an edge to every actor that implements it, `Cache` among them (U57),
+// which `vouch` takes out of the graph of U56 as before any call through the interface; without the word
+// the build says `call-loop` at that line
+interface Store {
+    long Get()
+}
+
+actor Cache : Store {
+    pub long Get() => 1
+
+    pub long Again() {
+        Store s = this
+        return vouch s.Get() + 1
+    }
+}
+
+c = spawn Cache()
+print(c.Get())

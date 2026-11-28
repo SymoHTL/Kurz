@@ -3387,7 +3387,7 @@ Case: [http/client-get.kz](../corpus/http/client-get.kz)
 extern "C" {
     int fork()
     int kill(int pid, int signal)
-    int waitpid(int pid, long status, int options)
+    int waitpid(int pid, int* status, int options)
     void _exit(int code)
 }
 
@@ -3501,7 +3501,7 @@ Run(listener.Port) else {
 
 raw {
     kill(child, 9)
-    waitpid(child, 0, 0)
+    waitpid(child, null, 0)
 }
 ```
 
@@ -3516,7 +3516,7 @@ Case: [http/client-pool.kz](../corpus/http/client-pool.kz)
 extern "C" {
     int fork()
     int kill(int pid, int signal)
-    int waitpid(int pid, long status, int options)
+    int waitpid(int pid, int* status, int options)
     int usleep(int microseconds)
     void _exit(int code)
 }
@@ -3658,7 +3658,7 @@ void Against(int most, (int) => void | IoError | HttpError | InvalidUtf8 part) {
 
     raw {
         kill(child, 9)
-        waitpid(child, 0, 0)
+        waitpid(child, null, 0)
     }
 }
 
@@ -3817,7 +3817,7 @@ Case: [http/client-malformed.kz](../corpus/http/client-malformed.kz)
 extern "C" {
     int fork()
     int kill(int pid, int signal)
-    int waitpid(int pid, long status, int options)
+    int waitpid(int pid, int* status, int options)
     void _exit(int code)
 }
 
@@ -3916,7 +3916,7 @@ void Against(List<string> answers, (int) => void part) {
     part(on.Port)
     raw {
         kill(child, 9)
-        waitpid(child, 0, 0)
+        waitpid(child, null, 0)
     }
 }
 
@@ -4029,7 +4029,7 @@ Case: [http/client-response.kz](../corpus/http/client-response.kz)
 extern "C" {
     int fork()
     int kill(int pid, int signal)
-    int waitpid(int pid, long status, int options)
+    int waitpid(int pid, int* status, int options)
     void _exit(int code)
 }
 
@@ -4128,7 +4128,7 @@ void Against(List<string> answers, (int) => void part) {
     part(on.Port)
     raw {
         kill(child, 9)
-        waitpid(child, 0, 0)
+        waitpid(child, null, 0)
     }
 }
 
@@ -4211,7 +4211,7 @@ Case: [http/client-limits.kz](../corpus/http/client-limits.kz)
 extern "C" {
     int fork()
     int kill(int pid, int signal)
-    int waitpid(int pid, long status, int options)
+    int waitpid(int pid, int* status, int options)
     void _exit(int code)
 }
 
@@ -4310,7 +4310,7 @@ void Against(List<string> answers, (int) => void part) {
     part(on.Port)
     raw {
         kill(child, 9)
-        waitpid(child, 0, 0)
+        waitpid(child, null, 0)
     }
 }
 
@@ -4380,7 +4380,7 @@ Case: [http/client-redirects.kz](../corpus/http/client-redirects.kz)
 extern "C" {
     int fork()
     int kill(int pid, int signal)
-    int waitpid(int pid, long status, int options)
+    int waitpid(int pid, int* status, int options)
     void _exit(int code)
 }
 
@@ -4511,7 +4511,7 @@ void Against((int) => void part) {
     part(on.Port)
     raw {
         kill(child, 9)
-        waitpid(child, 0, 0)
+        waitpid(child, null, 0)
     }
 }
 
@@ -4633,7 +4633,7 @@ Case: [http/client-timeout.kz](../corpus/http/client-timeout.kz)
 extern "C" {
     int fork()
     int kill(int pid, int signal)
-    int waitpid(int pid, long status, int options)
+    int waitpid(int pid, int* status, int options)
     int usleep(int microseconds)
     void _exit(int code)
 }
@@ -4732,7 +4732,7 @@ void Against((int) => void part) {
     part(on.Port)
     raw {
         kill(child, 9)
-        waitpid(child, 0, 0)
+        waitpid(child, null, 0)
     }
 }
 
@@ -4829,7 +4829,7 @@ Case: [http/client-timeout-body.kz](../corpus/http/client-timeout-body.kz)
 extern "C" {
     int fork()
     int kill(int pid, int signal)
-    int waitpid(int pid, long status, int options)
+    int waitpid(int pid, int* status, int options)
     int usleep(int microseconds)
     void _exit(int code)
 }
@@ -4963,7 +4963,7 @@ void Against(List<string> answers, (int) => void part) {
     part(on.Port)
     raw {
         kill(child, 9)
-        waitpid(child, 0, 0)
+        waitpid(child, null, 0)
     }
 }
 

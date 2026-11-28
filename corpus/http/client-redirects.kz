@@ -24,7 +24,7 @@
 extern "C" {
     int fork()
     int kill(int pid, int signal)
-    int waitpid(int pid, long status, int options)
+    int waitpid(int pid, int* status, int options)
     void _exit(int code)
 }
 
@@ -155,7 +155,7 @@ void Against((int) => void part) {
     part(on.Port)
     raw {
         kill(child, 9)
-        waitpid(child, 0, 0)
+        waitpid(child, null, 0)
     }
 }
 

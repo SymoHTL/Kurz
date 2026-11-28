@@ -228,9 +228,10 @@ public static class Command
     /// <summary>
     /// <c>test</c>'s options, each once, before its file, as Y2 has them, with no word for the program: a test reads no <c>args</c>, so
     /// <c>--</c>, an argument and an option after the file are the usage's (Y2, F17, Y11). The build runs the program's tests and the command
-    /// ends with its exit code, 0 where every test passed, else 1 (Y3, Q4). <c>--seed</c> takes the word after it as its value, whatever it
-    /// is, a <c>ulong</c> in digits alone, any other value ending the command before its build with <c>error: seed (&lt;the value&gt;)</c> and
-    /// the exit code 1 (section 2, the owner, 2026-11-27, issue 657, comment 7215317771, Q1 and Q2 of comment 7205593463), and where it is
+    /// ends with its exit code, 0 where every test passed, else 1 (Y3, Q4). <c>--seed</c> takes a <c>ulong</c> in digits alone, any
+    /// other value ending the command before its build with <c>error: seed (&lt;the value&gt;)</c> and the exit code 1 (section 2, the owner,
+    /// 2026-11-27, issue 657, comment 7215317771, Q1 and Q2 of comment 7205593463), its value the word after it, whatever it is (section 2,
+    /// assumed there), and where it is
     /// not given the run takes a new seed from the system's randomness, which the line of a failed test names (Y11; section 2, the owner,
     /// 2026-11-26, comment 7189038775, Q2 a and Q3 a; the rest assumed there).
     /// </summary>

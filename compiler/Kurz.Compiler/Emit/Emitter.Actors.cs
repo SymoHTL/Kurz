@@ -826,8 +826,9 @@ public sealed partial class Emitter
     /// which on worker threads is a heap of its own that the receiver copies the arguments out of (the runtime's <c>ActorHeap</c> and
     /// <c>Adopted</c>; U35, T17); an argument the slot borrows from the call through the interface stays the caller's, and one of a
     /// parameter written <c>move</c>, which the slot owns, is let go of once every argument crossed, which frees it, as a message with
-    /// <c>move</c> lets go of the moved value (<see cref="Arguments"/>); nothing runs between the read of that heap and the queueing,
-    /// the bound of the method's declaration (U39) being a literal (U41), which runs no code and raises nothing, as
+    /// <c>move</c> lets go of the moved value (<see cref="Arguments"/>); nothing raises and no code of the program runs between the read
+    /// of that heap and the queueing, the release of a moved argument freeing blocks and raising nothing, and the bound of the method's
+    /// declaration (U39) being a literal (U41), which runs no code and raises nothing, as
     /// <see cref="EmitMessage"/> says of a constant bound; the file <paramref name="file"/> and the line <paramref name="line"/> of the
     /// call through the interface for its queueing and its wait. The result, in the heap the caller allocates in.
     /// </summary>
@@ -1055,8 +1056,9 @@ public sealed partial class Emitter
     /// <c>MessageHeapNew</c> gave it, which on worker threads is a heap made for the message, that the runtime's <c>Enqueue</c> takes off
     /// the list of the heaps being built and the receiver copies the arguments out of and frees (<c>Adopted</c>, <c>OwnLeft</c>); null
     /// where the message is built in a heap neither gave, the child's of an <c>attempt</c>, which no free of a message's heap may reach.
-    /// <c>Enqueue</c> reads the word on worker threads alone and clears it on every thread before any other read, so that on one thread,
-    /// where <c>ActorHeap</c> gives the actor's heap, nothing reads it; from the message's start the word holds the deadline of a
+    /// <c>Enqueue</c> reads the word on worker threads alone and clears it on every thread before any other read, then on worker threads
+    /// stores the message's heap back in it before it queues the message, so that the copy's activation frees that heap
+    /// (<c>MessageCopy</c>); on one thread, where <c>ActorHeap</c> gives the actor's heap, nothing reads it; from the message's start the word holds the deadline of a
     /// <c>within</c> block (the runtime's <c>BlockEnter</c>).
     /// </summary>
     private void OwnHeapStored(string message, string block, string? heap) => fn.Emit($"store ptr {heap ?? "null"}, ptr {MessageField(message, block, 6)}");
@@ -1069,7 +1071,8 @@ public sealed partial class Emitter
     /// which the runtime's <c>ThreadsRead</c> takes as the count of worker threads or refuses, the cores the process may use where it is
     /// not set, and no worker thread starts unless that count is more than 1, a count of 1 running every actor on the main thread (the
     /// runtime's <c>WorkersStart</c>); a program with no <c>spawn</c> reads none, as a program with neither a log call nor a <c>spawn</c>
-    /// reads no <c>KURZ_LOG</c> (P5).
+    /// reads no <c>KURZ_LOG</c> (P5). Section 6 reads the count where a <c>spawn</c> or a form that splits work stands, and the build has
+    /// no form that splits work (section 6, "Parallel work"), so that a <c>spawn</c> is the one form whose program reads it.
     /// </summary>
     private void EmitThreadsStart()
     {

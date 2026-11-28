@@ -4698,7 +4698,8 @@ int Exchanged(AtomicInt word, int seen, int wanted) {
 // of the run queue, whether a thread holds it or not, so that an entry of it stands there once; a take that
 // finds it held drops that entry and leaves it to whoever holds it (`Claimed`), which queues it again at the
 // end as it lets go of it (`LetGo`, `ActorBuilt`). On worker threads the waker that found the mark clear puts it in the queues of
-// its own thread, on a worker in the slot of the actor woken last, which its thread takes first, as Go takes `runnext` (`QueueLocal`),
+// its own thread, on a worker in the slot of the actor woken last, which its thread takes after its queue that nobody steals from and,
+// at every 61st turn, the shared queue, and before its ring and the steals (`NextActor`), as Go takes `runnext` (`QueueLocal`),
 // but for an actor that a thread holds or whose constructor runs, which it leaves to its holder with no entry (`LeftToHolder`).
 void Wake(byte* state) {
     mut int before = 0
@@ -4722,10 +4723,10 @@ void Wake(byte* state) {
 // meanwhile, as no entry of it stands. False where the holder let go of it meanwhile, seeing the mark and queueing nothing, so that
 // the waker queues it. An entry of a held actor put where every worker takes from drew the workers that spin to take it and drop it,
 // and the waker put a new one in at the message after it: with no such entry and with the wait of `Stolen` the sends to one actor took
-// 77.9 and 70.5 ms, against 107.9 and 122.6 ms with neither (`KURZ_THREADS=4`, the least of 10 runs in each of two orders), and with no
-// such entry alone 98.8 and 91.6 ms, against 114.9 and 100.6 with neither (the least of 20 runs in each of two orders). Assumed in
-// section 6, and kept there by the owner's answer that a fix stays where no row is slower beyond the noise (2026-11-27, issue 39,
-// comment 7221780113), the rows measured there.
+// 71.6 and 74.2 ms, and with no such entry alone 98.8 and 91.6 ms, against 114.9 and 100.6 with neither (`KURZ_THREADS=4`, the least of
+// 20 runs in each of two orders, 2026-11-27). Assumed in section 6, and kept there by the owner's answer that a fix stays where no row
+// is slower beyond the noise (2026-11-27, issue 39, comment 7221780113), the rows measured there, the wake alone's gap on the four
+// actors' counts read as noise by the owner's answer of the same day (comment 7226765242, "Keep both, it's noise").
 bool LeftToHolder(byte* state) {
     AtomicInt word = StateWord(state)
     mut int seen = 0
@@ -7318,9 +7319,9 @@ void HandedOut(byte* block) {
 // (`sys.Forked`), found where jobs are handed while the pool's `eventfd` is not the one the scheduler armed: each wait whose end the
 // scheduler had not taken ended, so that no wait waits without end for a job no thread makes: a job a thread of the parent's pool
 // ended before the `fork` keeps the result that thread put in it, so that its call reads its bytes, or the descriptor its opening
-// gave, which the child's copy holds as the parent's does (`sys.Handing`'s mark at 16, which the call replaced), and any other job
-// gets -125, `ECANCELED`, as its result, so that its call gets `Other` with the number 125 (S1) and gives its job back *(assumed:
-// the number, which no answer names)*; the count of jobs handed set to 0 and the `eventfd` to none, so that the child's first call
+// gave, which the child's copy holds as the parent's does (the mark `sys.JobUnmade` gives, at 16, which the call replaced), and
+// any other job gets -125, `ECANCELED`, as its result, so that its call gets `Other` with the number 125 (S1) and gives its job
+// back *(assumed: the number, which no answer names)*; the count of jobs handed set to 0 and the `eventfd` to none, so that the child's first call
 // makes a pool of its own (`sys.PoolEvent`). A job whose actor fell before the `fork` stands in no wait, and the child neither
 // gives it back nor closes a descriptor its opening gave (inferred).
 void PoolLost() {
@@ -7336,7 +7337,7 @@ void PoolLost() {
             *Ptr<byte*>(at + 72) = null
             if *Ptr<long>(at) == 0 {
                 byte* job = *Ptr<byte*>(at + 48)
-                if *Ptr<long>(job + 16) == -4102 {
+                if *Ptr<long>(job + 16) == sys.JobUnmade() {
                     *Ptr<long>(job + 16) = -125
                 }
 
@@ -7978,9 +7979,9 @@ bool Runs(byte* state, byte* message) {
 // (its link to the next wait of its descriptor at 48, its events at 56), `ManyWaited`'s holder of 72 (its waits at 48, their count
 // at 56, the room of the call at 64) and `BlockingWaited`'s of 80 (its job at 48, its links among the waits on the pool at 64 and
 // 72), read only after the word at 432, which names the message of a call's wait (`Answer`) and no message of those (U60;
-// assumed: a sleep and a wait in the poller wait on no actor, so that the line ends there). Each word is read once, the actor the
-// reply reaches before the reply's word, so that on worker threads a reply its waiter's answer let go of meanwhile is read as set
-// (`Looped`).
+// assumed: a sleep, a wait in the poller, a wait for a child and a wait on the pool wait on no actor, so that the line ends there).
+// Each word is read once, the actor the reply reaches before the reply's word, so that on worker threads a reply its waiter's answer
+// let go of meanwhile is read as set (`Looped`).
 byte* Onward(byte* callee) {
     raw {
         if *Ptr<int>(callee - 88) == 5 {
@@ -8387,8 +8388,7 @@ byte* DrawnTake() {
 // actor whose top activation parked on another thread is let go of at once, which puts it in that thread's queue that nobody steals
 // from (`LetGo`, `QueueHeld`; section 6, Q2 of comment 6946532526, the mechanism assumed there), and the record of an ended one is
 // freed by the one thread that sets its RECLAIMED bit (`Reclaims`, `RecordFreed`; T16); a signal at the front of its inbox, the
-// crash a child passed up
-// (`Forwarded`), is taken before anything else, the crash of the actor (`Signaled`), and dropped where the actor waits for its
+// crash a child passed up (`Forwarded`), is taken before anything else, the crash of the actor (`Signaled`), and dropped where the actor waits for its
 // restart or for the decision of its block (`SignalsLeft`); a message starts with its heap of its own adopted (`Adopted`); the queues
 // are moved again once the reply of the top activation reads set, so that a signal pushed before the fall that set it is taken before
 // that activation goes on.
@@ -10697,8 +10697,8 @@ thread static mut long testWordsRoom = 0
 // error line (`LoopFirst`, `LoopLines`; the owner, 2026-11-23, #622, comment 7095825069, 1), each indented by four spaces as the
 // calls kept out are *(assumed: the form of those calls' lines, comment 7067139953)*; then every actor the test made ends at once
 // (`TestEnded`; F6). The line of its result is written on standard output after the lines the test printed (F4), `test "name" ...
-// ok` or `test "name" ... FAILED (seed 1234)`, the words indented by four spaces under a failed one, and after the last test the counts, `2 tests:
-// 1 passed, 1 failed`, `1 test:` for one (Q3, F21); the process then ends with the exit code 0 where every test passed, else 1 (Q4).
+// ok` or `test "name" ... FAILED (seed 1234)`, the words indented by four spaces under a failed one, and after the last test the
+// counts, `2 tests: 1 passed, 1 failed`, `1 test:` for one (Q3, F21); the process then ends with the exit code 0 where every test passed, else 1 (Q4).
 // A line the runner cannot write raises `print-failed` at the line of the test it reports, the counts at the last test's line (A17).
 // Before the first test the runner starts the generators of the build's seed, `seed`, from which the draws of the runtime follow, and
 // the order of the actors ready at a turn where the build is not `ordered`, the corpus runner's build of a case marked `// threads: 1`
@@ -10711,7 +10711,7 @@ pub void RunTests(byte* table, long count, string file, ulong seed, bool ordered
     mut byte* reply = null
     std.Seed(seed)
     raw {
-        // U35: the tests of `kurz test` run every actor on the main thread, as a case marked `// threads: 1` runs (assumed in section 6)
+        // U35: the tests of `kurz test` run every actor on the main thread, as a case marked `// threads: 1` runs (section 6, the owner, 2026-11-27, issue 657, comment 7215317771, Q5)
         workersAsked = 0
         shuffled = !ordered && !oneAsked
         name = AllocateOwn(16)

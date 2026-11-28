@@ -3794,10 +3794,14 @@ pub void ManyWaiter(extern "C" (int*, int, long, byte*) => int wait) {
     }
 }
 
+// The mark a job's result holds before a thread of the pool made its call (`Handing`), -4102, which no error number is, the one
+// definition that `PoolLost` reads too (`sys.JobUnmade`), so that the child of a `fork` tells a job its parent's thread ended
+// from one no thread ends.
+pub long JobUnmade() => -4102
+
 // The job of a call on `fd` (-1 for a call on a path) handed to the pool of threads for blocking calls (`BlockingWaiter`), of the
 // kind `kind` (`JobRun`), mapped with `count` bytes of its own at 64: at 0 the next job queued or done, at 8 its kind, at 16 its
-// result, -4102, which no error number is, before a thread of the pool made the call, so that the child of a `fork` tells a job its
-// parent's thread ended from one no thread ends (`PoolLost`), at 24 the block of its wait, which the scheduler writes and drops
+// result, the mark of `JobUnmade` before a thread of the pool made the call (`PoolLost`), at 24 the block of its wait, which the scheduler writes and drops
 // where the caller's actor fell (`BlockingWaited`), at 32 its size, one page where `count` fits in it, taken from `keptJobs`
 // where one is kept, at 40 the descriptor and at 48 `count`. Null
 // where the call is made on the calling thread: a thread whose page holds no waiter of blocking calls, a thread of the pool among
@@ -3834,7 +3838,7 @@ byte* Handing(long kind, int fd, long count) {
         }
 
         *Ptr<long>(job + 8) = kind
-        *Ptr<long>(job + 16) = -4102
+        *Ptr<long>(job + 16) = JobUnmade()
         *Ptr<long>(job + 32) = size
         *Ptr<long>(job + 40) = long(fd)
         *Ptr<long>(job + 48) = count
@@ -3857,8 +3861,8 @@ long Handed(byte* job) {
 // the poller where the thread's page holds its waiter (`ManyWaiter`) and the scheduler hands calls (`BlockingWaiter`'s `offloads`),
 // so that the actor that waits for its child parks while its output, which it reads into its own heap, comes (issue 661, Q14 (a),
 // comment 7189038013), with the room of the call, 64 bytes before `polled` (`RunCommand`), which a fall over the wait gives back
-// (`ChildDropped`); `poll` on this thread otherwise, and for the last look of a bound, 0 milliseconds, which waits for nothing. What `poll` gives, or -1
-// with `errno` set to its failure or to the poller's.
+// (`ChildDropped`); `poll` on this thread otherwise, and for the last look of a bound, 0 milliseconds, which waits for nothing.
+// What `poll` gives, or -1 with `errno` set to its failure or to the poller's.
 int ChildPolled(int* polled, int wait) {
     raw {
         byte* held = Endpoints()
@@ -3926,8 +3930,9 @@ pub void JobDropped(byte* job) {
 // The call of `Drive` whose wait for its child in the poller a fall of its actor ended (`ChildPolled`), its room at `record`, 65536
 // bytes into the mapping `RunCommand` or `WaitSpawned` made: the pipes it holds to the child closed where it owns them (at 36), the
 // input's among them, as `RunCommand` closes them after `Drive`, the descriptor of the child's process (at 40) closed, which the
-// call opened for its bound alone, `RunCommand` for S20's and `WaitSpawned` for each wait of S19 under a deadline, and closes after
-// `Drive`, -1 where it opened none, and no handle holds, and the mapping, of the size at 44, given back, so that a crash over the
+// call opened for the child's end, `RunCommand` for S18's and S20's and `WaitSpawned` for each wait of S19 whose child's end it had
+// not seen, and closes after `Drive`, -1 where it opened none, the system refusing it, and no handle holds, and the mapping, of the
+// size at 44, given back, so that a crash over the
 // wait leaves none of them behind; the child is left to run and is not waited for, as Rust's `Child` that is dropped leaves it
 // (section 12 of the record, *(assumed)* there, which S10 cites).
 pub void ChildDropped(byte* record) {
@@ -5085,10 +5090,11 @@ pub void | IoError ChildKill(int* state, string program) {
 // (`Drive`), each from the wake that took the lock of its reader, at `outReader` and `errReader`, null where
 // none is held, by `take`, which `held` names, under its bound: the status `waitpid` gave, or a failure below
 // 0, -4100 where the bound passed, the child killed and waited for. A child waited for before gives the status
-// it gave, or -4100 again, with what its pipes still give, read to their ends or to the deadline. Under a
-// bound the child's end is polled through the descriptor of its process; without one `Drive` looks at the child
-// at each wake while a lock another holder holds is still to take, so that that lock is given up at the child's
-// end and a wait with no bound opens no descriptor, as one where the system refuses it needs.
+// it gave, or -4100 again, with what its pipes still give, read to their ends or to the deadline. The child's
+// end is polled through the descriptor of its process, with a bound or without one, so that a child with no
+// pipe parks its actor in the poller to its end (S10, issue 661, Q14 (a)); where the system refuses that
+// descriptor to a wait with no bound, `Drive` looks at the child at each wake while a lock another holder holds
+// is still to take, so that that lock is given up at the child's end, and `waitpid` waits for it after the pipes.
 long WaitSpawned(int* state, int outFd, byte* outReader, int errFd, byte* errReader, extern "C" (byte*, long*) => long take, int* held, mut Bytes out, mut Bytes err) {
     mut long failure = 0
     raw {
@@ -5105,10 +5111,14 @@ long WaitSpawned(int* state, int outFd, byte* outReader, int errFd, byte* errRea
     raw {
         long deadline = *Ptr<long>(Ptr<byte>(state) + 8)
         mut int process = -1
-        if deadline >= 0 && state[1] == 0 {
+        if state[1] == 0 {
             process = int(syscall(434, long(state[0]), long(0)))
             if process < 0 {
-                failure = -long(*__errno_location())
+                if deadline >= 0 {
+                    failure = -long(*__errno_location())
+                }
+
+                process = -1
             }
         }
 
@@ -5399,7 +5409,8 @@ long Lift(int* fds, long k) {
 //
 // With `Timeout(d)` the bound runs from the start the child's report says, read on the monotonic clock and
 // held at the largest `long` where it passes it; the child's end is polled with its pipes through a
-// descriptor of the process, `pidfd_open` (434 on x86-64), as Rust's `Child` waits on one on Linux. When the
+// descriptor of the process, `pidfd_open` (434 on x86-64), as Rust's `Child` waits on one on Linux, which a
+// call with no bound opens too (S10). When the
 // bound has passed, a bound of 0 or below at the first look, the pipes are closed unread, so that a descriptor
 // another process still holds does not hold the call; a child that has not ended is killed with `SIGKILL` (9)
 // and waited for, and the call gives `TimedOut`, while one that ended gives its own status, the child's end
@@ -5841,7 +5852,7 @@ long RunCommand(List<string> command, int purpose, mut Bytes out, mut Bytes err,
             close(fds[6])
         }
 
-        // S20: the bound from the start, and the child's end as an entry of `poll`
+        // S20: the bound from the start
         mut long deadline = -1
         mut int process = -1
         if failure == 0 && bounded {
@@ -5851,13 +5862,19 @@ long RunCommand(List<string> command, int purpose, mut Bytes out, mut Bytes err,
             if bound <= 9223372036854775807 - now {
                 deadline = now + bound
             }
+        }
 
-            if purpose != 2 {
-                process = int(syscall(434, long(pid), long(0)))
-                if process < 0 {
+        // S10: the child's end as an entry of `poll` with a bound or without one (issue 661, Q14 (a)); where the system refuses
+        // the descriptor, a call with no bound waits for the child in `waitpid` after its pipes (§12, assumed there)
+        if failure == 0 && purpose != 2 {
+            process = int(syscall(434, long(pid), long(0)))
+            if process < 0 {
+                if bounded {
                     failure = -long(*__errno_location())
                     kill(pid, 9)
                 }
+
+                process = -1
             }
         }
 
@@ -5945,8 +5962,8 @@ long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long 
         int* polled = Ptr<int>(memory + 65536 + 64)
         byte* clock = memory + 65536 + 104
         // the room a fall over the wait for the child reads (`ChildDropped`): at 36 whether the call owns the pipes and at 40 the
-        // descriptor of the child's process, which the caller opened for its bound and owns in both calls, beside the size of the
-        // mapping, which the caller put at 44
+        // descriptor of the child's process, which the caller opened for the child's end and owns in both calls, -1 where it opened
+        // none, the system refusing it or the end seen before (`ChildDropped`), beside the size of the mapping, which the caller put at 44
         mut int owns = 0
         if owned {
             owns = 1
@@ -5955,7 +5972,7 @@ long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long 
         *Ptr<int>(memory + 65536 + 36) = owns
         *Ptr<int>(memory + 65536 + 40) = process
         // `poll` on the pipes still open, each read into its list until its end, and on the child's end
-        // where `process` is not -1, while a bound holds until the bound passes
+        // where `process` is not -1, to that end, a bound holding the wait until the bound passes
         mut int pending = 0
         mut bool polling = true
         mut bool exited = endSeen
@@ -6009,7 +6026,7 @@ long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long 
             pending = pending + 1
         }
 
-        while polling && (pending > 0 || writing || (bounded && !exited)) {
+        while polling && (pending > 0 || writing || ((bounded || process >= 0) && !exited)) {
             // S19: each lock still to take tried once at each wake, the output's first; one another holder holds
             // is tried again at the next, and its pipe, which that holder reads, is not polled until then
             if outWaits && Took(outReader, take, ahead, mut out) {

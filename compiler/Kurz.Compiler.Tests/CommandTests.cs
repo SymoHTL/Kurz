@@ -488,6 +488,7 @@ public sealed class CommandTests : IDisposable
     [InlineData("test", "--release", "--release", "a.kz")]
     [InlineData("test", "a.kz", "--cpu")]
     [InlineData("test", "--seed", "1", "--seed", "1", "a.kz")] // Y11: `--seed` once, and a value after it
+    [InlineData("test", "--seed", "1", "--seed", "x", "a.kz")] // Y11: the words read left to right, the second `--seed` the usage's before its value
     [InlineData("test", "a.kz", "--seed")]
     [InlineData("test", "--seed")] // Y11: a `--seed` that is the last word, before any file
     [InlineData("test", "a.kz", "--seed", "1")] // Y2, Y11: an option after the file is the usage's
@@ -517,6 +518,12 @@ public sealed class CommandTests : IDisposable
         // Y11: the value of `--seed` in digits alone, 0 to the greatest `ulong`; any other ends the command with its line, before the
         // file is read, so that a file that is not there is not named
         Assert.Equal((1, "", $"error: seed ({value})\n"), Kurz("test", "--seed", value, "missing.kz"));
+
+    [Fact]
+    public void A_command_line_ends_at_the_first_word_that_breaks_a_rule() =>
+        // Y11: the words are read left to right, and the first that breaks a rule ends the command with that rule's error, so that a
+        // refused seed before an option after the file is the seed's error, where a second `--seed` before a refused value is the usage's
+        Assert.Equal((1, "", "error: seed (x)\n"), Kurz("test", "--seed", "x", "missing.kz", "--release"));
 
     [Fact]
     public void A_seed_with_leading_zeros_names_its_number()

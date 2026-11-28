@@ -109,6 +109,34 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_fall_over_a_job_whose_end_the_scheduler_took_gives_the_job_back_at_the_fall()
+    {
+        // S10: the case `park-file-drained` falls over the opening of a FIFO whose end the scheduler took while `Boom` slept, and no fact
+        // the program reads tells that fall from one over a job still running, whose descriptor the drain closes as the fall closes the
+        // taken one's. On a runtime whose fall over a job whose end it did not take ends the program with 71, on one thread as the
+        // case's header asks, the case prints as its header says only where its fall met a job whose end was taken; the same program
+        // whose writer opens the FIFO a second in, after the fall, ends with 71, so that the edit stands in the branch of a job still
+        // running. A build for Windows makes no call on a file (S11), and the case stands among those it leaves out
+        if (Builder.HostTarget == Target.Windows)
+        {
+            return;
+        }
+
+        var text = File.ReadAllText(Path.Combine(CorpusTests.Root, "corpus", "system", "park-file-drained.kz"));
+        var running = ListTests.Edited(("runtime/common/runtime.kz", "                if *Ptr<long>(waited) == 0 {\n                    *Ptr<byte*>(job + 24) = null\n",
+            "                if *Ptr<long>(waited) == 0 {\n                    sys.Exit(71)\n                    *Ptr<byte*>(job + 24) = null\n"));
+        var taken = Compile(text, running);
+        Assert.True(taken.Program is not null, string.Join("; ", taken.Diagnostics.Sorted));
+        var run = Toolchain.Run(toolchain.Build(taken.Program, "park-file-drained-taken"), "0", "1");
+        Assert.Equal(["k", "CalleeCrashed", "done", "0"], run.Output);
+        Assert.Equal(0, run.Code);
+
+        var late = Compile(text.Replace("Environment.Sleep(100ms)", "Environment.Sleep(1000ms)", StringComparison.Ordinal), running);
+        Assert.True(late.Program is not null, string.Join("; ", late.Diagnostics.Sorted));
+        Assert.Equal(71, Toolchain.Run(toolchain.Build(late.Program, "park-file-drained-running"), "0", "1").Code);
+    }
+
+    [Fact]
     public void An_actors_read_of_standard_input_runs_on_the_pool_while_the_one_thread_runs_another_actor()
     {
         // S10, S22, the product pass's Q6 (issue 661, comment 7182792402): a read of standard input inside a message runs on the pool of

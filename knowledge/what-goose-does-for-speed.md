@@ -167,7 +167,9 @@ per-object teardown, contiguous data, narrow links, and enums sized for the vari
   nine checks per pixel keep the loop scalar: proving them away makes the flat kernel 1.8x faster
   and the row-slice form 2.9x faster." but "Under clang the checks have no measurable cost: clang
   vectorises the checked loop to run as fast as the unchecked one" (results). Kurz: answered:
-  "Goose's full set", section 13 of the record (Q4).
+  "Goose's full set", section 13 of the record (Q4), its marker `checkfree fn` retired on 2026-11-27
+  for a file or a module marked `proved`, a check that stays there failing the build (issue 662,
+  comment 7219363898, "Fold into proved").
 - G9, function values at compile time only. "Every call of a function value is direct and can be
   inlined, function values cannot escape, and there are no closure objects or function pointers, so
   a higher-order function compiles to exactly the loop it looks like." (front page). Kurz:

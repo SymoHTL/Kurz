@@ -3,7 +3,7 @@
 A program logs through `Log`, which every file sees, with C#'s six levels as the names of its
 functions and Kurz's interpolated string as the template, as `ILogger`'s surface reads, and each
 call is a call site with a static record, as Rust's `tracing` gives each of its macros a
-`Callsite` (§12, the owner, 2026-11-04, Q1 (a) and Q2 (a)). Spans, sinks, the inspector's levels,
+`Callsite` (§12, the owner, 2026-11-04, Q1 (a) and Q2 (a)). Spans that P8 does not set, a span a program opens itself among them, sinks, the inspector's levels,
 a `deploy` block's ceiling, `secret-logged` but for an actor's key in a span, which P8 names, and the
 instruments of §12 have no rule here.
 
@@ -139,7 +139,8 @@ No case: as P4's.
 By default each event a call site that is on makes is one text line on standard error, with its
 time, level, category, chain ID, message and fields (§12, the owner, 2026-11-04, Q6 (a)); the chain
 ID stands only in the span of P8, with the actor's parts, where an actor's message runs, and a line
-written outside every actor's message holds nothing in their place (P8). The
+written outside every actor's message holds nothing in their place, but for the line of an actor's crash, which takes the span of
+the actor it names whether a message runs or not (P8). The
 category of a call is the name of the type whose method holds it, as C#'s `ILogger<T>` names a
 category by its type, taken with no container (§12, the owner, 2026-11-04, Q1 (a)): the name as
 written, `Orders` for a method of `Orders`. A call in a constructor, in a property or in a field's
@@ -212,7 +213,7 @@ not declare, writes no span, as the top-level code writes none, and the line of 
 no chain, the `restart-limit` of a supervisor that runs no message, leaves out the field `chain` alone,
 its key, its name and its node standing as in any span, and writes the type's name alone, `Sup:`, where
 no field is left, as `tracing_subscriber::fmt` writes a span with no field *(assumed in §12)*. The build has no
-actor with a key or a name and no program that names nodes, so its span holds the chain alone
+actor with a key or a name and no program that names nodes, so its span holds the chain alone, and no field on a crash line that carries no chain, `Sup:`
 (`compiler/README.md`).
 
 No case: as P6's.
