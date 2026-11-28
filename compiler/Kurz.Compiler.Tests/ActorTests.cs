@@ -5678,6 +5678,11 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_crash_whose_block_waits_behind_a_wait_that_parked_on_it_raises_deadlock_at_that_wait()
     {
+        if (ClockRefusedOnWindows(CrashAfterPark))
+        {
+            return;
+        }
+
         var run = BuildAndRun(CrashAfterPark, toolchain.Runtime, "actor-block-wait-after-park");
         var (crashes, rest) = Logged(run.Error);
         Assert.Matches($"^{CrashAfterParkLogged}$", Assert.Single(crashes));

@@ -736,13 +736,15 @@ public sealed class CommandTests : IDisposable
         // Y5, Q2, F5: the test waits on its child, whose block of `on crash` runs in the test's actor once the test's message ends; the
         // child's crash closes that loop, at which the runtime follows the line from the test's wait, so that the test's call raises
         // `deadlock` at its line, the loop's waits in its words, each with its chain ID (U61, U63; issue 673, comment 7237520177), and
-        // the test fails with that crash of its actor, raises nothing, and runs the test after it
+        // the test fails with that crash of its actor, raises nothing, and runs the test after it; inside the crash's quoted words each
+        // `\` of the path stands after a `\` (P7), as a path of Windows writes them
         var source = Path.Combine(root, "deadlock.kz");
+        var quoted = source.Replace("\\", "\\\\");
         File.WriteAllText(source, "actor Worker {\n    pub void Fail() {\n        throw \"down\"\n    }\n\n    pub int Get() => 1\n}\n\n"
             + "test \"waits\" {\n    w = spawn Worker() on crash (c) {\n        restart\n    }\n\n    send w.Fail()\n    print(w.Get())\n}\n\n"
             + "test \"after\" {\n    print(\"after\")\n}\n");
         var run = KurzWithPlaces("test", "--seed", "1", source);
-        Assert.Equal((1, $"test \"waits\" ... FAILED (seed 1)\n    deadlock \"test#1 waits at {source}:15 on Worker#2 in chain <chain>\\n"
+        Assert.Equal((1, $"test \"waits\" ... FAILED (seed 1)\n    deadlock \"test#1 waits at {quoted}:15 on Worker#2 in chain <chain>\\n"
             + $"Worker#2 waits for the decision of test#1 on its crash in chain <chain>\" at {source}:15\nafter\ntest \"after\" ... ok\n2 tests: 1 passed, 1 failed\n", ""),
             (run.Code, RunTests.Chains(run.Output), run.Error));
     }
