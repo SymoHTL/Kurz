@@ -1,0 +1,15 @@
+// expect: error keyword-no-match at 13
+// allow: keywords
+// rules: J3
+
+keyword repeat <int times> <block body> {
+    mut i = 0
+    while i < times {
+        body
+        i = i + 1
+    }
+}
+
+repeat {
+    print(1)
+}

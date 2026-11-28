@@ -1,0 +1,9 @@
+// expect: error keyword-depth at 6
+// allow: keywords
+// rules: J8
+
+keyword forever <block body> {
+    forever {
+        body
+    }
+}

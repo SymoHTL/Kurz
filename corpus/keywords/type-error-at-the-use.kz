@@ -1,0 +1,15 @@
+// expect: error type-mismatch at 13
+// allow: keywords
+// rules: J4, J5
+
+keyword repeat <int times> <block body> {
+    mut i = 0
+    while i < times {
+        body
+        i = i + 1
+    }
+}
+
+repeat "two" {
+    print(1)
+}

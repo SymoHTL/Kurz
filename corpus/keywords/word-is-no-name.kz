@@ -1,0 +1,9 @@
+// expect: error reserved-word at 9
+// allow: keywords
+// rules: J9
+
+keyword twice <block body> {
+    body
+}
+
+twice = 2

@@ -1,0 +1,21 @@
+// expect: output
+// | a
+// | a
+// allow: keywords
+// rules: J1, J8
+
+twice {
+    print("a")
+}
+
+keyword twice <block body> {
+    once {
+        body
+    }
+
+    body
+}
+
+keyword once <block body> {
+    body
+}

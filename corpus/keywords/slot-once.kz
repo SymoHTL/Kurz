@@ -1,0 +1,24 @@
+// expect: output
+// | counted
+// | 3
+// allow: keywords
+// rules: J5
+
+keyword repeat <int times> <block body> {
+    mut i = 0
+    while i < times {
+        body
+        i = i + 1
+    }
+}
+
+int Count() {
+    print("counted")
+    return 3
+}
+
+mut total = 0
+repeat Count() {
+    total = total + 1
+}
+print(total)

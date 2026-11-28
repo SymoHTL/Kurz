@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Kurz.Compiler;
 
 /// <summary>
@@ -76,11 +78,33 @@ public sealed record Diagnostic(DiagnosticKind Kind, string Id, int Line, string
 }
 
 /// <summary>The diagnostics of one compilation, in the order they were found; <see cref="Sorted"/> orders them by line.</summary>
-public sealed class DiagnosticBag
+public sealed partial class DiagnosticBag
 {
     private readonly List<Diagnostic> items = [];
 
-    public IReadOnlyList<Diagnostic> Items => items;
+    /// <summary>The names an expansion took in the place of names its template wrote (J7), each to the name as written.</summary>
+    private readonly Dictionary<string, string> taken = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Each diagnostic as it was added, but that a name an expansion took reads as its template wrote it, so that an error points at what
+    /// the developer wrote and not at the expansion (record section 9, rule 4): <c>`n` was declared without `mut`</c>, not <c>`n_1`</c>.
+    /// The bag keeps the diagnostics as they were added, so that one is taken back by its reference (<see cref="Remove"/>).
+    /// </summary>
+    public IReadOnlyList<Diagnostic> Items => taken.Count == 0 ? items : items.Select(Written).ToList();
+
+    /// <summary>J7: a name that an expansion took for <paramref name="written"/>, a name that no identifier of the file holds.</summary>
+    internal void Took(string fresh, string written) => taken[fresh] = written;
+
+    [GeneratedRegex(@"[\p{L}_][\p{L}\p{N}_]*")]
+    private static partial Regex Name();
+
+    private Diagnostic Written(Diagnostic diagnostic)
+    {
+        string Named(string text) => Name().Replace(text, m => taken.GetValueOrDefault(m.Value, m.Value));
+        var message = Named(diagnostic.Message);
+        var help = diagnostic.OwnHelp is { } own ? Named(own) : null;
+        return message == diagnostic.Message && help == diagnostic.OwnHelp ? diagnostic : diagnostic with { Message = message, OwnHelp = help };
+    }
 
     public bool HasErrors => items.Any(d => d.IsError);
 
@@ -95,7 +119,7 @@ public sealed class DiagnosticBag
 
     public void NotSupported(int line, string construct) => items.Add(Diagnostic.NotSupported(line, construct));
 
-    public IReadOnlyList<Diagnostic> Sorted => items.OrderBy(d => d.Line).ThenBy(d => d.Kind).ToList();
+    public IReadOnlyList<Diagnostic> Sorted => Items.OrderBy(d => d.Line).ThenBy(d => d.Kind).ToList();
 }
 
 /// <summary>
@@ -199,6 +223,11 @@ public static class ErrorIds
     public const string PointerCrosses = "pointer-crosses";
     public const string CallLoop = "call-loop";
     public const string AdvanceOutside = "advance-outside";
+    public const string KeywordRedefined = "keyword-redefined";
+    public const string KeywordNoMatch = "keyword-no-match";
+    public const string KeywordDepth = "keyword-depth";
+    public const string KeywordJump = "keyword-jump";
+    public const string KeywordGrant = "keyword-grant";
 
     /// <summary>L1 names this id in its rule and keeps it out of the table, which lists the ids cases expect: no corpus file can be a file that is not UTF-8.</summary>
     public const string InvalidSource = "invalid-source";

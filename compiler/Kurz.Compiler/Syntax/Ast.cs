@@ -445,5 +445,42 @@ public sealed record TypeDeclaration(
     IReadOnlyList<EnumMember> Values,
     IReadOnlyList<ActorClause>? Clauses = null) : Statement(Line);
 
-/// <summary>One file: its statements and declarations in source order (F5).</summary>
-public sealed record ProgramSyntax(IReadOnlyList<Statement> Statements);
+/// <summary>A part of a keyword's pattern (J2): a fixed word, a slot, or an optional part.</summary>
+public abstract record KeywordElement(int Line);
+
+/// <summary>A fixed word of a pattern (J2), which a use writes as it stands.</summary>
+public sealed record KeywordWord(int Line, string Word) : KeywordElement(Line);
+
+/// <summary>What a slot of a pattern takes (J2).</summary>
+public enum KeywordSlotKind
+{
+    /// <summary><c>&lt;int times&gt;</c>: an expression of the type, evaluated once at the use (J5).</summary>
+    Expression,
+
+    /// <summary><c>&lt;block body&gt;</c>: a block whose jumps act on the function and the loop around the use (J6).</summary>
+    Block,
+
+    /// <summary><c>&lt;detached block job&gt;</c>: a block the template runs apart, where no jump leaves it (J6).</summary>
+    DetachedBlock,
+
+    /// <summary><c>&lt;name attempt&gt;</c>: a name the use gives to a variable of the template (J7).</summary>
+    Name,
+}
+
+/// <summary>A slot of a pattern (J2); <paramref name="Type"/> is the type of an expression slot, and null for the other kinds.</summary>
+public sealed record KeywordSlot(int Line, KeywordSlotKind Kind, TypeSyntax? Type, string Name) : KeywordElement(Line);
+
+/// <summary>An optional part of a pattern, <c>[as &lt;name attempt&gt;]</c>, whose first element is a fixed word (J2).</summary>
+public sealed record KeywordOptional(int Line, IReadOnlyList<KeywordElement> Elements) : KeywordElement(Line);
+
+/// <summary>
+/// <c>keyword retry &lt;int times&gt; &lt;block body&gt; { ... }</c> (J1, record section 9): the keyword's word, its pattern and its template,
+/// which the parser fills at each use (J4). The declaration stands in <see cref="ProgramSyntax.Keywords"/> and in no list of statements.
+/// </summary>
+public sealed record KeywordDeclaration(int Line, string Word, IReadOnlyList<KeywordElement> Pattern, Block Template) : Statement(Line);
+
+/// <summary>One file: its statements and declarations in source order (F5), and the keywords it declares (J1).</summary>
+public sealed record ProgramSyntax(IReadOnlyList<Statement> Statements)
+{
+    public IReadOnlyList<KeywordDeclaration> Keywords { get; init; } = [];
+}

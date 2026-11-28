@@ -1,0 +1,12 @@
+// expect: error syntax at 6
+// allow: keywords
+// rules: J1
+
+void Run() {
+    keyword twice <block body> {
+        body
+        body
+    }
+}
+
+Run()

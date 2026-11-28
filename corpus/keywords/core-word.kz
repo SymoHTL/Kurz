@@ -1,0 +1,7 @@
+// expect: error keyword-redefined at 5
+// allow: keywords
+// rules: J9
+
+keyword while <block body> {
+    body
+}

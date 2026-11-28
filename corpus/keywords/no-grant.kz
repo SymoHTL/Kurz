@@ -1,0 +1,11 @@
+// expect: error keyword-grant at 4
+// rules: J10
+
+keyword twice <block body> {
+    body
+    body
+}
+
+twice {
+    print(1)
+}

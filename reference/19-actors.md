@@ -6205,7 +6205,8 @@ supervisor msg"); at a `spawn` of the top-level code it runs in that code's wait
 ends the expression at `spawn`, as the words of a policy do (U2), and after an actor's name it is the
 type's default (U27), the braces after it the actor's body; no parentheses after `on crash` before a block, no
 name in them, a second one, and a block that does not open on the line of its parameter are `syntax` (E4)
-*(assumed: as §6 marks it)*. The blocks `attempt { ... }` and `retry { ... }` of §6, which keep a crash to a piece of
+*(assumed: as §6 marks it)*. The block `attempt { ... }` of §6 and a use of `retry`, the keyword of `std/` that loops over
+it (J14; §9, Q19 (a)), which keep a crash to a piece of
 code, have no rule here but where each word is a name, and where, inside a header's brackets, arms, blocks and
 parentheses, each is the block's word again, but for `attempt`'s block, whose rules are U46 to U50, and
 `compiler/README.md` says what the build does with `retry`'s; in
@@ -7462,8 +7463,9 @@ function around the `attempt` nor the `Reason` of the actor whose code runs it *
 6980152255, not asked)*. Every file sees `Crashed`, as it sees `RuntimeError` (U30), so that a signature names the
 case, and a file's own type of that name is `redeclared` (V9); in the arms of an `attempt`'s `else`, `Crashed` written
 with no type arguments names that case, as the record's sample in §6 writes `Crashed c` *(assumed: a reading of the
-build, proposed with this record and not put to the owner)*. `retry { ... }`, a loop over `attempt`, is `not supported`:
-how its attempts' calls are told apart is open (§14).
+build, proposed with this record and not put to the owner)*. `retry`, a loop over `attempt` and the keyword of `std/`
+(J14; §9, the owner, 2026-11-28, issue 667, comment 7236862510, Q19 (a)), is `not supported`: this build's `std/`
+declares no keyword, and how its attempts' calls are told apart is open (§14).
 
 Case: [actors/attempt-crash.kz](../corpus/actors/attempt-crash.kz)
 ```kurz
