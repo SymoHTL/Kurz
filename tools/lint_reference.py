@@ -98,9 +98,9 @@ def parse_case(text):
         if rest[0] != "// command: test":
             return None, "the `// command:` line is not `// command: test`"
         rest = rest[1:]
-    if rest and rest[0].startswith("// allow:"):  # the grants of a project.kz the file takes (R7)
-        if not re.fullmatch(r"// allow: (?:raw(?: native)?|native)", rest[0]):
-            return None, "the `// allow:` line is not `// allow: raw`, `// allow: native` or `// allow: raw native`"
+    if rest and rest[0].startswith("// allow:"):  # the grants of a project.kz the file takes (R7, J10)
+        if not re.fullmatch(r"// allow: (?:raw(?: native)?(?: keywords)?|native(?: keywords)?|keywords)", rest[0]):
+            return None, "the `// allow:` line is not `// allow:` and one or more of `raw`, `native` and `keywords`, in that order"
         rest = rest[1:]
     if rest and rest[0].startswith("// system:"):  # the one system the case runs on (chapter 0)
         if not re.fullmatch(r"// system: (?:linux|windows)", rest[0]):
@@ -442,6 +442,9 @@ def cases_in(base):
         "a grant line of native alone": (tree(edit(declare, "// rules: V1", "// allow: native\n// rules: V1")), None),
         "a grant line the header does not take": (tree(edit(declare, "// rules: V1", "// allow: network\n// rules: V1")), "the `// allow:` line is not"),
         "a grant line in the order native raw": (tree(edit(declare, "// rules: V1", "// allow: native raw\n// rules: V1")), "the `// allow:` line is not"),
+        "a grant line of keywords alone": (tree(edit(declare, "// rules: V1", "// allow: keywords\n// rules: V1")), None),
+        "a grant line of keywords after raw and native": (tree(edit(declare, "// rules: V1", "// allow: raw native keywords\n// rules: V1")), None),
+        "a grant line in the order keywords raw": (tree(edit(declare, "// rules: V1", "// allow: keywords raw\n// rules: V1")), "the `// allow:` line is not"),
         "a system line the header takes": (tree(edit(declare, "// rules: V1", "// allow: raw\n// system: linux\n// rules: V1")), None),
         "a system line the header does not take": (tree(edit(declare, "// rules: V1", "// system: macos\n// rules: V1")), "the `// system:` line is not"),
         "a threads line the header takes": (tree(edit(declare, "// rules: V1", "// system: linux\n// threads: 1\n// rules: V1")), None),

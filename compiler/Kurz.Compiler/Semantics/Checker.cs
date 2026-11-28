@@ -67,6 +67,7 @@ public sealed partial class Checker
     private List<(PointerType Pointer, int Line, string What)>? pendingPointees; // R10: the pointers the fields of data types name, judged after every field is resolved
     private readonly bool allowRaw;
     private readonly bool allowNative;
+    private readonly bool allowKeywords; // J10
     private readonly SemanticModel model = new();
     private readonly IReadOnlyDictionary<string, Checker> folders; // F10: the folders a `use` of their name can bring in, the runtime's `sys` alone
     private readonly Dictionary<string, Checker> used = new(StringComparer.Ordinal); // F10: the folders the file's `use` lines brought in
@@ -89,6 +90,7 @@ public sealed partial class Checker
         this.diagnostics = diagnostics;
         allowRaw = grants.Contains("raw");
         allowNative = grants.Contains("native");
+        allowKeywords = grants.Contains("keywords");
         this.folders = folders;
         this.std = std;
         this.reasons = reasons;
@@ -153,9 +155,9 @@ public sealed partial class Checker
         ArgumentNullException.ThrowIfNull(diagnostics);
         ArgumentNullException.ThrowIfNull(grants);
         ArgumentNullException.ThrowIfNull(folders);
-        if (grants.FirstOrDefault(g => g is not ("raw" or "native")) is { } unknown)
+        if (grants.FirstOrDefault(g => g is not ("raw" or "native" or "keywords")) is { } unknown)
         {
-            throw new ArgumentException($"`{unknown}` is no grant: R7 and R16 name `raw` and `native`", nameof(grants));
+            throw new ArgumentException($"`{unknown}` is no grant: R7 and R16 name `raw` and `native`, and J10 `keywords`", nameof(grants));
         }
 
         // U30: a program with a block of `on crash` is read again with the `Reason` of each block's child that the reading before found,
@@ -392,6 +394,13 @@ public sealed partial class Checker
 
     private void Run(ProgramSyntax program)
     {
+        foreach (var keyword in program.Keywords.Where(_ => !allowKeywords))
+        {
+            // J10: a package that defines keywords needs `allow keywords` (record section 9, the owner, 2026-10-30, "Definer, `allow keywords`");
+            // while the build reads no project file, the grant is a corpus case's header line alone, as `raw`'s is (assumed, #667, comment 7229158580, Q15 (a))
+            Report(ErrorIds.KeywordGrant, keyword.Line, $"a `keyword` needs the grant `keywords`, which a case's header line `// allow: keywords` gives while the build reads no `project.kz` (J10)");
+        }
+
         // T15, D18, S1, C6, X7, H7: the data types of the case `string.FromUtf8` returns besides its string, of the case an enum's `From`
         // returns besides its value, of the case a call on a file returns where it failed, of the entry of a loop over a map and of the cases
         // a number type's `Parse` and `Hex.Decode` return where they read nothing, declared before the file's own types, so that a

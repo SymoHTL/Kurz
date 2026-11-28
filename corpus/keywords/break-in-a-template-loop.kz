@@ -1,0 +1,18 @@
+// expect: error keyword-jump at 16
+// allow: keywords
+// rules: J6
+
+keyword repeat <int times> <block body> {
+    mut i = 0
+    while i < times {
+        body
+        i = i + 1
+    }
+}
+
+for x in [1, 2] {
+    print(x)
+    repeat 2 {
+        break
+    }
+}

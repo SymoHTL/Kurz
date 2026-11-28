@@ -6,7 +6,8 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
 - `Kurz.Compiler/`: the library. `Text/` reads a source file (L1: UTF-8, a byte-order mark
   skipped, the two-byte line break of Windows editors read as one, in a `"""` block too), `Syntax/`
   turns it into tokens and a syntax tree (the syntax of chapters 1 to 11: every declaration,
-  statement and expression form the reference shows), `Semantics/` checks a tree the parser read
+  statement and expression form the reference shows; and chapter 21's keywords, each use where a
+  statement stands filled from its template, the section "What the parser fills of a keyword"), `Semantics/` checks a tree the parser read
   without an error against the rules of chapters 1 to 3, 5, 6, 8 to 10, the raw forms of 11 and
   the calls on files of 13 and the hashes of 14 (the section "What the checker reads" below) and says `not supported` to a construct of the
   other chapters, and keeps what it found out, node by node, for a code generator
@@ -2482,7 +2483,7 @@ a block's is, puts the copy of the crash in that heap, writes the log line, ends
 the waiter, whose code builds `Crashed` as a block's function does and frees the copy
 (`PendingLeft`); an arm of its `else` lets go of the case it takes. A pointer or a view of an atomic type
 that the block takes, or that its value reaches, is `pointer-crosses`, as at a message (U47, U12). What stays `not supported` of
-section 6's supervision: `retry { ... }`; of `attempt { ... }`, a block that names `this`, a method or
+section 6's supervision: a use of `retry`, the keyword of `std/` (section 9, J14), which this build's `std/` does not declare; of `attempt { ... }`, a block that names `this`, a method or
 a property of the class whose method runs it, a `move` in the block of a variable or a field around
 it, a block whose value is a union, a nullable value among them, or a value the crossing copy does not
 bring back, a block that takes a value no word makes cross or that the crossing copy does not copy, a
@@ -2869,15 +2870,16 @@ A diagnostic is one of three kinds. A compile error carries an id from the table
 `reference/12-errors.md`, or the one id a rule names and keeps out of the table, L1's
 `invalid-source` (the table lists the ids a case can expect, and no case can be a file that is not
 UTF-8), and the line the reference's E1 names; a corpus case pins both and never the message,
-which is free to improve. The front end raises six ids of the table, `syntax`, `semicolon`,
-`reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, and `invalid-source`.
+which is free to improve. The front end raises ten ids of the table, `syntax`, `semicolon`,
+`reserved-word`, `braces-required`, `unknown-escape`, `block-indentation`, and the keywords'
+`keyword-redefined`, `keyword-no-match`, `keyword-depth` and `keyword-jump`, and `invalid-source`.
 The checker raises the ids of the chapters it reads, listed in its section below, and `syntax` for
 the shapes E4 leaves to it; a corpus case that expects an id of a chapter it does not read is
 checked for parsing clean and for getting `not supported` from the checker, its expectation read
 against the rules as `reference/00-about.md` says. The second kind, `not supported`, names a
 construct the reference states and this directory does not read; it carries no id, so it can
-never pass for an error a case expects. The front end produces it nowhere: it reads every form of
-chapters 1 to 11, the raw forms of chapter 11 among them, where `Ptr<T>(x)` and `SizeOf<T>()` parse
+never pass for an error a case expects. The front end produces it only for the keywords' forms that
+the section "What the parser fills of a keyword" lists: it reads every form of chapters 1 to 11, the raw forms of chapter 11 among them, where `Ptr<T>(x)` and `SizeOf<T>()` parse
 as calls and `p[i]` as an index; they stand in the cases of R7 and R10 to R17, which the checker
 reads as the section below says. The checker produces it for the constructs its section lists, and
 says nothing else about a program that uses one. Both sides raise `syntax`, so a case that expects it
@@ -2907,6 +2909,43 @@ over, arms or braces that open on the next line are `braces-required` all the sa
 error wherever a block that a statement form, a type body, `with` or a function takes opens on the
 next line, is missing or is replaced by a statement, and the rest of that line goes with the one
 error; a lambda's block after a `=>` that ends its line is the reading on F7 below.
+
+## What the parser fills of a keyword
+
+The parser reads a file's keywords (chapter 21) before its statements: a first pass finds every
+`keyword` that starts a line at the top level with a name after it on that line and reads its pattern,
+then reads each template as statements, so that a use can stand before its declaration and inside
+another keyword's template (J1, J8). A declaration stands in the tree's list of keywords
+(`ProgramSyntax.Keywords`) and in no list of statements: the checker reads that list for the grant
+`keywords` alone (J10), and the emitter meets no declaration.
+
+A use where a statement stands is matched against its pattern and stands in the tree as a block, which
+the checker and the emitter read as code written by hand (J3, J4):
+
+- the template's tokens are parsed again at each use, every token on the use's line, so that an error
+  inside the expansion names the use's line, and a name the expansion took (J7) as the template wrote it
+  (`DiagnosticBag.Took`), `n` and not `n_1` (J4);
+- each expression slot is a variable of the slot's type, declared at the start of the block in the
+  pattern's order, so that it is evaluated once (J5);
+- the statement that names a block slot is the use's block, and a second statement that names it gets
+  a copy; an optional part the use leaves out puts an empty block in the place of its block slot;
+- each name the template declares takes a fresh name, unique against every name of the file, but for
+  a member after `.` or `?.`, a parameter's name before `:` in a call and a field's name in the braces
+  of `with`; a name slot gives that variable the name the use writes, or a fresh one where the use
+  writes none (J7);
+- a jump that would leave a detached block, or a block the template puts in a loop of its own, is
+  `keyword-jump` at the jump, and a plain block slot that the template puts inside a lambda is
+  `keyword-jump` at the declaration (J6);
+- each use inside an expansion is one more level, and a use past 64 levels is `keyword-depth`; a
+  keyword whose template reaches a use of itself is `keyword-depth` at that use (J8, an assumed reading of Q7 said back on issue 667).
+
+The parser says `not supported` to a keyword used as an expression (J11), a repeated part of a
+pattern, an optional part inside another and an expression slot inside an optional part (J2). It reads
+no list that uses add to (J12), the command has no `expand` (J13), `std/` declares no keyword and the
+build reads no package (J14). The line of the expansion that rule 4 of the record's section 9 adds to
+an error is not written: an error inside an expansion names the use's line alone. `KeywordTests` holds
+each of these shapes in a program of its own, with a chain of 66 keywords past the depth beside a chain
+of 10 that builds.
 
 ## Readings the reference leaves open to the front end
 
@@ -3038,7 +3077,8 @@ that sit under a rule by its id. Every one is pinned by a test.
   lambda inside it; no name, a second one or a type in the parentheses, a block on a line of its own,
   a knob after `restart` and a word after a decision are `syntax` (U28, U29). `attempt` and `retry`
   before a block are an expression of that block, which the checker reads for `attempt`, with a postfix
-  `else` after it as after a call (U46), and says `not supported` to for `retry` (section 6),
+  `else` after it as after a call (U46), and says `not supported` to for `retry`, which a count, an `as` name and an
+  `else` block may follow too, `std/`'s keyword, which this build's `std/` does not declare (section 9, J14),
   but in the condition, the collection or the subject before the block of an `if`, a `while`, a `for`
   or a `match` the word is a name, as a struct literal is no condition in Rust, and inside that header's parentheses,
   brackets, arms and blocks the expression again, as Rust reads a struct literal there (U28; assumed: section 6, comment
@@ -3370,7 +3410,7 @@ may take as a class's does (U1, U9), each of which leaves the
 actor and every use of its name unread, besides what a class's body does not read, as the checker's `syntax` for a base after
 an actor's name, arguments after an interface there (U1, K10), `equal by` and a constructor in its body (U1, U2), and its `static-state` for a `static mut` field and one
 whose type is or holds a class (U1), leave it too, while an actor after a class's `:` is `syntax` and the class is read without
-that base (U1); `retry { ... }` (section 6, U28), and of `attempt { ... }` what the build does not bring into its child or
+that base (U1); a use of `retry`, `std/`'s keyword (section 9, J14), and of `attempt { ... }` what the build does not bring into its child or
 out of it, one in a file read without `std/` and one whose `Reason` still grows at the fifth reading (U46, U47); a block of `on crash` whose child can throw a type the
 crossing copy does not copy, one in a file read without `std/` and one whose child's `Reason` still grows at the fifth reading
 (U30); `move` before a field of a primary
