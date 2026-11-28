@@ -503,7 +503,8 @@ public sealed class ModelTests
     /// The waiter of a call, whose thread holds its actor at the start: the reply's waiter stored (<c>ReplyWaiter</c>) and the message
     /// queued (<c>Enqueue</c>), the reply's word read (<c>Answer</c>), and where it is 0 the activation parked: <c>Ready</c> and the end of
     /// the hold; then the takes of the actor's entries, each resuming the activation where the word is set (<c>RunTake</c>), as long as it
-    /// neither returned nor crashed.
+    /// neither returned nor crashed. The mark of a loop that a crash closes (<c>Marked</c>; issue 673) is no input of the model: it
+    /// resumes the activation only to walk the line again, which parks it where no loop stands, as a take that finds the word unset.
     /// </summary>
     private static Strand Waiting(int at, Break broken)
     {
@@ -532,7 +533,7 @@ public sealed class ModelTests
             new("Ready", "ReplyState(reply) != 0", _ => true, s => { s[at + 2] = s[Answer] != 0 ? 1 : 0; s[at] = 4; }),
             .. LetGone(at, 4, Then, broken),
             .. Taken(at, 7, 10, broken),
-            new("RunTake", "if reply != null && (ReplyState(reply) != 0 || Waited(reply))", _ => true, s =>
+            new("RunTake", "if reply != null && (ReplyState(reply) != 0 || Waited(reply) || Marked(top, reply))", _ => true, s =>
             {
                 if (s[Crashed] == 0 && s[Answer] != 0)
                 {
@@ -659,7 +660,8 @@ public sealed class ModelTests
     /// The waiter of a call with a deadline, whose thread holds its actor at the start: the reply's waiter stored (<c>ReplyWaiter</c>), the
     /// message queued (<c>Enqueue</c>), the reply among the timers (<c>TimerAdd</c>), the loop's test of the reply's word and of the
     /// deadline (<c>Answer</c>), and where neither holds the activation parked: <c>Ready</c> and the end of the hold, then the takes of the
-    /// actor's entries, each resuming the activation where the word is set or the deadline passed (<c>RunTake</c>), which tests again.
+    /// actor's entries, each resuming the activation where the word is set or the deadline passed (<c>RunTake</c>), which tests again; the
+    /// mark of a loop that a crash closes is no input, as in <see cref="Waiting"/>.
     /// Out of the loop: the reply off the timers (<c>TimerRemove</c>) and its word read once; where it is set the wait returns, the
     /// activation naming the reply no more, and the strand goes on at the end of the hold, not at <c>Ready</c>, and else
     /// the deadline's <c>call-timeout</c> is the actor's crash, whose fall unhooks the reply as <see cref="Crash"/> does, the waiter's thread
@@ -694,7 +696,7 @@ public sealed class ModelTests
             }),
             .. LetGone(at, 5, Then, broken),
             .. Taken(at, 8, 11, broken),
-            new("RunTake", "if reply != null && (ReplyState(reply) != 0 || Waited(reply))", _ => true, s =>
+            new("RunTake", "if reply != null && (ReplyState(reply) != 0 || Waited(reply) || Marked(top, reply))", _ => true, s =>
             {
                 if (s[Crashed] == 0 && (s[Answer] != 0 || s[Due] != 0))
                 {

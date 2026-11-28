@@ -26,7 +26,9 @@ use sys
 // all, which names the heap whose page holds those bytes, so that `Free` finds a block's heap by a mask,
 // a shift and a load. The system gives a piece in a mapping of 2 mebibytes, of which it touches only the
 // aligned mebibyte. The thread keeps the pages of a heap freed whole, for each size, for the next heap
-// that takes a page of that size.
+// that takes a page of that size, and a page of a piece another thread carved goes back to that thread,
+// which the word at byte 512 of the piece names by its pools, a word of the table for the table's own
+// bytes, which no lookup reads (`Freed`; section 3).
 //
 // The thread's own heap holds what lives as long as the process: the runtime's buffers, the work list
 // and the memo of a copy, and what the top-level code allocates, the root actor's heap. The allocation
@@ -106,10 +108,12 @@ void Pooled(byte* page, long size) {
 }
 
 // A page of a heap freed whole back where it came from: in the thread's pools where the thread carved it,
-// else on the list of frees from other threads of the thread that carved it, which the word at 512 of the
+// else onto the list of frees from other threads of the thread that carved it, which the word at 512 of the
 // page's piece names by its pools and which stands at 96 of those pools, as mimalloc's page takes a free
 // from another thread on a list of its own (`xthread_free`, not checked at source), so that the thread
-// that makes heaps another thread frees takes its pages back (`Returned`; issue 673).
+// that makes heaps another thread frees takes its pages back (`Returned`): the freeing thread holds such
+// pages, at most 32 of one owner, and pushes them with one exchange (`Given`) (section 3: the owner,
+// 2026-11-28, issue 673, comment 7236862307, Q1).
 void Freed(byte* page, long size) {
     raw {
         long owner = *Ptr<long>((long(page) & -1048576) + 512)
@@ -391,8 +395,8 @@ pub byte* HeapCurrent() {
 }
 
 // The heap freed whole (section 3): its blocks of more than 262144 bytes to the front of the blocks the
-// thread keeps, as `Free` gives them, its pages to the thread's pools. Nothing may read a block of the
-// heap after it, its record and its first block among them.
+// thread keeps, as `Free` gives them, its pages to the pools of the thread that carved them (`Freed`).
+// Nothing may read a block of the heap after it, its record and its first block among them.
 pub void HeapFree(byte* heap) {
     sys.Entered()
     raw {

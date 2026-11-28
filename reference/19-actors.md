@@ -3217,10 +3217,11 @@ actor left to run on any thread, no timer pending and nothing registered with th
 `error: deadlock at <file>:<n>`, the line of that call, and the exit code 1, so that two actors that
 call each other from different chains and wait for each other do not hang silently
 (§6, "Deadlocks"; the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level
-wait"). Layer 3 raises first in an actor whose wait closes a loop (U62), so that on one thread this end is reached by a
-loop that a crash closes, whose waits then stand below the error line, which ends with a colon (U64), and by a loop that
-a call an actor's start keeps out closes, whose error names that call's place (U22) (§6, the owner,
-2026-11-20, #519, comment 7051071630, T70 1; the owner, 2026-11-21, #519, comment 7060155980, T85 2). A call that waits in a function the top-level code called is the top-level code's, at its
+wait"). Layer 3 raises first in an actor whose wait closes a loop, and at the crash that closes one (U61, U62), so that on
+one thread this end is reached by a loop that a call an actor's start keeps out closes, whose error names that call's place
+(U22), and by a loop that layer 3 does not see, whose waits then stand below the error line, which ends with a colon (U64)
+(§6, the owner, 2026-11-20, #519, comment 7051071630, T70 1; the owner, 2026-11-21, #519, comment 7060155980, T85 2; the
+owner, 2026-11-28, issue 673, comment 7237520177, which took a loop that a crash closes out of this end). A call that waits in a function the top-level code called is the top-level code's, at its
 own line. Where a call that an actor's start keeps out closes the loop, the error names that call's
 line (U22) (§6, the owner, 2026-11-21, #599, comment 7060156109, Q6 1), and where more than one
 such call closes it, the error line names the first place in source order and ends with a colon, and
@@ -3233,92 +3234,14 @@ that `deadlock.kz` reaches its run with no `vouch` (the owner, 2026-11-21, #519,
 raises `call-timeout` at that call's line (U36, U34), or, where no bound holds or the program ends first, until the end of
 the program, where U13 drops it.
 
-Case: [actors/deadlock-pending-crash.kz](../corpus/actors/deadlock-pending-crash.kz)
-```kurz
-// `Boss`'s `Go` waits on `Get`, queued behind `Fail` in `Worker`'s inbox; `Fail` crashes, and the block of `Worker`'s policy
-// waits behind `Go`, so that a crash closes the loop and no wait does: layer 3 does not see it (U60), the top-level code's wait
-// on `Go`, under its bound, finds nothing left to run (U18, U42), and its walk names the loop below the error line (U64)
-
-actor Worker {
-    pub void Fail() {
-        throw "worker fails"
-    }
-
-    pub int Get() => 5
-}
-
-actor Boss {
-    pub void Go() {
-        w = spawn Worker() on crash (x) {
-            print("decided")
-            restart
-        }
-
-        send w.Fail()
-        print("got {w.Get()}")
-    }
-}
-
-b = spawn Boss()
-b.Go()
-print("after")
-```
-
-Case: [actors/waitline-into-loop.kz](../corpus/actors/waitline-into-loop.kz)
-```kurz
-// `Worker`'s crash closes a loop of `Boss` and `Worker` that no wait closes (U64); `Asker`'s call of `Ping`, made after it,
-// leads into that loop, which `Asker` is not in, so its wait parks and raises nothing (U61); the top-level code's wait on `Ask`
-// finds nothing left to run (U18), and its walk meets the loop at `Boss`, whose wait starts the text below the error line (U64)
-
-actor Clock {
-    pub int Now() => 7
-}
-
-actor Worker {
-    pub void Fail() {
-        throw "worker fails"
-    }
-
-    pub int Get() => 5
-}
-
-actor Boss {
-    pub void Go() {
-        w = spawn Worker() on crash (x) {
-            print("decided")
-            restart
-        }
-
-        send w.Fail()
-        print("got {w.Get()}")
-    }
-
-    pub int Ping() => 1
-}
-
-actor Asker(Clock C) {
-    pub void Ask(Boss boss) {
-        t = C.Now()
-        print("asks at {t}")
-        print("pinged {boss.Ping()}")
-    }
-}
-
-b = spawn Boss()
-c = spawn Clock()
-k = spawn Asker(c)
-send b.Go()
-k.Ask(b)
-print("after")
-```
-
 Case: [system/park-crash-deadlock.kz](../corpus/system/park-crash-deadlock.kz)
 ```kurz
-// `Boom`'s crash takes `Outer`'s wait on its read out of the poller, which `park-read-crash.kz` holds (S10, U20). Then `Boss`'s
-// `Go` waits on `Get`, queued behind `Fail` in `Worker`'s inbox, and the block of `Worker`'s policy waits behind `Go`, a loop that a
-// crash closes and that layer 3 does not see (U60): the top-level code's wait on `Go` finds no actor left to run, no timer pending
-// and nothing registered with the poller, so that it is `deadlock` at its line (U18), and not a wait in the poller without end.
-// U18 alone is the subject, the end of the top-level code's wait once nothing is registered; S10, U20, U60 and U64 it passes through
+// `Boom`'s crash takes `Outer`'s wait on its read out of the poller, which `park-read-crash.kz` holds (S10, U20). Then the restart
+// of `Holder` runs its constructor, whose call of `Ask` waits on `Taker`, whose call of `Peek` waits in `Holder`'s inbox for that
+// constructor, a loop that layer 3 does not see (U22), its calls' bounds standing (U42): the top-level code's wait on `Get` finds
+// no actor left to run, no timer pending and nothing registered with the poller, so that it is `deadlock`, at the line of the
+// call kept out (U18, U22), and not a wait in the poller without end.
+// U18 alone is the subject, the end of the top-level code's wait once nothing is registered; S10, U20, U22 and U42 it passes through
 actor Helper {
     pub void Poke(Napper n) {
         print(n.Boom())
@@ -3353,24 +3276,33 @@ actor Caller(Napper N, Helper H) {
     pub string Done() => "done"
 }
 
-actor Worker {
-    pub void Fail() {
-        throw "worker fails"
+actor Taker {
+    mut Holder? h = null
+
+    pub void Set(Holder x) {
+        h = x
     }
 
-    pub int Get() => 5
-}
-
-actor Boss {
-    pub void Go() {
-        w = spawn Worker() on crash (x) {
-            print("decided")
-            restart
+    pub int Ask() {
+        x = h
+        if x != null {
+            return vouch x.Peek()
         }
 
-        send w.Fail()
-        print("got {w.Get()}")
+        return 0
     }
+}
+
+actor Holder(Taker Other) {
+    int first = Other.Ask()
+
+    pub int Peek() => first
+
+    pub void Fail() {
+        throw "holder fails"
+    }
+
+    pub int Get() => first
 }
 
 void | IoError Main() {
@@ -3389,8 +3321,11 @@ void | IoError Main() {
     server = listener.Accept()
     print(c.Done())
     server.Write("x".Bytes)
-    b = spawn Boss()
-    b.Go()
+    t = spawn Taker()
+    h = spawn Holder(t)
+    t.Set(h)
+    send h.Fail()
+    print(h.Get())
 }
 
 Main() else {
@@ -4238,6 +4173,89 @@ Main() else {
 Case: [actors/interface-crash.kz](../corpus/actors/interface-crash.kz)
 
 Case: [system/park-crash-deadlock.kz](../corpus/system/park-crash-deadlock.kz)
+
+Case: [actors/deadlock-pending-crash.kz](../corpus/actors/deadlock-pending-crash.kz)
+```kurz
+// `Boss`'s `Go` waits on `Get`, queued behind `Fail` in `Worker`'s inbox; `Fail` crashes, and the block of `Worker`'s policy
+// waits behind `Go`, so that the crash closes the loop with no wait that parks (U60): the runtime follows the line from `Go`'s
+// wait at the crash, `Go`'s call of `Get` raises `deadlock` at its turn (U61), `Boss` crashes with it, which drops the
+// pending block of `Worker` with no line (U34), and the top-level code, which waits on `Go`, gets `callee-crashed`
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Get() => 5
+}
+
+actor Boss {
+    pub void Go() {
+        w = spawn Worker() on crash (x) {
+            print("decided")
+            restart
+        }
+
+        send w.Fail()
+        print("got {w.Get()}")
+    }
+}
+
+b = spawn Boss()
+b.Go()
+print("after")
+```
+
+Case: [actors/waitline-into-loop.kz](../corpus/actors/waitline-into-loop.kz)
+```kurz
+// `Asker`'s `Ask` waits on `Clock`, then `Boss`'s `Go` waits on `Get`, queued behind `Fail` in `Worker`'s inbox; `Clock`'s
+// answer queues `Asker` before `Fail` crashes, and the crash queues the block of `Worker`'s policy behind `Go` (U34), a loop
+// of `Boss` and `Worker` that the crash closes: the runtime follows the line from `Go`'s wait at the crash, and `Go` raises
+// `deadlock` at its turn, which comes after `Asker`'s (U61). `Asker`'s call of `Ping`, made in between, leads into that loop,
+// which `Asker` is not in, so its wait parks and raises nothing (U61); `Boss` then crashes with its `deadlock`, and the
+// top-level code, which waits on `Go`, gets `callee-crashed`
+
+actor Clock {
+    pub int Now() => 7
+}
+
+actor Worker {
+    pub void Fail() {
+        throw "worker fails"
+    }
+
+    pub int Get() => 5
+}
+
+actor Boss {
+    pub void Go() {
+        w = spawn Worker() on crash (x) {
+            print("decided")
+            restart
+        }
+
+        send w.Fail()
+        print("got {w.Get()}")
+    }
+
+    pub int Ping() => 1
+}
+
+actor Asker(Clock C) {
+    pub void Ask(Boss boss) {
+        t = C.Now()
+        print("asks at {t}")
+        print("pinged {boss.Ping()}")
+    }
+}
+
+b = spawn Boss()
+c = spawn Clock()
+k = spawn Asker(c)
+send k.Ask(b)
+b.Go()
+print("after")
+```
 
 ### U21 (decided, §6) The inbox is kept, and the crashed instance's heap goes
 
@@ -5458,6 +5476,8 @@ send l.Ask(r)
 send r.Ask(l)
 print(l.Value())
 ```
+
+Case: [system/park-crash-deadlock.kz](../corpus/system/park-crash-deadlock.kz)
 
 ### U23 (decided, §6) The pause before a restart grows
 
@@ -6708,10 +6728,12 @@ the supervisor's crash or end is dropped with no line, its child ended with the 
 children (U21, U13); while its block is pending, the child takes no message, so that a call to it
 waits in its kept inbox, and the calls queued in its inbox go on waiting, until the decision (§6, the
 owner, 2026-11-16, #519, comment 6926540546, "Keep: it waits"), so that a message of the supervisor, an actor,
-that calls its own child once the child's block is queued behind that message gets `deadlock` at that call (U60, U62),
-and one whose call already waits in the child's inbox when the child crashes ends only by the call's timeout (§6, the owner, 2026-11-20, #519, comment 7051071630,
-T63 2), §6's `call-timeout` at the line of that call, and a wait of the top-level code on that message is `deadlock` (U18) at the line of that wait where no
-timeout holds (U64) *(assumed: as §6 marks it)*; and the
+that calls its own child once the child's block is queued behind that message gets `deadlock` at that call (U60, U62)
+(§6, the owner, 2026-11-20, #519, comment 7051071630, T63 2), and so does one whose call already waits in the child's inbox
+when the child crashes, at the crash (U61) (§6, the owner, 2026-11-28, issue 673, comment 7237520177, which retired "and one
+whose call already waits in the child's inbox when the child crashes ends only by the call's timeout", with "§6's
+`call-timeout` at the line of that call, and a wait of the top-level code on that message is `deadlock` (U18) at the line of
+that wait where no timeout holds (U64)"); and the
 block's own calls run in a chain of their own, as a restart's construction does (U22). The log line
 of a crash that a block decides (U24) is written at the decision, at `restart` and at `stop`, and
 none at `escalate` (U25) (§6, assumed there, as Erlang's supervisor reports a child's exit as it
@@ -6726,6 +6748,34 @@ Case: [actors/waitline-pending-block.kz](../corpus/actors/waitline-pending-block
 Case: [actors/deadlock-pending-crash.kz](../corpus/actors/deadlock-pending-crash.kz)
 
 Case: [actors/waitline-into-loop.kz](../corpus/actors/waitline-into-loop.kz)
+
+Case: [tests/test-deadlock.kz](../corpus/tests/test-deadlock.kz)
+```kurz
+// the block of the child's policy runs in the test's actor once its message ends, and that message waits on the child: a loop
+// that the crash closes, at which the runtime follows the line from the test's wait, so that the test's call raises `deadlock`
+// at its line and the test fails with that crash of its actor, the loop's waits in the crash's quoted words, each with its
+// chain's ID, written `<chain>`
+actor Worker {
+    pub void Fail() {
+        throw "down"
+    }
+
+    pub int Get() => 1
+}
+
+test "waits on its own block" {
+    w = spawn Worker() on crash (c) {
+        restart
+    }
+
+    send w.Fail()
+    print(w.Get())
+}
+
+test "after" {
+    print("after")
+}
+```
 
 ### U35 (decided, §6, §8) Threads
 
@@ -7394,10 +7444,10 @@ passes only while other messages run or a restart's pause runs, the top-level co
 own deadline and the earliest deadline of a parked call *(assumed: detection first, as U18 (2026-11-15) was chosen after
 "Deadline on chain ID" (2026-10-30) and §6's layer 3, "Instant runtime detection", leaves to the timeout what detection cannot
 see, T6 of comment 6967625156)*, against a timer counted as work, as Tokio's runtime sleeps to its earliest timer (not checked
-at source), under which no program would reach `deadlock`. So [actors/deadlock-pending-crash.kz](../corpus/actors/deadlock-pending-crash.kz) ends as
-`deadlock` at once, though the call of `Boss` waits under its deadline.
+at source), under which no program would reach `deadlock`. So [system/park-crash-deadlock.kz](../corpus/system/park-crash-deadlock.kz) ends as
+`deadlock` at once, though the calls of its loop wait under their deadlines.
 
-Case: [actors/deadlock-pending-crash.kz](../corpus/actors/deadlock-pending-crash.kz)
+Case: [system/park-crash-deadlock.kz](../corpus/system/park-crash-deadlock.kz)
 
 ### U43 (assumed, §6) A caller whose callee crashed or ended once the caller's deadline had passed
 
@@ -8964,7 +9014,7 @@ Case: [actors/call-loop-unreached.kz](../corpus/actors/call-loop-unreached.kz)
 `vouch` before a call that waits on an actor's method through a reference (U4), `vouch c.Size()`, takes that call out of
 U56's graph, and with it every loop through it, and says that the call reaches another actor than the one of the loop that
 waits (§6, "Deadlocks", layer 2, "`vouch` on the call overrides it and means 'different instance, I vouch'"), which nothing
-checks at run time, U18's `deadlock` and `call-timeout` being the net for a false promise (the owner, 2026-11-20, #519, comment 7051071630, T57 (a)), layer 3 (U62) raising first where a wait closes the loop, and U18, the call's bound (U36) and U13 staying for a loop that a crash closes (U64). Where it does not hold, the call runs as it would without the word: a call that reaches an actor busy in
+checks at run time, U18's `deadlock` and `call-timeout` being the net for a false promise (the owner, 2026-11-20, #519, comment 7051071630, T57 (a)), layer 3 (U62) raising first where a wait or a crash closes the loop (U61), and U18, the call's bound (U36) and U13 staying for a loop that layer 3 does not see (U64). Where it does not hold, the call runs as it would without the word: a call that reaches an actor busy in
 another chain waits on it, so that the two chains wait on each other and the waiter whose wait closes their loop gets
 `deadlock` (U62, U65), and a call that reaches an actor waiting in the
 call's own chain gets in as a call of that chain (U17), so that a recursion of one chain through a `vouch` that does not hold
@@ -9185,6 +9235,8 @@ send sleeper.Nap()
 print(caller.Ask(sleeper))
 ```
 
+Case: [tests/test-deadlock.kz](../corpus/tests/test-deadlock.kz)
+
 ### U61 (decided, §6) The line is followed at every wait of an actor
 
 Before the activation of a call that waits parks, the runtime follows the line from the call's edge (U60), and where the line
@@ -9194,7 +9246,11 @@ clause's, its block's and its chain's deadline change nothing of it (U36 to U44)
 ends there, and the wait parks, raising nothing; each hop of the line is a different actor, up to its waiter or such
 a loop, which a check of Brent's kind stops, so that a walk is bounded by the actors that wait (T65 1 of that comment); and the
 waiter's own call that gets in and that no activation runs yet, a call back through `this` among them (U10, U17), makes no
-edge (U60).
+edge (U60). A crash whose block of `on crash` waits behind its supervisor's current message makes the edge from the child to
+the supervisor (U60) with no wait that parks, and the runtime follows the line from the supervisor's waiting call then too: where
+it leads back to the supervisor, that wait closes the loop (U62) at once, whichever of the park and the crash came first, on
+one thread and on worker threads (§6, the owner, 2026-11-28, issue 673, comment 7236862307, Q3, and comment 7237520177,
+"Walk everywhere, retire T63 2 part (Recommended)", for one thread).
 
 Case: [actors/deadlock.kz](../corpus/actors/deadlock.kz)
 
@@ -9202,11 +9258,15 @@ Case: [actors/waitline-within.kz](../corpus/actors/waitline-within.kz)
 
 Case: [actors/waitline-into-loop.kz](../corpus/actors/waitline-into-loop.kz)
 
+Case: [actors/deadlock-pending-crash.kz](../corpus/actors/deadlock-pending-crash.kz)
+
 Case: [actors/callback.kz](../corpus/actors/callback.kz)
 
 Case: [actors/callback-chain.kz](../corpus/actors/callback-chain.kz)
 
 Case: [actors/call-self-through-this.kz](../corpus/actors/call-self-through-this.kz)
+
+Case: [tests/test-deadlock.kz](../corpus/tests/test-deadlock.kz)
 
 ### U62 (decided, §6) The waiter that closes a loop gets `deadlock`
 
@@ -9253,53 +9313,28 @@ Case: [actors/waitline-escalate.kz](../corpus/actors/waitline-escalate.kz)
 Case: [actors/waitline-vouch.kz](../corpus/actors/waitline-vouch.kz)
 
 Case: [tests/test-deadlock.kz](../corpus/tests/test-deadlock.kz)
-```kurz
-// the block of the child's policy runs in the test's actor once its message ends, and that message waits on the child: a loop
-// that the crash closes, whose waits stand under the test's `FAILED` line, each with its chain's ID, written `<chain>`
-actor Worker {
-    pub void Fail() {
-        throw "down"
-    }
-
-    pub int Get() => 1
-}
-
-test "waits on its own block" {
-    w = spawn Worker() on crash (c) {
-        restart
-    }
-
-    send w.Fail()
-    print(w.Get())
-}
-
-test "after" {
-    print("after")
-}
-```
 
 ### U64 (decided, §6) U18 behind layer 3
 
 U18's end of the process stays for what layer 3 does not see: on one thread, a loop that a call an actor's start keeps out
-closes, which the error names by that call's place first, the walk running only where no such call closes the loop (U22, Y5),
-and a loop that a crash closes, where a child
-crashes while its supervisor's call already waits in its inbox and the child's block of `on crash` waits behind that call's
-message (U34), so that no wait closes the loop and the top-level code's wait on that message finds nothing left to run, its
-deadline standing (U42) (§6, "Deadlocks", layer 3; the owner, 2026-11-20, #519, comment 7051071630, T63 2 and T70 1, which replaces the part of Q4 of comment
+closes, which the error names by that call's place first, the walk running only where no such call closes the loop (U22, Y5)
+(§6, "Deadlocks", layer 3; the owner, 2026-11-20, #519, comment 7051071630, T70 1, which replaces the part of Q4 of comment
 6892812780 that kept layer 3 off one thread). That `deadlock` names the loop: one walk at U18's end follows the line from
 the top-level code's call (U60), and where it runs into a loop, the error line ends with a colon and the loop's waits stand
 below it in U63's form, one line for each, each with its chain's ID where U63 gives one, from the first wait of the loop the walk meets; where
 the line ends before any loop, the error line stands alone (the owner, 2026-11-21, #519, comment 7060155980, T85 2).
 Under `kurz test` the runner's wait for a test that finds nothing left to run takes the same walk from the test's call, and
 the loop's waits stand under the test's `FAILED` line (Y5; §11, the owner, 2026-11-23, #622, comment 7095825069, 1).
+Retired on 2026-11-28 by the owner's answer of that day (§6; issue 673, comment 7237520177, "Walk everywhere, retire T63 2
+part (Recommended)"), under which a crash follows the line from its supervisor's waiting call on one thread too (U61), of
+what layer 3 does not see: "and a loop that a crash closes, where a child crashes while its supervisor's call already waits
+in its inbox and the child's block of `on crash` waits behind that call's message (U34), so that no wait closes the loop and
+the top-level code's wait on that message finds nothing left to run, its deadline standing (U42)", with T63 2 of comment
+7051071630 for it.
 
-Case: [actors/deadlock-pending-crash.kz](../corpus/actors/deadlock-pending-crash.kz)
-
-Case: [actors/waitline-into-loop.kz](../corpus/actors/waitline-into-loop.kz)
-
-Case: [tests/test-deadlock.kz](../corpus/tests/test-deadlock.kz)
-
-Case: [system/park-crash-deadlock.kz](../corpus/system/park-crash-deadlock.kz)
+No case: the cases whose walk at U18's end met a loop, each a loop that a crash closed after its supervisor's call waited,
+raise `deadlock` at that call since that answer (U61), and no case is known of a loop that layer 3 does not see and that
+this walk meets.
 
 ### U65 (decided, §6) `vouch` and layer 3
 

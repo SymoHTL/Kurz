@@ -1011,7 +1011,9 @@ public sealed partial class Emitter
 
     /// <summary>
     /// The IR type of the reply of a call that waits, as tokio's <c>oneshot</c> holds its state, its receiver's task and its value: the
-    /// word set once the result stands, an <c>i32</c> that the runtime stores with release and loads with acquire, the activation that
+    /// word set once the result stands, an <c>i32</c> that the runtime stores with release and loads with acquire, the four bytes after
+    /// it, which the alignment of the next field leaves, holding the mark of a loop that a crash closed behind the wait, which the
+    /// runtime's <c>Enqueue</c> clears and <c>LoopClosed</c> sets (U61), the activation that
     /// waits on it, which the runtime's <c>ReplyWaiter</c> sets, the call's deadline and the replies before and after it among the
     /// thread's timers, which the runtime's <c>Enqueue</c> and <c>Wait</c> set (U36), the clock at which a crash or an end set the word,
     /// which the runtime's <c>Signal</c> stores and <c>Wait</c> holds to the deadline (U43), the call's place, its file's bytes, their count

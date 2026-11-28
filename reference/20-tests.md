@@ -226,7 +226,7 @@ its own; the run goes on with the test after it (§11, the owner, 2026-11-20, is
 7051499099, Q2 of comment 6992687784 at its lean) *(assumed: F5 of comment 6993110710, a reading of the
 build said back there, for the line `deadlock` names)*. A test's code runs as its actor's, its calls of
 one chain (U17), and the runner's wait meets `deadlock` where the test's actor waits on a message only it
-can run, a block of its child's policy among them, as `tests/test-deadlock.kz` shows. *(assumed: a reading of U17 and U18, proposed with the reading of comment 6998754650 and not put to the owner)* The runner is the
+can run, a block of its child's policy among them. *(assumed: a reading of U17 and U18, proposed with the reading of comment 6998754650 and not put to the owner)* Layer 3 raises first where it sees the loop (U61, U62): at a crash of the test's child that closes a loop through the test's call, that call raises `deadlock` at its line, and the test fails with that crash of its actor, its words the crash's, as `tests/test-deadlock.kz` shows (§6, the owner, 2026-11-28, issue 673, comment 7237520177). The runner is the
 root actor, which runs the tests in place of the program's statements, and each test's actor is its child
 with the policy `stop` (U25), so that a crash of the test's actor fails that test and nothing restarts
 (§11, the owner, 2026-11-20, comment 7051499099, Q13 (a) of comment 6998786049 at its lean). A `deadlock` that a call an actor's start keeps out closes (U22) names that
@@ -240,12 +240,14 @@ several 2; comment 7067139953, the form 1), in the order, with the counts and wi
 each line indented by four spaces as every word under a `FAILED` line (Y3) (§11, the owner,
 2026-11-21, #599, comment 7067639209, the order 1, the same place 1, the cap 1, the indent 1). Where no
 call that an actor's start keeps out closes the loop and one walk from the test's call runs into a loop
-that a crash closes (U64), the words are the test's line and, under it, the loop's waits, each with its
+that layer 3 does not see (U64), the words are the test's line and, under it, the loop's waits, each with its
 chain's ID, in the form the top-level code's error writes them below its error line (U63), the test's line ending with
 no colon, as it ends where no loop stands under it, each line
-indented by four spaces as the calls kept out are, as `tests/test-deadlock.kz` shows (§11, the owner,
+indented by four spaces as the calls kept out are (§11, the owner,
 2026-11-23, #622, comment 7095825069, 1, "Yes, list the waits") *(assumed: the indent of the calls kept
-out, comment 7067639209, for these lines, which the answer did not name)*. An error that
+out, comment 7067639209, for these lines, which the answer did not name)*; `tests/test-deadlock.kz` showed it for a loop that
+a crash closes, which layer 3 raises at the test's call since 2026-11-28 (U61; §6, issue 673, comment 7237520177), and no case
+is known of a loop that this walk meets. An error that
 ends the process wherever it happens (U19), `allocation-failed` among them, and on Windows an overflow of
 an actor's stack, at which the build ends the process as the system ends it (U19), ends the run inside a
 test too: its error line stands on standard error, and neither that test's line, nor the tests after it,
@@ -285,7 +287,9 @@ print(total)
 Case: [tests/test-deadlock.kz](../corpus/tests/test-deadlock.kz)
 ```kurz
 // the block of the child's policy runs in the test's actor once its message ends, and that message waits on the child: a loop
-// that the crash closes, whose waits stand under the test's `FAILED` line, each with its chain's ID, written `<chain>`
+// that the crash closes, at which the runtime follows the line from the test's wait, so that the test's call raises `deadlock`
+// at its line and the test fails with that crash of its actor, the loop's waits in the crash's quoted words, each with its
+// chain's ID, written `<chain>`
 actor Worker {
     pub void Fail() {
         throw "down"
