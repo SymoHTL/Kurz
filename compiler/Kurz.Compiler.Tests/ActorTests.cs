@@ -2454,7 +2454,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// </summary>
     private static CheckedRuntime StoodIn(bool print) => ListTests.Edited(
         ("runtime/common/runtime.kz", "own = Due(now, sys.DefaultBound())", "own = Never()"),
-        ("runtime/common/runtime.kz", "    mut long now = 0\n    if !sys.MonotonicNow(mut now) {\n        return 0\n    }\n\n    raw {\n        return now + ahead\n    }\n",
+        ("runtime/common/runtime.kz", "    mut long now = 0\n    if !sys.MonotonicNow(mut now) {\n        AllocationFailed(4096)\n    }\n\n    raw {\n        return now + ahead\n    }\n",
             "    mut long now = 0\n    raw {\n        now = standIn\n    }\n\n    return now\n"),
         ("runtime/common/runtime.kz", "void PauseSleep(long nanoseconds) {\n    sys.Sleep(nanoseconds)\n}",
             "static mut long standIn = 0\n\nvoid PauseSleep(long nanoseconds) {\n    raw {\n        standIn = standIn + nanoseconds\n    }\n\n" +

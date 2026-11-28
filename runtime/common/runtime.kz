@@ -4913,7 +4913,8 @@ byte* Worker(long index) {
 // The start of the worker threads at the first `spawn` of a program whose count of them is more than 1 (`workersAsked`; section 6, the
 // owner, 2026-11-17, #572, comment 6961064484, Q2, the start at the first `spawn` assumed there): the scheduler's block, the main
 // thread's record, its `eventfd` armed in its poller (`WakeArmed`), and a record and a thread for each worker (`WorkerMain`). A
-// worker that the system refuses, its thread, the page of its record or its `eventfd`, ends the process with `error: thread-refused
+// worker that the system refuses, its thread, the page of its record, its `eventfd` or the page of its clock (`WorkerMain`; the owner,
+// 2026-11-28, issue 673, comment 7236862307, Q2), ends the process with `error: thread-refused
 // (<the count of worker threads asked>)` on standard error and the exit code 1, the workers started before it ending with the process
 // (Q2, "Error line + exit 1", the line assumed there), as tokio's `Builder::build` gives an `io::Error`.
 void WorkersStart() {
@@ -5016,7 +5017,8 @@ long WakeArmed() {
 
 // A worker thread (`WorkersStart`), its record at `record`: the handler of a fault for its own stack (`sys.ThreadStart`), the waits of
 // the calls on sockets, of the calls handed to the pool and of `Drive` in its page, as the start of the process sets the main
-// thread's (`Start`), its `eventfd` armed in its own poller, and then its turns, without end, the process ending it (`WorkerTurn`).
+// thread's (`Start`), its `eventfd` armed in its own poller and the page its clock is read into mapped (`sys.StatusMapped`), a refusal of
+// either ending the start as `WorkersStart` says, and then its turns, without end, the process ending it (`WorkerTurn`).
 extern "C" byte* WorkerMain(byte* record) {
     sys.ThreadStart()
     sys.Waiter(SocketWaited)
@@ -5025,7 +5027,7 @@ extern "C" byte* WorkerMain(byte* record) {
     raw {
         threadRecord = record
         wakeEvent = *Ptr<long>(record + 72)
-        if WakeArmed() < 0 {
+        if WakeArmed() < 0 || !sys.StatusMapped() {
             ThreadRefused(*Ptr<long>(scheduler + 48))
         }
     }
@@ -6471,8 +6473,8 @@ thread static mut long rootBlock = 0
 // deadline of the block it stands in (U38, assumed), set for the running code, the top-level code's or the
 // running message's, and the deadline it replaces, which its exit puts back (`BlockExit`); the emitted code calls
 // it at the block's entry, and `BlockExit` at every way out of the block that goes on running. A deadline of 0
-// is no block (`rootBlock`, `Enqueue`); `Due` gives 0 only where the clock reads 0, which `PauseClock` gives only
-// where the clock cannot be read, and a `within` entered then reads as no block, its calls taking their own bounds.
+// is no block (`rootBlock`, `Enqueue`); `Due` gives 0 only where the clock reads 0, which a clock counted from the
+// system's start does not read, `PauseClock` ending the process where the clock cannot be read (issue 673, comment 7236862307, Q2).
 pub long BlockEnter(long bound) {
     mut long before = 0
     raw {
@@ -9873,11 +9875,16 @@ pub void Rebuilt(byte* state) {
 }
 
 // The clock every pause and every deadline reads (U23, U36): the system's monotonic clock, in nanoseconds, with the offset that
-// `advance` added in a test (`ahead`; Y10), 0 where it cannot be read.
+// `advance` added in a test (`ahead`; Y10). Where it cannot be read, since the system refused the page of the thread it is read
+// into, the process ends with `error: allocation-failed (4096 bytes)`, as a refused allocation ends it (O11) and as the program's
+// `instant.Now` does: a worker thread maps that page at its start (`WorkerMain`), so on worker threads only the main thread's first
+// read ends so (the owner, 2026-11-28, issue 673, comment 7236862307, Q2, against a clock of 0 whose deadlines a worker read as
+// passed). Windows reads it into no such page, and its `QueryPerformanceCounter` fails on no Windows since XP, as its documentation
+// says (not checked at source).
 long PauseClock() {
     mut long now = 0
     if !sys.MonotonicNow(mut now) {
-        return 0
+        AllocationFailed(4096)
     }
 
     raw {

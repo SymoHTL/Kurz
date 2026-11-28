@@ -6777,7 +6777,9 @@ or the build is for Windows (Y11; §2, that exception assumed there). Each worke
 thread has a poller and timers of its own, and a wake of an actor on another thread is a push to that
 thread's queue and one write of its `eventfd`, the wake of a thread on Linux, the one system the build
 starts worker threads on (§6, the owner, 2026-11-26, #519, comment 7189038384, T88). A worker whose `eventfd` or record the system refuses ends the start with `thread-refused` too
-*(assumed in §6)*. A message to an actor on another thread is built in a heap of its own and copied
+*(assumed in §6)*, and so does one whose page of the clock the system refuses at its start, where each worker maps it, the main
+thread ending with `allocation-failed (4096 bytes)` at its first read of the clock where its page is refused (§6, the owner,
+2026-11-28, issue 673, comment 7236862307, Q2). A message to an actor on another thread is built in a heap of its own and copied
 into the receiver's heap by the receiver at its turn, and a result into the waiter's heap as its wait
 returns (§6, the owner, 2026-11-20, #519, comment 7051492844, T17, 1); since a sender cannot know the
 thread that takes its receiver, on worker threads every message the code of an actor or of the top

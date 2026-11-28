@@ -2309,7 +2309,10 @@ process may use (section 6, Q4 of comment 6946532526), where that count is more 
 the main thread sees three things change, and `KURZ_THREADS=1` runs it so again (the owner, 2026-11-27, issue 519,
 comment 7216530837): the actors that are ready no longer run first in, first out, a message still running on a worker thread
 when the top-level code ends is cut (U13), and memory grows by each worker's record, poller and `eventfd` and by the heap
-of its own of each message (`MessageHeapNew`). The main thread runs
+of its own of each message (`MessageHeapNew`). A worker maps the page its clock is read into at its start (`sys.StatusMapped`,
+in `WorkerMain`), and the system's refusal of it ends the start with `thread-refused` as a refused record does, while a page
+refused at the main thread's first read of the clock ends the process with `allocation-failed (4096 bytes)` (`PauseClock`; the
+owner, 2026-11-28, issue 673, comment 7236862307, Q2). The main thread runs
 the top-level code alone and sleeps in its poller while it waits (`RootSlept`). Each worker takes an actor from the queue of
 its thread that nobody steals, which holds the actors whose activation parked on it, then from its slot of the actor woken
 last, from its ring of 256 slots, as tokio's `queue::Local`, and from the shared queue, which it reads first at every 61st

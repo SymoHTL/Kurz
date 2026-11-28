@@ -766,6 +766,59 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>
+    /// U35: a worker thread maps the page its clock is read into at its start, and a worker whose page the system refuses there, here
+    /// the second of four, ends the process with <c>thread-refused</c> naming the count asked and the exit code 1, while the top-level
+    /// code sleeps after its first <c>spawn</c> (the owner, 2026-11-28, issue 673, comment 7236862307, Q2). The other three workers
+    /// start, so that the refusal is that one worker's alone and no two refusals write their lines at once.
+    /// </summary>
+    [Fact]
+    public void A_worker_whose_page_of_the_clock_the_system_refuses_at_its_start_ends_the_process_with_thread_refused()
+    {
+        if (Builder.HostTarget == Target.Windows)
+        {
+            return;
+        }
+
+        var refused = ListTests.Edited(
+            ("runtime/linux/linux.kz", "        return status != null\n", "        return false\n"),
+            ("runtime/common/runtime.kz", "if WakeArmed() < 0 || !sys.StatusMapped() {", "if WakeArmed() < 0 || (*Ptr<long>(record + 96) == 1 && !sys.StatusMapped()) {"));
+        const string text = "actor Pinger {\n    pub int Ping() => 1\n}\n\nprint(\"start\")\np = spawn Pinger()\nEnvironment.Sleep(5s)\nprint(p.Ping())\n";
+        if (Ran(text, "threads-refused-clock", "export KURZ_THREADS=4; ", refused) is { } run)
+        {
+            Assert.Equal((1, "error: thread-refused (4)\n"), (run.Code, run.Error));
+            Assert.Equal(["start"], run.Output);
+        }
+    }
+
+    /// <summary>
+    /// U35, O11: the main thread maps the page its clock is read into at its first read, and where the system refuses that page there,
+    /// here at the deadline of the top-level code's call (U36), the process ends with <c>allocation-failed (4096 bytes)</c> and the exit
+    /// code 1, on one thread and on worker threads, whose own pages their start mapped (the owner, 2026-11-28, issue 673, comment
+    /// 7236862307, Q2). The clock of 0 such a read gave before printed the answer on one thread and raised <c>call-timeout</c> on
+    /// worker threads, where a worker read that deadline as passed.
+    /// </summary>
+    [Theory]
+    [InlineData("1")]
+    [InlineData("4")]
+    public void A_main_thread_whose_page_of_the_clock_the_system_refuses_ends_the_process_with_allocation_failed_at_its_first_read(string threads)
+    {
+        if (Builder.HostTarget == Target.Windows)
+        {
+            return;
+        }
+
+        var refused = ListTests.Edited(
+            ("runtime/linux/linux.kz", "thread static mut byte* status = null\n", "thread static mut byte* status = null\nthread static mut bool started = false\n"),
+            ("runtime/linux/linux.kz", "        return status != null\n", "        started = true\n        return status != null\n"),
+            ("runtime/linux/linux.kz", "        clock_gettime(1, Ptr<void>(status))", "        if !started {\n            return false\n        }\n\n        clock_gettime(1, Ptr<void>(status))"));
+        if (Ran("print(\"start\")\n" + Spawns, $"threads-clock-refused-{threads}", $"export KURZ_THREADS={threads}; ", refused) is { } run)
+        {
+            Assert.Equal((1, "error: allocation-failed (4096 bytes)\n"), (run.Code, run.Error));
+            Assert.Equal(["start"], run.Output);
+        }
+    }
+
+    /// <summary>
     /// A program with a <c>spawn</c>, started after <paramref name="setup"/>, ends with the exit code 1 and <paramref name="error"/> alone,
     /// before its first statement, while a program with no <c>spawn</c> under <paramref name="setup"/>, which reads no
     /// <c>KURZ_THREADS</c>, runs.
