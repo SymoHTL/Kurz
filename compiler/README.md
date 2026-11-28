@@ -471,8 +471,12 @@ class, where a request of the class takes it first, and a larger one off its hea
 front of the blocks the thread keeps where they take no more than 32 mebibytes with it, else to the
 system through the target's `Release`. `HeapFree` frees a heap whole, as the end of its actor does
 (record, section 3): its blocks of more than 262144 bytes join the blocks the thread keeps as `Free`
-gives them, and its pages go to the thread's pools, one for each size, from which a heap that needs a
-page of that size takes it first; the pieces a thread carved and the blocks it keeps stay its own.
+gives them, and its pages go to the pools of the thread that carved them, one for each size, from which a heap
+that needs a page of that size takes it first: a page of another thread's piece is held by the thread that frees it,
+at most 32 of one owner, and pushed with one exchange onto a list of the thread that carved it, which the word at byte
+512 of its piece names (`Freed`, `Given`, which a worker calls too when it parks and the main thread before it sleeps),
+and that thread takes the list into its pools where an allocation finds its pool of a size empty (`Returned`; record,
+section 3, issue 673); the pieces a thread carved and the blocks it keeps stay its own.
 `Reallocate` grows a block with its bytes in the heap it came from, as Rust's `GlobalAlloc::realloc`:
 one of more than 262144 bytes stays where it is where its header names room enough, as a kept block given out whole can, else moves into the smallest kept
 block that holds the grown block and that the grown block takes at least half of, its bytes copied
@@ -2315,7 +2319,10 @@ process may use (section 6, Q4 of comment 6946532526), where that count is more 
 the main thread sees three things change, and `KURZ_THREADS=1` runs it so again (the owner, 2026-11-27, issue 519,
 comment 7216530837): the actors that are ready no longer run first in, first out, a message still running on a worker thread
 when the top-level code ends is cut (U13), and memory grows by each worker's record, poller and `eventfd` and by the heap
-of its own of each message (`MessageHeapNew`). The main thread runs
+of its own of each message (`MessageHeapNew`). A worker maps the page its clock is read into at its start (`sys.StatusMapped`,
+in `WorkerMain`), and the system's refusal of it ends the start with `thread-refused` as a refused record does, while a page
+refused at the main thread's first read of the clock ends the process with `allocation-failed (4096 bytes)` (`PauseClock`; the
+owner, 2026-11-28, issue 673, comment 7236862307, Q2). The main thread runs
 the top-level code alone and sleeps in its poller while it waits (`RootSlept`). Each worker takes an actor from the queue of
 its thread that nobody steals, which holds the actors whose activation parked on it, then from its slot of the actor woken
 last, from its ring of 256 slots, as tokio's `queue::Local`, and from the shared queue, which it reads first at every 61st
@@ -2406,7 +2413,9 @@ walk of the throw sets (`ThrowSets.ActorsCode`) and `Semantics/CallLoops.cs` rea
 U65): each wait of an actor follows the wait line from the callee its reply names (`Looped`) before it parks, the line
 ending at an actor whose top activation sleeps or waits in the poller, which names no message it waits on (`Onward`), and the
 waiter whose wait closes a loop raises `deadlock` at its call with the loop's waits below its error line (`LoopText`,
-`Deadlocked`), so that a loop that a crash closes, which layer 3 does not see, ends at U18 where the top-level code
+`Deadlocked`); a crash whose block waits behind its supervisor, an edge that no park walks, follows the line from the
+supervisor's waiting call and marks that wait where the line leads back, and the wait walks the line again as it goes on and
+raises so, on one thread and on worker threads (`LoopClosed`, `Closed`; issue 673, comments 7236862307 and 7237520177); a loop that layer 3 does not see ends at U18 where the top-level code
 waits on it, its waits below the error line, which one walk from the top-level code's call finds (`Stuck`; U64), and
 else stays to the bound of a call in it (U36, U34) or the end of the program; a crash in a message is the crash of its actor (U19): the runtime stores it in the
 activation's header and switches to the scheduler's stack, frees the actor's heap whole but for its

@@ -2565,6 +2565,19 @@ pub bool Now(mut long nanoseconds) {
     return true
 }
 
+// The page of the thread that `stat` fills (`status`) mapped where it is not, at the start of a worker thread (`WorkerMain`), so
+// that each read of the clock on that thread finds it (the owner, 2026-11-28, issue 673, comment 7236862307, Q2): true, or false
+// where the system refuses it.
+pub bool StatusMapped() {
+    raw {
+        if status == null {
+            status = Memory(4096)
+        }
+
+        return status != null
+    }
+}
+
 // The monotonic clock in nanoseconds, put in `nanoseconds` (S25), read by `clock_gettime` with
 // `CLOCK_MONOTONIC` (1), as Rust's `Instant::now` reads it, into the page of the thread that `stat` fills:
 // true, or false where the page cannot be mapped. The clock counts from a zero the record does not name,

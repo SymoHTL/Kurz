@@ -4436,6 +4436,7 @@ pub void Enqueue(long index, long number, byte* message, bool bounded, long boun
             }
 
             *Ptr<long>(reply + 16) = deadline
+            *Ptr<int>(reply + 4) = 0
             *Ptr<byte*>(reply + 24) = null
             *Ptr<byte*>(reply + 32) = null
             *Ptr<byte*>(reply + 48) = file.Pointer
@@ -4918,7 +4919,8 @@ byte* Worker(long index) {
 // The start of the worker threads at the first `spawn` of a program whose count of them is more than 1 (`workersAsked`; section 6, the
 // owner, 2026-11-17, #572, comment 6961064484, Q2, the start at the first `spawn` assumed there): the scheduler's block, the main
 // thread's record, its `eventfd` armed in its poller (`WakeArmed`), and a record and a thread for each worker (`WorkerMain`). A
-// worker that the system refuses, its thread, the page of its record or its `eventfd`, ends the process with `error: thread-refused
+// worker that the system refuses, its thread, the page of its record, its `eventfd` or the page of its clock (`WorkerMain`; the owner,
+// 2026-11-28, issue 673, comment 7236862307, Q2), ends the process with `error: thread-refused
 // (<the count of worker threads asked>)` on standard error and the exit code 1, the workers started before it ending with the process
 // (Q2, "Error line + exit 1", the line assumed there), as tokio's `Builder::build` gives an `io::Error`.
 void WorkersStart() {
@@ -5021,7 +5023,8 @@ long WakeArmed() {
 
 // A worker thread (`WorkersStart`), its record at `record`: the handler of a fault for its own stack (`sys.ThreadStart`), the waits of
 // the calls on sockets, of the calls handed to the pool and of `Drive` in its page, as the start of the process sets the main
-// thread's (`Start`), its `eventfd` armed in its own poller, and then its turns, without end, the process ending it (`WorkerTurn`).
+// thread's (`Start`), its `eventfd` armed in its own poller and the page its clock is read into mapped (`sys.StatusMapped`), a refusal of
+// either ending the start as `WorkersStart` says, and then its turns, without end, the process ending it (`WorkerTurn`).
 extern "C" byte* WorkerMain(byte* record) {
     sys.ThreadStart()
     sys.Waiter(SocketWaited)
@@ -5030,7 +5033,7 @@ extern "C" byte* WorkerMain(byte* record) {
     raw {
         threadRecord = record
         wakeEvent = *Ptr<long>(record + 72)
-        if WakeArmed() < 0 {
+        if WakeArmed() < 0 || !sys.StatusMapped() {
             ThreadRefused(*Ptr<long>(scheduler + 48))
         }
     }
@@ -5619,9 +5622,11 @@ void Woken(byte* record) {
 // reads whether anything is left (`RootSlept`; section 6, the owner's `deadlock` of the top-level code, the mechanism assumed there,
 // Go's `checkdead` run by the thread that goes idle last). Its epoch is then the largest `long`, since a parked thread reads no
 // record (`Reclaimed`), and it waits in its poller to the first of its timers' deadlines and the restarts' pauses, or without end, its
-// `eventfd` ending the wait, and is taken off the parked ones (`Woken`).
+// `eventfd` ending the wait, and is taken off the parked ones (`Woken`). Before it looks, it gives back the pages of other threads
+// it holds (`std.Given`; section 3, issue 673).
 void WorkerPark(byte* record, long now) {
     raw {
+        std.Given()
         long pause = AtomicLong.FromPtr(Ptr<long>(scheduler + 72)).Load(MemoryOrder.Acquire)
         long due = Earliest(Next(), pause)
         bool empty = pause == Never() && polled == 0 && !Sleeping()
@@ -6036,8 +6041,8 @@ void WorldQuiet(byte* record) {
     }
 }
 
-// The world held by the main thread at its walk of a `deadlock` (`Answer`) and by the code of an activation at the confirmation of a
-// loop (`LoopHeld`): the thread's word cleared while it waits for another owner to let go of it, then set again, so that the owner,
+// The world held by the main thread at its walk of a `deadlock` (`Answer`), by the code of an activation at the confirmation of a
+// loop (`LoopHeld`) and by a crash whose block waits at its mark of a loop (`LoopClosed`): the thread's word cleared while it waits for another owner to let go of it, then set again, so that the owner,
 // which waits for that word, never waits on a thread that waits for it; nothing on one thread. A thread that holds the world takes
 // it no second time, which would wait on its own mark for good: `Answer` takes it once and ends the process with it held
 // (`Stuck`), and `LoopHeld` lets go of it before it returns, calling nothing in between that takes it.
@@ -6124,7 +6129,8 @@ void PauseNoted() {
 // top-level code spawned run (`RootBlock`; U33), else, under the lock of the parked threads, the mark that it waits set and whether
 // anything is left read: a worker that is not parked with nothing pending, an actor in the shared queue, a restart's pause, a
 // registration of its own poller or a block to run; where nothing is, `false`, so that `Answer` raises `deadlock`, as on one thread;
-// else the wait in its poller to the deadline, which its `eventfd` ends (`MainWoken`). True where the reply was set or the deadline
+// else the pages of other threads it holds given back (`std.Given`; section 3, issue 673), and the wait in its poller to the
+// deadline, which its `eventfd` ends (`MainWoken`). True where the reply was set or the deadline
 // passed.
 bool RootSlept(byte* reply, long deadline) {
     raw {
@@ -6151,6 +6157,7 @@ bool RootSlept(byte* reply, long deadline) {
                     return false
                 }
 
+                std.Given()
                 Polled(deadline - now)
             }
         }
@@ -6475,8 +6482,8 @@ thread static mut long rootBlock = 0
 // deadline of the block it stands in (U38, assumed), set for the running code, the top-level code's or the
 // running message's, and the deadline it replaces, which its exit puts back (`BlockExit`); the emitted code calls
 // it at the block's entry, and `BlockExit` at every way out of the block that goes on running. A deadline of 0
-// is no block (`rootBlock`, `Enqueue`); `Due` gives 0 only where the clock reads 0, which `PauseClock` gives only
-// where the clock cannot be read, and a `within` entered then reads as no block, its calls taking their own bounds.
+// is no block (`rootBlock`, `Enqueue`); `Due` gives 0 only where the clock reads 0, which a clock counted from the
+// system's start does not read, `PauseClock` ending the process where the clock cannot be read (issue 673, comment 7236862307, Q2).
 pub long BlockEnter(long bound) {
     mut long before = 0
     raw {
@@ -6685,6 +6692,9 @@ void Discard(byte* message) {
 // 3 does not see (T70), with the loop that one walk from its call finds below its error line (`Stuck`; the owner, 2026-11-21,
 // #519, comment 7060155980, T85 2). On worker threads the walk runs with no lock, and the loop it finds is confirmed under the lock
 // of the process before the raise (`LoopHeld`; T72 2), and the top-level code's walks hold that lock to the end of the process.
+// A crash whose block waits behind its supervisor follows the line from the supervisor's wait too, which may have parked before
+// the crash (`LoopClosed`), and a wait it marks walks the line again as it goes on, raising as at its park (the owner, 2026-11-28,
+// issue 673, comment 7236862307, Q3, and on one thread too, comment 7237520177).
 pub void Wait(byte* reply, byte* message, string file, int line) {
     int kind = Answer(reply, message, file, line)
     raw {
@@ -6761,6 +6771,9 @@ int Answer(byte* reply, byte* message, string file, int line) {
                 long entries = sys.Inside(0)
                 sys.Switch(header, threadSide)
                 sys.Inside(entries)
+                if Closed(reply) && ReplyState(reply) == 0 && !Waited(reply) {
+                    ClosedWalk(header, reply, heap, file, line)
+                }
             }
 
             TimerRemove(reply)
@@ -6775,6 +6788,31 @@ int Answer(byte* reply, byte* message, string file, int line) {
         }
 
         return kind
+    }
+}
+
+// The walk of `Answer` again for the activation `header`, which waits on the reply `reply` that a crash marked (`Closed`,
+// `LoopClosed`), on the heap `heap` of its message, at the line `line` of the file `file`: where the line leads back to it, its
+// timer taken off and `deadlock` raised at that line with the loop's text, as at its park; else nothing, and the wait goes on
+// (the owner, 2026-11-28, issue 673, comment 7236862307, Q3, and comment 7237520177).
+void ClosedWalk(byte* header, byte* reply, byte* heap, string file, int line) {
+    raw {
+        std.HeapUse(heap)
+        long again = Looped(header, reply)
+        if again > 0 && !Threaded() {
+            TimerRemove(reply)
+            sys.Left()
+            Deadlocked(LoopText(*Ptr<byte*>(header + 320), again), file, line)
+        }
+
+        mut string closed = ""
+        if again > 0 && LoopHeld(header, reply, mut closed) {
+            TimerRemove(reply)
+            sys.Left()
+            Deadlocked(closed, file, line)
+        }
+
+        std.HeapUse(null)
     }
 }
 
@@ -8239,6 +8277,75 @@ bool LoopHeld(byte* header, byte* reply, mut string text) {
     return found
 }
 
+// The wait line followed from the supervisor `parent` of a child whose block of `on crash` waits behind the supervisor's current
+// message (U60), an edge that no park walked (section 6, "Deadlocks", layer 3; the owner, 2026-11-28, issue 673, comment
+// 7236862307, Q3, "Walk from the supervisor (Recommended)", and on one thread too, comment 7237520177, "Walk everywhere, retire T63 2
+// part (Recommended)"): where the top activation of the supervisor waits on a call that no answer
+// set and whose line leads back to the supervisor, the child's block closed a loop behind that wait, and the reply is marked
+// (`Closed`) and its actor woken, so that the waiter walks the line again on its own thread and raises `deadlock` at its call's line
+// with the loop's text, as at its park (`Answer`), whichever of the park and the crash came first. The top-level code as the one that
+// runs the block (U33), and a top activation that runs or waits on no call, end the line. On worker threads the walk comes after a
+// fence of sequential consistency, as the park's walk does (`Answer`), so that of a park and a crash at once at least one sees the
+// other's store, and the mark is set under the lock of the process, while the waiter still waits on that reply and so keeps its
+// frame; the waiter's own walk confirms the loop under that lock (`LoopHeld`). It costs one walk for each crash whose block waits.
+void LoopClosed(byte* parent) {
+    raw {
+        if parent == null {
+            return
+        }
+
+        if Threaded() {
+            Fence(MemoryOrder.SeqCst)
+        }
+
+        byte* top = *Ptr<byte*>(parent - 8)
+        if top == null || *Ptr<byte*>(top + 432) == null {
+            return
+        }
+
+        byte* reply = *Ptr<byte*>(top + 360)
+        if reply == null || ReplyState(reply) != 0 || Looped(top, reply) == 0 {
+            return
+        }
+
+        if !Threaded() {
+            AtomicInt.FromPtr(Ptr<int>(reply + 4)).Store(1, MemoryOrder.Release)
+            Wake(parent)
+            return
+        }
+
+        WorldTaken()
+        mut byte* home = null
+        if *Ptr<byte*>(parent - 8) == top && *Ptr<byte*>(top + 432) != null && *Ptr<byte*>(top + 360) == reply && ReplyState(reply) == 0 {
+            AtomicInt.FromPtr(Ptr<int>(reply + 4)).Store(1, MemoryOrder.Release)
+            home = *Ptr<byte*>(top + 272)
+        }
+
+        WorldLeft()
+        if home != null {
+            WakeHome(parent, home)
+        }
+    }
+}
+
+// Whether a crash whose block waits marked the reply `reply` as closing a loop behind its wait (`LoopClosed`) since its waiter last
+// read the mark, the word after the reply's word, which the alignment of the waiter that follows it leaves free and `Enqueue` clears;
+// the read clears it.
+bool Closed(byte* reply) {
+    raw {
+        return AtomicInt.FromPtr(Ptr<int>(reply + 4)).Swap(0, MemoryOrder.AcqRel) != 0
+    }
+}
+
+// Whether the top activation `top` of an actor, which waits on the block `reply`, waits on a call whose reply a crash marked
+// (`Closed`), so that a take goes on with it (`RunOne`, `RunTake`): the word at 432 first, which names the message of a call's
+// wait and no message of the waits whose block is no reply (`Onward`).
+bool Marked(byte* top, byte* reply) {
+    raw {
+        return *Ptr<byte*>(top + 432) != null && AtomicInt.FromPtr(Ptr<int>(reply + 4)).Load(MemoryOrder.Acquire) != 0
+    }
+}
+
 // Layer 3's `deadlock` (U62, U63; section 6, "Deadlocks", layer 3): the crash of the actor whose wait closed a loop, at the line
 // of its call, with the loop's text `text` below its error line, as a `throw` keeps its text (`Throw`), so that its log line
 // holds the text in double quotes and a block of `on crash` reads it as the `Detail` of its `RuntimeError` (U24, U30); where its
@@ -8271,7 +8378,7 @@ void Deadlocked(string text, string file, int line) {
 // its turn (`LetGo`, in `Run` where it runs); a passed-over actor is let go at once and not queued again for
 // its own inbox. A message whose deadline passed at the scheduler's turn is dropped at its take, from the inbox
 // and from the side list, before the next is taken (`Dropped`; U37), and a top activation whose deadline
-// passed goes on (`Waited`). This take is the one thread's, of the actor the seed draws in a run of `kurz test` that `shuffled`
+// passed goes on (`Waited`), and so does one whose reply a crash marked (`Marked`, `LoopClosed`). This take is the one thread's, of the actor the seed draws in a run of `kurz test` that `shuffled`
 // marks (`DrawnTake`); the worker threads take an actor with `RunTake`, and no test of the worker threads stands on this path (the
 // owner, 2026-11-26, #519, comment 7204486070, Q1).
 void RunOne() {
@@ -8333,7 +8440,7 @@ void RunOne() {
                 Dropped(message)
             }
 
-            if reply != null && (ReplyState(reply) != 0 || Waited(reply)) {
+            if reply != null && (ReplyState(reply) != 0 || Waited(reply) || Marked(top, reply)) {
                 Run(state, top)
                 return
             }
@@ -8394,8 +8501,8 @@ byte* DrawnTake() {
 // freed by the one thread that sets its RECLAIMED bit (`Reclaims`, `RecordFreed`; T16); a signal at the front of its inbox, the
 // crash a child passed up (`Forwarded`), is taken before anything else, the crash of the actor (`Signaled`), and dropped where the actor waits for its
 // restart or for the decision of its block (`SignalsLeft`); a message starts with its heap of its own adopted (`Adopted`); the queues
-// are moved again once the reply of the top activation reads set, so that a signal pushed before the fall that set it is taken before
-// that activation goes on.
+// are moved again once the reply of the top activation reads set, its deadline passed or a crash marked it (`Marked`), so that a
+// signal pushed before the fall that set it is taken before that activation goes on.
 void RunTake(byte* state) {
     raw {
         if (StateWord(state).Load(MemoryOrder.Acquire) & 1) == 0 && *Ptr<int>(state - 88) == 3 && Reclaims(state, true) {
@@ -8456,7 +8563,7 @@ void RunTake(byte* state) {
                 Dropped(message)
             }
 
-            if reply != null && (ReplyState(reply) != 0 || Waited(reply)) {
+            if reply != null && (ReplyState(reply) != 0 || Waited(reply) || Marked(top, reply)) {
                 Moved(state)
                 byte* first = *Ptr<byte*>(state - 32)
                 if first != null && *Ptr<byte*>(first + 8) == SignalTable() {
@@ -8850,6 +8957,7 @@ void Fell(byte* state, byte* header, bool hasText, byte* id, long idCount, byte*
 
             *Ptr<int>(taker - 88) = 5
             Post(parent, message)
+            LoopClosed(parent)
             return
         }
 
@@ -8976,6 +9084,7 @@ void FellHeld(byte* state, byte* header, bool hasText, byte* id, long idCount, b
             Fall(state, header, kept)
             *Ptr<int>(state - 88) = 5
             Post(parent, message)
+            LoopClosed(parent)
             return
         }
 
@@ -9876,11 +9985,16 @@ pub void Rebuilt(byte* state) {
 }
 
 // The clock every pause and every deadline reads (U23, U36): the system's monotonic clock, in nanoseconds, with the offset that
-// `advance` added in a test (`ahead`; Y10), 0 where it cannot be read.
+// `advance` added in a test (`ahead`; Y10). Where it cannot be read, since the system refused the page of the thread it is read
+// into, the process ends with `error: allocation-failed (4096 bytes)`, as a refused allocation ends it (O11) and as the program's
+// `instant.Now` does: a worker thread maps that page at its start (`WorkerMain`), so on worker threads only the main thread's first
+// read ends so (the owner, 2026-11-28, issue 673, comment 7236862307, Q2, against a clock of 0 whose deadlines a worker read as
+// passed). Windows reads it into no such page, and its `QueryPerformanceCounter` fails on no Windows since XP, as its documentation
+// says (not checked at source).
 long PauseClock() {
     mut long now = 0
     if !sys.MonotonicNow(mut now) {
-        return 0
+        AllocationFailed(4096)
     }
 
     raw {

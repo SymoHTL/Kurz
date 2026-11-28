@@ -151,12 +151,16 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     [GeneratedRegex(@"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z Error [^{:\s]+(?:\{chain=[0-9a-f]{32}\})?: Kurz\.Actor: [^\n]*\n", RegexOptions.Multiline)]
     private static partial Regex CrashLine();
 
-    /// <summary>U63: the chain ID that ends a line of the text of layer 3's <c>deadlock</c>, <c> in chain </c> and 32 lowercase hexadecimal digits.</summary>
-    [GeneratedRegex(@" in chain [0-9a-f]{32}$", RegexOptions.Multiline)]
+    /// <summary>
+    /// U63: the chain ID that ends a line of the text of layer 3's <c>deadlock</c>, <c> in chain </c> and 32 lowercase hexadecimal
+    /// digits, at the end of a line or, in that text quoted in a crash's words, before the two characters <c>\n</c> that end its line
+    /// there or the quote that closes it (U61, U62; issue 673, comment 7237520177).
+    /// </summary>
+    [GeneratedRegex(@" in chain [0-9a-f]{32}(?=$|\\n|"")", RegexOptions.Multiline)]
     private static partial Regex ChainId();
 
     /// <summary>
-    /// U63: <paramref name="error"/> with the chain ID that ends each of its lines, which differs on every run, read as the one
+    /// U63: <paramref name="error"/> with each chain ID that <see cref="ChainId"/> finds, which differs on every run, read as the one
     /// placeholder <c> in chain &lt;chain&gt;</c>; an ID of another length or with an uppercase digit stays, so that the case turns red.
     /// </summary>
     internal static string Chains(string error) => ChainId().Replace(error, " in chain <chain>");
@@ -300,6 +304,7 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
         ["actors/restart-reentrant-places.kz"] = (58, "main"),
         ["actors/restart-reentrant-one-place.kz"] = (47, "main"),
         ["actors/restart-reentrant-cap.kz"] = (68, "main"),
+        ["system/park-crash-deadlock.kz"] = (96, "main"),
         ["actors/timeout-chain-left.kz"] = (24, "Front.Ask"),
         ["actors/waitline-escalate.kz"] = (18, "Right.Ask"),
         ["actors/waitline-vouch.kz"] = (20, "Right.Ask"),
@@ -335,9 +340,10 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
     };
 
     /// <summary>
-    /// U63, U25, U64: the cases whose process ends with a <c>deadlock</c> that names its loop, layer 3's that a policy escalates to the
-    /// top-level code and U18's whose walk finds a loop, each with the loop's text below its error line, each line's chain ID as the
-    /// placeholder of <see cref="Chains"/>.
+    /// U63, U25: the cases whose process ends with a <c>deadlock</c> that names its loop, layer 3's that a policy escalates to the
+    /// top-level code, each with the loop's text below its error line, each line's chain ID as the placeholder of <see cref="Chains"/>.
+    /// The walk at U18's end (U64) finds a loop in no case: the cases whose loop a crash closed raise <c>deadlock</c> at the
+    /// supervisor's call since the crash follows the line too (U61; issue 673, comment 7237520177).
     /// </summary>
     private static readonly Dictionary<string, string> LoopTexts = new(StringComparer.Ordinal)
     {
@@ -345,12 +351,6 @@ public sealed partial class RunTests(Toolchain toolchain) : IClassFixture<Toolch
             "Left#1 waits at actors/waitline-escalate.kz:10 on Right#2 in chain <chain>",
         ["actors/waitline-vouch.kz"] = "Right#2 waits at actors/waitline-vouch.kz:20 on Left#1 in chain <chain>\n" +
             "Left#1 waits at actors/waitline-vouch.kz:12 on Right#2 in chain <chain>",
-        ["actors/deadlock-pending-crash.kz"] = "Boss#1 waits at actors/deadlock-pending-crash.kz:25 on Worker#2 in chain <chain>\n" +
-            "Worker#2 waits for the decision of Boss#1 on its crash in chain <chain>",
-        ["actors/waitline-into-loop.kz"] = "Boss#1 waits at actors/waitline-into-loop.kz:30 on Worker#4 in chain <chain>\n" +
-            "Worker#4 waits for the decision of Boss#1 on its crash in chain <chain>",
-        ["system/park-crash-deadlock.kz"] = "Boss#4 waits at system/park-crash-deadlock.kz:62 on Worker#5 in chain <chain>\n" +
-            "Worker#5 waits for the decision of Boss#4 on its crash in chain <chain>",
     };
 
     /// <summary>U63, U64: a case whose <c>deadlock</c> names its loop below its error line, by its <c>rules:</c> line.</summary>

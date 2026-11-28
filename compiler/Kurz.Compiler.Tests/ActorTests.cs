@@ -2239,14 +2239,15 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void A_wait_of_the_top_level_code_that_nothing_left_to_run_can_end_is_a_deadlock_at_its_line()
+    public void A_wait_of_a_function_the_top_level_code_called_gets_callee_crashed_at_its_line_where_a_crash_closes_a_loop_behind_it()
     {
-        // section 6, "Deadlocks" (the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level wait"), on one thread for
-        // what layer 3 does not see (U64; the owner, 2026-11-20, #519, comment 7051071630, T70 1): `Boss`'s `Go` waits on `Get`, queued
-        // behind `Fail` in `Worker`'s inbox, and `Fail`'s crash queues the block of `Worker`'s policy behind `Go`, so that a crash closes
-        // the loop and no wait does; the top-level code's wait, in a function it called, finds nothing left to run: the process ends at
-        // that call's line, not at a line of the loop, with the exit code 1, and the loop's waits below the error line, which one walk
-        // from the call finds (U64; the owner, 2026-11-21, #519, comment 7060155980, T85 2)
+        // section 6, "Deadlocks", layer 3, on one thread (the owner, 2026-11-28, issue 673, comment 7237520177, "Walk everywhere, retire
+        // T63 2 part"): `Boss`'s `Go` waits on `Get`, queued behind `Fail` in `Worker`'s inbox, and `Fail`'s crash queues the block
+        // of `Worker`'s policy behind `Go`, so that the crash closes the loop; the runtime follows the line from `Go`'s wait at the
+        // crash, `Go` raises `deadlock` at its call, a crash of `Boss` (U61, U62), and the top-level code's wait, in a function it
+        // called, gets `callee-crashed` at that call's line, not at a line of the loop, with the exit code 1 (U18, U20). Before that
+        // answer the top-level code's wait found nothing left to run, and the process ended with `deadlock` at that call's line, the
+        // loop's waits below it (U64; the owner, 2026-11-21, #519, comment 7060155980, T85 2)
         const string text = """
             actor Worker {
                 pub void Fail() {
@@ -2279,8 +2280,9 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         var run = BuildAndRun(text, toolchain.Runtime, "actor-deadlock");
-        Ran((run.Code, run.Output, RunTests.Chains(run.Error)), 1, ["boss goes"], "error: deadlock at program.kz:23:\n" +
-            "Boss#1 waits at program.kz:18 on Worker#2 in chain <chain>\nWorker#2 waits for the decision of Boss#1 on its crash in chain <chain>\n");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Matches(@"^Boss#1 crashed: deadlock ""Boss#1 waits at program\.kz:18 on Worker#2 in chain [0-9a-f]{32}\\nWorker#2 waits for the decision of Boss#1 on its crash in chain [0-9a-f]{32}"" at program\.kz:18$", Assert.Single(crashes));
+        Ran((run.Code, run.Output, rest), 1, ["boss goes"], "error: callee-crashed at program.kz:23\n");
     }
 
     [Fact]
@@ -2456,7 +2458,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// </summary>
     private static CheckedRuntime StoodIn(bool print) => ListTests.Edited(
         ("runtime/common/runtime.kz", "own = Due(now, sys.DefaultBound())", "own = Never()"),
-        ("runtime/common/runtime.kz", "    mut long now = 0\n    if !sys.MonotonicNow(mut now) {\n        return 0\n    }\n\n    raw {\n        return now + ahead\n    }\n",
+        ("runtime/common/runtime.kz", "    mut long now = 0\n    if !sys.MonotonicNow(mut now) {\n        AllocationFailed(4096)\n    }\n\n    raw {\n        return now + ahead\n    }\n",
             "    mut long now = 0\n    raw {\n        now = standIn\n    }\n\n    return now\n"),
         ("runtime/common/runtime.kz", "void PauseSleep(long nanoseconds) {\n    sys.Sleep(nanoseconds)\n}",
             "static mut long standIn = 0\n\nvoid PauseSleep(long nanoseconds) {\n    raw {\n        standIn = standIn + nanoseconds\n    }\n\n" +
@@ -5668,6 +5670,61 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran((run.Code, run.Output, rest), 1, ["1"], "error: callee-crashed at program.kz:28\n");
     }
 
+    /// <summary>
+    /// U60, U61, U62: <c>Go</c> calls its child before the child's crash, which comes 2 ms into <c>Fail</c>, so that the call's wait parks
+    /// on a line that ends at the child; the crash's block, which waits behind <c>Go</c>, closes the loop, and the walk from the supervisor
+    /// that the crash makes finds it, so that <c>Go</c>'s wait raises <c>deadlock</c> at its line at once, with the loop's text, as where
+    /// the crash comes first, where it raised <c>call-timeout</c> after its bound of 5 s (the owner, 2026-11-28, issue 673, comment
+    /// 7236862307, Q3, and comment 7237520177, on one thread too). <c>ThreadsTests</c> runs the same program on worker threads (<see cref="CrashAfterPark"/>).
+    /// </summary>
+    [Fact]
+    public void A_crash_whose_block_waits_behind_a_wait_that_parked_on_it_raises_deadlock_at_that_wait()
+    {
+        if (ClockRefusedOnWindows(CrashAfterPark))
+        {
+            return;
+        }
+
+        var run = BuildAndRun(CrashAfterPark, toolchain.Runtime, "actor-block-wait-after-park");
+        var (crashes, rest) = Logged(run.Error);
+        Assert.Matches($"^{CrashAfterParkLogged}$", Assert.Single(crashes));
+        Ran((run.Code, run.Output, rest), 1, [], "error: callee-crashed at program.kz:26\n");
+    }
+
+    /// <summary>The program of <see cref="A_crash_whose_block_waits_behind_a_wait_that_parked_on_it_raises_deadlock_at_that_wait"/>.</summary>
+    internal const string CrashAfterPark = """
+        actor Worker {
+            pub void Fail() {
+                start = instant.Now
+                while start.Elapsed < 2ms {
+                }
+
+                throw "worker fails"
+            }
+
+            pub int Ping() => 2
+        }
+
+        actor Boss {
+            pub int Go() {
+                kid = spawn Worker() on crash (c) {
+                    print("never")
+                    restart
+                }
+
+                send kid.Fail()
+                return kid.Ping()
+            }
+        }
+
+        b = spawn Boss()
+        print(b.Go())
+
+        """;
+
+    /// <summary>The log line of <c>Boss</c>'s crash in <see cref="CrashAfterPark"/>, after its time.</summary>
+    internal const string CrashAfterParkLogged = @"Boss#1 crashed: deadlock ""Boss#1 waits at program\.kz:21 on Worker#2 in chain [0-9a-f]{32}\\nWorker#2 waits for the decision of Boss#1 on its crash in chain [0-9a-f]{32}"" at program\.kz:21";
+
     [Fact]
     public void The_log_line_of_a_deadlock_names_its_loop_with_the_chain_of_each_wait()
     {
@@ -7562,7 +7619,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // Y5, F6, Q2: the first test leaves a child paused by its restart, a child whose crash's block waits in the test's actor with the
         // stack it raised on, a child parked on the paused one with its timer, and a child with a `send` queued; the second meets
         // `deadlock` while it builds a message in a heap of its own, one of whose arguments waits on a child whose block waits in the
-        // test's actor; the third runs alone, and after each test no timer, no pause, no queued actor and no heap of messages is left,
+        // test's actor, raised at that call once the child's crash closes the loop (U61; issue 673, comment 7237520177); the third runs alone, and after each test no timer, no pause, no queued actor and no heap of messages is left,
         // and every stack is back in the pool, under the allocator that makes every freed block inaccessible
         var counted = ListTests.Edited([.. ListTests.Fence, ("runtime/common/runtime.kz", "        testWords = null\n        testWordsCount = 0\n        testWordsRoom = 0\n    }\n}\n",
             "        testWords = null\n        testWordsCount = 0\n        testWordsRoom = 0\n    }\n\n    mut long left = 0\n    mut bool unpaused = false\n    mut bool unqueued = false\n" +
@@ -7629,10 +7686,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var run = BuildAndRun(text, counted, "test-actors-ended", tests: true);
         var (crashes, rest) = Logged(run.Error);
         Assert.Equal(["Crasher#2 crashed: thrown \"down\" at program.kz:9"], crashes); // the test's actor is #1, and the block of `d` never ran
-        // the loop of the second test's wait under its `FAILED` line (Y5, U64; the owner, 2026-11-23, #622, comment 7095825069, 1), each chain's ID as `<chain>`
+        // the second test's own `deadlock` at its call, the loop's waits in its words (Y5, U61, U63; issue 673, comment 7237520177), each chain's ID as `<chain>`
         Ran((run.Code, run.Output.Select(l => RunTests.Chains(l)).ToList(), rest), 1, ["7", "first", "test \"leaves actors behind\" ... ok", "timers 0 paused false queued false heaps false pooled 4",
-            "test \"deadlocks while it builds a message\" ... FAILED (seed 0)", "    deadlock at program.kz:42", "    test#7 waits at program.kz:49 on Crasher#8 in chain <chain>",
-            "    Crasher#8 waits for the decision of test#7 on its crash in chain <chain>", "timers 0 paused false queued false heaps false pooled 4", "second",
+            "test \"deadlocks while it builds a message\" ... FAILED (seed 0)",
+            "    deadlock \"test#7 waits at program.kz:49 on Crasher#8 in chain <chain>\\nCrasher#8 waits for the decision of test#7 on its crash in chain <chain>\" at program.kz:49", "timers 0 paused false queued false heaps false pooled 4", "second",
             "test \"starts with none\" ... ok", "timers 0 paused false queued false heaps false pooled 4", "3 tests: 2 passed, 1 failed"], "");
     }
 

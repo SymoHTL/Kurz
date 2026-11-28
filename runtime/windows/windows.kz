@@ -249,6 +249,10 @@ pub bool Now(mut long nanoseconds) {
     return true
 }
 
+// Whether the page each thread of Linux reads its clock into is mapped (`WorkerMain`; issue 673, comment 7236862307, Q2): true,
+// since Windows reads its clocks into no page of the thread (`MonotonicNow`).
+pub bool StatusMapped() => true
+
 // The monotonic clock in nanoseconds, put in `nanoseconds`, which a restart's pause reads (U23):
 // `QueryPerformanceCounter` over `QueryPerformanceFrequency`, as Rust's `Instant::now` reads it on
 // Windows; false where the system refuses either.

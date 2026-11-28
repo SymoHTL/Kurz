@@ -1,10 +1,11 @@
-// expect: throws deadlock at 30
+// expect: throws callee-crashed at 31
 // threads: 1
-// rules: U18, U34, U42, U60, U64
+// rules: U20, U34, U60, U61
 
 // `Boss`'s `Go` waits on `Get`, queued behind `Fail` in `Worker`'s inbox; `Fail` crashes, and the block of `Worker`'s policy
-// waits behind `Go`, so that a crash closes the loop and no wait does: layer 3 does not see it (U60), the top-level code's wait
-// on `Go`, under its bound, finds nothing left to run (U18, U42), and its walk names the loop below the error line (U64)
+// waits behind `Go`, so that the crash closes the loop with no wait that parks (U60): the runtime follows the line from `Go`'s
+// wait at the crash, `Go`'s call of `Get` raises `deadlock` at its turn (U61), `Boss` crashes with it, which drops the
+// pending block of `Worker` with no line (U34), and the top-level code, which waits on `Go`, gets `callee-crashed`
 
 actor Worker {
     pub void Fail() {

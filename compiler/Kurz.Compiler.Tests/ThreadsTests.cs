@@ -212,6 +212,75 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>
+    /// The program of <see cref="A_page_a_worker_frees_of_a_heap_the_main_thread_carved_goes_back_to_the_main_thread"/>: 300000 calls of
+    /// the top-level code to one actor, each with a <c>string</c> argument, then the line <c>VmHWM</c> of the system's
+    /// <c>/proc/self/status</c>, the peak of the process's resident memory.
+    /// </summary>
+    private const string TopLevelCalls = """
+        actor Cache {
+            pub long Get(string key) => long(key.Bytes.Count)
+        }
+
+        long Calls(Cache s, int count) {
+            mut long total = 0
+            mut int i = 0
+            while i < count {
+                total = total + s.Get("item number {i}")
+                i = i + 1
+            }
+
+            return total
+        }
+
+        string | IoError Peak() {
+            bytes = File.ReadAll("/proc/self/status")
+            text = string.FromUtf8(bytes) else {
+                InvalidUtf8 => ""
+            }
+
+            for line in text.Split('\n') {
+                if line.StartsWith("VmHWM:") {
+                    return line
+                }
+            }
+
+            return "none"
+        }
+
+        void | IoError Show() {
+            print(Calls(spawn Cache(), 300000))
+            print(Peak())
+        }
+
+        Show() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    /// <summary>
+    /// Section 3 of the design record (issue 673, comment 7236862307, Q1): a page of a heap that one thread carved and another frees goes
+    /// back to the thread that carved it, onto its list of frees from other threads, which it takes into its pools where an allocation
+    /// finds its pool of a size empty (<c>Freed</c>, <c>Given</c>, <c>Returned</c> in <c>std/std.kz</c>): the top-level code's thread
+    /// makes the heap of each call's message and the callee's worker frees it, so that 300000 such calls on four worker threads keep the
+    /// peak of the process's resident memory under 64 MiB. With each page freed into the pools of the thread that freed it, the main
+    /// thread carved a new page for each call: the program peaked at 229568 kB on four worker threads, against 2572 kB with the pages
+    /// given back (2026-11-27, comments 7227720702 and 7228721418, `--release` builds).
+    /// </summary>
+    [Fact]
+    public void A_page_a_worker_frees_of_a_heap_the_main_thread_carved_goes_back_to_the_main_thread()
+    {
+        if (Ran(TopLevelCalls, "threads-top-level-pages", "export KURZ_THREADS=4; ") is { } run)
+        {
+            Assert.Equal((0, ""), (run.Code, run.Error));
+            Assert.Equal("5288890", run.Output[0]);
+            var peak = Regex.Match(run.Output[1], "^VmHWM:\\s+([0-9]+) kB$");
+            Assert.True(peak.Success, run.Output[1]);
+            Assert.True(long.Parse(peak.Groups[1].Value, CultureInfo.InvariantCulture) < 65536, run.Output[1]);
+        }
+    }
+
+    /// <summary>
     /// U35, T16 2: the wait of a call of the top-level code reads no block of the call's message after its push, since the callee's
     /// worker can run the message and free its heap of its own while the main thread holds no epoch (`OwnLeft`, `Unpinned`), but where
     /// it finds nothing left to run, under the lock of the process (`Answer`): 2000 calls to fresh actors on four worker threads, built
@@ -762,6 +831,77 @@ public sealed class ThreadsTests(Toolchain toolchain) : IClassFixture<Toolchain>
         {
             Assert.Equal((1, "error: thread-refused (4)\n"), (run.Code, run.Error));
             Assert.Equal(["start"], run.Output);
+        }
+    }
+
+    /// <summary>
+    /// U35: a worker thread maps the page its clock is read into at its start, and a worker whose page the system refuses there, here
+    /// the second of four, ends the process with <c>thread-refused</c> naming the count asked and the exit code 1, while the top-level
+    /// code sleeps after its first <c>spawn</c> (the owner, 2026-11-28, issue 673, comment 7236862307, Q2). The other three workers
+    /// start, so that the refusal is that one worker's alone and no two refusals write their lines at once.
+    /// </summary>
+    [Fact]
+    public void A_worker_whose_page_of_the_clock_the_system_refuses_at_its_start_ends_the_process_with_thread_refused()
+    {
+        if (Builder.HostTarget == Target.Windows)
+        {
+            return;
+        }
+
+        var refused = ListTests.Edited(
+            ("runtime/linux/linux.kz", "        return status != null\n", "        return false\n"),
+            ("runtime/common/runtime.kz", "if WakeArmed() < 0 || !sys.StatusMapped() {", "if WakeArmed() < 0 || (*Ptr<long>(record + 96) == 1 && !sys.StatusMapped()) {"));
+        const string text = "actor Pinger {\n    pub int Ping() => 1\n}\n\nprint(\"start\")\np = spawn Pinger()\nEnvironment.Sleep(5s)\nprint(p.Ping())\n";
+        if (Ran(text, "threads-refused-clock", "export KURZ_THREADS=4; ", refused) is { } run)
+        {
+            Assert.Equal((1, "error: thread-refused (4)\n"), (run.Code, run.Error));
+            Assert.Equal(["start"], run.Output);
+        }
+    }
+
+    /// <summary>
+    /// U35, O11: the main thread maps the page its clock is read into at its first read, and where the system refuses that page there,
+    /// here at the deadline of the top-level code's call (U36), the process ends with <c>allocation-failed (4096 bytes)</c> and the exit
+    /// code 1, on one thread and on worker threads, whose own pages their start mapped (the owner, 2026-11-28, issue 673, comment
+    /// 7236862307, Q2). The clock of 0 such a read gave before printed the answer on one thread and raised <c>call-timeout</c> on
+    /// worker threads, where a worker read that deadline as passed.
+    /// </summary>
+    [Theory]
+    [InlineData("1")]
+    [InlineData("4")]
+    public void A_main_thread_whose_page_of_the_clock_the_system_refuses_ends_the_process_with_allocation_failed_at_its_first_read(string threads)
+    {
+        if (Builder.HostTarget == Target.Windows)
+        {
+            return;
+        }
+
+        var refused = ListTests.Edited(
+            ("runtime/linux/linux.kz", "thread static mut byte* status = null\n", "thread static mut byte* status = null\nthread static mut bool started = false\n"),
+            ("runtime/linux/linux.kz", "        return status != null\n", "        started = true\n        return status != null\n"),
+            ("runtime/linux/linux.kz", "        clock_gettime(1, Ptr<void>(status))", "        if !started {\n            return false\n        }\n\n        clock_gettime(1, Ptr<void>(status))"));
+        if (Ran("print(\"start\")\n" + Spawns, $"threads-clock-refused-{threads}", $"export KURZ_THREADS={threads}; ", refused) is { } run)
+        {
+            Assert.Equal((1, "error: allocation-failed (4096 bytes)\n"), (run.Code, run.Error));
+            Assert.Equal(["start"], run.Output);
+        }
+    }
+
+    /// <summary>
+    /// U35, U60, U61, U62: on worker threads a crash whose block waits behind a call that parked on its actor, 2 ms before the crash,
+    /// closes a loop that no park walked; the crash's walk from the supervisor finds it and marks the wait, whose own walk raises
+    /// <c>deadlock</c> at its line at once with the loop's text, as on one thread
+    /// (<see cref="ActorTests.A_crash_whose_block_waits_behind_a_wait_that_parked_on_it_raises_deadlock_at_that_wait"/>), where it
+    /// raised <c>call-timeout</c> after the call's bound of 5 s (the owner, 2026-11-28, issue 673, comment 7236862307, Q3).
+    /// </summary>
+    [Fact]
+    public void A_crash_on_a_worker_thread_whose_block_waits_behind_a_wait_that_parked_on_it_raises_deadlock_at_that_wait()
+    {
+        if (Ran(ActorTests.CrashAfterPark, "threads-block-wait-after-park", "export KURZ_THREADS=4; ") is { } run)
+        {
+            Assert.Equal(1, run.Code);
+            Assert.Empty(run.Output);
+            Assert.Equal([ActorTests.CrashAfterParkLogged, "error: callee-crashed at program.kz:26"], Logged(run.Error).Select(line => Regex.IsMatch(line, $"^{ActorTests.CrashAfterParkLogged}$") ? ActorTests.CrashAfterParkLogged : line));
         }
     }
 
