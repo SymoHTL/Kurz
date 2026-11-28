@@ -1325,14 +1325,15 @@ public sealed partial class Checker
     /// child as a message's arguments do (U12): a value whose type needs a word only after <c>copy</c>, as the argument of a call, else
     /// <c>capture-needs-word</c> at the name (<see cref="AttemptCaptures"/>); a pointer or a view of an atomic type that it takes, or that
     /// its value reaches, is <c>pointer-crosses</c>, as for a message (U12; the owner, 2026-11-21, #582, comment 7062996932, Q25 1).
-    /// <c>retry { ... }</c> is <c>not supported</c>, its call's
-    /// id being open (section 14).
+    /// A use of <c>retry</c>, the keyword of <c>std/</c> that section 9 writes, is <c>not supported</c>, since this build's <c>std/</c>
+    /// declares no keyword (J14) and how its attempts' calls are told apart is open (section 14), section 6's <c>retry { ... }</c> with no
+    /// count retired (the owner, 2026-11-28, #667, comment 7236862510, Q19 (a)).
     /// </summary>
     private Typed AttemptResult(AttemptExpression a, KurzType? expected)
     {
         if (a.Word != "attempt")
         {
-            NotSupported(a.Line, $"`{a.Word} {{ ... }}`, the block that keeps a crash to a piece of code (section 6, U28)");
+            NotSupported(a.Line, $"`{a.Word}`, the keyword of `std/` that loops over `attempt` (section 9, J14)");
             return Typed.Error;
         }
 

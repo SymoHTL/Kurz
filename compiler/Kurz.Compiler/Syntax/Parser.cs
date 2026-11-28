@@ -681,7 +681,7 @@ public sealed partial class Parser
 
     /// <summary>
     /// What <paramref name="parse"/> reads between brackets or braces of an expression, where no <c>{</c> can open the block of a header
-    /// around it, so that <c>attempt { ... }</c> and <c>retry { ... }</c> are the form there again, as Rust reads a struct literal inside
+    /// around it, so that <c>attempt { ... }</c> and a use of <c>retry</c> are the form there again, as Rust reads a struct literal inside
     /// parentheses, brackets and braces of a condition (U28; assumed: section 6, comment 6847932993, Q10).
     /// </summary>
     private T Unheaded<T>(Func<T> parse)
@@ -2761,10 +2761,32 @@ public sealed partial class Parser
                     return ParseLambdaBody(token.Line, [new Parameter(token.Line, false, null, token.Text, null)]);
                 }
 
+                if (token.Text == "retry" && headers == 0 && Current.Line == token.Line && Current.Kind is TokenKind.IntegerLiteral or TokenKind.Name)
+                {
+                    // section 9: a use of `std/`'s keyword `retry` with its count, `retry 3 { ... }`, with `as attempt` and its `else` block
+                    // where it writes them, the one `retry` (the owner, 2026-11-28, #667, comment 7236862510, Q19 (a)), read for the checker to
+                    // say `not supported` to, since this build's `std/` declares no keyword (J14)
+                    Header();
+                    if (Current.Kind == TokenKind.Name && Current.Text == "as" && Peek().Kind == TokenKind.Name)
+                    {
+                        Advance();
+                        Advance();
+                    }
+
+                    var tried = ParseBlock();
+                    if (AtKeyword("else") && Peek().Kind == TokenKind.LeftBrace)
+                    {
+                        Advance();
+                        ParseBlock();
+                    }
+
+                    return new AttemptExpression(token.Line, token.Text, tried);
+                }
+
                 if (token.Text is "attempt" or "retry" && At(TokenKind.LeftBrace) && headers == 0)
                 {
-                    // section 6: `attempt { ... }` and `retry { ... }`, its block, which the checker reads (U46) and says `not supported` to
-                    // after `retry`; the words stay
+                    // section 6: `attempt { ... }`, its block, which the checker reads (U46), and `retry { ... }`, a use of `std/`'s `retry`
+                    // with no count, section 6's form retired (Q19 (a)), which the checker says `not supported` to; the words stay
                     // names elsewhere, and before the block of an `if`, a `while`, a `for` or a `match` outside brackets and braces, so that a
                     // variable of either name stands in a condition (U28; assumed: section 6, comment 6847932993, Q10, as Rust reads a struct
                     // literal in a condition)

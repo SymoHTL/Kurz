@@ -1896,6 +1896,9 @@ public sealed class ParserTests
     [Theory]
     [InlineData("x = attempt {\n    f()\n}", "(assign-or-declare x (attempt {(call f)}))")]
     [InlineData("x = retry {\n    f()\n}", "(assign-or-declare x (retry {(call f)}))")]
+    [InlineData("x = retry 3 {\n    f()\n}", "(assign-or-declare x (retry {(call f)}))")]
+    [InlineData("retry n as attempt {\n    f()\n} else {\n    g()\n}", "(retry {(call f)})")]
+    [InlineData("retry(3)", "(call retry (int 3))")]
     [InlineData("attempt = 1", "(assign-or-declare attempt (int 1))")]
     [InlineData("if attempt {\n    f()\n}", "(if attempt {(call f)})")]
     [InlineData("while retry {\n    f()\n}", "(while retry {(call f)})")]
@@ -1907,7 +1910,8 @@ public sealed class ParserTests
     [InlineData("if match k {\n    else => attempt {\n        f()\n    }\n} {\n}", "(if (match-expression k [(else => (attempt {(call f)}))]) {})")]
     public void An_attempt_is_its_block_and_a_name_before_the_block_of_a_header(string program, string tree)
     {
-        // section 6: `attempt { ... }` and `retry { ... }` parse, for the checker to refuse; before the block of an `if`, a `while`, a `for`
+        // section 6: `attempt { ... }` parses, and section 9: a use of `std/`'s `retry`, with no count or with one, `as` and `else`
+        // (Q19 (a) of comment 7229762585), for the checker to refuse; before the block of an `if`, a `while`, a `for`
         // or a `match` the word is a name, so that a variable of either name stands in a condition, as a struct literal is no condition in
         // Rust; inside the header's brackets, arms and blocks, a lambda's body and the block of `on crash` among them, the word is the
         // form again, as Rust reads a struct literal there (U28; section 6, the owner, 2026-11-17, #570, comment 6961064167, Q3, "Block's

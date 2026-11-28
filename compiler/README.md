@@ -2469,7 +2469,7 @@ a block's is, puts the copy of the crash in that heap, writes the log line, ends
 the waiter, whose code builds `Crashed` as a block's function does and frees the copy
 (`PendingLeft`); an arm of its `else` lets go of the case it takes. A pointer or a view of an atomic type
 that the block takes, or that its value reaches, is `pointer-crosses`, as at a message (U47, U12). What stays `not supported` of
-section 6's supervision: `retry { ... }`; of `attempt { ... }`, a block that names `this`, a method or
+section 6's supervision: a use of `retry`, the keyword of `std/` (section 9, J14), which this build's `std/` does not declare; of `attempt { ... }`, a block that names `this`, a method or
 a property of the class whose method runs it, a `move` in the block of a variable or a field around
 it, a block whose value is a union, a nullable value among them, or a value the crossing copy does not
 bring back, a block that takes a value no word makes cross or that the crossing copy does not copy, a
@@ -3060,7 +3060,8 @@ that sit under a rule by its id. Every one is pinned by a test.
   lambda inside it; no name, a second one or a type in the parentheses, a block on a line of its own,
   a knob after `restart` and a word after a decision are `syntax` (U28, U29). `attempt` and `retry`
   before a block are an expression of that block, which the checker reads for `attempt`, with a postfix
-  `else` after it as after a call (U46), and says `not supported` to for `retry` (section 6),
+  `else` after it as after a call (U46), and says `not supported` to for `retry`, which a count, an `as` name and an
+  `else` block may follow too, `std/`'s keyword, which this build's `std/` does not declare (section 9, J14),
   but in the condition, the collection or the subject before the block of an `if`, a `while`, a `for`
   or a `match` the word is a name, as a struct literal is no condition in Rust, and inside that header's parentheses,
   brackets, arms and blocks the expression again, as Rust reads a struct literal there (U28; assumed: section 6, comment
@@ -3392,7 +3393,7 @@ may take as a class's does (U1, U9), each of which leaves the
 actor and every use of its name unread, besides what a class's body does not read, as the checker's `syntax` for a base after
 an actor's name, `equal by` and a constructor in its body (U1, U2), and its `static-state` for a `static mut` field and one
 whose type is or holds a class (U1), leave it too, while an actor after a class's `:` is `syntax` and the class is read without
-that base (U1); `retry { ... }` (section 6, U28), and of `attempt { ... }` what the build does not bring into its child or
+that base (U1); a use of `retry`, `std/`'s keyword (section 9, J14), and of `attempt { ... }` what the build does not bring into its child or
 out of it, one in a file read without `std/` and one whose `Reason` still grows at the fifth reading (U46, U47); a block of `on crash` whose child can throw a type the
 crossing copy does not copy, one in a file read without `std/` and one whose child's `Reason` still grows at the fifth reading
 (U30); `move` before a field of a primary

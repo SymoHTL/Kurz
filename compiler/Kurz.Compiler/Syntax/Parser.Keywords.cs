@@ -17,7 +17,11 @@ public sealed partial class Parser
     /// <summary>J8: the depth of keywords used inside expansions (record section 9, the owner, 2026-11-27, #667, comment 7215318330, Q7).</summary>
     public const int KeywordDepthLimit = 64;
 
-    /// <summary>J9: the words the parser reads as forms where a statement starts, which no keyword can be declared as, beside the core words of L18 and the types of L19.</summary>
+    /// <summary>
+    /// J9: the words the parser reads as forms where a statement starts, which no keyword can be declared as, beside the core words of L18
+    /// and the types of L19, and <c>retry</c>, the keyword of <c>std/</c> (record section 9, the owner, 2026-11-28, #667, comment 7236862510,
+    /// Q19 (a)), which no keyword can be declared as either, as another keyword (rule 8).
+    /// </summary>
     private static readonly HashSet<string> StatementWords =new HashSet<string>(StringComparer.Ordinal)
     {
         "keyword", "within", "test", "check", "advance", "mock", "const", "attempt", "retry", "restart", "stop", "escalate",

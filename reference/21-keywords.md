@@ -2,7 +2,8 @@
 
 A keyword that transforms code is declared in Kurz, with a pattern and a template, and each use of it
 stands as the code its template fills (§9; issue 667, the owner's answers of 2026-11-27, comment
-7215318330, and the forms of comment 7229158580, each rule marked as it stands). This chapter holds the
+7215318330, and the forms of comment 7229158580 at their leans, the owner, 2026-11-28, comment
+7236862510, "Keep all ten leans (Recommended)", each rule marked as it stands). This chapter holds the
 declaration of a file, its pattern, a use where a statement stands and what it fills. A use as an
 expression, the list that uses add to, `kurz expand`, a package's keywords and those of `std/` are rules
 the build answers `not supported` or holds no case of (J11 to J14).
@@ -49,7 +50,7 @@ void Run() {
 Run()
 ```
 
-### J2 (assumed, §9) The pattern
+### J2 (decided, §9) The pattern
 
 A pattern is a row of fixed words, slots and optional parts (§9, rule 1). A fixed word is a name or a
 core word, which a use writes as it stands. A slot stands between `<` and `>`: `<int times>`, a type and
@@ -89,7 +90,7 @@ repeat 3 {
 }
 ```
 
-### J3 (assumed, §9) A use
+### J3 (decided, §9) A use
 
 A use stands where a statement does: the keyword's word first, then what its pattern asks, in its order,
 to the end of the line or the closing brace of the pattern's last block (§9, rule 1). A fixed word is
@@ -174,7 +175,7 @@ Case: [keywords/type-error-at-the-use.kz](../corpus/keywords/type-error-at-the-u
 
 A `return`, `break` or `continue` in a block slot acts on the function and the loop around the use, as in
 C#'s `lock` (§9, Q3, "The enclosing function"). In a block the template runs apart, written `<detached
-block>` (§9, Q10 (a) *(assumed: asked on issue 667, not answered)*), a `return`, `break` or `continue`
+block>` (§9, Q10 (a)), a `return`, `break` or `continue`
 that would leave the block is `keyword-jump` at its line (§9, Q3). The build refuses two jumps it
 cannot make as Q3 says *(assumed: the build's reading of Q3, said back on issue 667)*. In a block slot
 that the template puts inside a loop of its own, a `break` or `continue` that would leave the block is
@@ -324,8 +325,9 @@ Case: [keywords/nested-and-before.kz](../corpus/keywords/nested-and-before.kz)
 
 A keyword cannot be declared as a built-in keyword, nor as another keyword (§9, rule 8). A built-in
 keyword is a core word of L18, a type's name of L19 or a word of a form that stands where a statement
-starts: `keyword`, `within`, `test`, `check`, `advance`, `mock`, `const`, `attempt`, `retry`, `restart`,
-`stop` and `escalate`; a keyword is declared once in a file. Each of these is `keyword-redefined` at the
+starts: `keyword`, `within`, `test`, `check`, `advance`, `mock`, `const`, `attempt`, `restart`, `stop`
+and `escalate`; `retry`, the keyword of `std/` (J14; §9, Q19 (a)), is another keyword, which no file declares
+again; a keyword is declared once in a file. Each of these is `keyword-redefined` at the
 word. A keyword's word is no name in its file: before `=`, and alone where an expression stands, it is
 `reserved-word` at its line (L12) *(assumed: the build's readings of rule 8, said back on issue 667)*.
 
@@ -345,7 +347,7 @@ keyword twice <block body> {
 twice = 2
 ```
 
-### J10 (assumed, §9) The grant
+### J10 (decided, §9) The grant
 
 A keyword is declared by a package that has the grant `keywords`, and a package that uses its keywords
 needs nothing (§9, the owner, 2026-10-30, "Definer, `allow keywords`"). While the build reads no
@@ -367,7 +369,7 @@ twice {
 ### J11 (decided, §9) A keyword as an expression
 
 A keyword can stand as an expression, whose value is its expansion's (§9, Q4, "Yes"), and where it may
-stand is read from its template's shape (§9, Q11 (a) *(assumed: asked on issue 667, not answered)*). This
+stand is read from its template's shape (§9, Q11 (a)). This
 build answers a use as an expression `not
 supported`.
 
@@ -378,16 +380,14 @@ No case: the build answers such a use `not supported`, which no case can expect.
 Each use of a keyword whose pattern names a list adds an entry to it, and the program reads the list at its
 start (§9, Q5, "A list read at start"). The list is named after the pattern, `into routes`; a use that
 adds an entry stands at the top level of a file, and the entries are read in the order of the files'
-paths, then of the uses in each file (§9, Q12 (a), Q13 (a), Q14 (a) *(assumed: asked on issue 667, not
-answered)*). This build reads no list.
+paths, then of the uses in each file (§9, Q12 (a), Q13 (a), Q14 (a)). This build reads no list.
 
 No case: the build reads no list.
 
 ### J13 (decided, §9) `kurz expand`
 
 A command shows what each use expands to (§9, rule 4, "kurz expand + editor"): `kurz expand FILE` prints
-the file with each use replaced by its expansion (§9, Q17 (a) *(assumed: asked on issue 667, not
-answered)*). The command `kurz` has no `expand` in this build.
+the file with each use replaced by its expansion (§9, Q17 (a)). The command `kurz` has no `expand` in this build.
 
 No case: no command of the build prints an expansion.
 
@@ -395,6 +395,10 @@ No case: no command of the build prints an expansion.
 
 The keywords of `std/` come with the prelude, and a package's keywords are named in the file's `use`
 line (§9, Q8, "In the prelude"); `pub keyword` makes a keyword visible outside its package (§9
-*(assumed: said back on issue 667, not objected to in comment 7215318330)*). `std/` declares no keyword, and the build reads no package.
+*(assumed: said back on issue 667, not objected to in comment 7215318330)*). `retry` is one of them,
+`keyword retry <int times> <block body> [else <block fallback>]`, its template a loop over `attempt`, and
+the one `retry`, §6's form with no count retired (§9, the owner, 2026-11-28, issue 667, comment
+7236862510, Q19 (a) of comment 7229762585). `std/` declares no keyword, and the build reads no package,
+so that a use of `retry`, `retry 3 { ... }` or the retired `retry { ... }`, is `not supported`.
 
 No case: `std/` declares no keyword, and the build reads no package.
