@@ -398,7 +398,7 @@ public sealed partial class Checker
         {
             // J10: a package that defines keywords needs `allow keywords` (record section 9, the owner, 2026-10-30, "Definer, `allow keywords`");
             // while the build reads no project file, the grant is a corpus case's header line alone, as `raw`'s is (assumed, #667, comment 7229158580, Q15 (a))
-            Report(ErrorIds.KeywordGrant, keyword.Line, $"a `keyword` needs the grant `allow keywords`, which this package does not have (J10)");
+            Report(ErrorIds.KeywordGrant, keyword.Line, $"a `keyword` needs the grant `keywords`, which a case's header line `// allow: keywords` gives while the build reads no `project.kz` (J10)");
         }
 
         // T15, D18, S1, C6, X7, H7: the data types of the case `string.FromUtf8` returns besides its string, of the case an enum's `From`

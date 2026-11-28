@@ -2906,7 +2906,8 @@ A use where a statement stands is matched against its pattern and stands in the 
 the checker and the emitter read as code written by hand (J3, J4):
 
 - the template's tokens are parsed again at each use, every token on the use's line, so that an error
-  inside the expansion names the use's line (J4);
+  inside the expansion names the use's line, and a name the expansion took (J7) as the template wrote it
+  (`DiagnosticBag.Took`), `n` and not `n_1` (J4);
 - each expression slot is a variable of the slot's type, declared at the start of the block in the
   pattern's order, so that it is evaluated once (J5);
 - the statement that names a block slot is the use's block, and a second statement that names it gets
@@ -2919,7 +2920,7 @@ the checker and the emitter read as code written by hand (J3, J4):
   `keyword-jump` at the jump, and a plain block slot that the template puts inside a lambda is
   `keyword-jump` at the declaration (J6);
 - each use inside an expansion is one more level, and a use past 64 levels is `keyword-depth`; a
-  keyword whose template reaches a use of itself is `keyword-depth` at that use (J8).
+  keyword whose template reaches a use of itself is `keyword-depth` at that use (J8, an assumed reading of Q7 said back on issue 667).
 
 The parser says `not supported` to a keyword used as an expression (J11), a repeated part of a
 pattern, an optional part inside another and an expression slot inside an optional part (J2). It reads

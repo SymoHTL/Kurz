@@ -117,7 +117,8 @@ repeat {
 
 At each use the template is filled with what the use wrote and checked as code written by hand (§9, Q1,
 "Template per use"). The filled template stands in the use's place as a block, so that the variables it
-declares live in that block. An error inside it points at the use's line (§9, rule 4); the line of the
+declares live in that block. An error inside it points at the use's line, and names each name of the template
+as the template wrote it, not as the expansion took it (§9, rule 4); the line of the
 expansion that rule 4 adds to the error is `not supported` by this build, which names the use's line
 alone.
 
@@ -143,7 +144,7 @@ repeat "two" {
 An expression slot is evaluated once, where the keyword stands, before the template's code runs, into a
 variable of the slot's type, as a function's argument is, the slots in the pattern's order (§9, Q2, "Once,
 at the use"). A value of another type gets the error a variable of the slot's type gets (J4), and the
-template cannot assign the variable (V7).
+template cannot assign the variable (V7) *(assumed: the build's reading, said back on issue 667, comment 7230457821)*.
 
 Case: [keywords/slot-once.kz](../corpus/keywords/slot-once.kz)
 ```kurz
@@ -251,7 +252,7 @@ A name slot gives the template's variable of its name the name the use writes, s
 reads that variable (§9, Q6, "The use names it"); where the optional part that holds the slot is not
 written, the variable is the template's own. A name the template uses and does not declare, a function's
 or a type's, is read where the keyword is declared. A member after `.` or `?.`, a parameter's name before
-`:` in a call and a field's name in the braces of `with` are no variables of the template.
+`:` in a call and a field's name in the braces of `with` are no variables of the template *(assumed: the build's reading, said back on issue 667, comment 7230457821)*.
 
 Case: [keywords/names-kept-apart.kz](../corpus/keywords/names-kept-apart.kz)
 ```kurz
@@ -306,7 +307,7 @@ each 2 {
 A template may use keywords, its own among them (§9, Q7, "Yes, depth 64"). A use whose keywords used
 inside expansions reach a depth past 64 is `keyword-depth` at its line. A keyword whose template uses it
 again, itself or through another keyword's template, is `keyword-depth` at that use in the template,
-since its expansions have no end.
+since its expansions have no end *(assumed: the build's reading of Q7, said back on issue 667, comment 7230457821)*.
 
 Case: [keywords/own-template.kz](../corpus/keywords/own-template.kz)
 ```kurz

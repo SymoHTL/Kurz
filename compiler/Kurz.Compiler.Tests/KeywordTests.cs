@@ -164,12 +164,25 @@ public sealed class KeywordTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("keyword codes <int... xs> {\n    print(1)\n}\n", "not supported", 1)]
     [InlineData("keyword twice [then [also <block b>]] {\n    b\n}\n", "not supported", 1)]
     [InlineData("keyword twice [times <int n>] {\n    print(n)\n}\n", "not supported", 1)]
+    [InlineData("keyword twice <int n> <block body> {\n    n = 2\n    print(n)\n    body\n}\n\ntwice 1 {\n}\n", "assign-immutable", 7)]
     public void A_declaration_is_held_to_its_rules(string program, string id, int line)
     {
         // J9: no core word, no word of a form, no keyword twice; J2: every slot named in the template, a block slot alone on its line,
         // an end for each expression slot, an optional part that starts with a word; J8: a keyword in its own template; J1: the top level;
-        // J2: a repeated part, an optional part inside another and an expression slot in an optional part are not supported by this build
+        // J2: a repeated part, an optional part inside another and an expression slot in an optional part are not supported by this build;
+        // J5: an expression slot's variable is declared without `mut`, so the template cannot assign it (V7), at the use's line
         Assert.Equal((id, line), Error(program));
+    }
+
+    [Fact]
+    public void An_error_inside_an_expansion_names_the_template_s_name_as_the_template_wrote_it()
+    {
+        // J7, record section 9, rule 4: the error points at what the developer wrote, `n`, and not at the name the expansion took for it
+        const string program = "keyword twice <int n> <block body> {\n    n = 2\n    print(n)\n    body\n}\n\ntwice 1 {\n}\n";
+        var error = Assert.Single(Compile(program).Diagnostics.Items, d => d.IsError);
+        Assert.Equal((ErrorIds.AssignImmutable, 7), (error.Id, error.Line));
+        Assert.Contains("`n` was declared without `mut`", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("n_", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

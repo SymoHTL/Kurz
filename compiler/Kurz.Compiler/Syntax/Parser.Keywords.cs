@@ -43,6 +43,9 @@ public sealed partial class Parser
 
         public Dictionary<int, Keyword> ByStart { get; } = new();
 
+        /// <summary>Each name an expansion took, to the name its template wrote: <c>attempt_3</c> to <c>attempt</c>.</summary>
+        public Dictionary<string, string> Taken { get; } = new(StringComparer.Ordinal);
+
         /// <summary>J7: a name that no identifier of the file holds and no expansion took before, <c>attempt_3</c>.</summary>
         public string Fresh(string name)
         {
@@ -53,9 +56,22 @@ public sealed partial class Parser
                 var fresh = $"{name}_{count}";
                 if (names.Add(fresh))
                 {
+                    Taken[fresh] = name;
                     return fresh;
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Gives the bag each name the file's expansions took, so that a diagnostic names it as the template wrote it (J7; record section 9,
+    /// rule 4): an error inside an expansion points at what the developer wrote, at the use's line.
+    /// </summary>
+    private void HandTaken()
+    {
+        foreach (var (fresh, written) in table.Taken)
+        {
+            diagnostics.Took(fresh, written);
         }
     }
 

@@ -48,6 +48,7 @@ public sealed partial class Parser
         var parser = new Parser(source, tokens, diagnostics);
         var keywords = parser.ReadKeywords(); // J1: before the statements, so that a use may stand before its declaration and in a template
         var statements = parser.ParseStatementsUntil(TokenKind.EndOfFile);
+        parser.HandTaken(); // J7, rule 4: the diagnostics name what a template wrote, not the names its expansions took
         return new ProgramSyntax(statements) { Keywords = keywords };
     }
 
